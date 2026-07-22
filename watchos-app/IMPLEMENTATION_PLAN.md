@@ -44,11 +44,13 @@ Create Swift `struct`s conforming to `Codable`:
 - **`MarkdownFormatter.swift`**:
   - Port the regex logic from `MarkdownFormatter.kt` to clean raw markdown and truncate text for the history list previews.
 
-## 6. Push Notifications (watchOS Specifics)
-- **APNs Integration** (Replaces FCM):
-  - Request notification permissions on launch.
-  - Obtain the APNs device token and send it to the bridge via `/register`.
-  - Support interactive notifications with Actionable Categories (e.g., Allow/Deny actions in the notification payload itself).
+## 6. Push Notifications (100% Free Alternative Strategy)
+- **Constraint**: Native iOS/watchOS push notifications (APNs) strictly require a paid Apple Developer account ($99/year), meaning we cannot use Firebase Cloud Messaging (FCM) natively on this client for free.
+- **Alternative Path**: Instead of native pushes directly to "Agent Watch", the Node Bridge server should be configured to emit notifications via a free third-party messaging service.
+- **Recommendations**:
+  - **ntfy.sh**: A free, open-source HTTP pub-sub service. The user installs the free `ntfy` app on their iPhone (which mirrors to watchOS) and subscribes to a topic. The Node bridge simply makes an HTTP POST to that topic.
+  - **Telegram Bot**: The Node bridge uses the Telegram Bot API to send a direct message to the user upon task completion. The Telegram app naturally delivers the push notification to the Apple Watch.
+- **Action**: This is documented but put **on hold** for now. We will rely on real-time SSE polling when the app is in the foreground.
 
 ## Next Steps
 1. Initialize the Xcode project in this directory.
