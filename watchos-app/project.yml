@@ -13,3 +13,4 @@ targets:
     settings:
       SWIFT_VERSION: 5.0
       INFOPLIST_FILE: AgentWatch/Info.plist
+      ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon

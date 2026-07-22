@@ -6,19 +6,21 @@ struct ContentView: View {
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(spacing: 8) {
+                VStack(spacing: 6) { // Reduced spacing to fit 40mm screen
+                    
                     // Header Brand
                     headerView
                     
                     // Folder Badge
                     if let cwd = networkService.state.cwd, !cwd.isEmpty {
                         Text("DIR / \((cwd as NSString).lastPathComponent)")
-                            .font(.system(size: 10, weight: .bold))
-                            .foregroundColor(.agentBrandBlue)
-                            .padding(.horizontal, 10).padding(.vertical, 4)
-                            .background(Color.agentBrandBlue.opacity(0.2))
-                            .cornerRadius(12)
-                            .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.agentBrandBlue.opacity(0.3), lineWidth: 1))
+                            .font(.system(size: 9, weight: .bold)) // Slightly smaller
+                            .foregroundColor(.black) // High contrast against blue background
+                            .padding(.horizontal, 8).padding(.vertical, 3)
+                            .background(Color.agentBrandBlue) // Solid bright background
+                            .cornerRadius(8)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.8)
                     }
                     
                     // Status Badge Indicator
@@ -33,14 +35,14 @@ struct ContentView: View {
                     if networkService.state.status == "thinking" {
                         ProgressView()
                             .progressViewStyle(CircularProgressViewStyle(tint: .agentBrightYellow))
-                            .scaleEffect(1.5)
-                            .padding(.vertical, 8)
+                            .scaleEffect(1.2) // Adjusted scale for smaller screens
+                            .padding(.vertical, 4)
                     }
                     
                     // Actions
-                    VStack(spacing: 6) {
+                    VStack(spacing: 4) { // Tighter spacing
                         Button(action: {
-                            // dictation action to be implemented
+                            // dictation action
                         }) {
                             HStack {
                                 Image(systemName: "mic.fill")
@@ -50,6 +52,7 @@ struct ContentView: View {
                         }
                         .buttonStyle(.borderedProminent)
                         .tint(.agentBrandBlue)
+                        .foregroundColor(.black) // Best contrast on light blue
                         
                         NavigationLink(destination: HistoryListView(state: networkService.state)) {
                             HStack {
@@ -59,25 +62,26 @@ struct ContentView: View {
                             .frame(maxWidth: .infinity)
                         }
                         .buttonStyle(.bordered)
-                        .tint(.white)
+                        .tint(.gray)
+                        .foregroundColor(.white)
                     }
-                    .padding(.top, 4)
+                    .padding(.top, 2)
                     
                     // Config Link
                     NavigationLink(destination: ConfigView(networkService: networkService)) {
-                        VStack(spacing: 2) {
-                            Text("SERVER CONNECTION").font(.system(size: 8, weight: .bold)).foregroundColor(.gray)
+                        VStack(spacing: 1) {
+                            Text("SERVER").font(.system(size: 8, weight: .semibold)).foregroundColor(Color.white.opacity(0.7))
                             Text(networkService.localIp).font(.system(size: 10, weight: .bold)).foregroundColor(.white)
                         }
                         .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.bordered)
                     .tint(.agentCardBg)
-                    .padding(.top, 4)
+                    .padding(.top, 2)
                 }
-                .padding()
+                .padding(.horizontal, 6) // Maximize horizontal screen real estate for 40mm
+                .padding(.bottom, 12)
             }
-            .background(Color.black.edgesIgnoringSafeArea(.all)) // Match Wear OS pure black
         }
         .onAppear {
             networkService.startListening()
@@ -86,65 +90,88 @@ struct ContentView: View {
     
     // MARK: - Subviews
     private var headerView: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: 4) {
             Image(systemName: "greaterthan.square.fill")
                 .foregroundColor(.agentBrandBlue)
+                .font(.system(size: 11))
             Text("AGENT WATCH")
-                .font(.system(size: 12, weight: .heavy, design: .monospaced))
+                .font(.system(size: 11, weight: .heavy, design: .monospaced))
                 .foregroundColor(.white)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
         }
-        .padding(.horizontal, 10).padding(.vertical, 6)
+        .padding(.horizontal, 8).padding(.vertical, 4)
         .background(Color.agentBrandBlue.opacity(0.2))
-        .cornerRadius(8)
-        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.agentBrandBlue.opacity(0.3), lineWidth: 1))
+        .cornerRadius(6)
+        .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.agentBrandBlue.opacity(0.4), lineWidth: 1))
     }
     
     private var statusBadge: some View {
-        HStack(spacing: 10) {
+        HStack(spacing: 8) {
             Circle()
                 .fill(statusColor)
                 .frame(width: 8, height: 8)
-                .shadow(color: statusColor, radius: 4)
+                .shadow(color: statusColor, radius: 3)
             
-            VStack(alignment: .leading, spacing: 2) {
-                Text(statusTitle).font(.system(size: 11, weight: .bold)).foregroundColor(statusColor)
-                Text(statusSubtitle).font(.system(size: 9)).foregroundColor(.gray)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(statusTitle)
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundColor(statusColor)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+                Text(statusSubtitle)
+                    .font(.system(size: 8))
+                    .foregroundColor(Color.white.opacity(0.8)) // Brighter than the old gray
+                    .lineLimit(1)
             }
             Spacer()
         }
-        .padding()
+        .padding(8) // Reduced from default padding
         .background(Color.agentCardBg)
-        .cornerRadius(12)
-        .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.agentCardBorder, lineWidth: 1))
+        .cornerRadius(10)
+        .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.agentCardBorder, lineWidth: 1))
     }
     
     private var authCard: some View {
-        VStack(spacing: 8) {
-            Text("PERMISSION REQUIRED").font(.system(size: 9, weight: .black)).foregroundColor(.agentRed)
-            Text(networkService.state.tool_name ?? "Unknown tool").font(.system(size: 12, weight: .bold)).foregroundColor(.white)
+        VStack(spacing: 6) {
+            Text("ACTION REQUIRED")
+                .font(.system(size: 9, weight: .black))
+                .foregroundColor(.agentRed)
+            
+            Text(networkService.state.tool_name ?? "Unknown tool")
+                .font(.system(size: 11, weight: .bold))
+                .foregroundColor(.white)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
             
             if let cmd = networkService.state.commandToApprove {
-                Text(cmd).font(.system(size: 9, design: .monospaced)).foregroundColor(.gray).lineLimit(3).multilineTextAlignment(.center)
+                Text(cmd)
+                    .font(.system(size: 9, design: .monospaced))
+                    .foregroundColor(Color.white.opacity(0.8))
+                    .lineLimit(2)
+                    .multilineTextAlignment(.center)
             }
             
-            HStack {
+            HStack(spacing: 8) {
                 Button(action: { networkService.sendInputCommand(text: "n") }) {
                     Image(systemName: "xmark")
                 }
                 .buttonStyle(.borderedProminent)
                 .tint(.agentRed)
+                .foregroundColor(.white)
                 
                 Button(action: { networkService.sendInputCommand(text: "y") }) {
                     Image(systemName: "checkmark")
                 }
                 .buttonStyle(.borderedProminent)
                 .tint(.agentBrightGreen)
+                .foregroundColor(.black) // Better contrast for the green background
             }
         }
-        .padding()
-        .background(Color.agentRed.opacity(0.15))
-        .cornerRadius(16)
-        .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color.agentRed.opacity(0.3), lineWidth: 1))
+        .padding(8)
+        .background(Color.agentRed.opacity(0.2))
+        .cornerRadius(12)
+        .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.agentRed.opacity(0.5), lineWidth: 1))
     }
     
     // MARK: - Computed Properties
@@ -153,7 +180,7 @@ struct ContentView: View {
         case "thinking": return .agentBrightYellow
         case "waiting_for_permission": return .agentRed
         case "done": return .agentBrightGreen
-        default: return .gray
+        default: return .white.opacity(0.6)
         }
     }
     
@@ -169,7 +196,7 @@ struct ContentView: View {
     private var statusSubtitle: String {
         switch networkService.state.status {
         case "thinking": return "Processing query"
-        case "waiting_for_permission": return "Action required"
+        case "waiting_for_permission": return "Permission required"
         case "done": return "Task completed"
         default: return "Waiting for prompt"
         }

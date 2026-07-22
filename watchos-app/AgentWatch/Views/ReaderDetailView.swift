@@ -32,11 +32,13 @@ struct ReaderDetailView: View {
                 }) {
                     HStack {
                         Image(systemName: "mic.fill")
-                        Text("VOICE DICTATION").bold()
+                        Text("VOICE").bold()
                     }
+                    .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent)
-                .tint(.blue)
+                .tint(.agentBrandBlue)
+                .foregroundColor(.black)
                 
                 Button("DONE READING") {
                     presentationMode.wrappedValue.dismiss()

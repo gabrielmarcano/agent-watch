@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		5D97EA0820A85BE8289491FB /* ConfigView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3DB3F9003FDC329BBB878F44 /* ConfigView.swift */; };
+		6033A66E335D9BB7AA66FFD1 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 756532D801D0250025613EAE /* Assets.xcassets */; };
 		66AFC704DA882B1A4C5514F1 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1D88DDEA5A34A96F953A86E /* ContentView.swift */; };
 		66DCB1DDC971AE2E2EF1AF11 /* Colors.swift in Sources */ = {isa = PBXBuildFile; fileRef = F06ED6111A18D3A8B9FB7EB8 /* Colors.swift */; };
 		81A08379191679C58794665C /* AgentState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5C4AAF015F74B1999980B335 /* AgentState.swift */; };
@@ -24,6 +25,7 @@
 		315877C8455103A2D20DD4CD /* AgentNetworkService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentNetworkService.swift; sourceTree = "<group>"; };
 		3DB3F9003FDC329BBB878F44 /* ConfigView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConfigView.swift; sourceTree = "<group>"; };
 		5C4AAF015F74B1999980B335 /* AgentState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentState.swift; sourceTree = "<group>"; };
+		756532D801D0250025613EAE /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		9A8F5F3A7823C1A0B249E865 /* AgentWatchApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentWatchApp.swift; sourceTree = "<group>"; };
 		9DBFEE81DAC15E55A9D04EF3 /* AgentWatch.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = AgentWatch.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		AE0A5DB0F03A50DD79C71FA6 /* ReaderDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReaderDetailView.swift; sourceTree = "<group>"; };
@@ -84,6 +86,7 @@
 			isa = PBXGroup;
 			children = (
 				9A8F5F3A7823C1A0B249E865 /* AgentWatchApp.swift */,
+				756532D801D0250025613EAE /* Assets.xcassets */,
 				C1C89970F95BFABDA6C36169 /* Info.plist */,
 				20FE3DE17B10D042F7C60871 /* Models */,
 				B9D0DCC9B05F7A7EA3D86933 /* Network */,
@@ -109,6 +112,7 @@
 			buildConfigurationList = A10AD2BA549799791538A094 /* Build configuration list for PBXNativeTarget "AgentWatch" */;
 			buildPhases = (
 				B299F2988DE48F6EC45CF668 /* Sources */,
+				95695C0EE88EA03E159DFD57 /* Resources */,
 			);
 			buildRules = (
 			);
@@ -150,6 +154,17 @@
 			);
 		};
 /* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		95695C0EE88EA03E159DFD57 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				6033A66E335D9BB7AA66FFD1 /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		B299F2988DE48F6EC45CF668 /* Sources */ = {
