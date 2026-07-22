@@ -1,0 +1,27 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    
+    <!-- Background Circle (Deep dark blue/grey, mimicking dark mode Material 3 surface) -->
+    <path
+        android:fillColor="#0D1117"
+        android:pathData="M54,0C83.82,0 108,24.18 108,54C108,83.82 83.82,108 54,108C24.18,108 0,83.82 0,54C0,24.18 24.18,0 54,0Z" />
+        
+    <!-- Outer Ring Accent (Subtle Material 3 Secondary Color) -->
+    <path
+        android:fillColor="#1A202C"
+        android:pathData="M54,8C79.4,8 100,28.6 100,54C100,79.4 79.4,100 54,100C28.6,100 8,79.4 8,54C8,28.6 28.6,8 54,8Z" />
+
+    <!-- Sleek Material 3 'A' / Bot Symbol (Neon Cyan/Green gradient style, flat color here) -->
+    <path
+        android:fillColor="#00E676"
+        android:pathData="M54,24 L28,74 L38,74 L44.5,61 L63.5,61 L70,74 L80,74 L54,24 Z M48.5,52 L54,41 L59.5,52 L48.5,52 Z" />
+        
+    <!-- Tech Dot / AI Eye inside the A -->
+    <path
+        android:fillColor="#00B0FF"
+        android:pathData="M54,34 C50.13,34 47,37.13 47,41 C47,44.87 50.13,48 54,48 C57.87,48 61,44.87 61,41 C61,37.13 57.87,34 54,34 Z" />
+        
+</vector>

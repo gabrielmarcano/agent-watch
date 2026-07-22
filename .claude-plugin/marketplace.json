@@ -1,0 +1,16 @@
+{
+  "name": "agent-watch-local",
+  "description": "Local Wear OS bridge plugin for Claude Code",
+  "owner": {
+    "name": "Gabriel",
+    "url": "http://localhost"
+  },
+  "plugins": [
+    {
+      "name": "wearos-bridge",
+      "description": "Bridges Claude Code event notifications to a local server for Wear OS.",
+      "source": "./claude-plugin",
+      "version": "0.1.0"
+    }
+  ]
+}
