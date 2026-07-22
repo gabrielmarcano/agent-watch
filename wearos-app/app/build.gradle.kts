@@ -55,9 +55,9 @@ android {
 
 dependencies {
     // Wear OS Compose libraries
-    implementation("androidx.wear.compose:compose-material:1.3.0")
-    implementation("androidx.wear.compose:compose-foundation:1.3.0")
-    implementation("androidx.wear.compose:compose-navigation:1.3.0")
+    implementation("androidx.wear.compose:compose-material:1.4.0")
+    implementation("androidx.wear.compose:compose-foundation:1.4.0")
+    implementation("androidx.wear.compose:compose-navigation:1.4.0")
 
     // Core Android Compose
     implementation("androidx.activity:activity-compose:1.8.2")

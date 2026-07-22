@@ -15,7 +15,6 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.input.rotary.onRotaryScrollEvent
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -42,7 +41,7 @@ fun MainAgentFeedScreen(
     onVoiceInputClick: () -> Unit,
     serverIp: String,
     onConfigureIpClick: () -> Unit,
-    onSelectHistoryItem: (HistoryItem) -> Unit,
+    onHistoryClick: () -> Unit,
     onStatusClick: () -> Unit
 ) {
     val listState = rememberScalingLazyListState()
@@ -98,7 +97,7 @@ fun MainAgentFeedScreen(
     // Conversation History List (Last 3 Responses)
     val historyList = remember(state.history, state.last_response) {
         if (state.history.isNotEmpty()) {
-            state.history
+            state.history.toList()
         } else if (!state.last_response.isNullOrEmpty()) {
             listOf(
                 HistoryItem(
@@ -120,12 +119,6 @@ fun MainAgentFeedScreen(
         ScalingLazyColumn(
             modifier = Modifier
                 .fillMaxSize()
-                .onRotaryScrollEvent { event ->
-                    coroutineScope.launch {
-                        listState.scrollBy(event.verticalScrollPixels)
-                    }
-                    true
-                }
                 .focusRequester(focusRequester)
                 .focusable(),
             state = listState,
@@ -374,87 +367,24 @@ fun MainAgentFeedScreen(
                 }
             }
 
-            // Conversation History (Last 3 Responses Feed)
-            if (historyList.isNotEmpty()) {
-                item {
+            // Conversation History Button
+            item {
+                Button(
+                    onClick = onHistoryClick,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 24.dp, vertical = 8.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        backgroundColor = Color.DarkGray.copy(alpha = 0.5f)
+                    ),
+                    shape = RoundedCornerShape(16.dp)
+                ) {
                     Text(
-                        text = "RECENT RESPONSES (${historyList.size})",
-                        style = MaterialTheme.typography.caption2.copy(
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 8.5.sp,
-                            letterSpacing = 1.sp
-                        ),
-                        color = Color.White.copy(alpha = 0.4f),
-                        modifier = Modifier.padding(top = 8.dp, bottom = 4.dp)
+                        text = "HISTORY (${historyList.size})",
+                        color = Color.White,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold
                     )
-                }
-
-                items(historyList.size) { index ->
-                    val historyItem = historyList[index]
-                    val cleanedResponse = remember(historyItem.response) {
-                        MarkdownFormatter.truncate(historyItem.response, 100)
-                    }
-
-                    Card(
-                        onClick = { onSelectHistoryItem(historyItem) },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .border(BorderStroke(1.dp, Color(0x2B00D2FF)), shape = RoundedCornerShape(20.dp))
-                            .padding(vertical = 3.dp),
-                        backgroundPainter = CardDefaults.cardBackgroundPainter(
-                            startBackgroundColor = Color(0x1800D2FF),
-                            endBackgroundColor = Color(0x0400D2FF)
-                        )
-                    ) {
-                        Column(modifier = Modifier.fillMaxWidth()) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                Text(
-                                    text = if (index == historyList.size - 1) "LATEST RESPONSE" else "RESPONSE #${index + 1}",
-                                    style = MaterialTheme.typography.caption2.copy(
-                                        fontWeight = FontWeight.ExtraBold,
-                                        fontSize = 8.5.sp
-                                    ),
-                                    color = if (index == historyList.size - 1) BrightGreen else LightBlue
-                                )
-                                Text(
-                                    text = "READ FULL ->",
-                                    style = MaterialTheme.typography.caption2.copy(
-                                        fontSize = 8.sp,
-                                        fontWeight = FontWeight.Bold
-                                    ),
-                                    color = Color.White.copy(alpha = 0.6f)
-                                )
-                            }
-                            if (!historyItem.query.isNullOrEmpty()) {
-                                Spacer(modifier = Modifier.height(2.dp))
-                                Text(
-                                    text = "Q: ${historyItem.query}",
-                                    style = MaterialTheme.typography.caption2.copy(
-                                        fontSize = 9.5.sp,
-                                        fontWeight = FontWeight.SemiBold
-                                    ),
-                                    color = Color.White.copy(alpha = 0.6f),
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                            }
-                            Spacer(modifier = Modifier.height(3.dp))
-                            Text(
-                                text = cleanedResponse,
-                                style = MaterialTheme.typography.body2.copy(
-                                    fontSize = 11.sp,
-                                    lineHeight = 13.5.sp
-                                ),
-                                color = Color.White,
-                                maxLines = 3,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                        }
-                    }
                 }
             }
 
@@ -698,12 +628,6 @@ fun StatusHelpModal(
         ScalingLazyColumn(
             modifier = Modifier
                 .fillMaxSize()
-                .onRotaryScrollEvent { event ->
-                    coroutineScope.launch {
-                        listState.scrollBy(event.verticalScrollPixels)
-                    }
-                    true
-                }
                 .focusRequester(focusRequester)
                 .focusable(),
             state = listState,
@@ -897,16 +821,6 @@ fun AgentMonitorBrandHeader() {
                 )
             }
         }
-        Spacer(modifier = Modifier.height(2.dp))
-        Text(
-            text = "POWERED BY CLAUDE CODE",
-            style = MaterialTheme.typography.caption2.copy(
-                fontSize = 7.5.sp,
-                letterSpacing = 1.2.sp,
-                fontWeight = FontWeight.ExtraBold
-            ),
-            color = Color(0xFF8AB4F8).copy(alpha = 0.8f)
-        )
     }
 }
 
@@ -952,12 +866,6 @@ fun ResponseReaderScreen(
         ScalingLazyColumn(
             modifier = Modifier
                 .fillMaxSize()
-                .onRotaryScrollEvent { event ->
-                    coroutineScope.launch {
-                        listState.scrollBy(event.verticalScrollPixels)
-                    }
-                    true
-                }
                 .focusRequester(focusRequester)
                 .focusable(),
             state = listState,

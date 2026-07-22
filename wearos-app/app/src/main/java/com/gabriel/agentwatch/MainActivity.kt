@@ -20,6 +20,7 @@ import androidx.wear.compose.navigation.currentBackStackEntryAsState
 import androidx.wear.compose.navigation.rememberSwipeDismissableNavController
 import com.gabriel.agentwatch.network.SseClient
 import com.gabriel.agentwatch.ui.screens.MainAgentFeedScreen
+import com.gabriel.agentwatch.ui.screens.HistoryListScreen
 import com.gabriel.agentwatch.ui.screens.ResponseReaderScreen
 import com.gabriel.agentwatch.ui.screens.ServerConfigScreen
 import com.gabriel.agentwatch.ui.screens.StatusHelpModal
@@ -149,8 +150,8 @@ class MainActivity : ComponentActivity() {
                                 tempTailscaleIpInput = tailscaleIp
                                 navController.navigate("server_config")
                             },
-                            onSelectHistoryItem = { item ->
-                                navController.navigate("reader/${item.id}")
+                            onHistoryClick = {
+                                navController.navigate("history")
                             },
                             onStatusClick = {
                                 navController.navigate("status_help")
@@ -198,6 +199,15 @@ class MainActivity : ComponentActivity() {
                     composable("status_help") {
                         StatusHelpModal(
                             onClose = { navController.popBackStack() }
+                        )
+                    }
+
+                    composable("history") {
+                        HistoryListScreen(
+                            state = agentState,
+                            onSelectHistoryItem = { item ->
+                                navController.navigate("reader/${item.id}")
+                            }
                         )
                     }
 

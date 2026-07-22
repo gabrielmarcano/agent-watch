@@ -26,3 +26,11 @@ Thumbs.db
 
 # Android Secrets
 google-services.json
+local.properties
+
+# Android Build files
+**/build/
+**/.gradle/
+**/.cxx/
+*.apk
+*.aab
