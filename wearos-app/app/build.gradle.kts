@@ -71,6 +71,7 @@ dependencies {
     // Wear OS specific helpers
     implementation("androidx.wear:wear:1.3.0")
     implementation("com.google.android.gms:play-services-wearable:18.1.0")
+    implementation("androidx.wear.watchface:watchface-complications-data-source-ktx:1.2.1")
 
     // HTTP / SSE client
     implementation("com.squareup.okhttp3:okhttp:4.12.0")

@@ -44,6 +44,24 @@
                 <action android:name="com.gabriel.agentwatch.ACTION_REPLY" />
             </intent-filter>
         </receiver>
+
+        <!-- Complication Service -->
+        <service
+            android:name=".complication.AgentStatusComplicationService"
+            android:exported="true"
+            android:icon="@mipmap/ic_launcher"
+            android:label="Agent Status"
+            android:permission="com.google.android.wearable.permission.BIND_COMPLICATION_PROVIDER">
+            <intent-filter>
+                <action android:name="android.support.wearable.complications.ACTION_COMPLICATION_UPDATE_REQUEST" />
+            </intent-filter>
+            <meta-data
+                android:name="android.support.wearable.complications.SUPPORTED_TYPES"
+                android:value="SHORT_TEXT" />
+            <meta-data
+                android:name="android.support.wearable.complications.UPDATE_PERIOD_SECONDS"
+                android:value="900" />
+        </service>
         
     </application>
 
