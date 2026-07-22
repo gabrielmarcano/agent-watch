@@ -28,6 +28,7 @@ import androidx.wear.compose.foundation.lazy.rememberScalingLazyListState
 import androidx.wear.compose.foundation.rotary.RotaryScrollableDefaults
 import androidx.wear.compose.foundation.rotary.rotaryScrollable
 import com.mikepenz.markdown.m2.Markdown
+import com.mikepenz.markdown.m2.markdownColor
 import androidx.wear.compose.material.*
 import com.gabriel.agentwatch.model.AgentState
 import com.gabriel.agentwatch.model.HistoryItem
@@ -951,6 +952,11 @@ fun ResponseReaderScreen(
                 ) {
                     Markdown(
                         content = rawText,
+                        colors = markdownColor(
+                            text = Color.White,
+                            codeText = Color.LightGray,
+                            codeBackground = Color(0xFF2B2B2B)
+                        ),
                         modifier = Modifier.fillMaxWidth()
                     )
                 }
