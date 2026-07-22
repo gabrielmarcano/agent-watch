@@ -773,7 +773,7 @@ fun StatusHelpModal(
 }
 
 /**
- * Premium Brand Header for Agent Monitor on Wear OS.
+ * Premium Brand Header for Agent Watch on Wear OS.
  * Glassmorphic badge with custom vector prompt chevron mark.
  */
 @Composable
@@ -813,7 +813,7 @@ fun AgentMonitorBrandHeader() {
                 }
                 Spacer(modifier = Modifier.width(6.dp))
                 Text(
-                    text = "AGENT MONITOR",
+                    text = "AGENT WATCH",
                     style = MaterialTheme.typography.caption1.copy(
                         letterSpacing = 1.8.sp,
                         fontWeight = FontWeight.Black,

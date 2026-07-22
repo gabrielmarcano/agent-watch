@@ -1,6 +1,6 @@
-# Agent Monitor (Wear OS)
+# Agent Watch (Wear OS)
 
-Agent Monitor is a sleek, Material Design-inspired Wear OS application that lets you monitor and interact with AI development agents (like Google Antigravity and Claude Code) directly from your smartwatch.
+Agent Watch is a sleek, Material Design-inspired Wear OS application that lets you monitor and interact with AI development agents (like Google Antigravity and Claude Code) directly from your smartwatch.
 
 ## Architecture
 
