@@ -59,6 +59,7 @@ dependencies {
     implementation("androidx.wear.compose:compose-foundation:1.4.0")
 
     // Markdown Renderer
+    implementation("androidx.compose.material:material:1.6.1")
     implementation("com.mikepenz:multiplatform-markdown-renderer-m2:0.25.0")
     implementation("androidx.wear.compose:compose-navigation:1.4.0")
 
