@@ -21,6 +21,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.text.TextStyle
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.wear.compose.foundation.lazy.ScalingLazyColumn
@@ -29,6 +30,7 @@ import androidx.wear.compose.foundation.rotary.RotaryScrollableDefaults
 import androidx.wear.compose.foundation.rotary.rotaryScrollable
 import com.mikepenz.markdown.m2.Markdown
 import com.mikepenz.markdown.m2.markdownColor
+import com.mikepenz.markdown.m2.markdownTypography
 import androidx.wear.compose.material.*
 import com.gabriel.agentwatch.model.AgentState
 import com.gabriel.agentwatch.model.HistoryItem
@@ -956,6 +958,18 @@ fun ResponseReaderScreen(
                             text = Color.White,
                             codeText = Color.LightGray,
                             codeBackground = Color(0xFF2B2B2B)
+                        ),
+                        typography = markdownTypography(
+                            text = TextStyle(fontSize = 13.sp, lineHeight = 16.sp, color = Color.White),
+                            code = TextStyle(fontSize = 11.sp, lineHeight = 14.sp),
+                            h1 = TextStyle(fontSize = 18.sp, fontWeight = FontWeight.Bold),
+                            h2 = TextStyle(fontSize = 16.sp, fontWeight = FontWeight.Bold),
+                            h3 = TextStyle(fontSize = 14.sp, fontWeight = FontWeight.Bold),
+                            h4 = TextStyle(fontSize = 13.sp, fontWeight = FontWeight.Bold),
+                            h5 = TextStyle(fontSize = 13.sp, fontWeight = FontWeight.Bold),
+                            h6 = TextStyle(fontSize = 13.sp, fontWeight = FontWeight.Bold),
+                            quote = TextStyle(fontSize = 13.sp, fontStyle = androidx.compose.ui.text.font.FontStyle.Italic),
+                            paragraph = TextStyle(fontSize = 13.sp, lineHeight = 16.sp)
                         ),
                         modifier = Modifier.fillMaxWidth()
                     )
