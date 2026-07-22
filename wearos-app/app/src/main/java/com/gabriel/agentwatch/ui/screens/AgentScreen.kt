@@ -857,9 +857,7 @@ fun ResponseReaderScreen(
         }
     }
 
-    val cleanedText = remember(item.response) {
-        MarkdownFormatter.clean(item.response)
-    }
+    val rawText = item.response ?: "No response body available."
 
     Scaffold(
         timeText = { TimeText() },
@@ -952,7 +950,7 @@ fun ResponseReaderScreen(
                     )
                 ) {
                     MarkdownText(
-                        markdown = if (cleanedText.isNotEmpty()) cleanedText else "No response body available.",
+                        markdown = rawText,
                         style = MaterialTheme.typography.body2.copy(
                             fontSize = 12.sp,
                             lineHeight = 16.sp,
