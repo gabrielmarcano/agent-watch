@@ -11,6 +11,7 @@ fi
 # Construct the payload containing the event type and the raw data from Claude
 PAYLOAD=$(cat <<EOF
 {
+  "agent": "Claude",
   "event": "$EVENT_TYPE",
   "timestamp": "$(date -u +"%Y-%m-%dT%H:%M:%SZ")",
   "data": $INPUT

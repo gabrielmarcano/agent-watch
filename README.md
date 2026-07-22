@@ -25,10 +25,7 @@ In `bridge/`, create a `config.json` to define your terminal preferences and not
 
 ```json
 {
-  "target_terminal": "Warp",
-  "pushover_user": "OPTIONAL_PUSHOVER_USER_KEY",
-  "pushover_token": "OPTIONAL_PUSHOVER_API_TOKEN",
-  "fcm_server_key": "OPTIONAL_LEGACY_FCM_KEY"
+  "target_terminal": "Warp"
 }
 ```
 
