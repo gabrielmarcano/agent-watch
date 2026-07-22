@@ -6,10 +6,10 @@ const brainPath = path.join(process.env.HOME, '.gemini', 'antigravity-cli', 'bra
 const webhookUrl = 'http://localhost:8420/webhook';
 
 function sendWebhook(type, message = '') {
-  const payload = JSON.stringify({ type, message });
+  const payload = JSON.stringify({ agent: 'AGY', event: type, data: { message } });
   const req = http.request(webhookUrl, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'Content-Length': payload.length }
+    headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(payload) }
   });
   req.on('error', (e) => console.error(`Webhook error: ${e.message}`));
   req.write(payload);
@@ -25,7 +25,7 @@ function getLatestTranscript() {
   let latestTime = 0;
   
   for (const dir of dirs) {
-    const file = path.join(brainPath, dir, '.system_generated', 'logs', 'transcript.jsonl');
+    const file = path.join(brainPath, dir, '.system_generated', 'logs', 'transcript_full.jsonl');
     if (fs.existsSync(file)) {
       const stats = fs.statSync(file);
       if (stats.mtimeMs > latestTime) {
@@ -86,7 +86,7 @@ setInterval(() => {
               // If there are no tool calls in a PLANNER_RESPONSE, AGY is done talking to the user
               else {
                  console.log('[AGY] Final Response Detected -> Sending Stop');
-                 sendWebhook('Stop', 'AGY has finished responding.');
+                 sendWebhook('Stop', step.content);
               }
             }
           } catch (e) {

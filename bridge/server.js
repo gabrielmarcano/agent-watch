@@ -293,52 +293,7 @@ function sendFcmV1Notification(token, title, message, eventType) {
     });
 }
 
-// Send push notification via Pushover API
-function sendPushoverNotification(title, message, priority = 0) {
-  const user = config.pushover_user || process.env.PUSHOVER_USER;
-  const token = config.pushover_token || process.env.PUSHOVER_TOKEN;
-
-  if (!user || !token || user.startsWith('INTRODUCE_') || token.startsWith('INTRODUCE_')) {
-    console.log('[PUSHOVER] Not sent: User Key or API Token is not configured in config.json.');
-    return;
-  }
-
-  const postData = JSON.stringify({
-    token: token,
-    user: user,
-    title: title,
-    message: message,
-    priority: priority
-  });
-
-  const options = {
-    hostname: 'api.pushover.net',
-    port: 443,
-    path: '/1/messages.json',
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Content-Length': Buffer.byteLength(postData)
-    }
-  };
-
-  const req = https.request(options, (res) => {
-    let body = '';
-    res.on('data', chunk => body += chunk);
-    res.on('end', () => {
-      console.log(`[PUSHOVER] Response status: ${res.statusCode} - ${body}`);
-    });
-  });
-
-  req.on('error', (e) => {
-    console.error(`[PUSHOVER] Error sending notification: ${e.message}`);
-  });
-
-  req.write(postData);
-  req.end();
-}
-
-// General function to route alerts through FCM V1 (if watch registered) or Pushover fallback
+// General function to route alerts through FCM V1 (if watch registered)
 function sendPushNotification(title, message, priority = 0, eventType = 'Notification') {
   const serviceAccountPath = path.join(__dirname, 'firebase-service-account.json');
   const hasFcmV1 = registeredFcmToken && fs.existsSync(serviceAccountPath);
@@ -347,8 +302,7 @@ function sendPushNotification(title, message, priority = 0, eventType = 'Notific
     console.log(`[PUSH] Dispatching FCM V1 directly to Wear OS for event "${eventType}"`);
     sendFcmV1Notification(registeredFcmToken, title, message, eventType);
   } else {
-    console.log('[PUSH] Dispatching via Pushover fallback');
-    sendPushoverNotification(title, message, priority);
+    console.log('[PUSH] Cannot dispatch push: Missing FCM token or firebase-service-account.json');
   }
 }
 
@@ -446,6 +400,7 @@ const server = http.createServer((req, res) => {
       try {
         const payload = JSON.parse(body);
         const event = payload.event;
+        const agentName = payload.agent || 'Agent';
         const data = payload.data || {};
 
         console.log(`[WEBHOOK] Received event: ${event}`);
@@ -486,7 +441,7 @@ const server = http.createServer((req, res) => {
             });
             const cmd = data.tool_input?.command || data.tool_input?.file_path || '';
             const msg = `Wants to run ${data.tool_name}` + (cmd ? `: ${cmd}` : '') + ' (respond y/n from watch)';
-            sendPushNotification('Claude: Permission Request', msg, 1, 'PermissionRequest');
+            sendPushNotification(`${agentName}: Permission Request`, msg, 1, 'PermissionRequest');
             break;
 
           case 'Notification':
@@ -494,7 +449,7 @@ const server = http.createServer((req, res) => {
               updateState({
                 status: 'idle'
               });
-              sendPushNotification('Claude: Waiting for input', data.message || 'Claude is waiting for you.', 0, 'Notification');
+              sendPushNotification(`${agentName}: Waiting for input`, data.message || `${agentName} is waiting for your input.`, 0, 'Notification');
             }
             break;
 
@@ -503,7 +458,7 @@ const server = http.createServer((req, res) => {
             setTimeout(async () => {
               const { query, response } = await parseTranscript(data.transcript_path);
               const q = query || globalState.last_query;
-              const r = response;
+              const r = response || data.message;
               
               const currentHistory = globalState.history || [];
               const newItem = {
@@ -513,21 +468,23 @@ const server = http.createServer((req, res) => {
                 timestamp: new Date().toISOString()
               };
               
-              // Keep only the last 3 items
-              const newHistory = [...currentHistory, newItem].slice(-3);
+              // Keep only the last 10 items
+              const newHistory = [...currentHistory, newItem].slice(-10);
+              console.log('[DEBUG] r is:', r ? r.substring(0, 50) : null);
+              console.log('[DEBUG] newHistory is:', JSON.stringify(newHistory));
 
               updateState({
                 status: 'done',
-                last_query: q,
                 last_response: r,
                 history: newHistory,
                 tool_name: null,
-                tool_input: null
+                tool_input: null,
+                last_query: null // Clear query so it doesn't bleed into next agent
               });
 
               // Clean markdown for notification payload
               const cleanMsg = r ? (r.replace(/\*\*(.*?)\*\*/g, '$1').replace(/`{3}[\s\S]*?`{3}/g, '[Code]').trim()) : 'Task completed.';
-              sendPushNotification('Claude Code', cleanMsg, 0, 'Stop');
+              sendPushNotification(`${agentName} Finished`, cleanMsg, 0, 'Stop');
             }, 300);
             break;
 
