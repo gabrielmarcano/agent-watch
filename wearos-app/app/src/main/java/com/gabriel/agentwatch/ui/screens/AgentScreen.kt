@@ -25,6 +25,8 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.wear.compose.foundation.lazy.ScalingLazyColumn
 import androidx.wear.compose.foundation.lazy.rememberScalingLazyListState
+import androidx.wear.compose.foundation.rotary.RotaryScrollableDefaults
+import androidx.wear.compose.foundation.rotary.rotaryScrollable
 import androidx.wear.compose.material.*
 import com.gabriel.agentwatch.model.AgentState
 import com.gabriel.agentwatch.model.HistoryItem
@@ -119,7 +121,7 @@ fun MainAgentFeedScreen(
         ScalingLazyColumn(
             modifier = Modifier
                 .fillMaxSize()
-                .focusRequester(focusRequester)
+                .rotaryScrollable(RotaryScrollableDefaults.behavior(listState), focusRequester)
                 .focusable(),
             state = listState,
             horizontalAlignment = Alignment.CenterHorizontally,
@@ -628,7 +630,7 @@ fun StatusHelpModal(
         ScalingLazyColumn(
             modifier = Modifier
                 .fillMaxSize()
-                .focusRequester(focusRequester)
+                .rotaryScrollable(RotaryScrollableDefaults.behavior(listState), focusRequester)
                 .focusable(),
             state = listState,
             horizontalAlignment = Alignment.CenterHorizontally,
@@ -866,7 +868,7 @@ fun ResponseReaderScreen(
         ScalingLazyColumn(
             modifier = Modifier
                 .fillMaxSize()
-                .focusRequester(focusRequester)
+                .rotaryScrollable(RotaryScrollableDefaults.behavior(listState), focusRequester)
                 .focusable(),
             state = listState,
             horizontalAlignment = Alignment.CenterHorizontally,
