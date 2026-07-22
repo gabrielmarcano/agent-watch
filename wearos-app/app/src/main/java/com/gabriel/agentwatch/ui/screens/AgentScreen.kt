@@ -951,15 +951,15 @@ fun ResponseReaderScreen(
                         endBackgroundColor = Color(0x0200D2FF)
                     )
                 ) {
-                    Text(
-                        text = if (cleanedText.isNotEmpty()) cleanedText else "No response body available.",
+                    MarkdownText(
+                        markdown = if (cleanedText.isNotEmpty()) cleanedText else "No response body available.",
                         style = MaterialTheme.typography.body2.copy(
                             fontSize = 12.sp,
                             lineHeight = 16.sp,
-                            fontWeight = FontWeight.Normal
+                            fontWeight = FontWeight.Normal,
+                            color = Color.White
                         ),
-                        color = Color.White,
-                        textAlign = TextAlign.Start
+                        modifier = Modifier.fillMaxWidth()
                     )
                 }
             }
