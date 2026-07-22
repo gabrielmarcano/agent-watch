@@ -75,6 +75,7 @@ dependencies {
     implementation("androidx.wear.tiles:tiles:1.4.0")
     implementation("androidx.wear.protolayout:protolayout:1.2.0")
     implementation("androidx.wear.protolayout:protolayout-material:1.2.0")
+    implementation("androidx.concurrent:concurrent-futures:1.1.0")
 
     // HTTP / SSE client
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
