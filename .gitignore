@@ -34,3 +34,7 @@ local.properties
 **/.cxx/
 *.apk
 *.aab
+
+# Xcode User Data
+xcuserdata/
+*.xcuserstate

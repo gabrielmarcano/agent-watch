@@ -1,0 +1,344 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		5D97EA0820A85BE8289491FB /* ConfigView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3DB3F9003FDC329BBB878F44 /* ConfigView.swift */; };
+		66AFC704DA882B1A4C5514F1 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1D88DDEA5A34A96F953A86E /* ContentView.swift */; };
+		66DCB1DDC971AE2E2EF1AF11 /* Colors.swift in Sources */ = {isa = PBXBuildFile; fileRef = F06ED6111A18D3A8B9FB7EB8 /* Colors.swift */; };
+		81A08379191679C58794665C /* AgentState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5C4AAF015F74B1999980B335 /* AgentState.swift */; };
+		8F4A8D98E60EF32F48511642 /* ReaderDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE0A5DB0F03A50DD79C71FA6 /* ReaderDetailView.swift */; };
+		9BD0BC6940A7B5BC39734D20 /* AgentNetworkService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 315877C8455103A2D20DD4CD /* AgentNetworkService.swift */; };
+		A8C7D00633B1BA0F9E996A47 /* AgentWatchApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9A8F5F3A7823C1A0B249E865 /* AgentWatchApp.swift */; };
+		D132E78A27876FEF70F40E60 /* HistoryItem.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0C56815C7B661DA24B26F49 /* HistoryItem.swift */; };
+		D6729BF5BCA7D07839804026 /* HistoryListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = EC6057041B1601BB63B555B6 /* HistoryListView.swift */; };
+		EA25E3E5B53834C06BBBB2E6 /* MarkdownFormatter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2C931679E482F0179E36CE55 /* MarkdownFormatter.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		2C931679E482F0179E36CE55 /* MarkdownFormatter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownFormatter.swift; sourceTree = "<group>"; };
+		315877C8455103A2D20DD4CD /* AgentNetworkService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentNetworkService.swift; sourceTree = "<group>"; };
+		3DB3F9003FDC329BBB878F44 /* ConfigView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConfigView.swift; sourceTree = "<group>"; };
+		5C4AAF015F74B1999980B335 /* AgentState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentState.swift; sourceTree = "<group>"; };
+		9A8F5F3A7823C1A0B249E865 /* AgentWatchApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentWatchApp.swift; sourceTree = "<group>"; };
+		9DBFEE81DAC15E55A9D04EF3 /* AgentWatch.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = AgentWatch.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		AE0A5DB0F03A50DD79C71FA6 /* ReaderDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReaderDetailView.swift; sourceTree = "<group>"; };
+		C0C56815C7B661DA24B26F49 /* HistoryItem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryItem.swift; sourceTree = "<group>"; };
+		C1C89970F95BFABDA6C36169 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		D1D88DDEA5A34A96F953A86E /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
+		EC6057041B1601BB63B555B6 /* HistoryListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryListView.swift; sourceTree = "<group>"; };
+		F06ED6111A18D3A8B9FB7EB8 /* Colors.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Colors.swift; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXGroup section */
+		20FE3DE17B10D042F7C60871 /* Models */ = {
+			isa = PBXGroup;
+			children = (
+				5C4AAF015F74B1999980B335 /* AgentState.swift */,
+				C0C56815C7B661DA24B26F49 /* HistoryItem.swift */,
+			);
+			path = Models;
+			sourceTree = "<group>";
+		};
+		6F38BD92342B83D3713BACFF /* Views */ = {
+			isa = PBXGroup;
+			children = (
+				3DB3F9003FDC329BBB878F44 /* ConfigView.swift */,
+				D1D88DDEA5A34A96F953A86E /* ContentView.swift */,
+				EC6057041B1601BB63B555B6 /* HistoryListView.swift */,
+				AE0A5DB0F03A50DD79C71FA6 /* ReaderDetailView.swift */,
+			);
+			path = Views;
+			sourceTree = "<group>";
+		};
+		7AB047447DB04D0932A03148 = {
+			isa = PBXGroup;
+			children = (
+				E55A09E1D1A7F6932EE4A5F2 /* AgentWatch */,
+				F3EB69DA0C355D7A6ACF37A8 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		839C2A36C3B1BF7D23FA0D89 /* Utilities */ = {
+			isa = PBXGroup;
+			children = (
+				F06ED6111A18D3A8B9FB7EB8 /* Colors.swift */,
+				2C931679E482F0179E36CE55 /* MarkdownFormatter.swift */,
+			);
+			path = Utilities;
+			sourceTree = "<group>";
+		};
+		B9D0DCC9B05F7A7EA3D86933 /* Network */ = {
+			isa = PBXGroup;
+			children = (
+				315877C8455103A2D20DD4CD /* AgentNetworkService.swift */,
+			);
+			path = Network;
+			sourceTree = "<group>";
+		};
+		E55A09E1D1A7F6932EE4A5F2 /* AgentWatch */ = {
+			isa = PBXGroup;
+			children = (
+				9A8F5F3A7823C1A0B249E865 /* AgentWatchApp.swift */,
+				C1C89970F95BFABDA6C36169 /* Info.plist */,
+				20FE3DE17B10D042F7C60871 /* Models */,
+				B9D0DCC9B05F7A7EA3D86933 /* Network */,
+				839C2A36C3B1BF7D23FA0D89 /* Utilities */,
+				6F38BD92342B83D3713BACFF /* Views */,
+			);
+			path = AgentWatch;
+			sourceTree = "<group>";
+		};
+		F3EB69DA0C355D7A6ACF37A8 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				9DBFEE81DAC15E55A9D04EF3 /* AgentWatch.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		2DA49E19D0AE4A3EFF6D39D7 /* AgentWatch */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A10AD2BA549799791538A094 /* Build configuration list for PBXNativeTarget "AgentWatch" */;
+			buildPhases = (
+				B299F2988DE48F6EC45CF668 /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = AgentWatch;
+			packageProductDependencies = (
+			);
+			productName = AgentWatch;
+			productReference = 9DBFEE81DAC15E55A9D04EF3 /* AgentWatch.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		C479C8D8F935AC2A479A39B3 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 1430;
+				TargetAttributes = {
+				};
+			};
+			buildConfigurationList = E9A1256A7CBF4860EE49CE4E /* Build configuration list for PBXProject "AgentWatch" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				en,
+			);
+			mainGroup = 7AB047447DB04D0932A03148;
+			minimizedProjectReferenceProxies = 1;
+			preferredProjectObjectVersion = 77;
+			productRefGroup = F3EB69DA0C355D7A6ACF37A8 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				2DA49E19D0AE4A3EFF6D39D7 /* AgentWatch */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXSourcesBuildPhase section */
+		B299F2988DE48F6EC45CF668 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				9BD0BC6940A7B5BC39734D20 /* AgentNetworkService.swift in Sources */,
+				81A08379191679C58794665C /* AgentState.swift in Sources */,
+				A8C7D00633B1BA0F9E996A47 /* AgentWatchApp.swift in Sources */,
+				66DCB1DDC971AE2E2EF1AF11 /* Colors.swift in Sources */,
+				5D97EA0820A85BE8289491FB /* ConfigView.swift in Sources */,
+				66AFC704DA882B1A4C5514F1 /* ContentView.swift in Sources */,
+				D132E78A27876FEF70F40E60 /* HistoryItem.swift in Sources */,
+				D6729BF5BCA7D07839804026 /* HistoryListView.swift in Sources */,
+				EA25E3E5B53834C06BBBB2E6 /* MarkdownFormatter.swift in Sources */,
+				8F4A8D98E60EF32F48511642 /* ReaderDetailView.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		59295D6822AEC2F1DF2D003F /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				INFOPLIST_FILE = AgentWatch/Info.plist;
+				PRODUCT_BUNDLE_IDENTIFIER = com.gabriel.AgentWatch;
+				SDKROOT = watchos;
+				SKIP_INSTALL = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 4;
+			};
+			name = Release;
+		};
+		B082A4EDB03D046AF879182B /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				INFOPLIST_FILE = AgentWatch/Info.plist;
+				PRODUCT_BUNDLE_IDENTIFIER = com.gabriel.AgentWatch;
+				SDKROOT = watchos;
+				SKIP_INSTALL = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 4;
+			};
+			name = Debug;
+		};
+		B44B4662065BD80796115154 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = watchos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 5.0;
+				WATCHOS_DEPLOYMENT_TARGET = 9.0;
+			};
+			name = Release;
+		};
+		EDACF32649EC1886AE00D732 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = watchos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.0;
+				WATCHOS_DEPLOYMENT_TARGET = 9.0;
+			};
+			name = Debug;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		A10AD2BA549799791538A094 /* Build configuration list for PBXNativeTarget "AgentWatch" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				B082A4EDB03D046AF879182B /* Debug */,
+				59295D6822AEC2F1DF2D003F /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		E9A1256A7CBF4860EE49CE4E /* Build configuration list for PBXProject "AgentWatch" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				EDACF32649EC1886AE00D732 /* Debug */,
+				B44B4662065BD80796115154 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = C479C8D8F935AC2A479A39B3 /* Project object */;
+}

@@ -1,0 +1,15 @@
+name: AgentWatch
+options:
+  bundleIdPrefix: com.gabriel
+  deploymentTarget:
+    watchOS: "9.0"
+
+targets:
+  AgentWatch:
+    type: application
+    platform: watchOS
+    sources:
+      - AgentWatch
+    settings:
+      SWIFT_VERSION: 5.0
+      INFOPLIST_FILE: AgentWatch/Info.plist
