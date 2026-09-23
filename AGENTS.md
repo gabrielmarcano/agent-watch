@@ -1,0 +1,146 @@
+# Agent Guidelines & Repository Rules (`AGENTS.md`)
+
+This document defines the development rules, architectural boundaries, and coding standards for all AI agents (Claude Code, Antigravity, OpenCode, Codex, Cursor, Copilot, etc.) contributing to this repository. The full design lives in [`HERDR_REFACTOR_PLAN.md`](./HERDR_REFACTOR_PLAN.md); when the two disagree, the plan wins and this file must be updated.
+
+---
+
+## 1. Prime Directives & Architectural Rules
+
+### 1.1 Herdr-Native Control Plane (Zero Legacy Policy)
+- **Strictly prohibited on `feat/herdr-focus`:**
+  - Warp-specific code
+  - AppleScript keystrokes (`osascript`)
+  - the Claude Code plugin and hook webhooks (`claude-plugin/`, `/webhook`)
+  - legacy single-agent endpoints (`/state`, `/input`)
+  - the Node.js bridge
+  - file-tailing sidecars (`agy-sidecar.js`)
+- Herdr (the socket API at `$HERDR_SOCKET_PATH`) is the **sole source of truth** for agent detection, lifecycle status, and input/key delivery. Talk to the socket directly; do not shell out to the `herdr` CLI from Go.
+- Do **NOT** add backward-compatibility shims, dual-write adapters, or fallback modes for non-Herdr environments. An agent running outside Herdr is out of scope.
+- Reading an agent's **own transcript** for history is allowed, under three conditions:
+  - it happens inside a `pkg/agents` adapter
+  - it is triggered on demand by a herdr status transition
+  - the file comes from herdr's `agent_session`
+
+  Scanning directories for the "latest file" and continuous tailing are not allowed.
+
+### 1.2 Multi-Agent, Multi-Provider by Design
+- Priority agents: **Claude (`claude`), Antigravity (`agy`), OpenCode (`opencode`)**. Every other agent herdr detects must work through the **generic adapter**.
+- **All agent-specific knowledge lives in `pkg/agents`** and nowhere else:
+  - menu layout
+  - key mapping
+  - cancel key
+  - transcript format
+  - whether a prompt can be queued while working
+
+  `pkg/herdr`, the bridge core, the relay and the clients stay agent-agnostic.
+- **Never map prompt options by position.**
+  - Roles (`allow_once`, `allow_always`, `deny`, `choice`) are derived from the option **label**.
+  - Example of why: in Claude Code, `2` means "Yes, and don't ask again".
+- **Every adapter change ships with a real captured fixture** in `pkg/agents/testdata/<agent>/`, taken with `herdr agent read <pane> --source visible --format text`.
+
+### 1.3 Go for Host Bridge & Cloud Relay
+- Backend is **Go 1.22+**, a single module: `github.com/gabrielmarcano/agent-monitor`.
+- `agent-watch-bridge`: static binary on the Mac/Linux host, supervised by launchd (macOS) or systemd `--user` (Linux). Keep it thin: herdr ↔ relay translation plus on-demand transcript reads.
+- `agent-watch-relay`: static Linux binary on the VPS. It owns state aggregation, history storage, push, pairing and auth.
+- `pkg/model` is the **only** schema source. Clients mirror it field by field.
+
+### 1.4 Outbound Relay Networking (Zero VPN on Watch)
+- Watches must **NEVER** require Tailscale, a VPN, or a LAN IP.
+- The bridge dials **outbound** to `wss://relay.<domain>/v1/host`. Watches use HTTPS + SSE on the relay. No inbound ports on the Mac.
+
+### 1.5 Multi-Client Parity (Wear OS & watchOS)
+- Any change to the schema, API or interaction model is applied symmetrically to `wearos-app/` and `watchos-app/`. Never leave one platform behind.
+
+### 1.6 Scope Boundaries
+- **No terminal emulator / SSH client** (Moshi covers that).
+- **Wrist-first:**
+  - glanceable status
+  - approvals built from parsed options
+  - voice dictation
+  - history
+  - complications/tiles
+- **Phone companion app** is deferred until Bluetooth tethering is needed.
+- **watchOS push** uses ntfy (free). No APNs until a paid Apple Developer account exists.
+
+---
+
+## 2. Directory Layout
+
+```
+agent-monitor/
+├── go.mod · go.sum · Makefile
+├── herdr-plugin.toml             # herdr-agent-watch plugin manifest
+├── cmd/
+│   ├── bridge/                   # host daemon (run/start/stop/status/pair)
+│   └── relay/                    # VPS relay (serve/devices)
+├── pkg/
+│   ├── model/                    # shared contracts: state, API DTOs, wire envelopes
+│   ├── herdr/                    # socket client — agent-agnostic
+│   ├── herdrtest/                # fake herdr socket for tests
+│   ├── agents/                   # adapters: claude, agy, opencode, generic (+ testdata/)
+│   ├── relayclient/              # bridge side of the WSS link
+│   ├── relay/                    # relay server: hub, api, sse, auth, store
+│   └── push/                     # Notifier: FCM v1 (Wear OS), ntfy (watchOS)
+├── deploy/                       # launchd template, relay Dockerfile + systemd unit
+├── wearos-app/                   # Wear OS client (Kotlin, Jetpack Compose)
+└── watchos-app/                  # watchOS client (Swift, SwiftUI)
+```
+
+---
+
+## 3. Security & Secrets Hygiene
+
+- **NEVER commit credentials:**
+  - `firebase-service-account.json`
+  - host tokens, device tokens, pairing codes
+  - ntfy topics/tokens
+  - Cloudflare tokens, SSH keys
+  - `.env` files and the bridge `config.toml`
+- All traffic across public networks uses TLS (HTTPS / WSS).
+- **Tokens travel in `Authorization` headers**, never in query strings (they end up in proxy logs).
+- The relay stores only **hashes** of device tokens. Pairing codes are short-lived and rate-limited.
+- **The watch never sends raw keys.** It sends `prompt`, `answer {option_id}` or `cancel`, and the bridge resolves the keys.
+- **The bridge re-validates every command right before acting:**
+  - `expected_seq` must match
+  - the prompt `fingerprint` must match
+  - the pane must have a detected agent
+- Commands are rejected for shell panes and for panes without an agent.
+
+---
+
+## 4. Coding Conventions
+
+### Backend (Go)
+- Idiomatic Go: clear package boundaries, explicit error handling, **no panics in daemons**.
+- Propagate `context.Context` for cancellation and timeouts.
+- Herdr RPC is **one request per connection**. Only `events.subscribe` stays open. Status events require a per-pane subscription.
+- **Snapshot is authoritative; events only trigger a debounced re-list.**
+- Reconnect with exponential backoff + jitter for both the herdr socket and the relay WebSocket. Ping the WebSocket every 30 s.
+- Use herdr's status enum **verbatim**: `idle / working / blocked / done / unknown`.
+- Key agents by **`pane_id`** (URL-encode it; it contains `:`), never by session id.
+- Transcript readers must be bounded (tail reads) and must fall back to screen capture on any failure.
+- Tests run against `pkg/herdrtest`, never against a live herdr session.
+
+### Wear OS (Kotlin / Compose)
+- Jetpack Compose for Wear OS (`androidx.wear.compose.material`); keep native rotary scroll (`rotaryScrollable`).
+- `@Keep` on serializable models (R8).
+- Complications and tiles stay lightweight: they read the aggregated snapshot, with no heavy parsing.
+
+### watchOS (Swift / SwiftUI)
+- Swift 5.9+, SwiftUI, `NavigationStack`.
+- Models conform to `Codable`, `Identifiable`, `Sendable`.
+- Reconnect SSE with `AsyncSequence`.
+
+---
+
+## 5. Verification Checklist for Agents
+
+Before claiming a task is done:
+1. **No legacy references remain:** Warp, `osascript`, `agy-sidecar.js`, `claude-plugin`, `/webhook`, or the Node bridge.
+2. **Go builds and tests pass:** `go vet ./... && go test ./...`.
+3. **Adapter changes are covered** by a fixture test in `pkg/agents/testdata/`.
+4. **Both clients match `pkg/model`:** `wearos-app` and `watchos-app` models mirror the current schema.
+5. **Input rules hold:**
+   - inputs to `blocked` agents go through `answer` / `cancel` → `agent.send_keys`, never `agent.prompt`
+   - options are resolved by role, never by position
+6. **Nothing is left behind:** no uncommitted scratch files or secrets.
