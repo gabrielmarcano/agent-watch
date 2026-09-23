@@ -1,0 +1,54 @@
+---
+name: wearos-deploy
+description: "Build, test and install the Wear OS app on the owner's Google Pixel Watch 2 over wireless adb, and read its logs. Use when asked to try, install, deploy or debug the Wear OS app on the watch."
+---
+
+# Build and install on the Pixel Watch 2
+
+## Build and unit tests (no device needed)
+
+```bash
+cd wearos-app
+export JAVA_HOME="/Applications/Android Studio.app/Contents/jbr/Contents/Home"   # JDK 17 bundled with Android Studio
+./gradlew :app:testDebugUnitTest :app:assembleDebug
+```
+
+`google-services.json` must exist in `wearos-app/app/`. It is the owner's file and git-ignored. If it is missing, **ask the owner**. Never create or commit it.
+
+## Connect the watch (wireless debugging)
+
+`adb devices` should list the watch. If it does not:
+
+1. **Pairing is needed only once per watch, and the owner does it.** On the watch: Settings → Developer options → Wireless debugging → **Pair new device**. It shows `IP:PORT` and a code. Then, on the Mac, the owner runs:
+
+   ```bash
+   ! adb pair <ip>:<pair-port> <code>
+   ```
+
+2. **Connect.** The connect port is shown on the Wireless debugging screen and differs from the pair port:
+
+   ```bash
+   adb connect <ip>:<port>
+   adb devices     # the watch appears as <ip>:<port>  device
+   ```
+
+The watch and the Mac must be on the same Wi-Fi. The connect port changes after the watch reboots, so check the screen again.
+
+## Install and run
+
+```bash
+cd wearos-app
+./gradlew :app:installDebug                       # or :app:installRelease to test R8/@Keep
+adb shell am start -n com.gabriel.agentwatch/.MainActivity
+```
+
+## Logs
+
+```bash
+adb logcat -c
+adb logcat -s AgentWatch:V FCM:V OkHttp:V AndroidRuntime:E
+```
+
+## Reporting
+- **Unit tests and build:** paste the Gradle output tail.
+- **Behaviour on the watch:** only the owner can confirm what the screen shows and what the taps do. Give him a numbered list of what to check (e.g. from `docs/phases/5-e2e.md`), and report his answers. **Never claim "works on the watch" without his confirmation.**

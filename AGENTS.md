@@ -4,6 +4,33 @@ This document defines the development rules, architectural boundaries, and codin
 
 ---
 
+## 0. Where to Start
+
+1. **Pick a task:** [`docs/README.md`](docs/README.md) is the index of phase guides. [`docs/STATUS.md`](docs/STATUS.md) says what is done, claimed and blocked. Claim a phase there before starting.
+2. **Look up facts,** never from memory:
+   - [`docs/reference/contracts.md`](docs/reference/contracts.md): every JSON shape
+   - [`docs/reference/herdr-socket-api.md`](docs/reference/herdr-socket-api.md): the herdr socket, verified
+   - [`docs/reference/agents.md`](docs/reference/agents.md): per-agent menus, keys, transcripts
+3. **Path-scoped rules** live in `.claude/rules/*.md`. Claude Code loads them automatically; other agents should read the ones matching the files they touch.
+4. **Skills** in `.claude/skills/*/SKILL.md`:
+   - `capture-fixture`
+   - `add-agent-adapter`
+   - `schema-sync`
+   - `wearos-deploy`
+   - `relay-deploy`
+   - `herdr-probe`
+5. **Hooks** (`.claude/settings.json`) block:
+   - input to herdr panes outside the `aw-sandbox` workspace;
+   - `git add -A`, `--amend` and unapproved `git push`;
+   - writes to legacy or secret paths;
+   - commits containing secrets.
+
+   They also gofmt Go files and remind you to keep the contracts in sync. If a hook blocks you, fix the cause; never work around it.
+
+> ⚠️ **The herdr on the development Mac runs the owner's real agent sessions.** Only panes you create in the `aw-sandbox` workspace may receive prompts or keys.
+
+---
+
 ## 1. Prime Directives & Architectural Rules
 
 ### 1.1 Herdr-Native Control Plane (Zero Legacy Policy)
@@ -149,3 +176,5 @@ Before claiming a task is done:
    - inputs to `blocked` agents go through `answer` / `cancel` → `agent.send_keys`, never `agent.prompt`
    - options are resolved by role, never by position
 6. **Nothing is left behind:** no uncommitted scratch files or secrets.
+7. **Hooks still pass:** if you changed anything under `.claude/hooks/`, run `bash .claude/hooks/test_hooks.sh`.
+8. **Status is up to date:** your phase is ticked in `docs/STATUS.md`, and only your own paths were committed.

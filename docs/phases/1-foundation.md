@@ -31,7 +31,9 @@ git rm -r -q bridge claude-plugin .claude-plugin agent_integrations_analysis.md
 ```
 
 Then clean up the files that still mention the old system:
-- **`.gitignore`:** remove the `bridge/…` and `node_modules/` lines.
+- **`.gitignore`:**
+  - remove the `bridge/…` and `node_modules/` lines;
+  - add `bin/`, `firebase-service-account*.json`, `store.json`, `.env*` and `!*.example`.
 - **`README.md`:** leave it for Phase 5. Only add one line at the top: `> ⚠️ Being rewritten for the herdr-native architecture — see HERDR_REFACTOR_PLAN.md.`
 
 ### 2. Initialise the module
