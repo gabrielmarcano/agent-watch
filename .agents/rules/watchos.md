@@ -1,9 +1,12 @@
 ---
-paths:
-  - "watchos-app/**"
+trigger: glob
+glob: "watchos-app/**"
+description: "watchOS client rules (best-effort, simulator only)"
 ---
 
 # watchOS client rules (best-effort, simulator only)
+
+> Applies to: watchos-app/**.
 
 Guide: `docs/phases/6-watchos.md`.
 

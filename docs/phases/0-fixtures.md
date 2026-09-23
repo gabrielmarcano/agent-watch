@@ -16,7 +16,7 @@
 
 1. [`docs/reference/herdr-socket-api.md`](../reference/herdr-socket-api.md), especially the safety warning at the top.
 2. [`docs/reference/agents.md`](../reference/agents.md).
-3. The `capture-fixture` skill (`.claude/skills/capture-fixture/SKILL.md`).
+3. The `capture-fixture` skill (`.agents/skills/capture-fixture/SKILL.md`).
 
 ---
 
@@ -187,7 +187,7 @@ Then add `pkg/agents/testdata/<agent>/transcript.expected.json` with the `query`
 ```
 You are executing Phase 0 of the Agent Watch refactor in /Users/me/Code/personal/agent-watch-herdr.
 Read docs/phases/0-fixtures.md and follow it step by step. Also read docs/reference/herdr-socket-api.md
-(the safety warning at the top is mandatory) and .claude/skills/capture-fixture/SKILL.md.
+(the safety warning at the top is mandatory) and .agents/skills/capture-fixture/SKILL.md.
 Rules: only send keys or prompts to panes you created inside the "aw-sandbox" workspace; never touch other
 panes. Ask the owner before running `herdr integration install claude`. Do not write Go/Kotlin/Swift code.
 Scrub personal data from every fixture. When done, tick the Definition of Done in docs/STATUS.md and commit

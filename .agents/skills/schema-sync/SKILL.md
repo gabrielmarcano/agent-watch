@@ -1,6 +1,6 @@
 ---
 name: schema-sync
-description: "Change a JSON contract (agent state, prompt, history, API bodies, SSE events, wire messages, push payload) consistently across docs/reference/contracts.md, pkg/model (Go), the Wear OS Kotlin models and the watchOS Swift models. Use for any field addition/rename, new endpoint body, or when the Stop hook reports contracts out of sync."
+description: "Change a JSON contract (agent state, prompt, history, API bodies, SSE events, wire messages, push payload) consistently across docs/reference/contracts.md, pkg/model (Go), the Wear OS Kotlin models and the watchOS Swift models. Use for any field addition/rename, new endpoint body, or when the pre-commit hook reports contracts out of sync."
 ---
 
 # Keep the four copies of the contracts identical
@@ -37,4 +37,4 @@ description: "Change a JSON contract (agent state, prompt, history, API bodies, 
 7. **Commit all copies together** in one commit, with explicit paths.
 
 ## If a client cannot be updated right now
-Say so to the owner explicitly and add a line under "Blocked / questions" in `docs/STATUS.md`. The Stop hook asks for this explanation.
+Say so to the owner explicitly and add a line under "Blocked / questions" in `docs/STATUS.md`. If the change touches no JSON field, commit with `AW_CONTRACT_NO_JSON_CHANGE=1` and say so in the message.

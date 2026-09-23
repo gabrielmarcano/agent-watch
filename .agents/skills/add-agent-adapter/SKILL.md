@@ -5,7 +5,7 @@ description: "Add or change support for a coding agent (claude, agy, opencode, c
 
 # Add or change an agent adapter
 
-Read `docs/reference/agents.md` (spec) and `.claude/rules/agent-adapters.md` first.
+Read `docs/reference/agents.md` (spec) and `.agents/rules/agent-adapters.md` first.
 
 ## Decide: adapter or generic?
 

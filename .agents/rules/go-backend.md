@@ -1,12 +1,12 @@
 ---
-paths:
-  - "**/*.go"
-  - "go.mod"
-  - "go.sum"
-  - "Makefile"
+trigger: glob
+glob: "**/*.go"
+description: "Go conventions for the bridge, relay and shared packages"
 ---
 
 # Go backend conventions
+
+> Applies to: every Go file, go.mod, go.sum, Makefile.
 
 Applies to every Go file (bridge, relay, shared packages). Design: `HERDR_REFACTOR_PLAN.md`. Phase guides: `docs/phases/`.
 
@@ -29,7 +29,7 @@ Applies to every Go file (bridge, relay, shared packages). Design: `HERDR_REFACT
 ## Tests
 - Table-driven, `go test -race ./...`, no network, no real herdr socket: use `pkg/herdrtest`, `httptest` and temp dirs.
 - Wait for conditions with a polling helper and a deadline; never use a `time.Sleep` longer than 50 ms.
-- A gofmt hook formats edited files automatically. Still run `go vet ./...` before finishing.
+- The pre-commit hook rejects unformatted Go (OpenCode also runs gofmt after each edit). Run `gofmt -w` and `go vet ./...` before finishing.
 
 ## Before claiming done
 ```bash

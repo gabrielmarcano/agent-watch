@@ -23,7 +23,7 @@
 
 - [`docs/reference/contracts.md`](../reference/contracts.md) §1, §2, §4.1. The app is a client of exactly this.
 - [`HERDR_REFACTOR_PLAN.md`](../../HERDR_REFACTOR_PLAN.md) §11 (target agent selection) and §13.1.
-- `.claude/rules/wearos.md` (conventions: `@Keep`, rotary, lightweight tiles and complications).
+- `.agents/rules/wearos.md` (conventions: `@Keep`, rotary, lightweight tiles and complications).
 
 ---
 
@@ -323,7 +323,7 @@ export JAVA_HOME="/Applications/Android Studio.app/Contents/jbr/Contents/Home"
 
 ```
 You are executing Phase 4 (Wear OS client) of the Agent Watch refactor in /Users/me/Code/personal/agent-watch-herdr.
-Read AGENTS.md, .claude/rules/wearos.md, docs/reference/contracts.md (§1, §2, §4.1), HERDR_REFACTOR_PLAN.md §11 and §13.1,
+Read AGENTS.md, .agents/rules/wearos.md, docs/reference/contracts.md (§1, §2, §4.1), HERDR_REFACTOR_PLAN.md §11 and §13.1,
 and docs/phases/4-wearos.md. Rewrite wearos-app/ as the guide specifies: models mirroring pkg/model with @Keep, RelayClient +
 RelayRepository over /v1 with bearer tokens, pairing screen, agent list/detail, PromptCard, notifications with
 answer/cancel/prompt actions carrying pane_id + state_change_seq + fingerprint, complication and tile following the

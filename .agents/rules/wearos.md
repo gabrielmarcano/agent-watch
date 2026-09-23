@@ -1,9 +1,12 @@
 ---
-paths:
-  - "wearos-app/**"
+trigger: glob
+glob: "wearos-app/**"
+description: "Wear OS client rules (primary client, Pixel Watch 2)"
 ---
 
 # Wear OS client rules (primary client, Pixel Watch 2)
+
+> Applies to: wearos-app/**.
 
 Guide: `docs/phases/4-wearos.md`. Contracts: `docs/reference/contracts.md`.
 
@@ -22,4 +25,4 @@ Guide: `docs/phases/4-wearos.md`. Contracts: `docs/reference/contracts.md`.
 - **Battery:** SSE runs only while the app is in the foreground (process lifecycle). Complications and tiles make one `GET /v1/agents` and do no heavy parsing.
 - **UI:** Wear Compose Material, `ScalingLazyColumn` with `rotaryScrollable`, list → detail navigation. The dictation target label is shown before sending.
 - **Secrets:** never create, edit or commit `google-services.json`. The owner places it.
-- **Build:** `./gradlew :app:testDebugUnitTest :app:assembleDebug` (JDK 17). Device install: `.claude/skills/wearos-deploy/SKILL.md`.
+- **Build:** `./gradlew :app:testDebugUnitTest :app:assembleDebug` (JDK 17). Device install: `.agents/skills/wearos-deploy/SKILL.md`.

@@ -1,0 +1,23 @@
+{
+  "agent-watch-guards": {
+    "PreToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ../tools/guards/guards.py agy-pretool",
+            "timeout": 15
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "type": "command",
+        "command": "python3 ../tools/guards/guards.py agy-stop",
+        "timeout": 15
+      }
+    ]
+  }
+}

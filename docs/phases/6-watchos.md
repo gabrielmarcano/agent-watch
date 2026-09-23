@@ -15,7 +15,7 @@
 
 - [`docs/reference/contracts.md`](../reference/contracts.md) §1, §2.
 - [`docs/phases/4-wearos.md`](4-wearos.md): the behaviour to copy (PromptCard rules, target-agent rule, error handling).
-- `.claude/rules/watchos.md`.
+- `.agents/rules/watchos.md`.
 
 ---
 
@@ -122,7 +122,7 @@ Replace the simulator name with one from the `simctl` list. To check the UI, ope
 
 ```
 You are executing Phase 6 (watchOS client, best-effort) of the Agent Watch refactor in /Users/me/Code/personal/agent-watch-herdr.
-Read AGENTS.md, .claude/rules/watchos.md, docs/reference/contracts.md (§1, §2), docs/phases/4-wearos.md (the UX to copy) and
+Read AGENTS.md, .agents/rules/watchos.md, docs/reference/contracts.md (§1, §2), docs/phases/4-wearos.md (the UX to copy) and
 docs/phases/6-watchos.md. Rewrite watchos-app/ as specified, regenerate the project with xcodegen, and verify with
 xcodebuild build/test on a watchOS simulator. There is no physical Apple Watch: report results as "verified in simulator"
 and never claim device behaviour. Tick Phase 6 in docs/STATUS.md and commit only watchos-app/** and docs/STATUS.md.

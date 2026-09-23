@@ -88,10 +88,13 @@ When two disagree, the higher one wins, and the lower one must be fixed in the s
 
 ## Tooling for agents in this repo
 
-| Tool | Where | For |
+| Tool | Where | Loaded by |
 |---|---|---|
-| Rules (auto-loaded by path in Claude Code) | `.claude/rules/*.md` | Conventions for Go backend, herdr client, adapters, relay security, Wear OS, watchOS |
-| Skills | `.claude/skills/*/SKILL.md` | `capture-fixture`, `add-agent-adapter`, `schema-sync`, `wearos-deploy`, `relay-deploy`, `herdr-probe` |
-| Hooks | `.claude/hooks/` + `.claude/settings.json` | Block live herdr input and unsafe git; gofmt after edits; contract-sync reminders; secret scan before commits |
+| Rules | `.agents/rules/*.md` | Antigravity CLI (by `trigger`/`glob` frontmatter); OpenCode (all of them, via `opencode.json` → `instructions`) |
+| Skills | `.agents/skills/*/SKILL.md` | Antigravity CLI and OpenCode (both discover `.agents/skills/`) |
+| Guards (logic) | `tools/guards/guards.py` | — |
+| Guards (Antigravity) | `.agents/hooks.json` | Antigravity CLI `PreToolUse` + `Stop` |
+| Guards (OpenCode) | `.opencode/plugins/agent-watch-guards.js` | OpenCode `tool.execute.before/after` |
+| Guards (git) | `.githooks/pre-commit` | git, for every tool and humans (enable once: `git config core.hooksPath .githooks`) |
 
-Agents that are not Claude Code (Antigravity, OpenCode, Codex…) should read the relevant `.claude/rules/*.md` and `SKILL.md` files as plain documents: they are written tool-agnostically.
+Agents without hooks (Codex, Cursor, …) still get the git pre-commit hook. They must read `AGENTS.md` and the matching rules as plain documents. Setup and tests of the guards: [`tools/guards/README.md`](../tools/guards/README.md).

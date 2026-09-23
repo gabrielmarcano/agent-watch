@@ -11,21 +11,30 @@ This document defines the development rules, architectural boundaries, and codin
    - [`docs/reference/contracts.md`](docs/reference/contracts.md): every JSON shape
    - [`docs/reference/herdr-socket-api.md`](docs/reference/herdr-socket-api.md): the herdr socket, verified
    - [`docs/reference/agents.md`](docs/reference/agents.md): per-agent menus, keys, transcripts
-3. **Path-scoped rules** live in `.claude/rules/*.md`. Claude Code loads them automatically; other agents should read the ones matching the files they touch.
-4. **Skills** in `.claude/skills/*/SKILL.md`:
+3. **Rules** live in `.agents/rules/*.md`:
+   - **Antigravity CLI** loads them by their `trigger` / `glob` frontmatter.
+   - **OpenCode** loads all of them through `opencode.json` → `instructions`.
+   - **Any other agent:** read the ones matching the files you touch.
+4. **Skills** in `.agents/skills/*/SKILL.md`, discovered by both Antigravity and OpenCode:
    - `capture-fixture`
    - `add-agent-adapter`
    - `schema-sync`
    - `wearos-deploy`
    - `relay-deploy`
    - `herdr-probe`
-5. **Hooks** (`.claude/settings.json`) block:
-   - input to herdr panes outside the `aw-sandbox` workspace;
-   - `git add -A`, `--amend` and unapproved `git push`;
-   - writes to legacy or secret paths;
-   - commits containing secrets.
+5. **Guards:** one implementation in `tools/guards/guards.py`, wired in three places:
+   - `.agents/hooks.json` for Antigravity CLI;
+   - `.opencode/plugins/agent-watch-guards.js` for OpenCode;
+   - `.githooks/pre-commit` for every tool and humans.
 
-   They also gofmt Go files and remind you to keep the contracts in sync. If a hook blocks you, fix the cause; never work around it.
+   They block:
+   - input to herdr panes outside the `aw-sandbox` workspace;
+   - owner-only herdr commands;
+   - `git add -A`, `--amend`, `--no-verify` and unapproved `git push`;
+   - writes to legacy or secret paths;
+   - commits with secrets, unformatted Go, or `pkg/model` changes without the client and contract updates.
+
+   If a guard blocks you, fix the cause; never work around it. Setup and tests: `tools/guards/README.md`.
 
 > ⚠️ **The herdr on the development Mac runs the owner's real agent sessions.** Only panes you create in the `aw-sandbox` workspace may receive prompts or keys.
 
@@ -176,5 +185,5 @@ Before claiming a task is done:
    - inputs to `blocked` agents go through `answer` / `cancel` → `agent.send_keys`, never `agent.prompt`
    - options are resolved by role, never by position
 6. **Nothing is left behind:** no uncommitted scratch files or secrets.
-7. **Hooks still pass:** if you changed anything under `.claude/hooks/`, run `bash .claude/hooks/test_hooks.sh`.
+7. **Guards still pass:** if you changed anything under `tools/guards/`, `.agents/hooks.json`, `.opencode/` or `.githooks/`, run `bash tools/guards/test_guards.sh`.
 8. **Status is up to date:** your phase is ticked in `docs/STATUS.md`, and only your own paths were committed.

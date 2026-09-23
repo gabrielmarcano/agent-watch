@@ -200,7 +200,7 @@ gofmt -l cmd pkg        # must print nothing
 go vet ./...
 go test -race ./...
 make build
-git grep -nE 'osascript|agy-sidecar|claude-plugin|/webhook|Warp' -- ':!docs' ':!HERDR_REFACTOR_PLAN.md' ':!AGENTS.md' ':!.claude'
+git grep -nE 'osascript|agy-sidecar|claude-plugin|/webhook|Warp' -- ':!docs' ':!HERDR_REFACTOR_PLAN.md' ':!AGENTS.md' ':!.agents' ':!tools/guards'
                         # must print nothing (except client code, which Phase 4/6 rewrite)
 ```
 

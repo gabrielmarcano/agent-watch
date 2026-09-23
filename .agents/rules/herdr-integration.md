@@ -1,18 +1,16 @@
 ---
-paths:
-  - "pkg/herdr/**"
-  - "pkg/herdrtest/**"
-  - "pkg/bridge/**"
-  - "cmd/bridge/**"
-  - "herdr-plugin.toml"
+trigger: always_on
+description: "Safety and protocol rules for talking to herdr (live owner sessions)"
 ---
 
 # herdr integration rules
 
+> Applies to: pkg/herdr, pkg/herdrtest, pkg/bridge, cmd/bridge, herdr-plugin.toml, and ANY herdr command you run.
+
 Full reference: `docs/reference/herdr-socket-api.md` (verified on herdr 0.9.1, protocol 22).
 
 ## Safety (non-negotiable)
-- The herdr on this Mac runs the **owner's real agent sessions**. Never call `agent.prompt`, `agent.send_keys`, `pane.send_*`, `agent.start` or `pane.close` against a pane you did not create in the `aw-sandbox` workspace. A hook enforces this for the CLI and blocks raw socket writes.
+- The herdr on this Mac runs the **owner's real agent sessions**. Never call `agent.prompt`, `agent.send_keys`, `pane.send_*`, `agent.start` or `pane.close` against a pane you did not create in the `aw-sandbox` workspace. The guards (`tools/guards/guards.py`, wired into agy and OpenCode) enforce this for the CLI and block raw socket writes.
 - Tests never touch the real socket: use `pkg/herdrtest`.
 
 ## Protocol facts that break code when forgotten

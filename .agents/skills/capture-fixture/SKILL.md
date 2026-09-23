@@ -5,7 +5,7 @@ description: "Safely capture a coding agent's blocked-menu screen, key behaviour
 
 # Capture an agent fixture without touching the owner's sessions
 
-The herdr on this Mac runs the owner's **real** agent sessions. Everything below happens inside a workspace labelled **`aw-sandbox`**. A PreToolUse hook refuses `send-keys` / `prompt` / `pane run` against any pane outside that workspace. If you get `BLOCKED`, you targeted the wrong pane: stop and re-check. Never work around the hook.
+The herdr on this Mac runs the owner's **real** agent sessions. Everything below happens inside a workspace labelled **`aw-sandbox`**. The repo guards (agy and OpenCode hooks) refuse `send-keys` / `prompt` / `pane run` against any pane outside that workspace. If you get `BLOCKED`, you targeted the wrong pane: stop and re-check. Never work around the hook.
 
 ## 1. Create the sandbox
 

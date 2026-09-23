@@ -1,12 +1,11 @@
 ---
-paths:
-  - "pkg/relay/**"
-  - "pkg/push/**"
-  - "cmd/relay/**"
-  - "deploy/**"
+trigger: model_decision
+description: "Security rules for the relay server, push notifications and VPS deployment. Apply when touching pkg/relay, pkg/push, cmd/relay or deploy/"
 ---
 
 # Relay and push rules (security is correctness here)
+
+> Applies to: pkg/relay, pkg/push, cmd/relay, deploy/.
 
 The relay can make agents on the owner's Mac type and approve things, so treat it as a remote-execution surface. Spec: `docs/reference/contracts.md` §2–§5, guides `docs/phases/3a…3c`.
 
