@@ -24,6 +24,8 @@
 | 12 | Go module path matches the remote: `github.com/gabrielmarcano/agent-monitor` | The first draft used the wrong path |
 | 13 | Wear OS is the primary client (Pixel Watch 2); watchOS is best-effort, simulator-only, last phase | Wear OS is the daily driver; there is no physical Apple Watch to test on |
 | 14 | §12.1 spells out what runs on the Mac: one binary; the plugin is only its installer/controller | The first draft did not say which process is long-running or who keeps it alive |
+| 15 | Phases split into executable guides under `docs/`; contracts frozen in `docs/reference/contracts.md`; Phase 0 is now only fixtures, and `pkg/model` moved to Phase 1 | Lets smaller agents execute phases without design context |
+| 16 | The socket's `agent.read` source is `recent_unwrapped` (underscore) | Verified: the hyphenated CLI spelling fails on the socket with `invalid_request` |
 
 ---
 
@@ -103,7 +105,8 @@
 | Prompt | `agent.prompt` is rejected with `agent_blocked` when blocked. Accepted otherwise, including while `working` |
 | Keys | `agent.send_keys`: special keys `Enter Escape(esc) Up Down Left Right Tab Space Backspace F1–F12`, single chars (`"1"`), chords (`ctrl+c`). No `PageUp/Home/End/Delete` |
 | Ack semantics | An ack means herdr took the bytes, **not** that the TUI acted on them |
-| Screen read | `agent.read` with `source ∈ visible \| recent \| recent-unwrapped \| detection`, `format: text` (plain, no ANSI) |
+| Screen read | `agent.read` with `source ∈ visible \| recent \| recent_unwrapped \| detection` (**underscore on the socket**; the CLI flag spells it `recent-unwrapped`), `format: text` (plain, no ANSI) |
+| Health | `ping` → `{version, protocol, capabilities}` |
 | Plugin env | `HERDR_SOCKET_PATH`, `HERDR_PLUGIN_CONFIG_DIR`, `HERDR_PLUGIN_STATE_DIR`, `HERDR_PLUGIN_EVENT_JSON`, `HERDR_PLUGIN_CONTEXT_JSON` |
 | Plugin build | `[[build]]` runs on `herdr plugin install` only, **not** on `herdr plugin link` |
 
@@ -288,7 +291,7 @@ type Prompt struct {
 | `claude` | `kind: path` → transcript JSONL (sent by the current integration). `kind: id` → resolve `<id>.jsonl` under the configured `claude_config_dirs` (supports custom `CLAUDE_CONFIG_DIR`) | Last `user` text + last `assistant` text blocks (logic from legacy `parseTranscript`) |
 | `agy` | `kind: path` → `…/brain/<id>/.system_generated/logs/transcript_full.jsonl` | Last `USER_INPUT` + last `PLANNER_RESPONSE` without `tool_calls` (logic from legacy sidecar) |
 | `opencode` | `kind: id` → read-only SQLite `~/.local/share/opencode/opencode.db` (`message` / `part` tables keyed by `session_id`, JSON `data`) via pure-Go `modernc.org/sqlite`, `mode=ro` | Last user message text + last assistant text parts |
-| generic / any failure | `agent.read --source recent-unwrapped --format text` | Screen text, `Source = "screen"` |
+| generic / any failure | `agent.read` with `source: "recent_unwrapped"`, `format: "text"` | Screen text, `Source = "screen"` |
 
 - A reader failure (format change, missing file, locked DB) **always falls back to screen capture** and logs a warning. It never drops the event.
 - **Storage lives on the relay:** the last 20 items per pane plus a global cap of 200, persisted in the relay store and deduplicated by `ID`. The watch can browse history while the Mac is asleep.
@@ -331,6 +334,9 @@ All endpoints except `POST /v1/pair` require `Authorization: Bearer <device_toke
 | POST | `/v1/agents/{pane_id}/answer` | `{option_id, expected_seq, fingerprint}` |
 | POST | `/v1/agents/{pane_id}/cancel` | `{expected_seq}` |
 | POST | `/v1/push/register` | `{platform: "fcm", token}` (Wear OS) |
+| POST | `/v1/host/pair-code` | Host token. Returns a 6-digit code (used by the bridge `pair` action) |
+| GET | `/v1/host/status` | Host token. `host_online`, `herdr_online`, device and agent counts |
+| GET | `/v1/healthz` | No auth. Liveness |
 
 **Pairing:**
 1. `herdr plugin action invoke … pair` asks the relay for a 6-digit code (5-minute TTL).
@@ -442,7 +448,7 @@ Target device: **Google Pixel Watch 2**. The current `minSdk 30` / `targetSdk 34
 2. `SseClient.kt` → `/v1/events` with a bearer token and reconnect; REST calls per §9.
 3. `ServerConfigScreen.kt` → pairing screen (relay URL + 6-digit code) instead of a LAN IP.
 4. `AgentScreen.kt`:
-   - multi-agent carousel
+   - agent list (`ScalingLazyColumn`, sorted by severity) → agent detail. This is the Wear-idiomatic pattern, and it scales better than a carousel with 10+ agents
    - prompt card rendering `PendingPrompt`: primary **Allow** (`allow_once`), **Deny** (`deny`/cancel), **More** (other options incl. `allow_always`)
    - `unknown` prompts show `RawTail` + Cancel only
 5. History screens stay (per agent + global). The markdown reader is kept for `source == "transcript"`; `screen` items render as plain text.
@@ -461,22 +467,27 @@ Starts after Wear OS is verified. Sync the model and network layer first so the 
 
 ## 14. Phases
 
-| Phase | Work | Depends on |
-|---|---|---|
-| **0. Contract freeze** | Write `pkg/model` (§5, §8, §9). Capture fixtures: blocked screens for claude/agy/opencode, one transcript sample each, confirm opencode DB extraction query. Update herdr's claude integration | — |
-| **1. Foundation** | `go mod init github.com/gabrielmarcano/agent-monitor`, Makefile, `pkg/herdrtest` fake socket. Delete legacy: `bridge/`, `claude-plugin/`, `.claude-plugin/`, `agent_integrations_analysis.md` | 0 |
-| **2. Bridge** | `pkg/herdr` (rpc, subscribe, sync) · `pkg/agents` (menu parser, 3 adapters + generic, transcript readers) · `pkg/relayclient` · `cmd/bridge` (run/start/stop/status/pair, launchd) | 0, 1 |
-| **3. Relay** | `pkg/relay` (hub, api, sse, auth/pairing, store) · `pkg/push` (fcm, ntfy) · `cmd/relay` · `deploy/relay` (Dockerfile, systemd, Cloudflare) | 0, 1 |
-| **4. Wear OS** | Model, network, pairing, prompt card, history, tile/complication (§13.1) | 0 (can start against a relay stub) |
-| **5. End-to-end + docs** | E2E checklist below **on the Pixel Watch 2**, README rewrite, ROADMAP refresh | 2, 3, 4 |
-| **6. watchOS (best-effort)** | Model + network sync first, then UI parity (§13.2); simulator only | 5 (off the critical path; never blocks a release) |
+**Step-by-step guides for every phase live in [`docs/`](docs/README.md)** and progress is tracked in [`docs/STATUS.md`](docs/STATUS.md). The exact JSON shapes are frozen in [`docs/reference/contracts.md`](docs/reference/contracts.md).
+
+| Phase | Guide | Work | Depends on |
+|---|---|---|---|
+| **0. Fixtures** | [0-fixtures](docs/phases/0-fixtures.md) | Capture blocked screens and transcript samples for claude/agy/opencode in a sandbox; resolve every 🔍 in `docs/reference/agents.md`; update herdr's claude integration | — |
+| **1. Foundation** | [1-foundation](docs/phases/1-foundation.md) | Delete legacy; `go mod init github.com/gabrielmarcano/agent-monitor`; Makefile; `pkg/model` from the contracts; `pkg/herdrtest` fake socket | — |
+| **2a. herdr client** | [2a-herdr-client](docs/phases/2a-herdr-client.md) | `pkg/herdr` (rpc, subscribe, syncer) | 1 |
+| **2b. Adapters** | [2b-agent-adapters](docs/phases/2b-agent-adapters.md) | `pkg/agents` (menu parser, claude/agy/opencode/generic, transcript readers) | 1, 0 |
+| **2c. Bridge** | [2c-bridge-daemon](docs/phases/2c-bridge-daemon.md) | `pkg/relayclient`, `pkg/bridge` (engine + command executor), `cmd/bridge`, launchd, herdr plugin | 2a, 2b |
+| **3a. Relay** | [3a-relay-server](docs/phases/3a-relay-server.md) | `pkg/relay` (hub, API, SSE, pairing, store), `cmd/relay` | 1 |
+| **3b. Push** | [3b-push](docs/phases/3b-push.md) | `pkg/push` (dispatcher, FCM, ntfy) | 3a |
+| **3c. Deploy** | [3c-relay-deploy](docs/phases/3c-relay-deploy.md) | systemd + reverse proxy + Cloudflare on the VPS | 3a |
+| **4. Wear OS** | [4-wearos](docs/phases/4-wearos.md) | Models, network, pairing, list/detail, prompt card, notifications, history, tile/complication (§13.1) | 1 (can start against a relay stub) |
+| **5. End-to-end + docs** | [5-e2e](docs/phases/5-e2e.md) | E2E checklist **on the Pixel Watch 2**, README rewrite, ROADMAP refresh | 2c, 3b, 3c, 4 |
+| **6. watchOS (best-effort)** | [6-watchos](docs/phases/6-watchos.md) | Model + network sync first, then UI parity (§13.2); simulator only | 5 (off the critical path; never blocks a release) |
 
 **What can run in parallel:**
-- **2 ∥ 3** once Phase 0 is frozen: different directories, sharing only the frozen `pkg/model`.
-- **Inside 2:** `pkg/agents` ∥ `pkg/herdr`. Adapters depend only on fixtures and the model.
-- **4 ∥ 2 ∥ 3:** Wear OS can start right after Phase 0 against a relay stub. It touches only `wearos-app/`.
+- **0 ∥ 1:** Phase 0 writes only `pkg/agents/testdata` and docs.
+- **1 runs alone** among code phases: it deletes legacy and creates the module root, touching most of the git index.
+- **2a ∥ 2b ∥ 3a ∥ 4** after Phase 1: disjoint directories, sharing only the frozen `pkg/model`. Caveat: 2b and 3a/3b may both edit `go.mod`/`go.sum`, so commit one before the other runs `go get`.
 - **6 (watchOS)** could technically run in parallel with 4 (no shared files), but it goes last on purpose: Wear OS is the priority, and watchOS should copy a UI that has already been validated on a real device.
-- **Sequential only:** 0 → 1, because Phase 1 deletes and creates the module root and touches most of the git index.
 - **Git discipline:** parallel agents commit only their own paths (`git add <paths>`, never `-A`).
 
 **Verification per phase:**
