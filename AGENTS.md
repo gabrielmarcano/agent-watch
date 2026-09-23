@@ -40,7 +40,9 @@ This document defines the development rules, architectural boundaries, and codin
 
 ### 1.3 Go for Host Bridge & Cloud Relay
 - Backend is **Go 1.22+**, a single module: `github.com/gabrielmarcano/agent-monitor`.
-- `agent-watch-bridge`: static binary on the Mac/Linux host, supervised by launchd (macOS) or systemd `--user` (Linux). Keep it thin: herdr ↔ relay translation plus on-demand transcript reads.
+- `agent-watch-bridge`: static binary on the Mac/Linux host. Keep it thin: herdr ↔ relay translation plus on-demand transcript reads.
+  - The herdr plugin (`herdr-plugin.toml`) is only the manifest that installs and controls this binary. Its actions (`start`, `stop`, `status`, `pair`) are one-shot.
+  - The long-running process is `agent-watch-bridge run`, supervised by launchd (macOS) or systemd `--user` (Linux). Never rely on herdr to keep it alive.
 - `agent-watch-relay`: static Linux binary on the VPS. It owns state aggregation, history storage, push, pairing and auth.
 - `pkg/model` is the **only** schema source. Clients mirror it field by field.
 
@@ -48,8 +50,11 @@ This document defines the development rules, architectural boundaries, and codin
 - Watches must **NEVER** require Tailscale, a VPN, or a LAN IP.
 - The bridge dials **outbound** to `wss://relay.<domain>/v1/host`. Watches use HTTPS + SSE on the relay. No inbound ports on the Mac.
 
-### 1.5 Multi-Client Parity (Wear OS & watchOS)
-- Any change to the schema, API or interaction model is applied symmetrically to `wearos-app/` and `watchos-app/`. Never leave one platform behind.
+### 1.5 Clients: Wear OS First, watchOS Best-Effort
+- **Wear OS is the primary client and reference implementation.** Features ship there first and are verified on a real Google Pixel Watch 2.
+- **watchOS is extra support**, verified only in the Xcode simulator. It never blocks a phase or a release.
+- **Schema/API changes must still update both clients' models**, so `watchos-app/` always compiles against the current `/v1` API. watchOS UI features may lag behind Wear OS.
+- **Never claim a watchOS feature works on a real device.** Say "verified in the simulator".
 
 ### 1.6 Scope Boundaries
 - **No terminal emulator / SSH client** (Moshi covers that).
@@ -139,7 +144,7 @@ Before claiming a task is done:
 1. **No legacy references remain:** Warp, `osascript`, `agy-sidecar.js`, `claude-plugin`, `/webhook`, or the Node bridge.
 2. **Go builds and tests pass:** `go vet ./... && go test ./...`.
 3. **Adapter changes are covered** by a fixture test in `pkg/agents/testdata/`.
-4. **Both clients match `pkg/model`:** `wearos-app` and `watchos-app` models mirror the current schema.
+4. **Both clients match `pkg/model`:** `wearos-app` and `watchos-app` models mirror the current schema. Wear OS behavior is verified on the Pixel Watch 2; watchOS only in the simulator, and reported as such.
 5. **Input rules hold:**
    - inputs to `blocked` agents go through `answer` / `cancel` → `agent.send_keys`, never `agent.prompt`
    - options are resolved by role, never by position

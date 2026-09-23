@@ -22,6 +22,8 @@
 | 10 | Commands carry `expected_seq` (+ prompt `fingerprint`) and are re-validated on the Mac | Prevents a stale tap from typing `1` into a live prompt |
 | 11 | Tokens in `Authorization` headers, never query strings; paired device tokens | The relay can drive agents on the Mac, so it is effectively a remote-execution surface |
 | 12 | Go module path matches the remote: `github.com/gabrielmarcano/agent-monitor` | The first draft used the wrong path |
+| 13 | Wear OS is the primary client (Pixel Watch 2); watchOS is best-effort, simulator-only, last phase | Wear OS is the daily driver; there is no physical Apple Watch to test on |
+| 14 | §12.1 spells out what runs on the Mac: one binary; the plugin is only its installer/controller | The first draft did not say which process is long-running or who keeps it alive |
 
 ---
 
@@ -43,7 +45,10 @@
    - pairing and auth
 5. **Outbound relay networking.** The bridge dials `wss://relay.<domain>/v1/host`. Watches use HTTPS + SSE on the relay. No inbound ports on the Mac, no VPN on the watch.
 6. **Wrist-first scope.** Status, approvals, dictation, history, complications/tiles. No terminal emulator (Moshi covers that). A phone companion is deferred until Bluetooth tethering is needed.
-7. **Multi-client parity.** Wear OS and watchOS consume the same `/v1` API and are updated together.
+7. **Wear OS first, watchOS as extra support.**
+   - **Wear OS is the primary client and reference implementation.** Every feature ships there first and is verified end-to-end on the daily-driver device: a **Google Pixel Watch 2**.
+   - **watchOS is best-effort.** It follows the same `/v1` API and its models stay in sync with `pkg/model`, so it always compiles. Its UI features may lag behind Wear OS.
+   - **watchOS is verified only in the Xcode simulator** (there is no physical Apple Watch). It never blocks a phase.
 
 ---
 
@@ -207,7 +212,8 @@ type HistoryItem struct {
 }
 
 type AgentsSnapshot struct {
-    HostOnline  bool         `json:"host_online"`
+    HostOnline  bool         `json:"host_online"`  // bridge connected to the relay
+    HerdrOnline bool         `json:"herdr_online"` // bridge can reach the herdr socket
     Agents      []AgentState `json:"agents"`
     GeneratedAt string       `json:"generated_at"`
 }
@@ -296,6 +302,7 @@ type Prompt struct {
 | Direction | Type | Payload |
 |---|---|---|
 | H → R | `hello` | `version`, `host`, `herdr_protocol` |
+| H → R | `herdr_status` | `herdr_online` (bridge is up but the herdr socket is unreachable) |
 | H → R | `snapshot` | `agents[]` (full; sent on every (re)connect) |
 | H → R | `agent_update` / `agent_removed` | one `AgentState` / `pane_id` |
 | H → R | `history_item` | one `HistoryItem` |
@@ -365,6 +372,25 @@ All endpoints except `POST /v1/pair` require `Authorization: Bearer <device_toke
 
 ## 12. Herdr Plugin (`herdr-plugin.toml`)
 
+### 12.1 What runs on the Mac
+
+There is **one binary**, `agent-watch-bridge`. The herdr plugin is not a second program: it is only the manifest that lets herdr install and control that binary.
+
+| Piece | What it is | Lifetime |
+|---|---|---|
+| `herdr-plugin.toml` | Manifest: how to build the binary and which actions herdr exposes | Static file |
+| `agent-watch-bridge start` / `stop` / `status` / `pair` | One-shot commands herdr runs when you invoke an action | Seconds, then exit |
+| `agent-watch-bridge run` | The actual bridge: herdr socket ↔ relay WebSocket | Long-running, kept alive by **launchd** |
+
+- **Why launchd and not herdr keeps it alive:**
+  - Plugin actions are one-shot, and the manifest has no "keep this process alive" option.
+  - Plugin panes (`herdr plugin pane`) are visible terminal panes: they take a tab and die with the herdr server.
+  - launchd restarts the bridge after a crash or a reboot, and survives herdr updates. Collie does the same with systemd `--user`.
+- **When herdr is not running**, the bridge stays connected to the relay and reports `herdr_online=false`. The watch can then tell "herdr is stopped" apart from "the Mac is offline".
+- **Day-to-day use:** you run `start` and `pair` once. After that there is nothing to open or keep running by hand.
+
+### 12.2 Manifest
+
 ```toml
 id = "herdr-agent-watch"
 name = "Agent Watch"
@@ -408,7 +434,10 @@ command = ["./bin/agent-watch-bridge", "pair"]
 
 ## 13. Client Changes
 
-### 13.1 Wear OS (`wearos-app/`)
+### 13.1 Wear OS (`wearos-app/`) — primary
+
+Target device: **Google Pixel Watch 2**. The current `minSdk 30` / `targetSdk 34` already cover it. Deploy with `adb` over Wi-Fi debugging on the watch.
+
 1. `AgentState.kt` mirrors `pkg/model` (`@Keep`). Removes `tool_input`, `session_id`, `last_query`, `last_response`, `history`.
 2. `SseClient.kt` → `/v1/events` with a bearer token and reconnect; REST calls per §9.
 3. `ServerConfigScreen.kt` → pairing screen (relay URL + 6-digit code) instead of a LAN IP.
@@ -419,7 +448,10 @@ command = ["./bin/agent-watch-bridge", "pair"]
 5. History screens stay (per agent + global). The markdown reader is kept for `source == "transcript"`; `screen` items render as plain text.
 6. Complication, tile and QuickDictate follow §11.
 
-### 13.2 watchOS (`watchos-app/`)
+### 13.2 watchOS (`watchos-app/`) — best-effort, simulator only
+
+Starts after Wear OS is verified. Sync the model and network layer first so the app compiles against `/v1`; UI features follow as time allows. Verification is the Xcode watchOS simulator against the real relay.
+
 1. `AgentState.swift` mirrors `pkg/model` (`Codable`, `Identifiable`, `Sendable`); `AnyCodable` is deleted.
 2. `AgentNetworkService.swift` → `/v1` with a bearer token, SSE via `AsyncSequence` with reconnect.
 3. Same pairing, prompt-card, history and pinned-agent behavior as Wear OS.
@@ -435,24 +467,28 @@ command = ["./bin/agent-watch-bridge", "pair"]
 | **1. Foundation** | `go mod init github.com/gabrielmarcano/agent-monitor`, Makefile, `pkg/herdrtest` fake socket. Delete legacy: `bridge/`, `claude-plugin/`, `.claude-plugin/`, `agent_integrations_analysis.md` | 0 |
 | **2. Bridge** | `pkg/herdr` (rpc, subscribe, sync) · `pkg/agents` (menu parser, 3 adapters + generic, transcript readers) · `pkg/relayclient` · `cmd/bridge` (run/start/stop/status/pair, launchd) | 0, 1 |
 | **3. Relay** | `pkg/relay` (hub, api, sse, auth/pairing, store) · `pkg/push` (fcm, ntfy) · `cmd/relay` · `deploy/relay` (Dockerfile, systemd, Cloudflare) | 0, 1 |
-| **4. Clients** | 4a Wear OS · 4b watchOS | 0 (can start against a relay stub) |
-| **5. End-to-end + docs** | E2E checklist below, README rewrite, ROADMAP refresh | 2, 3, 4 |
+| **4. Wear OS** | Model, network, pairing, prompt card, history, tile/complication (§13.1) | 0 (can start against a relay stub) |
+| **5. End-to-end + docs** | E2E checklist below **on the Pixel Watch 2**, README rewrite, ROADMAP refresh | 2, 3, 4 |
+| **6. watchOS (best-effort)** | Model + network sync first, then UI parity (§13.2); simulator only | 5 (off the critical path; never blocks a release) |
 
 **What can run in parallel:**
 - **2 ∥ 3** once Phase 0 is frozen: different directories, sharing only the frozen `pkg/model`.
 - **Inside 2:** `pkg/agents` ∥ `pkg/herdr`. Adapters depend only on fixtures and the model.
-- **4a ∥ 4b:** no shared files. Both can start right after Phase 0.
+- **4 ∥ 2 ∥ 3:** Wear OS can start right after Phase 0 against a relay stub. It touches only `wearos-app/`.
+- **6 (watchOS)** could technically run in parallel with 4 (no shared files), but it goes last on purpose: Wear OS is the priority, and watchOS should copy a UI that has already been validated on a real device.
 - **Sequential only:** 0 → 1, because Phase 1 deletes and creates the module root and touches most of the git index.
 - **Git discipline:** parallel agents commit only their own paths (`git add <paths>`, never `-A`).
 
 **Verification per phase:**
 - `go vet ./... && go test ./...`, with the fake herdr socket and adapter fixture tests.
-- **End-to-end, once for each of claude, agy and opencode:**
+- **End-to-end on the Pixel Watch 2, once for each of claude, agy and opencode:**
   - blocked → the watch shows the real command → **Deny** → the agent reports a denial, and a later identical request prompts again (proves Deny did not select "don't ask again")
   - **Allow** → the agent proceeds
   - dictation while `idle` → the agent starts working
   - `done` → a history item with the markdown response appears on the watch
   - Mac asleep → the watch shows "host offline" and commands fail with `host_offline`
+  - herdr stopped with the Mac awake → the watch shows "herdr stopped"
+- **watchOS (Phase 6):** the same flows in the Xcode simulator, except push (ntfy is checked on the iPhone).
 
 ---
 
@@ -466,3 +502,4 @@ command = ["./bin/agent-watch-bridge", "pair"]
 | Relay compromise = remote control of agents | Hashed device tokens, pairing TTL + rate limit, no raw keys, agent panes only, revocable devices, TLS everywhere |
 | ntfy topic leakage | Random topic + access token, stored only on the relay |
 | Mac asleep / offline | `host_online=false` surfaced on the watch; history still browsable from the relay |
+| watchOS regressions go unnoticed (no physical device) | Models kept in sync with `pkg/model` so the app always compiles; simulator pass in Phase 6; watchOS is labelled best-effort in the README |
