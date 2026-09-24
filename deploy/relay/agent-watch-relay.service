@@ -1,0 +1,23 @@
+[Unit]
+Description=Agent Watch relay
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=agentwatch
+Group=agentwatch
+EnvironmentFile=/etc/agent-watch-relay/env
+ExecStart=/usr/local/bin/agent-watch-relay serve
+Restart=always
+RestartSec=5
+# Hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/agent-watch-relay
+StateDirectory=agent-watch-relay
+StateDirectoryMode=0700
+
+[Install]
+WantedBy=multi-user.target
