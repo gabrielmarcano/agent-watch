@@ -64,12 +64,20 @@ Keep entries short, and use absolute dates (YYYY-MM-DD).
 
 ## Phase 2b — Agent adapters
 - Claimed by: agy, 2026-09-23
-- [ ] generic parser + unit tests
-- [ ] claude adapter (fixtures + transcript)
-- [ ] agy adapter (fixtures + transcript)
-- [ ] opencode adapter (fixtures + SQLite)
-- [ ] CGO-free build confirmed
+- [x] generic parser + unit tests
+- [x] claude adapter (fixtures + transcript)
+- [x] agy adapter (fixtures + transcript)
+- [x] opencode adapter (fixtures + SQLite)
+- [x] CGO-free build confirmed
 - Notes:
+  - `pkg/agents`: pure Go agent adapters implemented for `generic`, `claude`, `agy`, and `opencode` with zero `pkg/herdr` imports.
+  - Generic parser in `menu.go`: parses numbered blocks, continuation lines, cursor detection, role classification via keyword matching, and arrow/digit key generators.
+  - All 11 Phase 0 fixtures in `pkg/agents/testdata/{claude,agy,opencode}/` pass against their respective adapters and golden JSON contracts.
+  - Synthetic test cases under `pkg/agents/testdata/generic/` verify edge cases (cursors, continuation lines, boxed tables, multiple blocks, non-menus).
+  - Transcript readers implemented and verified against expected golden outputs: Claude (`.jsonl`), Antigravity (`transcript_full.jsonl`), and OpenCode (`modernc.org/sqlite` read-only queries on `message` and `part` tables).
+  - Screen fallback formatter `ScreenTurn` implemented per `agents.md` §6 with input box cutting and UTF-8 truncation.
+  - CGO-free static build verified with `CGO_ENABLED=0` (`make build`).
+  - `go test -race ./...` and `go vet ./...` pass with 0 errors.
 
 ## Phase 2c — Bridge daemon
 - Claimed by: —

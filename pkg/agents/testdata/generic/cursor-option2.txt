@@ -1,0 +1,5 @@
+Choose deployment target
+Please select one:
+  1. Staging
+❯ 2. Production
+  3. Canary

@@ -1,0 +1,5 @@
+Options available:
+1. First choice
+   with extra explanation on line two
+2. Second choice
+   also with more details

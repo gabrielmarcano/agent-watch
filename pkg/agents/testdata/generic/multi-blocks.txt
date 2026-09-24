@@ -1,0 +1,8 @@
+Previous steps completed:
+1. Step one
+2. Step two
+
+Next action:
+What should we do next?
+1. Continue
+2. Stop
