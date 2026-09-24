@@ -63,7 +63,7 @@ Keep entries short, and use absolute dates (YYYY-MM-DD).
   - All 11 tests pass with race detector; read-only live herdr smoke test verified.
 
 ## Phase 2b — Agent adapters
-- Claimed by: —
+- Claimed by: agy, 2026-09-23
 - [ ] generic parser + unit tests
 - [ ] claude adapter (fixtures + transcript)
 - [ ] agy adapter (fixtures + transcript)
