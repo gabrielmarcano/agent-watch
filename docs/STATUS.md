@@ -46,10 +46,21 @@ Keep entries short, and use absolute dates (YYYY-MM-DD).
 
 ## Phase 2a — herdr client
 - Claimed by: agy, 2026-09-23
-- [ ] client, subscribe, syncer
-- [ ] all tests in the guide's table pass
-- [ ] read-only smoke test against real herdr (paste 3–5 lines)
+- [x] client, subscribe, syncer
+- [x] all tests in the guide's table pass
+- [x] read-only smoke test against real herdr (paste 3–5 lines)
+  ```
+  [HerdrOnline] online=true version=0.9.1 protocol=22
+  [Added] pane=w5:pB5 agent=claude status=working focused=false
+  [Added] pane=w9:p1 agent=claude status=idle focused=false
+  [Added] pane=w7:p1 agent=agy status=working focused=true
+  ```
 - Notes:
+  - Agent-agnostic `pkg/herdr` implemented: `types.go`, `client.go`, `subscribe.go`, `sync.go`.
+  - Client respects one connection per call, string IDs, `recent_unwrapped` underscore source, and omits `wait` in prompt.
+  - Syncer handles online/offline transitions, initial snapshot diffing, live event-driven debounced re-listing, and fallback degraded polling when event streams drop.
+  - Filters out non-agent shells (`agent: null, agent_status: unknown`).
+  - All 11 tests pass with race detector; read-only live herdr smoke test verified.
 
 ## Phase 2b — Agent adapters
 - Claimed by: —
