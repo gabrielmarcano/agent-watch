@@ -80,7 +80,7 @@ Keep entries short, and use absolute dates (YYYY-MM-DD).
   - `go test -race ./...` and `go vet ./...` pass with 0 errors.
 
 ## Phase 2c — Bridge daemon
-- Claimed by: —
+- Claimed by: agy, 2026-09-24
 - [ ] relayclient + tests
 - [ ] engine + command executor + tests (every error code)
 - [ ] cmd/bridge subcommands
