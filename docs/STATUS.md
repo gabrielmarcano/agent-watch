@@ -45,7 +45,7 @@ Keep entries short, and use absolute dates (YYYY-MM-DD).
   - Legacy code removed; zero references to old bridge/plugins remain; make check and make build pass.
 
 ## Phase 2a — herdr client
-- Claimed by: —
+- Claimed by: agy, 2026-09-23
 - [ ] client, subscribe, syncer
 - [ ] all tests in the guide's table pass
 - [ ] read-only smoke test against real herdr (paste 3–5 lines)
