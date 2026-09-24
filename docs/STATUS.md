@@ -150,7 +150,7 @@ Keep entries short, and use absolute dates (YYYY-MM-DD).
   - Bridge enhanced with automatic `NormalizeRelayURL` (appending `/v1/host` when omitted) and launchd retry on macOS.
 
 ## Phase 4 — Wear OS (primary)
-- Claimed by: —
+- Claimed by: agy, 2026-09-24
 - [ ] models + ContractsTest
 - [ ] RelayClient + RelayRepository (SSE lifecycle)
 - [ ] pairing, list, detail, PromptCard, dictation, history, reader
