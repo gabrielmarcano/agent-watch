@@ -102,10 +102,19 @@ Keep entries short, and use absolute dates (YYYY-MM-DD).
 
 ## Phase 3a — Relay server
 - Claimed by: agy, 2026-09-24
-- [ ] store, auth/pairing, state, hub, API, SSE
-- [ ] all tests in the guide's table pass
-- [ ] static linux binary builds
+- [x] store, auth/pairing, state, hub, API, SSE
+- [x] all tests in the guide's table pass
+- [x] static linux binary builds
 - Notes:
+  - `pkg/relay/config.go`: parses and validates `AW_LISTEN` (default :8080), `AW_HOST_TOKEN` (64 hex characters required), `AW_DATA_DIR` (default /var/lib/agent-watch-relay), and `AW_TRUST_CF_IP`.
+  - `pkg/relay/store.go`: atomic JSON storage (`store.json.tmp` -> fsync -> rename) with file permissions `0600`; devices (SHA-256 token hashing, constant-time compare); bounded history (20/pane, 200 total, 7-day pane pruning, ID deduplication); coalesced 1s saves.
+  - `pkg/relay/auth.go`: constant-time host token verification; device bearer token authentication with context injection; 6-digit `crypto/rand` pairing codes (5-minute TTL, max 3 active, single-use); sliding-window rate limiting on `/v1/pair` (5/IP/10m, 20 total/10m; respects `CF-Connecting-IP`).
+  - `pkg/relay/state.go`: thread-safe `State` tracking agents, `host_online`, `herdr_online`; snapshot sorting; SSE fan-out with non-blocking 64-item buffers dropping slow subscribers.
+  - `pkg/relay/hub.go`: `/v1/host` WebSocket endpoint; enforces 1 active host (close 4000 `replaced`); 5s hello handshake check (close 4001); round-trip command routing with 10s timeout; no-op `Notifier` hook for Phase 3b.
+  - `pkg/relay/api.go` & `pkg/relay/sse.go`: Go 1.22 routing (`ServeMux`), MaxBytesReader (16KB), structured `ErrorResponse` mapping, `/v1/events` SSE streaming with snapshot on connect and 15s keepalive ticks. Access logging without secrets or prompt text.
+  - `cmd/relay/main.go`: subcommands `serve`, `devices list`, `devices revoke <id>`, `version`.
+  - Static Linux binary `bin/agent-watch-relay-linux-amd64` builds with `CGO_ENABLED=0` via `make relay-linux`.
+  - Full test suite passing with race detector (`go test -race ./...`). Guard checks passing 43/43.
 
 ## Phase 3b — Push
 - Claimed by: —
