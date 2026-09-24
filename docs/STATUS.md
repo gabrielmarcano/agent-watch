@@ -101,7 +101,7 @@ Keep entries short, and use absolute dates (YYYY-MM-DD).
 
 
 ## Phase 3a — Relay server
-- Claimed by: —
+- Claimed by: agy, 2026-09-24
 - [ ] store, auth/pairing, state, hub, API, SSE
 - [ ] all tests in the guide's table pass
 - [ ] static linux binary builds
