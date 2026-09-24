@@ -33,12 +33,16 @@ Keep entries short, and use absolute dates (YYYY-MM-DD).
 
 ## Phase 1 — Foundation
 - Claimed by: agy, 2026-09-23
-- [ ] legacy removed (`bridge/`, `claude-plugin/`, `.claude-plugin/`, `agent_integrations_analysis.md`)
-- [ ] `go.mod` (`github.com/gabrielmarcano/agent-monitor`, go 1.22) + Makefile
-- [ ] `pkg/model` + tests (golden `testdata/agent_state.json`)
-- [ ] `pkg/herdrtest` + tests
-- [ ] `make check` and `make build` pass
+- [x] legacy removed (`bridge/`, `claude-plugin/`, `.claude-plugin/`, `agent_integrations_analysis.md`)
+- [x] `go.mod` (`github.com/gabrielmarcano/agent-monitor`, go 1.22) + Makefile
+- [x] `pkg/model` + tests (golden `testdata/agent_state.json`)
+- [x] `pkg/herdrtest` + tests
+- [x] `make check` and `make build` pass
 - Notes:
+  - Go module github.com/gabrielmarcano/agent-monitor initialized at Go 1.22 floor.
+  - All contracts from docs/reference/contracts.md encoded in pkg/model (agent.go, api.go, wire.go) with round-trip, golden file, and helper tests.
+  - pkg/herdrtest implements full in-process fake socket server covering 7 verified herdr behaviors.
+  - Legacy code removed; zero references to old bridge/plugins remain; make check and make build pass.
 
 ## Phase 2a — herdr client
 - Claimed by: —

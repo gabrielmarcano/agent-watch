@@ -1,12 +1,15 @@
 # Agent Watch Root .gitignore
 
-# Sensitive Node/Bridge configuration
-bridge/config.json
-bridge/firebase-service-account.json
-.env
+# Build outputs
+bin/
 
-# Node dependencies
-node_modules/
+# Secrets and configuration
+firebase-service-account*.json
+store.json
+.env*
+!*.example
+google-services.json
+local.properties
 
 # OS generated files
 .DS_Store
@@ -19,14 +22,6 @@ Thumbs.db
 
 # Large Android profiling files
 *.hprof
-.Spotlight-V100
-.Trashes
-ehthumbs.db
-Thumbs.db
-
-# Android Secrets
-google-services.json
-local.properties
 
 # Android Build files
 **/build/
