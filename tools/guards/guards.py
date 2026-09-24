@@ -364,7 +364,7 @@ def cmd_agy_pretool(_argv):
     try:
         data = json.load(sys.stdin)
     except Exception:
-        print("{}")
+        print(json.dumps({"decision": "allow"}))
         return 0
     call = data.get("toolCall") or {}
     args = call.get("args") or {}
@@ -378,7 +378,7 @@ def cmd_agy_pretool(_argv):
     except Blocked as e:
         print(json.dumps({"decision": "deny", "reason": f"BLOCKED: {e}"}))
         return 0
-    print("{}")  # no opinion: agy applies its normal permission flow
+    print(json.dumps({"decision": "allow"}))
     return 0
 
 
@@ -395,7 +395,7 @@ def cmd_agy_stop(_argv):
               + ". Update them (.agents/skills/schema-sync/SKILL.md) or tell the owner why the change "
                 "does not affect them."}))
         return 0
-    print("{}")
+    print(json.dumps({"decision": "allow"}))
     return 0
 
 

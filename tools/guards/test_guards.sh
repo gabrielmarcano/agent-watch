@@ -66,10 +66,10 @@ write "$ROOT/deploy/relay/env.example" 0 "env.example allowed"
 
 # ── agy adapter (PreToolUse contract: toolCall.name/args → decision) ──
 agy '{"toolCall":{"name":"run_command","args":{"CommandLine":"git add -A"}}}' deny "run_command git add -A denied"
-agy '{"toolCall":{"name":"run_command","args":{"CommandLine":"go test ./..."}}}' none "run_command go test no opinion"
+agy '{"toolCall":{"name":"run_command","args":{"CommandLine":"go test ./..."}}}' allow "run_command go test allowed"
 agy "{\"toolCall\":{\"name\":\"write_to_file\",\"args\":{\"TargetFile\":$(j "$ROOT/bridge/x.js")}}}" deny "write legacy denied"
-agy "{\"toolCall\":{\"name\":\"view_file\",\"args\":{\"AbsolutePath\":$(j "$ROOT/wearos-app/app/google-services.json")}}}" none "view_file never blocked"
-agy 'not json' none "garbage input is a no-op"
+agy "{\"toolCall\":{\"name\":\"view_file\",\"args\":{\"AbsolutePath\":$(j "$ROOT/wearos-app/app/google-services.json")}}}" allow "view_file never blocked"
+agy 'not json' allow "garbage input is a no-op"
 
 # ── opencode adapter ({tool,args} → exit code) ──
 oc '{"tool":"bash","args":{"command":"git commit --amend"}}' 2 "bash amend blocked"
