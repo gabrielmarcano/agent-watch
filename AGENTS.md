@@ -11,6 +11,7 @@ This document defines the development rules, architectural boundaries, and codin
    - [`docs/reference/contracts.md`](docs/reference/contracts.md): every JSON shape
    - [`docs/reference/herdr-socket-api.md`](docs/reference/herdr-socket-api.md): the herdr socket, verified
    - [`docs/reference/agents.md`](docs/reference/agents.md): per-agent menus, keys, transcripts
+   - [`docs/guides/agent-cli-audit.md`](docs/guides/agent-cli-audit.md): CLI verification runbook when TUIs or integrations change
 3. **Rules** live in `.agents/rules/*.md`:
    - **Antigravity CLI** loads them by their `trigger` / `glob` frontmatter.
    - **OpenCode** loads all of them through `opencode.json` → `instructions`.

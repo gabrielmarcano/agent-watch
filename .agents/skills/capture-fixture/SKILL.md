@@ -7,6 +7,8 @@ description: "Safely capture a coding agent's blocked-menu screen, key behaviour
 
 The herdr on this Mac runs the owner's **real** agent sessions. Everything below happens inside a workspace labelled **`aw-sandbox`**. The repo guards (agy and OpenCode hooks) refuse `send-keys` / `prompt` / `pane run` against any pane outside that workspace. If you get `BLOCKED`, you targeted the wrong pane: stop and re-check. Never work around the hook.
 
+For the complete end-to-end audit runbook covering all CLIs, key checks, and transcript verification, see [`docs/guides/agent-cli-audit.md`](../../docs/guides/agent-cli-audit.md).
+
 ## 1. Create the sandbox
 
 ```bash

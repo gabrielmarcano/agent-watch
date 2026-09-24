@@ -39,6 +39,7 @@ When two disagree, the higher one wins, and the lower one must be fixed in the s
 | [`reference/contracts.md`](reference/contracts.md) | Every JSON shape: agent state, prompts, history, HTTP API, SSE, WebSocket wire protocol, push payloads, config |
 | [`reference/herdr-socket-api.md`](reference/herdr-socket-api.md) | The herdr socket, verified on 0.9.1: transport, methods, events, key grammar, errors, **safety rules** |
 | [`reference/agents.md`](reference/agents.md) | Per-agent knowledge (claude, agy, opencode, generic): menus, keys, transcripts |
+| [`guides/agent-cli-audit.md`](guides/agent-cli-audit.md) | Periodic audit & verification runbook for all agent CLIs |
 
 ---
 
