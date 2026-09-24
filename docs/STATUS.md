@@ -151,14 +151,26 @@ Keep entries short, and use absolute dates (YYYY-MM-DD).
 
 ## Phase 4 — Wear OS (primary)
 - Claimed by: agy, 2026-09-24
-- [ ] models + ContractsTest
-- [ ] RelayClient + RelayRepository (SSE lifecycle)
-- [ ] pairing, list, detail, PromptCard, dictation, history, reader
-- [ ] notifications with answer/cancel/prompt actions
-- [ ] complication + tile (target-agent rule)
-- [ ] release build (R8) parses JSON
+- [x] models + ContractsTest
+- [x] RelayClient + RelayRepository (SSE lifecycle)
+- [x] pairing, list, detail, PromptCard, dictation, history, reader
+- [x] notifications with answer/cancel/prompt actions
+- [x] complication + tile (target-agent rule)
+- [x] release build (R8) parses JSON
 - [ ] verified on the Pixel Watch 2
 - Notes:
+  - `model/Contracts.kt`: mirrors `pkg/model` field by field with `@Keep` on all serializable classes; includes `AgentState.severity()` and `resolveTargetAgent()`.
+  - `ContractsTest.kt`: verified against golden fixture `pkg/model/testdata/agent_state.json` and unit tests for target agent resolution.
+  - `data/Prefs.kt`: SharedPreferences wrapper for `relay_url`, `device_token`, `device_id`, `fcm_token`, `fcm_registered_token`, `pinned_pane_id`. Purged legacy `local_ip` / `tailscale_ip`.
+  - `network/RelayClient.kt`: stateless HTTP client using `OkHttpClient` with `Authorization: Bearer` auth, URL-encoded pane IDs, `ErrorResponse` mapping, and `okhttp-sse` support.
+  - `network/RelayRepository.kt`: singleton owning `UiState` with `StateFlow`, managing foreground SSE lifecycle (snapshot, agent, agent_removed, host, history), exponential backoff reconnect, and 401 token revocation.
+  - Split monolith `AgentScreen.kt` into `PairingScreen.kt`, `AgentListScreen.kt`, `AgentDetailScreen.kt`, `PromptCard.kt`, `HistoryListScreen.kt`, `ResponseReaderScreen.kt`, and `MicrophoneIcon.kt`.
+  - `PromptCard`: handles `permission` (Allow once / Deny / More), `question` (options list + Cancel), and `unknown` (raw tail + Cancel). Emits `expected_seq` and `fingerprint`.
+  - `NotificationActionReceiver` + `MyFirebaseMessagingService`: handles FCM v1 push notifications with unique PendingIntent IDs per pane and action. Dispatches `answer`, `cancel`, and `prompt` commands via `goAsync()` coroutines.
+  - `AgentStatusComplicationService`: fetches `/v1/agents` with device token; displays most severe status (`blocked > done > working > idle > unknown`).
+  - `AgentQuickActionTileService` + `QuickDictateActivity`: implements Plan §11 target agent resolution (pinned -> done with latest updated_at -> focused); shows "To: <label>" before voice dictation; sends fresh `state_change_seq`.
+  - Network security: purged `usesCleartextTraffic="true"` from main manifest (HTTPS enforced). Added debug network security config allowing cleartext for local testing.
+  - Verification: `./gradlew :app:testDebugUnitTest`, `./gradlew :app:assembleDebug`, and `./gradlew :app:assembleRelease` (with R8 minification) all passed cleanly. Zero occurrences of `local_ip`, `tailscale`, `8420`, or `usesCleartextTraffic="true"` in `app/src/main`.
 
 ## Phase 5 — End-to-end + docs (release gate)
 - Claimed by: —
