@@ -132,7 +132,7 @@ Keep entries short, and use absolute dates (YYYY-MM-DD).
   - All tests passing with race detector (`go test -race ./...`). Guard checks 43/43 passing. No secrets or topic names committed.
 
 ## Phase 3c — Relay deploy
-- Claimed by: —
+- Claimed by: agy, 2026-09-24
 - [ ] `deploy/relay/` files (no secrets)
 - [ ] systemd service running on the VPS
 - [ ] Cloudflare: proxied DNS, Full (strict), cache bypass
