@@ -14,6 +14,9 @@ relay:
 relay-linux:
 	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags "$(LDFLAGS)" -o bin/agent-watch-relay-linux-amd64 ./cmd/relay
 
+bar:
+	./macos-bar/build.sh
+
 test:
 	go test -race ./...
 
