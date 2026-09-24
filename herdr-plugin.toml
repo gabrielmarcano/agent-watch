@@ -1,0 +1,31 @@
+id = "herdr-agent-watch"
+name = "Agent Watch"
+version = "0.2.0"
+min_herdr_version = "0.9.0"
+description = "Monitor and answer your agent herd from your smartwatch via a remote relay"
+platforms = ["macos", "linux"]
+
+# Runs on `herdr plugin install` only. For `herdr plugin link`, run `make build` first.
+[[build]]
+command = ["go", "build", "-o", "bin/agent-watch-bridge", "./cmd/bridge"]
+platforms = ["macos", "linux"]
+
+[[actions]]
+id = "start"     # writes/loads the LaunchAgent (macOS) or systemd --user unit (Linux)
+title = "Start bridge service"
+command = ["./bin/agent-watch-bridge", "start"]
+
+[[actions]]
+id = "stop"      # unloads the service
+title = "Stop bridge service"
+command = ["./bin/agent-watch-bridge", "stop"]
+
+[[actions]]
+id = "status"
+title = "Bridge and relay status"
+command = ["./bin/agent-watch-bridge", "status"]
+
+[[actions]]
+id = "pair"
+title = "Pair a watch (shows a code)"
+command = ["./bin/agent-watch-bridge", "pair"]

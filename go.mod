@@ -2,9 +2,13 @@ module github.com/gabrielmarcano/agent-monitor
 
 go 1.22.0
 
-require modernc.org/sqlite v1.33.1
+require (
+	github.com/coder/websocket v1.8.12
+	modernc.org/sqlite v1.33.1
+)
 
 require (
+	github.com/BurntSushi/toml v1.6.0 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/hashicorp/golang-lru/v2 v2.0.7 // indirect

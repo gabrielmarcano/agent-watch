@@ -81,13 +81,24 @@ Keep entries short, and use absolute dates (YYYY-MM-DD).
 
 ## Phase 2c — Bridge daemon
 - Claimed by: agy, 2026-09-24
-- [ ] relayclient + tests
-- [ ] engine + command executor + tests (every error code)
-- [ ] cmd/bridge subcommands
-- [ ] launchd install/uninstall verified on the Mac
-- [ ] herdr plugin linked; start/status/stop/pair work
-- [ ] sandbox blocked → parsed → answered via stub relay
+- [x] relayclient + tests
+- [x] engine + command executor + tests (every error code)
+- [x] cmd/bridge subcommands
+- [x] launchd install/uninstall verified on the Mac
+- [x] herdr plugin linked; start/status/stop/pair work
+- [x] sandbox blocked → parsed → answered via stub relay
 - Notes:
+  - `pkg/relayclient`: outbound WebSocket link to `wss://relay.<domain>/v1/host` with Bearer auth, exponential backoff (1s–60s) + jitter, 30s ping keepalive, sequential `OnMessage`, and bounded 50-item history queue.
+  - `pkg/bridge`: `Engine` implements `herdr.Listener` mapping `AgentInfo` to `model.AgentState` (label precedence: Name > TerminalTitleStripped > Base(CWD) > PaneID; ForegroundCWD preference).
+  - Prompt parsing with 3x retry before falling back to `UnknownPrompt`.
+  - History capture with 500ms debounce, `LastTurn` with screen-turn fallback, and deduplication by `HistoryID`.
+  - Safety-critical command executor: per-pane mutex, `Refresh` check, `expected_seq` verification, screen re-reading and `fingerprint` comparison before sending keys. Zero raw watch keys accepted. Audit logging records lengths/IDs, never prompt text.
+  - All command error codes tested and verified (`stale_state`, `prompt_changed`, `unknown_option`, `agent_busy`, `agent_blocked`, `agent_state_unknown`, `unknown_pane`, `herdr_offline`, `invalid_request`).
+  - `cmd/bridge`: subcommands `configure` (mode 0600), `run`, `start`, `stop`, `status`, `pair`, `version`.
+  - macOS launchd service template embedded and verified via `start`/`status`/`stop`.
+  - `herdr-plugin.toml` manifest created and linked into live herdr (`herdr plugin link "$PWD"`).
+  - All tests (`go test -race ./...`) and guard checks pass cleanly.
+
 
 ## Phase 3a — Relay server
 - Claimed by: —
