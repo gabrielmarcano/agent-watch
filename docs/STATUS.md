@@ -12,7 +12,7 @@ Keep entries short, and use absolute dates (YYYY-MM-DD).
 ---
 
 ## Phase 0 — Capture agent fixtures
-- Claimed by: —
+- Claimed by: agy, 2026-09-23
 - [ ] `herdr integration status` current for claude / agy / opencode (paste output)
 - [ ] claude fixtures + golden files
 - [ ] agy fixtures + golden files
