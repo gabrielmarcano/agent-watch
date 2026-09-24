@@ -117,7 +117,7 @@ Keep entries short, and use absolute dates (YYYY-MM-DD).
   - Full test suite passing with race detector (`go test -race ./...`). Guard checks passing 43/43.
 
 ## Phase 3b — Push
-- Claimed by: —
+- Claimed by: agy, 2026-09-24
 - [ ] dispatcher (transitions, debounce, digest) + tests
 - [ ] FCM sender + tests
 - [ ] ntfy sender + tests
