@@ -32,7 +32,7 @@ Keep entries short, and use absolute dates (YYYY-MM-DD).
   - All testdata scrubbed of personal paths, emails, usernames, and tokens; passes `git grep -nE '/Users/[a-z]+|@gmail|sk-|ghp_' pkg/agents/testdata`.
 
 ## Phase 1 — Foundation
-- Claimed by: —
+- Claimed by: agy, 2026-09-23
 - [ ] legacy removed (`bridge/`, `claude-plugin/`, `.claude-plugin/`, `agent_integrations_analysis.md`)
 - [ ] `go.mod` (`github.com/gabrielmarcano/agent-monitor`, go 1.22) + Makefile
 - [ ] `pkg/model` + tests (golden `testdata/agent_state.json`)
