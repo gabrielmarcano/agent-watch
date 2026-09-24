@@ -1,2 +1,7 @@
 # Add project specific ProGuard rules here.
-# By default, the default Android rules are used.
+# Preserve classes and members annotated with @Keep for R8
+-keepattributes *Annotation*
+-keep @androidx.annotation.Keep class * { *; }
+-keepclassmembers class * {
+    @androidx.annotation.Keep *;
+}

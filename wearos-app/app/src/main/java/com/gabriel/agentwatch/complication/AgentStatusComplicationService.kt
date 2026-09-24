@@ -1,6 +1,7 @@
 package com.gabriel.agentwatch.complication
 
-import android.content.Context
+import android.app.PendingIntent
+import android.content.Intent
 import android.graphics.drawable.Icon
 import android.util.Log
 import androidx.wear.watchface.complications.data.ComplicationData
@@ -10,71 +11,81 @@ import androidx.wear.watchface.complications.data.PlainComplicationText
 import androidx.wear.watchface.complications.data.ShortTextComplicationData
 import androidx.wear.watchface.complications.datasource.ComplicationRequest
 import androidx.wear.watchface.complications.datasource.SuspendingComplicationDataSourceService
-import com.gabriel.agentwatch.R
-import com.gabriel.agentwatch.model.AgentState
-import com.google.gson.Gson
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
-import okhttp3.OkHttpClient
-import okhttp3.Request
-import java.io.IOException
+import com.gabriel.agentwatch.MainActivity
+import com.gabriel.agentwatch.data.Prefs
+import com.gabriel.agentwatch.network.RelayClient
 
 class AgentStatusComplicationService : SuspendingComplicationDataSourceService() {
 
-    private val client = OkHttpClient()
-    private val gson = Gson()
+    companion object {
+        private const val TAG = "Complication"
+    }
 
     override fun getPreviewData(type: ComplicationType): ComplicationData? {
         if (type != ComplicationType.SHORT_TEXT) return null
-        return createComplicationData("Idle", android.R.drawable.ic_dialog_info)
+        return createComplicationData("✓", "Agent Watch")
     }
 
     override suspend fun onComplicationRequest(request: ComplicationRequest): ComplicationData? {
         if (request.complicationType != ComplicationType.SHORT_TEXT) return null
 
-        val state = fetchAgentState()
-        
-        val text = when (state?.status) {
-            "idle", "done" -> "Idle"
-            "thinking" -> "Working"
-            "waiting_for_permission" -> "Waiting"
-            else -> "Offline"
+        val prefs = Prefs(this)
+        if (!prefs.isPaired) {
+            return createComplicationData("—", "Not Paired")
         }
 
-        // We can use different icons based on state if we have them. 
-        // For now, we will just use a placeholder text and icon.
-        val iconRes = android.R.drawable.ic_dialog_info // Fallback generic icon
+        return try {
+            val client = RelayClient(prefs.relayUrl, prefs.deviceToken)
+            val result = client.agents()
 
-        return createComplicationData(text, iconRes)
+            result.fold(
+                onSuccess = { snapshot ->
+                    if (!snapshot.host_online) {
+                        createComplicationData("—", "Host Offline")
+                    } else {
+                        val blocked = snapshot.agents.count { it.status == "blocked" }
+                        val working = snapshot.agents.count { it.status == "working" }
+
+                        when {
+                            blocked > 0 -> createComplicationData("$blocked ⚠", "$blocked Blocked")
+                            working > 0 -> createComplicationData("$working ⚙", "$working Working")
+                            snapshot.agents.isNotEmpty() -> createComplicationData("✓", "All Done/Idle")
+                            else -> createComplicationData("0", "No Agents")
+                        }
+                    }
+                },
+                onFailure = { error ->
+                    Log.e(TAG, "Complication failed to fetch agents: ${error.message}")
+                    createComplicationData("—", "Error")
+                }
+            )
+        } catch (e: Exception) {
+            Log.e(TAG, "Complication error", e)
+            createComplicationData("—", "Error")
+        }
     }
 
-    private fun createComplicationData(text: String, iconResId: Int): ComplicationData {
+    private fun createComplicationData(text: String, contentDescription: String): ComplicationData {
+        val tapIntent = Intent(this, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
+        }
+        val pendingIntent = PendingIntent.getActivity(
+            this,
+            0,
+            tapIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
         return ShortTextComplicationData.Builder(
             text = PlainComplicationText.Builder(text).build(),
-            contentDescription = PlainComplicationText.Builder("Agent Status").build()
-        ).setMonochromaticImage(
-            MonochromaticImage.Builder(
-                Icon.createWithResource(this, iconResId)
-            ).build()
-        ).build()
-    }
-
-    private suspend fun fetchAgentState(): AgentState? = withContext(Dispatchers.IO) {
-        val sharedPreferences = getSharedPreferences("AgentWatchPrefs", Context.MODE_PRIVATE)
-        val localIp = sharedPreferences.getString("local_ip", "192.168.1.20") ?: return@withContext null
-        val url = "http://$localIp:8420/state"
-
-        val request = Request.Builder().url(url).build()
-        try {
-            client.newCall(request).execute().use { response ->
-                if (!response.isSuccessful) return@withContext null
-                response.body?.string()?.let {
-                    gson.fromJson(it, AgentState::class.java)
-                }
-            }
-        } catch (e: IOException) {
-            Log.e("Complication", "Failed to fetch state for complication", e)
-            null
-        }
+            contentDescription = PlainComplicationText.Builder(contentDescription).build()
+        )
+            .setTapAction(pendingIntent)
+            .setMonochromaticImage(
+                MonochromaticImage.Builder(
+                    Icon.createWithResource(this, android.R.drawable.ic_dialog_info)
+                ).build()
+            )
+            .build()
     }
 }

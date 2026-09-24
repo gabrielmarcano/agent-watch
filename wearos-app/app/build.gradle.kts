@@ -90,4 +90,7 @@ dependencies {
     // Firebase Cloud Messaging
     implementation(platform("com.google.firebase:firebase-bom:32.7.2"))
     implementation("com.google.firebase:firebase-messaging-ktx")
+
+    // Testing
+    testImplementation("junit:junit:4.13.2")
 }

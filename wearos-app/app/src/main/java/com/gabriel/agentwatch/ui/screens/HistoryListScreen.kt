@@ -2,7 +2,6 @@ package com.gabriel.agentwatch.ui.screens
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.focusable
-import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.layout.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -11,58 +10,55 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalLifecycleOwner
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.LifecycleEventObserver
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import androidx.wear.compose.foundation.lazy.ScalingLazyColumn
+import androidx.wear.compose.foundation.lazy.items
 import androidx.wear.compose.foundation.lazy.rememberScalingLazyListState
 import androidx.wear.compose.foundation.rotary.RotaryScrollableDefaults
 import androidx.wear.compose.foundation.rotary.rotaryScrollable
 import androidx.wear.compose.material.*
-import com.gabriel.agentwatch.model.AgentState
 import com.gabriel.agentwatch.model.HistoryItem
-import com.gabriel.agentwatch.ui.theme.BrightYellow
+import com.gabriel.agentwatch.network.RelayRepository
 import com.gabriel.agentwatch.ui.theme.LightBlue
 import com.gabriel.agentwatch.util.MarkdownFormatter
 import kotlinx.coroutines.launch
 
 @Composable
 fun HistoryListScreen(
-    state: AgentState,
-    onSelectHistoryItem: (HistoryItem) -> Unit
+    paneId: String? = null,
+    historyItems: List<HistoryItem>,
+    onSelectHistoryItem: (HistoryItem) -> Unit,
+    onBackClick: () -> Unit
 ) {
     val listState = rememberScalingLazyListState()
     val focusRequester = remember { FocusRequester() }
     val coroutineScope = rememberCoroutineScope()
-    
-    val historyList = remember(state.history, state.last_response) {
-        if (state.history.isNotEmpty()) {
-            state.history.toList().reversed()
-        } else if (!state.last_response.isNullOrEmpty()) {
-            listOf(
-                HistoryItem(
-                    id = "latest",
-                    query = state.last_query,
-                    response = state.last_response,
-                    timestamp = state.timestamp
-                )
-            )
+    val lifecycleOwner = LocalLifecycleOwner.current
+
+    val filteredList = remember(historyItems, paneId) {
+        if (!paneId.isNullOrBlank()) {
+            historyItems.filter { it.pane_id == paneId }
         } else {
-            emptyList()
+            historyItems
         }
     }
 
-    val lifecycleOwner = LocalLifecycleOwner.current
+    LaunchedEffect(paneId) {
+        RelayRepository.refresh()
+    }
 
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
                 coroutineScope.launch {
                     kotlinx.coroutines.delay(50)
-                    try { focusRequester.requestFocus() } catch (e: Exception) {}
+                    try { focusRequester.requestFocus() } catch (_: Exception) {}
                 }
             }
         }
@@ -72,84 +68,119 @@ fun HistoryListScreen(
         }
     }
 
-    ScalingLazyColumn(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(Color.Black)
-            .rotaryScrollable(RotaryScrollableDefaults.behavior(listState), focusRequester)
-            .focusable(),
-        state = listState,
-        contentPadding = PaddingValues(top = 32.dp, bottom = 48.dp, start = 8.dp, end = 8.dp),
-        horizontalAlignment = Alignment.CenterHorizontally
+    Scaffold(
+        timeText = { TimeText() },
+        vignette = { Vignette(vignettePosition = VignettePosition.TopAndBottom) },
+        positionIndicator = { PositionIndicator(scalingLazyListState = listState) }
     ) {
-        item {
-            Text(
-                text = "CONVERSATION HISTORY",
-                style = MaterialTheme.typography.caption2.copy(
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 10.sp,
-                    letterSpacing = 1.sp
-                ),
-                color = Color.White.copy(alpha = 0.6f),
-                modifier = Modifier.padding(bottom = 8.dp)
-            )
-        }
-
-        if (historyList.isEmpty()) {
+        ScalingLazyColumn(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color.Black)
+                .rotaryScrollable(RotaryScrollableDefaults.behavior(listState), focusRequester)
+                .focusable(),
+            state = listState,
+            contentPadding = PaddingValues(top = 28.dp, bottom = 28.dp, start = 8.dp, end = 8.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
             item {
                 Text(
-                    text = "No history available",
-                    color = Color.Gray,
-                    fontSize = 12.sp,
-                    modifier = Modifier.padding(32.dp)
+                    text = if (paneId != null) "AGENT HISTORY" else "GLOBAL HISTORY",
+                    style = MaterialTheme.typography.caption2.copy(
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 10.sp,
+                        letterSpacing = 1.sp
+                    ),
+                    color = Color.White.copy(alpha = 0.6f),
+                    modifier = Modifier.padding(bottom = 6.dp)
                 )
             }
-        } else {
-            items(historyList.size) { index ->
-                val historyItem = historyList[index]
-                val cleanedResponse = remember(historyItem.response) {
-                    MarkdownFormatter.truncate(historyItem.response, 120)
-                }
 
-                Card(
-                    onClick = { onSelectHistoryItem(historyItem) },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 4.dp, vertical = 4.dp),
-                    backgroundPainter = CardDefaults.cardBackgroundPainter(
-                        startBackgroundColor = Color(0xFF1E1E1E),
-                        endBackgroundColor = Color(0xFF1A1A1A)
+            if (filteredList.isEmpty()) {
+                item {
+                    Text(
+                        text = "No history available",
+                        color = Color.Gray,
+                        fontSize = 11.sp,
+                        modifier = Modifier.padding(24.dp)
                     )
-                ) {
-                    Column {
-                        if (!historyItem.query.isNullOrEmpty()) {
+                }
+            } else {
+                items(filteredList, key = { it.id }) { historyItem ->
+                    val cleanedResponse = remember(historyItem.response) {
+                        MarkdownFormatter.truncate(historyItem.response, 120)
+                    }
+
+                    Card(
+                        onClick = { onSelectHistoryItem(historyItem) },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 3.dp),
+                        backgroundPainter = CardDefaults.cardBackgroundPainter(
+                            startBackgroundColor = Color(0xFF1E1E1E),
+                            endBackgroundColor = Color(0xFF1A1A1A)
+                        )
+                    ) {
+                        Column {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = historyItem.label.ifBlank { historyItem.agent }.uppercase(),
+                                    color = LightBlue,
+                                    fontSize = 9.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Text(
+                                    text = historyItem.source,
+                                    color = Color.White.copy(alpha = 0.4f),
+                                    fontSize = 8.sp
+                                )
+                            }
+
+                            if (!historyItem.query.isNullOrEmpty()) {
+                                Spacer(modifier = Modifier.height(2.dp))
+                                Text(
+                                    text = "Q: ${historyItem.query}",
+                                    color = Color.White,
+                                    fontSize = 10.5.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+
+                            Spacer(modifier = Modifier.height(2.dp))
                             Text(
-                                text = "Q: ${historyItem.query}",
-                                color = LightBlue,
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Medium,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
+                                text = cleanedResponse,
+                                color = Color.White.copy(alpha = 0.85f),
+                                fontSize = 10.5.sp,
+                                maxLines = 3,
+                                overflow = TextOverflow.Ellipsis,
+                                lineHeight = 13.sp
                             )
-                            Spacer(modifier = Modifier.height(4.dp))
                         }
-                        Text(
-                            text = cleanedResponse,
-                            color = Color.White.copy(alpha = 0.9f),
-                            fontSize = 12.sp,
-                            maxLines = 4,
-                            overflow = TextOverflow.Ellipsis,
-                            lineHeight = 15.sp
-                        )
-                        Spacer(modifier = Modifier.height(6.dp))
-                        Text(
-                            text = "READ FULL ->",
-                            color = LightBlue,
-                            fontSize = 9.sp,
-                            fontWeight = FontWeight.Bold
-                        )
                     }
                 }
+            }
+
+            item {
+                Spacer(modifier = Modifier.height(4.dp))
+                Chip(
+                    onClick = onBackClick,
+                    label = {
+                        Text(
+                            text = "BACK",
+                            fontSize = 10.sp,
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    },
+                    colors = ChipDefaults.chipColors(backgroundColor = Color(0x1AFFFFFF)),
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)
+                )
             }
         }
     }

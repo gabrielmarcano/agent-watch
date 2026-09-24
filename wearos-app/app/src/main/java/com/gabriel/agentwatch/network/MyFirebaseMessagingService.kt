@@ -9,137 +9,206 @@ import android.os.Build
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.app.RemoteInput
+import com.gabriel.agentwatch.MainActivity
+import com.gabriel.agentwatch.data.Prefs
+import com.gabriel.agentwatch.util.MarkdownFormatter
 import com.google.firebase.messaging.FirebaseMessagingService
 import com.google.firebase.messaging.RemoteMessage
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 
 class MyFirebaseMessagingService : FirebaseMessagingService() {
 
+    companion object {
+        private const val TAG = "FCM"
+        private const val CHANNEL_BLOCKED = "agent_blocked"
+        private const val CHANNEL_DONE = "agent_done"
+        private const val CHANNEL_FEEDBACK = "agent_watch_feedback"
+    }
+
     override fun onNewToken(token: String) {
         super.onNewToken(token)
-        Log.d("FCM", "New token generated: $token")
-        
-        // Save token to SharedPreferences so the app can register it with the bridge server
-        val sharedPreferences = getSharedPreferences("AgentWatchPrefs", Context.MODE_PRIVATE)
-        sharedPreferences.edit().putString("fcm_token", token).apply()
+        Log.d(TAG, "New FCM token generated: $token")
+
+        val prefs = Prefs(this)
+        prefs.fcmToken = token
+
+        if (prefs.isPaired && token != prefs.fcmRegisteredToken) {
+            CoroutineScope(Dispatchers.IO).launch {
+                val client = RelayClient(prefs.relayUrl, prefs.deviceToken)
+                val res = client.registerPush(token)
+                if (res.isSuccess) {
+                    prefs.fcmRegisteredToken = token
+                    Log.d(TAG, "Successfully registered FCM token with relay")
+                } else {
+                    Log.e(TAG, "Failed to register FCM token: ${res.exceptionOrNull()?.message}")
+                }
+            }
+        }
     }
 
     override fun onMessageReceived(remoteMessage: RemoteMessage) {
         super.onMessageReceived(remoteMessage)
-        Log.d("FCM", "Received message from: ${remoteMessage.from}")
+        Log.d(TAG, "Received FCM message: ${remoteMessage.data}")
 
-        // Extract title, body, and data payload
-        val title = remoteMessage.data["title"] ?: remoteMessage.notification?.title ?: "Agent Alert"
-        val body = remoteMessage.data["body"] ?: remoteMessage.notification?.body ?: "Agent details updated"
-        val eventType = remoteMessage.data["event"] ?: "unknown"
+        val data = remoteMessage.data
+        if (data.isEmpty()) return
 
-        val cleanedBody = com.gabriel.agentwatch.util.MarkdownFormatter.clean(body)
-        sendNotification(title, cleanedBody, eventType)
-    }
+        val paneId = data["pane_id"] ?: ""
+        val agent = data["agent"] ?: ""
+        val label = data["label"] ?: agent
+        val event = data["event"] ?: "agent_blocked"
+        val status = data["status"] ?: "blocked"
+        val title = data["title"] ?: (if (event == "digest") "Agent Watch" else "$label needs you")
+        val body = data["body"] ?: ""
+        val seqStr = data["state_change_seq"] ?: "0"
+        val stateChangeSeq = seqStr.toLongOrNull() ?: 0L
+        val fingerprint = data["fingerprint"] ?: ""
+        val allowOptionId = data["allow_option_id"] ?: ""
+        val denyOptionId = data["deny_option_id"] ?: ""
 
-    private fun sendNotification(title: String, messageBody: String, eventType: String) {
-        val channelId = "agent_watch_channel"
-        val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        createNotificationChannels()
 
-        // Create notification channel (required for Android 8.0+)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(
-                channelId,
-                "Agent Watch Notifications",
-                NotificationManager.IMPORTANCE_HIGH
-            ).apply {
-                description = "Shows real-time status and alerts from Claude Code"
-                enableLights(true)
-                enableVibration(true)
-            }
-            notificationManager.createNotificationChannel(channel)
-        }
+        val notifId = if (event == "digest" || paneId.isBlank()) 9999 else (paneId.hashCode() and 0x7FFFFFFF)
+        val cleanedBody = MarkdownFormatter.clean(body)
 
-        // Base intent to open MainActivity when clicking the notification
-        val mainIntent = Intent(this, com.gabriel.agentwatch.MainActivity::class.java).apply {
+        val notifManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+
+        // Content intent: open MainActivity deep linked to this pane
+        val openIntent = Intent(this, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
+            if (paneId.isNotBlank()) {
+                putExtra("pane_id", paneId)
+            }
         }
-        val mainPendingIntent = PendingIntent.getActivity(
-            this, 0, mainIntent,
+        val openPendingIntent = PendingIntent.getActivity(
+            this,
+            notifId,
+            openIntent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
-        // Create the notification builder
+        val channelId = if (status == "blocked") CHANNEL_BLOCKED else CHANNEL_DONE
+        val priority = if (status == "blocked") NotificationCompat.PRIORITY_HIGH else NotificationCompat.PRIORITY_DEFAULT
+
         val builder = NotificationCompat.Builder(this, channelId)
-            .setSmallIcon(android.R.drawable.ic_dialog_info) // System info icon
+            .setSmallIcon(android.R.drawable.ic_dialog_info)
             .setContentTitle(title)
-            .setContentText(messageBody)
+            .setContentText(cleanedBody)
             .setAutoCancel(true)
-            .setContentIntent(mainPendingIntent)
-            .setPriority(NotificationCompat.PRIORITY_HIGH)
-            .setDefaults(NotificationCompat.DEFAULT_ALL)
+            .setContentIntent(openPendingIntent)
+            .setPriority(priority)
 
-        // Custom actions based on event type (e.g. PermissionRequest)
-        if (eventType == "PermissionRequest") {
-            // Allow Button ('y')
-            val allowIntent = Intent(this, NotificationActionReceiver::class.java).apply {
-                action = "com.gabriel.agentwatch.ACTION_ALLOW"
+        val baseRequestCode = (notifId % 100000) * 10
+
+        if (status == "blocked") {
+            // Allow Action
+            if (allowOptionId.isNotBlank()) {
+                val allowIntent = Intent(this, NotificationActionReceiver::class.java).apply {
+                    action = NotificationActionReceiver.ACTION_ANSWER
+                    putExtra("pane_id", paneId)
+                    putExtra("option_id", allowOptionId)
+                    putExtra("state_change_seq", stateChangeSeq)
+                    putExtra("fingerprint", fingerprint)
+                    putExtra("notif_id", notifId)
+                }
+                val allowPending = PendingIntent.getBroadcast(
+                    this,
+                    baseRequestCode + 1,
+                    allowIntent,
+                    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+                )
+                builder.addAction(android.R.drawable.checkbox_on_background, "Allow", allowPending)
             }
-            val allowPendingIntent = PendingIntent.getBroadcast(
-                this, 1, allowIntent,
-                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-            )
 
-            // Deny Button ('n')
+            // Deny Action
             val denyIntent = Intent(this, NotificationActionReceiver::class.java).apply {
-                action = "com.gabriel.agentwatch.ACTION_DENY"
+                if (denyOptionId.isNotBlank()) {
+                    action = NotificationActionReceiver.ACTION_ANSWER
+                    putExtra("option_id", denyOptionId)
+                    putExtra("fingerprint", fingerprint)
+                } else {
+                    action = NotificationActionReceiver.ACTION_CANCEL
+                }
+                putExtra("pane_id", paneId)
+                putExtra("state_change_seq", stateChangeSeq)
+                putExtra("notif_id", notifId)
             }
-            val denyPendingIntent = PendingIntent.getBroadcast(
-                this, 2, denyIntent,
+            val denyPending = PendingIntent.getBroadcast(
+                this,
+                baseRequestCode + 2,
+                denyIntent,
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
             )
+            builder.addAction(android.R.drawable.ic_delete, "Deny", denyPending)
 
-            // Reply/Dictate Action (inline text input)
-            val replyLabel = "Dictate response..."
+            // Open Action
+            builder.addAction(android.R.drawable.ic_menu_view, "Open", openPendingIntent)
+        } else if (status == "done") {
+            // Done Action: Reply via RemoteInput
             val remoteInput = RemoteInput.Builder("KEY_TEXT_REPLY")
-                .setLabel(replyLabel)
+                .setLabel("Reply to $label...")
                 .build()
 
             val replyIntent = Intent(this, NotificationActionReceiver::class.java).apply {
-                action = "com.gabriel.agentwatch.ACTION_REPLY"
+                action = NotificationActionReceiver.ACTION_PROMPT
+                putExtra("pane_id", paneId)
+                putExtra("state_change_seq", stateChangeSeq)
+                putExtra("notif_id", notifId)
             }
-            val replyPendingIntent = PendingIntent.getBroadcast(
-                this, 3, replyIntent,
-                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_MUTABLE // Must be mutable for RemoteInput
-            )
-
-            val replyAction = NotificationCompat.Action.Builder(
-                android.R.drawable.ic_btn_speak_now,
-                "Reply",
-                replyPendingIntent
-            ).addRemoteInput(remoteInput).build()
-
-            builder.addAction(android.R.drawable.checkbox_on_background, "Allow", allowPendingIntent)
-            builder.addAction(android.R.drawable.ic_delete, "Deny", denyPendingIntent)
-            builder.addAction(replyAction)
-        } else {
-            // Add a simple "Reply" action to normal notifications so they can dictate a query/response
-            val remoteInput = RemoteInput.Builder("KEY_TEXT_REPLY")
-                .setLabel("Send input...")
-                .build()
-
-            val replyIntent = Intent(this, NotificationActionReceiver::class.java).apply {
-                action = "com.gabriel.agentwatch.ACTION_REPLY"
-            }
-            val replyPendingIntent = PendingIntent.getBroadcast(
-                this, 4, replyIntent,
+            val replyPending = PendingIntent.getBroadcast(
+                this,
+                baseRequestCode + 3,
+                replyIntent,
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_MUTABLE
             )
 
             val replyAction = NotificationCompat.Action.Builder(
                 android.R.drawable.ic_btn_speak_now,
-                "Send",
-                replyPendingIntent
+                "Reply",
+                replyPending
             ).addRemoteInput(remoteInput).build()
 
             builder.addAction(replyAction)
         }
 
-        // Dispatch notification
-        notificationManager.notify(1001, builder.build())
+        notifManager.notify(notifId, builder.build())
+    }
+
+    private fun createNotificationChannels() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val notifManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+
+            val blockedChannel = NotificationChannel(
+                CHANNEL_BLOCKED,
+                "Agent Blocked (Approvals)",
+                NotificationManager.IMPORTANCE_HIGH
+            ).apply {
+                description = "Urgent alerts when an agent is waiting for your approval"
+                enableLights(true)
+                enableVibration(true)
+            }
+
+            val doneChannel = NotificationChannel(
+                CHANNEL_DONE,
+                "Agent Completed",
+                NotificationManager.IMPORTANCE_DEFAULT
+            ).apply {
+                description = "Notifications when an agent task finishes"
+            }
+
+            val feedbackChannel = NotificationChannel(
+                CHANNEL_FEEDBACK,
+                "Agent Action Feedback",
+                NotificationManager.IMPORTANCE_LOW
+            ).apply {
+                description = "Brief silent feedback after approving or denying an agent prompt"
+            }
+
+            notifManager.createNotificationChannel(blockedChannel)
+            notifManager.createNotificationChannel(doneChannel)
+            notifManager.createNotificationChannel(feedbackChannel)
+        }
     }
 }

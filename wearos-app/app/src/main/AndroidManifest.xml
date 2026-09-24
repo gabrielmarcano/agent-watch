@@ -11,8 +11,7 @@
         android:roundIcon="@mipmap/ic_launcher"
         android:label="Agent Watch"
         android:supportsRtl="true"
-        android:theme="@android:style/Theme.DeviceDefault"
-        android:usesCleartextTraffic="true">
+        android:theme="@android:style/Theme.DeviceDefault">
         
         <activity
             android:name=".MainActivity"
@@ -81,7 +80,7 @@
         <activity
             android:name=".tile.QuickDictateActivity"
             android:exported="false"
-            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+            android:theme="@android:style/Theme.DeviceDefault" />
         
     </application>
 

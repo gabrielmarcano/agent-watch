@@ -1,265 +1,175 @@
 package com.gabriel.agentwatch
 
-import android.app.Activity
-import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
-import android.speech.RecognizerIntent
 import android.util.Log
-import android.widget.Toast
 import androidx.activity.ComponentActivity
-import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.*
+import androidx.navigation.NavType
+import androidx.navigation.navArgument
 import androidx.wear.compose.navigation.SwipeDismissableNavHost
 import androidx.wear.compose.navigation.composable
-import androidx.wear.compose.navigation.currentBackStackEntryAsState
 import androidx.wear.compose.navigation.rememberSwipeDismissableNavController
-import com.gabriel.agentwatch.network.SseClient
-import com.gabriel.agentwatch.ui.screens.MainAgentFeedScreen
-import com.gabriel.agentwatch.ui.screens.HistoryListScreen
-import com.gabriel.agentwatch.ui.screens.ResponseReaderScreen
-import com.gabriel.agentwatch.ui.screens.ServerConfigScreen
-import com.gabriel.agentwatch.ui.screens.StatusHelpModal
+import com.gabriel.agentwatch.data.Prefs
+import com.gabriel.agentwatch.network.RelayRepository
+import com.gabriel.agentwatch.ui.screens.*
 import com.gabriel.agentwatch.ui.theme.AgentWatchTheme
 
 class MainActivity : ComponentActivity() {
-
-    private var sseClient: SseClient? = null
+    private val prefs by lazy { Prefs(this) }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // Request notification permission for Android 13+ (Tiramisu)
+        // Request notification permission for Android 13+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            val requestPermissionLauncher = registerForActivityResult(
-                ActivityResultContracts.RequestPermission()
-            ) { isGranted: Boolean ->
-                if (isGranted) {
-                    Log.d("MainActivity", "Notification permission granted")
-                } else {
-                    Log.e("MainActivity", "Notification permission denied")
-                }
-            }
-            if (checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) !=
-                PackageManager.PERMISSION_GRANTED
-            ) {
-                requestPermissionLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+            if (checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+                registerForActivityResult(ActivityResultContracts.RequestPermission()) { isGranted ->
+                    Log.d("MainActivity", "Notification permission granted: $isGranted")
+                }.launch(android.Manifest.permission.POST_NOTIFICATIONS)
             }
         }
 
         setContent {
             AgentWatchTheme {
-                val context = this
-                val sharedPreferences = remember {
-                    context.getSharedPreferences("AgentWatchPrefs", Context.MODE_PRIVATE)
-                }
-
-                // Retrieve saved server IPs
-                var localIp by remember {
-                    mutableStateOf(sharedPreferences.getString("local_ip", "192.168.1.20") ?: "192.168.1.20")
-                }
-                var tailscaleIp by remember {
-                    mutableStateOf(sharedPreferences.getString("tailscale_ip", "100.64.0.1") ?: "100.64.0.1")
-                }
-
-                var editingField by remember { mutableStateOf(0) }
-                var tempLocalIpInput by remember { mutableStateOf(localIp) }
-                var tempTailscaleIpInput by remember { mutableStateOf(tailscaleIp) }
-
-                // Manage SSE client lifecycle reacting to serverIp changes
-                val stateFlow = remember(localIp, tailscaleIp) {
-                    sseClient?.stopListening()
-                    val client = SseClient(localIp, tailscaleIp)
-                    sseClient = client
-                    client.startListening()
-                    client.stateFlow
-                }
-
-                val agentState by stateFlow.collectAsState()
-
-                // Speech-to-text launcher for dictating prompts
-                val voiceLauncher = rememberLauncherForActivityResult(
-                    contract = ActivityResultContracts.StartActivityForResult()
-                ) { result ->
-                    if (result.resultCode == Activity.RESULT_OK) {
-                        val spokenText = result.data?.getStringArrayListExtra(
-                            RecognizerIntent.EXTRA_RESULTS
-                        )?.firstOrNull()
-                        if (!spokenText.isNullOrEmpty()) {
-                            sseClient?.sendInputCommand(spokenText) { success ->
-                                runOnUiThread {
-                                    if (success) {
-                                        Toast.makeText(context, "Prompt sent!", Toast.LENGTH_SHORT).show()
-                                    } else {
-                                        Toast.makeText(context, "Failed to send prompt", Toast.LENGTH_SHORT).show()
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-
-                // Speech-to-text launcher for setting the Server IP Address
-                val ipInputLauncher = rememberLauncherForActivityResult(
-                    contract = ActivityResultContracts.StartActivityForResult()
-                ) { result ->
-                    if (result.resultCode == Activity.RESULT_OK) {
-                        val spokenText = result.data?.getStringArrayListExtra(
-                            RecognizerIntent.EXTRA_RESULTS
-                        )?.firstOrNull()
-                        if (!spokenText.isNullOrEmpty()) {
-                            val cleanedIp = spokenText.replace(" ", "").replace(",", ".").trim()
-                            if (editingField == 0) {
-                                tempLocalIpInput = cleanedIp
-                            } else {
-                                tempTailscaleIpInput = cleanedIp
-                            }
-                        }
-                    }
-                }
-
                 val navController = rememberSwipeDismissableNavController()
+                val uiState by RelayRepository.state.collectAsState()
+
+                // Check deep link from notification
+                val deepLinkPaneId = remember {
+                    intent?.getStringExtra("pane_id")
+                }
+
+                val startDestination = remember {
+                    if (!prefs.isPaired) {
+                        "pairing"
+                    } else if (!deepLinkPaneId.isNullOrBlank()) {
+                        "agent/${Uri.encode(deepLinkPaneId)}"
+                    } else {
+                        "agents"
+                    }
+                }
 
                 SwipeDismissableNavHost(
                     navController = navController,
-                    startDestination = "main"
+                    startDestination = startDestination
                 ) {
-                    composable("main") {
-                        MainAgentFeedScreen(
-                            state = agentState,
-                            onSendCommand = { command ->
-                                sseClient?.sendInputCommand(command)
-                            },
-                            onVoiceInputClick = {
-                                val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-                                    putExtra(
-                                        RecognizerIntent.EXTRA_LANGUAGE_MODEL,
-                                        RecognizerIntent.LANGUAGE_MODEL_FREE_FORM
-                                    )
-                                    putExtra(RecognizerIntent.EXTRA_PROMPT, "Dictate your response")
+                    composable("pairing") {
+                        PairingScreen(
+                            onPairedSuccess = {
+                                navController.navigate("agents") {
+                                    popUpTo("pairing") { inclusive = true }
                                 }
-                                voiceLauncher.launch(intent)
-                            },
-                            serverIp = localIp,
-                            onConfigureIpClick = {
-                                tempLocalIpInput = localIp
-                                tempTailscaleIpInput = tailscaleIp
-                                navController.navigate("server_config")
+                            }
+                        )
+                    }
+
+                    composable("agents") {
+                        AgentListScreen(
+                            uiState = uiState,
+                            onAgentClick = { paneId ->
+                                navController.navigate("agent/${Uri.encode(paneId)}")
                             },
                             onHistoryClick = {
                                 navController.navigate("history")
                             },
-                            onStatusClick = {
-                                navController.navigate("status_help")
+                            onSettingsClick = {
+                                navController.navigate("pairing")
                             }
                         )
                     }
 
-                    composable("server_config") {
-                        ServerConfigScreen(
-                            currentLocalIp = tempLocalIpInput,
-                            currentTailscaleIp = tempTailscaleIpInput,
-                            onDictateLocalIp = {
-                                editingField = 0
-                                val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-                                    putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-                                    putExtra(RecognizerIntent.EXTRA_PROMPT, "Dictate Local IP")
-                                }
-                                ipInputLauncher.launch(intent)
-                            },
-                            onDictateTailscaleIp = {
-                                editingField = 1
-                                val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-                                    putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-                                    putExtra(RecognizerIntent.EXTRA_PROMPT, "Dictate Tailscale IP")
-                                }
-                                ipInputLauncher.launch(intent)
-                            },
-                            onSaveClick = {
-                                sharedPreferences.edit().apply {
-                                    putString("local_ip", tempLocalIpInput)
-                                    putString("tailscale_ip", tempTailscaleIpInput)
-                                    apply()
-                                }
-                                localIp = tempLocalIpInput
-                                tailscaleIp = tempTailscaleIpInput
-                                navController.popBackStack()
-                                Toast.makeText(context, "IPs Saved & Reconnecting", Toast.LENGTH_SHORT).show()
-                            },
-                            onCancelClick = {
-                                navController.popBackStack()
-                            }
-                        )
+                    composable(
+                        route = "agent/{paneId}",
+                        arguments = listOf(navArgument("paneId") { type = NavType.StringType })
+                    ) { backStackEntry ->
+                        val encodedPaneId = backStackEntry.arguments?.getString("paneId") ?: ""
+                        val paneId = Uri.decode(encodedPaneId)
+                        val agent = uiState.agents.find { it.pane_id == paneId }
+
+                        if (agent != null) {
+                            AgentDetailScreen(
+                                agent = agent,
+                                onHistoryClick = { pId ->
+                                    navController.navigate("history?paneId=${Uri.encode(pId)}")
+                                },
+                                onBackClick = { navController.popBackStack() }
+                            )
+                        } else {
+                            // Agent not found or closed
+                            navController.popBackStack()
+                        }
                     }
 
-                    composable("status_help") {
-                        StatusHelpModal(
-                            onClose = { navController.popBackStack() }
+                    composable(
+                        route = "history?paneId={paneId}",
+                        arguments = listOf(
+                            navArgument("paneId") {
+                                type = NavType.StringType
+                                nullable = true
+                                defaultValue = null
+                            }
+                        )
+                    ) { backStackEntry ->
+                        val encodedPaneId = backStackEntry.arguments?.getString("paneId")
+                        val paneId = encodedPaneId?.let { Uri.decode(it) }
+
+                        HistoryListScreen(
+                            paneId = paneId,
+                            historyItems = uiState.history,
+                            onSelectHistoryItem = { item ->
+                                navController.navigate("reader/${Uri.encode(item.id)}")
+                            },
+                            onBackClick = { navController.popBackStack() }
                         )
                     }
 
                     composable("history") {
                         HistoryListScreen(
-                            state = agentState,
+                            paneId = null,
+                            historyItems = uiState.history,
                             onSelectHistoryItem = { item ->
-                                navController.navigate("reader/${item.id}")
-                            }
+                                navController.navigate("reader/${Uri.encode(item.id)}")
+                            },
+                            onBackClick = { navController.popBackStack() }
                         )
                     }
 
-                    composable("reader/{itemId}") { backStackEntry ->
-                        val itemId = backStackEntry.arguments?.getString("itemId")
-                        val item = agentState.history.find { it.id == itemId }
-                            ?: if (itemId == "latest" && agentState.last_response != null) {
-                                com.gabriel.agentwatch.model.HistoryItem(
-                                    id = "latest",
-                                    query = agentState.last_query,
-                                    response = agentState.last_response
-                                )
-                            } else {
-                                com.gabriel.agentwatch.model.HistoryItem(
-                                    id = itemId ?: "latest",
-                                    query = agentState.last_query,
-                                    response = agentState.last_response ?: ""
-                                )
-                            }
+                    composable(
+                        route = "reader/{historyId}",
+                        arguments = listOf(navArgument("historyId") { type = NavType.StringType })
+                    ) { backStackEntry ->
+                        val historyId = Uri.decode(backStackEntry.arguments?.getString("historyId") ?: "")
+                        val item = uiState.history.find { it.id == historyId }
 
-                        ResponseReaderScreen(
-                            item = item,
-                            onBackClick = { navController.popBackStack() },
-                            onVoiceInputClick = {
-                                val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-                                    putExtra(
-                                        RecognizerIntent.EXTRA_LANGUAGE_MODEL,
-                                        RecognizerIntent.LANGUAGE_MODEL_FREE_FORM
-                                    )
-                                    putExtra(RecognizerIntent.EXTRA_PROMPT, "Dictate your response")
-                                }
-                                voiceLauncher.launch(intent)
-                            }
-                        )
+                        if (item != null) {
+                            ResponseReaderScreen(
+                                item = item,
+                                onBackClick = { navController.popBackStack() }
+                            )
+                        } else {
+                            navController.popBackStack()
+                        }
                     }
                 }
             }
         }
     }
 
-    override fun onResume() {
-        super.onResume()
-        sseClient?.startListening()
+    override fun onStart() {
+        super.onStart()
+        // Save battery: start SSE when foregrounded
+        RelayRepository.start(this)
     }
 
-    override fun onPause() {
-        super.onPause()
-        sseClient?.stopListening()
-    }
-
-    override fun onDestroy() {
-        super.onDestroy()
-        sseClient?.stopListening()
+    override fun onStop() {
+        super.onStop()
+        // Save battery: disconnect SSE when app goes to background
+        RelayRepository.stop()
     }
 }

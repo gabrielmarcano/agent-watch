@@ -12,3 +12,13 @@ val DarkGreen = Color(0xFF0D5C3A)
 val BrightGreen = Color(0xFF10B981)
 val BrightYellow = Color(0xFFF59E0B)
 val LightBlue = Color(0xFF3B82F6)
+val GrayText = Color(0xFF9CA3AF)
+val DarkGray = Color(0xFF4B5563)
+
+fun statusColor(status: String): Color = when (status) {
+    "blocked" -> BrightYellow
+    "done" -> BrightGreen
+    "working" -> LightBlue
+    "idle" -> GrayText
+    else -> DarkGray
+}
