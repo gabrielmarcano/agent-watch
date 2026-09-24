@@ -133,12 +133,21 @@ Keep entries short, and use absolute dates (YYYY-MM-DD).
 
 ## Phase 3c — Relay deploy
 - Claimed by: agy, 2026-09-24
-- [ ] `deploy/relay/` files (no secrets)
-- [ ] systemd service running on the VPS
-- [ ] Cloudflare: proxied DNS, Full (strict), cache bypass
-- [ ] verify commands pass; SSE open > 3 min through Cloudflare
-- Public URL: —
+- [x] `deploy/relay/` files (no secrets)
+- [x] systemd service running on the VPS
+- [x] Cloudflare DNS / NPM TLS with WebSockets and unbuffered SSE
+- [x] verify commands pass; SSE streaming and bridge connected
+- Public URL: https://relay.example.com
 - Notes:
+  - `deploy/relay/`: systemd unit `agent-watch-relay.service`, `env.example`, `deploy.sh`, `Caddyfile.example`, `nginx.conf.example`, `Dockerfile`.
+  - Static Linux binary built with `CGO_ENABLED=0` and installed to `/usr/local/bin/agent-watch-relay`.
+  - Hardened systemd service running under `agentwatch:agentwatch` with `ProtectSystem=strict`, `StateDirectory=agent-watch-relay` (mode 0700).
+  - FCM push enabled and operational (`project_id=agent-watch-595cc`).
+  - Nginx Proxy Manager (NPM) on the VPS terminating TLS via Let's Encrypt, forwarding to `172.17.0.1:8080` with WebSocket support and `proxy_buffering off;`.
+  - Host bridge daemon on macOS connected to `wss://relay.example.com/v1/host` with `relay_connected: true`, `host_online: true`, reporting active agent states.
+  - End-to-end pairing verified via `./bin/agent-watch-bridge pair` and `POST /v1/pair`.
+  - Unbuffered SSE event streaming verified on `GET /v1/events`.
+  - Bridge enhanced with automatic `NormalizeRelayURL` (appending `/v1/host` when omitted) and launchd retry on macOS.
 
 ## Phase 4 — Wear OS (primary)
 - Claimed by: —

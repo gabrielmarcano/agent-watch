@@ -116,7 +116,7 @@ func runConfigure(args []string) error {
 	}
 
 	cfg := &bridge.Config{
-		RelayURL:         *relayURL,
+		RelayURL:         bridge.NormalizeRelayURL(*relayURL),
 		HostToken:        *hostToken,
 		HostName:         *hostName,
 		ClaudeConfigDirs: claudeDirs,
@@ -175,7 +175,7 @@ func runDaemon(args []string) error {
 	})
 
 	rClient := &relayclient.Client{
-		URL:    cfg.RelayURL,
+		URL:    bridge.NormalizeRelayURL(cfg.RelayURL),
 		Token:  cfg.HostToken,
 		Logger: logger,
 	}

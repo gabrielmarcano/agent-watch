@@ -176,3 +176,23 @@ func TestConfig_StatusFile(t *testing.T) {
 		t.Errorf("ReadStatus mismatch: got %+v, want %+v", read, s)
 	}
 }
+
+func TestConfig_NormalizeRelayURL(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{"wss://relay.example.com", "wss://relay.example.com/v1/host"},
+		{"wss://relay.example.com/", "wss://relay.example.com/v1/host"},
+		{"wss://relay.example.com/v1/host", "wss://relay.example.com/v1/host"},
+		{"ws://localhost:8080", "ws://localhost:8080/v1/host"},
+		{"ws://localhost:8080/custom", "ws://localhost:8080/custom"},
+	}
+
+	for _, tc := range tests {
+		got := NormalizeRelayURL(tc.input)
+		if got != tc.want {
+			t.Errorf("NormalizeRelayURL(%q) = %q, want %q", tc.input, got, tc.want)
+		}
+	}
+}

@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"text/template"
+	"time"
 
 	"github.com/gabrielmarcano/agent-monitor/deploy/launchd"
 )
@@ -86,13 +87,26 @@ func (m *darwinServiceManager) Start(binary, configPath, socketPath, stateDir, l
 	// Bootout previous instance if loaded (ignore errors)
 	_ = exec.Command("launchctl", "bootout", target).Run()
 
-	// Bootstrap new instance
-	cmd := exec.Command("launchctl", "bootstrap", domainTarget, plistPath)
-	if out, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("launchctl bootstrap: %w: %s", err, string(out))
+	// launchctl bootout is asynchronous; retry bootstrap briefly to allow teardown to finish
+	var lastErr error
+	var lastOut []byte
+	for attempt := 0; attempt < 15; attempt++ {
+		if attempt > 0 {
+			time.Sleep(100 * time.Millisecond)
+		}
+		cmd := exec.Command("launchctl", "bootstrap", domainTarget, plistPath)
+		out, err := cmd.CombinedOutput()
+		if err == nil {
+			return nil
+		}
+		lastErr = err
+		lastOut = out
+		if !strings.Contains(string(out), "Input/output error") && !strings.Contains(string(out), "already bootstrapped") {
+			break
+		}
 	}
 
-	return nil
+	return fmt.Errorf("launchctl bootstrap: %w: %s", lastErr, string(lastOut))
 }
 
 func (m *darwinServiceManager) Stop() error {

@@ -146,6 +146,19 @@ func HTTPSBase(relayURL string) (string, error) {
 	return fmt.Sprintf("%s://%s", scheme, u.Host), nil
 }
 
+// NormalizeRelayURL ensures the WebSocket URL has the /v1/host path.
+// E.g. "wss://relay.example.com" -> "wss://relay.example.com/v1/host".
+func NormalizeRelayURL(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return raw
+	}
+	if u.Path == "" || u.Path == "/" {
+		u.Path = "/v1/host"
+	}
+	return u.String()
+}
+
 // WriteStatus writes the status file atomically with 0644 mode.
 func WriteStatus(path string, s StatusFile) error {
 	if s.UpdatedAt == "" {
