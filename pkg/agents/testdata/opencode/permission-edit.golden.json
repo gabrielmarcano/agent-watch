@@ -1,0 +1,20 @@
+{
+  "prompt": {
+    "kind": "permission",
+    "title": "Permission required",
+    "detail": "Access external directory /tmp/aw-other\nPatterns: /tmp/aw-other/*",
+    "options": [
+      {"id": "opt-1", "label": "Allow once", "role": "allow_once"},
+      {"id": "opt-2", "label": "Allow always", "role": "allow_always"},
+      {"id": "opt-3", "label": "Reject", "role": "deny"}
+    ]
+  },
+  "keys": {
+    "opt-1": ["Enter"],
+    "opt-2": ["Right", "Enter"],
+    "opt-3": ["esc"]
+  },
+  "cancel_keys": ["esc"],
+  "verified_keys": true,
+  "notes": "Horizontal button bar: Allow once is focused by default, Enter confirms. Right+Enter selects Allow always. esc or Right+Right+Enter rejects."
+}

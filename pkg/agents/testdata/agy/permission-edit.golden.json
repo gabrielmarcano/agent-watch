@@ -1,0 +1,15 @@
+{
+  "prompt": {
+    "kind": "permission",
+    "title": "Pending edit",
+    "detail": "/tmp/aw-sandbox/note.txt  +1",
+    "options": [
+      {"id": "opt-1", "label": "Yes, accept this change", "role": "allow_once"},
+      {"id": "opt-2", "label": "No, reject this change", "role": "deny"}
+    ]
+  },
+  "keys": {"opt-1": ["1"], "opt-2": ["2"]},
+  "cancel_keys": ["2"],
+  "verified_keys": true,
+  "notes": "Digit selects immediately without Enter. Esc is disabled during file edits in Antigravity CLI ('Esc disabled during file edits — press 1 to accept or 2 to reject'); key 2 rejects."
+}

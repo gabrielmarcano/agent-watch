@@ -1,0 +1,51 @@
+  /docs                                                  docs (living docs people share, comment on and edit; use only when the user asks for one:
+                                                         names a doc, document, page, memo, spec, PRD, runbook or write-up, asks for somewhere to sha…
+  /skill-creator                                         Create new skills, modify and improve existing skills, and measure skill performance. Use
+                                                         when users want to create a skill from scratch, edit, or optimize an existing skill, run eva…
+  /pdf                                                   Use this skill whenever the user wants to do anything with PDF files. This includes reading
+                                                         or extracting text/tables from PDFs, combining or merging multiple PDFs into one, splitting …
+  /doctor                                                Health-check the user's Claude Code setup and fix issues: diagnose installation health — what
+                                                         the `claude doctor` terminal diagnostics cover — from local data (duplicate or leftover inst…
+  /stripe:stripe-directory                               (stripe) Identifies external providers, merchants, nonprofits, platforms, APIs, and software
+                                                         services, and resolves the documented way to engage them — to pay, donate, subscribe, book, …
+  /superpowers:writing-skills                            (superpowers) Use when creating new skills, editing existing skills, or verifying skills work
+                                                         before deployment
+  /docx                                                  Use this skill whenever the user wants to create, read, edit, or manipulate Word documents
+                                                         (.docx) or Word templates (.dotx). Triggers include: any mention of Microsoft Word Documents…
+  /xlsx                                                  Use this skill any time a spreadsheet file is the primary input or output. This means any
+                                                         task where the user wants to: open, read, edit, or fix an existing .xlsx, .xlsm, .xltx, .csv…
+  /stripe:metronome                                      (stripe) Guides Metronome usage-based billing integration decisions — event ingestion (single
+                                                         and batch, idempotency, billable metrics), contract design (rate cards, overrides, dimension…
+
+Resume this session with:
+claude --resume 22ab2b1b-17c1-45d2-89b3-a7081a580c56
+
+󰉋 /tmp/aw-sandbox 󰘬 main 󰈙 1 󱎫 28m11s
+❯ agy
+
+
+      ▄▀▀▄        Antigravity CLI 1.2.9
+     ▀▀▀▀▀▀       REDACTED (Google AI Pro)
+    ▀▀▀▀▀▀▀▀      Gemini 3.8 Flash (High)
+   ▄▀▀    ▀▀▄     /tmp/aw-sandbox
+  ▄▀▀      ▀▀▄
+
+────────────────────────────────────────────────────────────
+> Run the shell command ls -la and tell me what you see
+
+● Bash(ls -la) (ctrl+o to expand)
+
+Command
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+Requesting permission for:
+   ls -la
+
+Run this command?
+> 1. Yes, run command
+  2. Yes, and always allow in this conversation for commands that start with 'ls'
+  3. Yes, and always allow for commands that start with 'ls' (Persist to settings.json)
+  4. No, cancel
+
+  ↑/↓ Navigate · tab Amend · ctrl+g edit/expand command
+esc to cancel                                                                                                                    Gemini 3.8 Flash · high

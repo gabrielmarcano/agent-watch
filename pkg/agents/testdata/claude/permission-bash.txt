@@ -1,0 +1,50 @@
+
+❯ Run the shell command ps -ef | head -n 5
+
+⏺ Bash(ps -ef | head -n 5)
+  ⎿    UID   PID  PPID   C STIME   TTY           TIME CMD
+         0     1     0   0 13Sep26 ??        91:23.17 /sbin/launchd
+         0    94     1   0 13Sep26 ??        27:48.46 /usr/libexec/logd
+     … +3 lines (ctrl+o to expand)
+
+⏺ Las primeras 4 líneas son procesos base de macOS que corren como root. Todos llevan activos desde el 13 de septiembre, cuando arrancó el Mac hace 10
+  días.
+
+  ┌─────┬────────────────┬────────────────────────────────────────────────────────────────┬───────────────┐
+  │ PID │    Proceso     │                            Qué hace                            │ Tiempo de CPU │
+  ├─────┼────────────────┼────────────────────────────────────────────────────────────────┼───────────────┤
+  │ 1   │ launchd        │ Primer proceso del sistema: arranca y vigila a todos los demás │ 91 min        │
+  ├─────┼────────────────┼────────────────────────────────────────────────────────────────┼───────────────┤
+  │ 94  │ logd           │ Recoge los logs del sistema                                    │ 28 min        │
+  ├─────┼────────────────┼────────────────────────────────────────────────────────────────┼───────────────┤
+  │ 96  │ UserEventAgent │ Reacciona a eventos del sistema                                │ 2 min         │
+  ├─────┼────────────────┼────────────────────────────────────────────────────────────────┼───────────────┤
+  │ 98  │ fseventsd      │ Registra los cambios en el sistema de archivos                 │ 61 min        │
+  └─────┴────────────────┴────────────────────────────────────────────────────────────────┴───────────────┘
+
+  - Por qué solo salen 4: head -n 5 cuenta la cabecera como una de las 5 líneas.
+  - Terminal: ?? quiere decir que ninguno está unido a una terminal.
+
+  note.txt sigue igual: rechazaste la edición, así que todavía pone world, no universe.
+
+✻ Sautéed for 7s · done 8:39 PM
+
+❯ Run the shell command touch foo.txt && ls foo.txt
+
+⏺ Bash(touch foo.txt && ls foo.txt)
+  ⎿  Waiting…
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ Bash command
+ Tip: auto mode handles these prompts for you — choose "switch to auto mode" below
+
+   touch foo.txt && ls foo.txt
+   Create empty foo.txt and confirm it exists
+
+ Do you want to proceed?
+ ❯ 1. Yes
+   2. Yes, and always allow access to /tmp/aw-sandbox from this project
+   3. Yes, and switch to auto mode · auto mode handles these prompts for you
+   4. No
+
+ Esc to cancel · Tab to amend

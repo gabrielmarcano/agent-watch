@@ -1,0 +1,17 @@
+{
+  "prompt": {
+    "kind": "permission",
+    "title": "Command",
+    "detail": "ls -la",
+    "options": [
+      {"id": "opt-1", "label": "Yes, run command", "role": "allow_once"},
+      {"id": "opt-2", "label": "Yes, and always allow in this conversation for commands that start with 'ls'", "role": "allow_always"},
+      {"id": "opt-3", "label": "Yes, and always allow for commands that start with 'ls' (Persist to settings.json)", "role": "allow_always"},
+      {"id": "opt-4", "label": "No, cancel", "role": "deny"}
+    ]
+  },
+  "keys": {"opt-1": ["1"], "opt-2": ["2"], "opt-3": ["3"], "opt-4": ["4"]},
+  "cancel_keys": ["esc"],
+  "verified_keys": true,
+  "notes": "Digit selects immediately without Enter. esc cancels."
+}

@@ -63,9 +63,9 @@ type Adapter interface {
 |---|---|---|
 | Permission menu | ✅ (Claude Code behaviour) | `1. Yes` / `2. Yes, and don't ask again for …` / `3. No, and tell Claude what to do differently (esc)`. **The number and wording of options vary by tool**: some prompts have only 2 options, and edits say "allow all edits during this session" |
 | Selected-row marker | ✅ | `❯` |
-| Digit selects immediately | 🔍 | Believed yes (no Enter needed) — confirm with a fixture + sandbox test |
+| Digit selects immediately | ✅ | Confirmed: typing the option digit selects immediately (no Enter needed). |
 | Cancel | ✅ | `esc` rejects the tool call |
-| AskUserQuestion / plan approval | 🔍 | Also numbered menus → `question` kind. Capture both |
+| AskUserQuestion / plan approval | ✅ | Confirmed: both render numbered menus with digit selection (`1. ...`, `2. ...`). Mapped to `kind: "question"`. Captured in `question-multiple.txt` and `plan-approval.txt`. |
 | Prompt while working | ✅ | Claude queues typed messages while working → `PromptWhileWorking() = true` |
 
 ### 3.2 Transcript
@@ -105,10 +105,10 @@ type Adapter interface {
 
 | Item | Status | Value |
 |---|---|---|
-| Approval menu | 🔍 | Unknown layout. Capture a blocked screen for a shell command and for a file edit |
-| Digit selection vs arrows | 🔍 | Decide from the fixture |
-| Cancel | 🔍 | Assume `esc` until verified |
-| Prompt while working | 🔍 | Assume `false` until verified |
+| Approval menu | ✅ | Numbered vertical list inside a box. Header indicates tool/kind (e.g. `Command`, `File edit`). Captured in `permission-bash.txt` and `permission-edit.txt`. Multiple-choice and plan approval are unsupported (`.missing.md`). |
+| Digit selection vs arrows | ✅ | Digit selects immediately without Enter. |
+| Cancel | ✅ | `esc` cancels/rejects standard commands. **Crucial quirk:** In file edits, Esc is explicitly disabled by the TUI (`"Esc disabled during file edits — press 1 to accept or 2 to reject."`), so `cancel_keys` for file edits is `["2"]`. |
+| Prompt while working | ✅ | Agy queues typed prompts while working → `PromptWhileWorking() = true`. |
 
 ### 4.2 Transcript
 
@@ -133,10 +133,10 @@ type Adapter interface {
 
 | Item | Status | Value |
 |---|---|---|
-| Approval UI | 🔍 | Permission requests are rendered inside the TUI. Capture one for bash and one for edit |
-| Keys | 🔍 | Decide from the fixture (may be arrows + Enter, or letters) |
-| Cancel | 🔍 | Assume `esc` until verified |
-| Prompt while working | 🔍 | Assume `false` until verified |
+| Approval UI | ✅ | Rendered with `△ Permission required`, action description, patterns, and a horizontal button bar: `Allow once   Allow always   Reject`. Footer: `ctrl+f fullscreen  ⇆ select  enter confirm`. Captured in `permission-bash.txt` and `permission-edit.txt`. Multiple-choice question and plan approval are unsupported (`.missing.md`). |
+| Keys | ✅ | `Allow once` is selected by default and confirmed with `["Enter"]`. `Allow always` is selected via `["Right", "Enter"]` (or `["Tab", "Enter"]`). `Reject` is `["esc"]` or `["Right", "Right", "Enter"]`. |
+| Cancel | ✅ | `esc` rejects the permission request / interrupts. |
+| Prompt while working | ✅ | OpenCode queues typed prompts while working and executes them when the current turn finishes → `PromptWhileWorking() = true`. |
 
 ### 5.2 Transcript (SQLite)
 

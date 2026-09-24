@@ -13,14 +13,23 @@ Keep entries short, and use absolute dates (YYYY-MM-DD).
 
 ## Phase 0 — Capture agent fixtures
 - Claimed by: agy, 2026-09-23
-- [ ] `herdr integration status` current for claude / agy / opencode (paste output)
-- [ ] claude fixtures + golden files
-- [ ] agy fixtures + golden files
-- [ ] opencode fixtures + golden files
-- [ ] transcript samples (scrubbed) + expected results
-- [ ] no 🔍 left in `docs/reference/agents.md`
-- [ ] sandbox removed
+- [x] `herdr integration status` current for claude / agy / opencode (paste output)
+  ```
+  claude: current (v10) (/Users/me/.claude/hooks/herdr-agent-state.sh)
+  opencode: current (v12) (/Users/me/.config/opencode/plugins/herdr-agent-state.js)
+  antigravity-cli: current (v3) (/Users/me/.gemini/config/hooks/herdr-agent-state.sh)
+  ```
+- [x] claude fixtures + golden files
+- [x] agy fixtures + golden files
+- [x] opencode fixtures + golden files
+- [x] transcript samples (scrubbed) + expected results
+- [x] no 🔍 left in `docs/reference/agents.md`
+- [x] sandbox removed
 - Notes:
+  - Claude: digit selects immediately without Enter; esc cancels; AskUserQuestion and plan approval render numbered menus (question kind); PromptWhileWorking() = true.
+  - Antigravity (agy): digit selects immediately without Enter; esc cancels commands. File edits explicitly disable Esc ("Esc disabled during file edits — press 1 to accept or 2 to reject."), so cancel_keys is ["2"]. Multiple-choice and plan approval are unsupported (.missing.md). PromptWhileWorking() = true.
+  - OpenCode: horizontal button bar (Allow once / Allow always / Reject); Allow once is focused by default (Enter confirms); Allow always via Right+Enter; Reject via esc or Right+Right+Enter. Multiple-choice and plan approval unsupported (.missing.md). PromptWhileWorking() = true.
+  - All testdata scrubbed of personal paths, emails, usernames, and tokens; passes `git grep -nE '/Users/[a-z]+|@gmail|sk-|ghp_' pkg/agents/testdata`.
 
 ## Phase 1 — Foundation
 - Claimed by: —

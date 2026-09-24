@@ -1,0 +1,17 @@
+{
+  "prompt": {
+    "kind": "permission",
+    "title": "Bash command",
+    "detail": "touch foo.txt && ls foo.txt\nCreate empty foo.txt and confirm it exists",
+    "options": [
+      {"id": "opt-1", "label": "Yes", "role": "allow_once"},
+      {"id": "opt-2", "label": "Yes, and always allow access to /tmp/aw-sandbox from this project", "role": "allow_always"},
+      {"id": "opt-3", "label": "Yes, and switch to auto mode · auto mode handles these prompts for you", "role": "allow_always"},
+      {"id": "opt-4", "label": "No", "role": "deny"}
+    ]
+  },
+  "keys": {"opt-1": ["1"], "opt-2": ["2"], "opt-3": ["3"], "opt-4": ["4"]},
+  "cancel_keys": ["esc"],
+  "verified_keys": true,
+  "notes": "Digit selects immediately, no Enter needed. Option 4 rejects."
+}
