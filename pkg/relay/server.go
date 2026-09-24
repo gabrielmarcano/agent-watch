@@ -6,7 +6,10 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"os"
 	"time"
+
+	"github.com/gabrielmarcano/agent-monitor/pkg/push"
 )
 
 // Server coordinates the relay components and serves the HTTP API.
@@ -29,7 +32,39 @@ func NewServer(cfg *Config) (*Server, error) {
 
 	state := NewState()
 	auth := NewAuthManager(cfg.HostToken, store, cfg.TrustCFIP)
-	hub := NewHub(auth, state, store, nil)
+
+	var senders []push.Sender
+	if cfg.FCMCredentials != "" {
+		credsData, err := os.ReadFile(cfg.FCMCredentials)
+		if err != nil {
+			return nil, fmt.Errorf("read fcm credentials from %s: %w", cfg.FCMCredentials, err)
+		}
+		fcmSender, err := push.NewFCMFromCredentials(context.Background(), credsData, store.AllFCMTokens, store.RemoveFCMToken)
+		if err != nil {
+			return nil, fmt.Errorf("init fcm sender: %w", err)
+		}
+		senders = append(senders, fcmSender)
+		slog.Info("fcm push enabled", "project_id", fcmSender.ProjectID)
+	}
+
+	if cfg.NtfyURL != "" && cfg.NtfyTopic != "" {
+		ntfySender := &push.Ntfy{
+			BaseURL: cfg.NtfyURL,
+			Topic:   cfg.NtfyTopic,
+			Token:   cfg.NtfyToken,
+		}
+		senders = append(senders, ntfySender)
+		slog.Info("ntfy push enabled", "url", cfg.NtfyURL, "topic", cfg.NtfyTopic)
+	}
+
+	var notifier Notifier
+	if len(senders) > 0 {
+		notifier = push.NewDispatcher(senders, nil, nil)
+	} else {
+		slog.Info("push disabled")
+	}
+
+	hub := NewHub(auth, state, store, notifier)
 
 	s := &Server{
 		cfg:               cfg,

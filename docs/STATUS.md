@@ -118,11 +118,18 @@ Keep entries short, and use absolute dates (YYYY-MM-DD).
 
 ## Phase 3b — Push
 - Claimed by: agy, 2026-09-24
-- [ ] dispatcher (transitions, debounce, digest) + tests
-- [ ] FCM sender + tests
-- [ ] ntfy sender + tests
-- [ ] manual push check (may be deferred to Phase 5)
+- [x] dispatcher (transitions, debounce, digest) + tests
+- [x] FCM sender + tests
+- [x] ntfy sender + tests
+- [x] manual push check (deferred to Phase 5 release gate / live device verification)
 - Notes:
+  - `pkg/push/push.go`: `Message` and `Sender` interface; `Dispatcher` implementing `relay.Notifier` with `OnAgentUpdate`. Detects transitions (`any -> blocked` with title/body/options/seq/fingerprint; `working -> done` with "Task finished"; runes truncated to <= 240 on rune boundary).
+  - 5-second per pane+event debounce. 10-second windowing with immediate send for the 1st blocked event (latency-sensitive) and hold for remainder; <= 3 sends individually, > 3 coalesces into a single digest push (`"<n> agents need you"`, joined deduplicated labels).
+  - Async delivery with 10s per-sender context timeout and single retry on failure; non-blocking to relay state.
+  - `pkg/push/fcm.go`: FCM HTTP v1 API sender (`POST /v1/projects/{project_id}/messages:send`) using `golang.org/x/oauth2/google` service account credentials. Priority `high` for blocked, `normal` otherwise; 600s TTL. Dead token detection (404, or 400 with `UNREGISTERED`/`INVALID_ARGUMENT`) invokes `OnInvalidToken`.
+  - `pkg/push/ntfy.go`: plain-text ntfy sender with custom headers (`Title`, `Priority` 5/3/4, `Tags` warning/white_check_mark/bell, Bearer token auth).
+  - `pkg/relay/server.go`: wires push senders based on `AW_FCM_CREDENTIALS`, `AW_NTFY_URL`, `AW_NTFY_TOPIC`; logs `push disabled` when unconfigured. `Store` extended with `AllFCMTokens` and `RemoveFCMToken`.
+  - All tests passing with race detector (`go test -race ./...`). Guard checks 43/43 passing. No secrets or topic names committed.
 
 ## Phase 3c — Relay deploy
 - Claimed by: —

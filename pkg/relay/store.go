@@ -180,6 +180,39 @@ func (s *Store) UpdateDeviceFCMToken(deviceID, fcmToken string) bool {
 	return false
 }
 
+// AllFCMTokens returns a deduplicated slice of all registered device FCM tokens.
+func (s *Store) AllFCMTokens() []string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	seen := make(map[string]bool)
+	var tokens []string
+	for _, d := range s.devices {
+		if d.FCMToken != "" && !seen[d.FCMToken] {
+			seen[d.FCMToken] = true
+			tokens = append(tokens, d.FCMToken)
+		}
+	}
+	return tokens
+}
+
+// RemoveFCMToken clears the FCM token from any device that has it.
+func (s *Store) RemoveFCMToken(fcmToken string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	changed := false
+	for i := range s.devices {
+		if s.devices[i].FCMToken == fcmToken {
+			s.devices[i].FCMToken = ""
+			changed = true
+		}
+	}
+	if changed {
+		s.scheduleSaveLocked()
+	}
+}
+
 // ListDevices returns a copy of all registered devices.
 func (s *Store) ListDevices() []Device {
 	s.mu.RLock()
