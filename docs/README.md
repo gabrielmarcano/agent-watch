@@ -56,7 +56,8 @@ When two disagree, the higher one wins, and the lower one must be fixed in the s
 | 3b | [Push](phases/3b-push.md) | 3a | FCM + ntfy |
 | 3c | [Relay deploy](phases/3c-relay-deploy.md) | 3a | Relay live on the VPS behind a TLS reverse proxy |
 | 4 | [Wear OS client](phases/4-wearos.md) | 1 | App on the Pixel Watch 2 |
-| 5 | [End-to-end + docs](phases/5-e2e.md) | 2c, 3b, 3c, 4 | Release gate, README |
+| 4b | [Wear OS UI redesign](phases/4b-wearos-ui.md) | 4 | Everyday-usable UI on the Pixel Watch 2 |
+| 5 | [End-to-end + docs](phases/5-e2e.md) | 2c, 3b, 3c, 4, 4b | Release gate, README |
 | 6 | [watchOS client](phases/6-watchos.md) | 5 | Simulator-verified app (best-effort) |
 
 ```

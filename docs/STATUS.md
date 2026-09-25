@@ -211,6 +211,15 @@ Keep entries short, and use absolute dates (YYYY-MM-DD).
     - drop the owner's relay domain pre-filled in `PairingScreen` (personal data if the repo goes public; a wrong default for anyone else).
   - Done 2026-09-25: the app ignores a `blocked` push whose seq is ≤ the last `resolved` seq for its pane (`contracts.md` §4.1), a prerequisite for `AW_PUSH_RESOLVED`.
 
+## Phase 4b — Wear OS UI redesign
+- Claimed by: —
+- [ ] data-layer API adopted (the Phase 4 "UI-redesign session must" list)
+- [ ] review findings fixed or deferred with a reason (`docs/phases/4b-wearos-ui.md`)
+- [ ] unit tests + debug/release builds green
+- [ ] emulator screenshots of every screen and state, reviewed with the owner
+- [ ] checked on the Pixel Watch 2 with the owner
+- Notes:
+
 ## Phase 5 — End-to-end + docs (release gate)
 - Claimed by: agy, 2026-09-24 — **reopened 2026-09-25**
 - [ ] `docs/e2e-report.md` complete for claude / agy / opencode (re-run after the Wear OS UI redesign, rows 1–27)
