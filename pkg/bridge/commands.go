@@ -7,9 +7,14 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gabrielmarcano/agent-monitor/pkg/agents"
 	"github.com/gabrielmarcano/agent-monitor/pkg/herdr"
 	"github.com/gabrielmarcano/agent-monitor/pkg/model"
 )
+
+// commandTimeout bounds one command end to end (list, read, send). It stays
+// below the relay's 10 s wait so the watch gets our answer, not a timeout.
+const commandTimeout = 9 * time.Second
 
 // HandleRelayMessage processes inbound messages from the relay.
 func (e *Engine) HandleRelayMessage(msg any) {
@@ -73,7 +78,9 @@ func (e *Engine) executeCommand(cmd model.CommandMsg) {
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	// One budget for the whole command, below the relay's 10 s wait; each herdr
+	// call gets its own 3 s slice of it.
+	ctx, cancel := context.WithTimeout(context.Background(), commandTimeout)
 	defer cancel()
 
 	if e.Syncer == nil {
@@ -81,7 +88,9 @@ func (e *Engine) executeCommand(cmd model.CommandMsg) {
 		return
 	}
 
-	agentsList, err := e.Syncer.Refresh(ctx)
+	listCtx, listCancel := context.WithTimeout(ctx, 3*time.Second)
+	agentsList, err := e.Syncer.Refresh(listCtx)
+	listCancel()
 	if err != nil {
 		if errors.Is(err, herdr.ErrUnavailable) {
 			reply(false, "herdr_offline", err.Error(), "")
@@ -135,7 +144,7 @@ func (e *Engine) executeCommand(cmd model.CommandMsg) {
 			}
 		}
 
-		promptCtx, promptCancel := context.WithTimeout(context.Background(), 3*time.Second)
+		promptCtx, promptCancel := context.WithTimeout(ctx, 3*time.Second)
 		defer promptCancel()
 
 		if err := e.Herdr.Prompt(promptCtx, cmd.PaneID, cmd.Text); err != nil {
@@ -164,21 +173,9 @@ func (e *Engine) executeCommand(cmd model.CommandMsg) {
 			return
 		}
 
-		readCtx, readCancel := context.WithTimeout(context.Background(), 3*time.Second)
-		screen, err := e.Herdr.Read(readCtx, cmd.PaneID, herdr.SourceVisible, 0)
-		readCancel()
-		if err != nil {
-			if errors.Is(err, herdr.ErrUnavailable) {
-				reply(false, "herdr_offline", err.Error(), agentName)
-				return
-			}
-			reply(false, "herdr_offline", fmt.Sprintf("read screen: %v", err), agentName)
-			return
-		}
-
-		p, ok := ad.ParsePrompt(screen)
-		if !ok {
-			reply(false, "prompt_changed", "failed to parse prompt on visible screen", agentName)
+		p, code, msg := e.readFreshPrompt(ctx, cmd.PaneID, ad)
+		if code != "" {
+			reply(false, code, msg, agentName)
 			return
 		}
 
@@ -193,8 +190,8 @@ func (e *Engine) executeCommand(cmd model.CommandMsg) {
 			return
 		}
 
-		sendCtx, sendCancel := context.WithTimeout(context.Background(), 3*time.Second)
-		err = e.Herdr.SendKeys(sendCtx, cmd.PaneID, keys)
+		sendCtx, sendCancel := context.WithTimeout(ctx, 3*time.Second)
+		err := e.Herdr.SendKeys(sendCtx, cmd.PaneID, keys)
 		sendCancel()
 		if err != nil {
 			if errors.Is(err, herdr.ErrUnavailable) {
@@ -218,14 +215,32 @@ func (e *Engine) executeCommand(cmd model.CommandMsg) {
 			return
 		}
 
-		cancelKeys := ad.CancelKeys()
-		e.mu.RLock()
-		if st, ok := e.states[cmd.PaneID]; ok && st.prompt != nil && len(st.prompt.CancelKeys) > 0 {
-			cancelKeys = st.prompt.CancelKeys
+		// Never trust the cached prompt: re-read the screen and take the cancel
+		// keys from what is on it right now (agy's edit prompt cancels with "2",
+		// which means "always allow" in its bash prompt).
+		p, code, msg := e.readFreshPrompt(ctx, cmd.PaneID, ad)
+		if code != "" {
+			reply(false, code, msg, agentName)
+			return
 		}
-		e.mu.RUnlock()
 
-		sendCtx, sendCancel := context.WithTimeout(context.Background(), 3*time.Second)
+		// The relay's cancel carries no fingerprint (contracts §2.2), so fall back
+		// to the prompt this bridge published for this seq: it is what the watch showed.
+		expected := cmd.Fingerprint
+		if expected == "" {
+			expected = e.publishedFingerprint(cmd.PaneID, info.StateChangeSeq)
+		}
+		if expected == "" {
+			reply(false, "prompt_changed", "no published prompt for this state", agentName)
+			return
+		}
+		if p.Public.Fingerprint != expected {
+			reply(false, "prompt_changed", fmt.Sprintf("fingerprint mismatch: expected %s, got %s", expected, p.Public.Fingerprint), agentName)
+			return
+		}
+
+		cancelKeys := p.EffectiveCancelKeys(ad)
+		sendCtx, sendCancel := context.WithTimeout(ctx, 3*time.Second)
 		err := e.Herdr.SendKeys(sendCtx, cmd.PaneID, cancelKeys)
 		sendCancel()
 		if err != nil {
@@ -247,4 +262,33 @@ func (e *Engine) executeCommand(cmd model.CommandMsg) {
 	default:
 		reply(false, "invalid_request", fmt.Sprintf("unsupported command action: %q", cmd.Action), agentName)
 	}
+}
+
+// readFreshPrompt re-reads the pane's visible screen and parses it with the
+// agent's adapter, right before keys are sent. It returns a contract error code
+// (and message) when the screen cannot be read or shows no menu.
+func (e *Engine) readFreshPrompt(ctx context.Context, paneID string, ad agents.Adapter) (agents.Prompt, string, string) {
+	readCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	screen, err := e.Herdr.Read(readCtx, paneID, herdr.SourceVisible, 0)
+	cancel()
+	if err != nil {
+		return agents.Prompt{}, "herdr_offline", fmt.Sprintf("read screen: %v", err)
+	}
+	p, ok := ad.ParsePrompt(screen)
+	if !ok {
+		return agents.Prompt{}, "prompt_changed", "no menu on the visible screen"
+	}
+	return p, "", ""
+}
+
+// publishedFingerprint returns the fingerprint of the prompt this bridge
+// published for paneID at seq, or "" if none is published for that state.
+func (e *Engine) publishedFingerprint(paneID string, seq uint64) string {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	st, ok := e.states[paneID]
+	if !ok || st.prompt == nil || st.info.StateChangeSeq != seq || st.public.Status != model.StatusBlocked {
+		return ""
+	}
+	return st.prompt.Public.Fingerprint
 }

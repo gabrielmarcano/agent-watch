@@ -374,7 +374,10 @@ func TestCommands_CancelDispatchesCancelKeys(t *testing.T) {
 			"state_change_seq": 100,
 		},
 	})
-	h.engine.herdrOnline = true
+	// Cancel re-reads the screen: a menu must be on it, matching the published prompt.
+	h.server.SetScreen("w1:p1", "visible", loadFixture(t, "claude", "permission-bash.txt"))
+	h.engine.OnHerdrOnline(true, herdr.Pong{Version: "0.9.1", Protocol: 22})
+	syncAndAwaitPrompt(t, h, "w1:p1", 100, "")
 
 	beforeCalls := len(h.server.Calls())
 

@@ -168,7 +168,9 @@ func (e *Engine) OnChanges(changes []herdr.Change) {
 					st.prompt == nil
 
 				if needParse {
-					// Preserve existing prompt until resolved
+					// Drop the previous prompt: it belongs to an older screen and
+					// must not be re-published or used while the re-parse runs.
+					st.prompt = nil
 					pub.Prompt = nil
 					st.public = pub
 					go e.resolvePrompt(info.PaneID, info.StateChangeSeq, agentName)
