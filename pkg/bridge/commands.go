@@ -266,6 +266,12 @@ func (e *Engine) executeCommand(ctx context.Context, cmd model.CommandMsg) {
 			return
 		}
 
+		// Before the claim: a refusal leaves the prompt answerable.
+		if code, msg := e.checkFocus(ctx, cmd.PaneID, ad, p, cmd.OptionID); code != "" {
+			reply(false, code, msg, agentName)
+			return
+		}
+
 		if code, msg := e.pressPromptKeys(ctx, cmd.PaneID, info.StateChangeSeq, p.Public.Fingerprint, keys); code != "" {
 			reply(false, code, msg, agentName)
 			return
@@ -380,6 +386,28 @@ func (e *Engine) readFreshPrompt(ctx context.Context, paneID string, ad agents.A
 		return agents.Prompt{}, "prompt_changed", "no menu on the visible screen"
 	}
 	return p, "", ""
+}
+
+// checkFocus runs the adapter's focus guard, if it has one, for keys that act
+// on the focused button: one more read of the visible screen, in herdr's
+// "ansi" format, right before the keys are sent. Keys that do not depend on
+// focus cost nothing. It returns a contract error code (and message) when
+// the keys must not be sent; the prompt is not claimed.
+func (e *Engine) checkFocus(ctx context.Context, paneID string, ad agents.Adapter, p agents.Prompt, optionID string) (string, string) {
+	fg, ok := ad.(agents.FocusGuard)
+	if !ok || !fg.FocusDependent(p, optionID) {
+		return "", ""
+	}
+	readCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	screen, err := e.Herdr.ReadANSI(readCtx, paneID, herdr.SourceVisible, 0)
+	cancel()
+	if err != nil {
+		return herdrErrorCode(ctx, err, "herdr_offline"), fmt.Sprintf("read screen (ansi): %v", err)
+	}
+	if err := fg.CheckFocus(screen, p, optionID); err != nil {
+		return string(model.ErrPromptChanged), fmt.Sprintf("focus may have moved on the Mac; answer it on the Mac (%v)", err)
+	}
+	return "", ""
 }
 
 // readVisible reads the pane's visible screen with a 3 s slice of ctx.
