@@ -54,7 +54,7 @@ When two disagree, the higher one wins, and the lower one must be fixed in the s
 | 2c | [Bridge daemon](phases/2c-bridge-daemon.md) | 2a, 2b | `agent-watch-bridge`, launchd, herdr plugin |
 | 3a | [Relay server](phases/3a-relay-server.md) | 1 | `agent-watch-relay` |
 | 3b | [Push](phases/3b-push.md) | 3a | FCM + ntfy |
-| 3c | [Relay deploy](phases/3c-relay-deploy.md) | 3a | Relay live on the VPS behind Cloudflare |
+| 3c | [Relay deploy](phases/3c-relay-deploy.md) | 3a | Relay live on the VPS behind a TLS reverse proxy |
 | 4 | [Wear OS client](phases/4-wearos.md) | 1 | App on the Pixel Watch 2 |
 | 5 | [End-to-end + docs](phases/5-e2e.md) | 2c, 3b, 3c, 4 | Release gate, README |
 | 6 | [watchOS client](phases/6-watchos.md) | 5 | Simulator-verified app (best-effort) |

@@ -29,6 +29,7 @@
 | `pkg/relay/api.go` | HTTP handlers and routing (`http.ServeMux` patterns) |
 | `pkg/relay/sse.go` | `/v1/events` streaming |
 | `pkg/relay/auth.go` | Device and host token checks, pairing codes, rate limiting |
+| `pkg/relay/clientip.go` | Which address identifies the client (trusted proxies) |
 | `pkg/relay/server.go` | `Server` struct wiring everything; `Handler() http.Handler`; `Run(ctx)` |
 | `cmd/relay/main.go` | `serve`, `devices list`, `devices revoke <id>`, `version` |
 
@@ -55,7 +56,7 @@ type storeFile struct {
 }
 ```
 
-- **Save:** write to `store.json.tmp` with mode `0600`, then `fsync`, then `os.Rename` over `store.json`. Save at most once per second (coalesce) and on shutdown.
+- **Save:** write to `store.json.tmp` with mode `0600`, then `fsync`, then `os.Rename` over `store.json`, then `fsync` the directory. Save at most once per second (coalesce) and on shutdown. Log a failed save; never crash on it.
 - **Load:** a missing file means an empty store. A corrupt file is a fatal error at startup, with a clear message. **Never** overwrite it silently.
 - **History limits:**
   - 20 items per pane and 200 in total; drop the oldest.
@@ -82,7 +83,8 @@ type storeFile struct {
 
 **Rate limiting (`POST /v1/pair`):**
 - 5 attempts per client IP per 10 minutes, plus 20 attempts in total per 10 minutes.
-- The client IP is `CF-Connecting-IP` when `AW_TRUST_CF_IP=true`, else `r.RemoteAddr`.
+- The client IP comes from `ClientIPPolicy` (`contracts.md` §5): the TCP peer, unless the peer is in `AW_TRUSTED_PROXIES`; only then `AW_CLIENT_IP_HEADER` (if set), the rightmost untrusted `X-Forwarded-For` hop, or `X-Real-IP`. A header from anyone else is ignored, so a client cannot pick its own rate-limit bucket.
+- Clients are forgotten once their 10-minute window has passed, so the limiter's memory stays bounded.
 - Over the limit → `429 rate_limited`.
 - A wrong code → `403 pair_code_invalid`, which also counts as an attempt.
 
@@ -118,8 +120,8 @@ func (h *Hub) Command(ctx context.Context, cmd model.CommandMsg) (model.CommandR
 1. Check host auth **before** accepting (401 otherwise).
 2. `websocket.Accept(w, r, nil)`, then `SetReadLimit(1 << 20)`.
 3. If a host is already connected, close the old connection with status `4000` and reason `replaced`.
-4. Wait up to 5 s for `hello` (else close with `4001`).
-5. Then `SetHost(true, hello.HerdrOnline)`.
+4. Wait up to 5 s for `hello` (else close with `4001`; the close frame really goes out, so the bridge sees 4001).
+5. Then `SetHost(true, hello.HerdrOnline)`, and start pinging the host every 30 s. **No pong within 10 s → drop the host** (the same as a disconnect, below). A half-open connection is detected within ~40 s instead of lingering.
 6. **Read loop** — decode with `model.DecodeWire`:
    - `SnapshotMsg` → `State.ReplaceAll`
    - `AgentUpdateMsg` → `State.Upsert`, then `Notifier.OnAgentUpdate(prev, cur)` (interface below)
@@ -128,12 +130,13 @@ func (h *Hub) Command(ctx context.Context, cmd model.CommandMsg) (model.CommandR
    - `HerdrStatusMsg` → `State.SetHost(true, msg.HerdrOnline)`
    - `CommandResultMsg` → deliver to `pending[request_id]`
    - unknown → ignore
-7. **On disconnect:** `SetHost(false, false)`, and fail every pending command with `host_offline`. Keep the agents (clients grey them out).
+7. **On disconnect, missed pong or replacement:** the connection stops being the current host at that moment. `SetHost(false, false)` (unless a new host already took over), and every command waiting on the old connection fails **at once** with `host_offline`. Keep the agents (clients grey them out).
 
 **`Command`:**
 - If no host is connected → `host_offline`.
-- Otherwise generate a `request_id`, write the `CommandMsg`, then wait for the result, a 10 s timeout (`timeout`) or a disconnect (`host_offline`).
-- A late result arriving after the timeout is logged and dropped.
+- Otherwise generate a `request_id`, write the `CommandMsg`, then wait for the result. **Writing and waiting share one 10 s budget** → `timeout`. The host going away first → `host_offline` immediately. A result that arrives at the same instant as either still wins.
+- The write is bounded by the budget but not by the caller: a watch hanging up must not close the host's WebSocket mid-write.
+- A late result arriving after the timeout is logged (debug) and dropped.
 
 **Notifier hook** (implemented in 3b; use a no-op here):
 
@@ -190,15 +193,19 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 
 - **Format:** `data:` is a single line of JSON. Never pretty-print, because newlines break SSE framing.
 - **After a host reconnect:** `ReplaceAll` broadcasts a fresh `snapshot` to every subscriber.
+- **Every write has a 10 s deadline** (`SetWriteDeadline` through `http.ResponseController`): a client that stops reading is disconnected instead of pinning a goroutine.
+- **Never send on a closed subscriber channel:** each subscriber's channel is closed exactly once, and every send happens under the same lock.
 
 ### 7. `cmd/relay/main.go`
 
 | Subcommand | Behaviour |
 |---|---|
-| `serve` | Load the config (fail fast on a missing `AW_HOST_TOKEN` or one that is not 64 hex chars). Open the store. Serve `http.Server{Addr: AW_LISTEN, ReadHeaderTimeout: 10s}` with **no** `WriteTimeout`, because SSE and WebSocket are long-lived. Shut down gracefully on SIGTERM (10 s) and flush the store |
-| `devices list` | Print id, name, created, last seen (reads `store.json`) |
-| `devices revoke <id>` | Remove the device. **The relay must be stopped**, or reload the store via signal: document which one you implement. Simplest: require the service to be stopped, and print that |
+| `serve` | Load the config (fail fast on a missing `AW_HOST_TOKEN` or one that is not 64 hex chars, a bad `AW_TRUSTED_PROXIES`, `AW_CLIENT_IP_HEADER` without trusted proxies, a non-boolean `AW_PUSH_RESOLVED`; warn once if the removed `AW_TRUST_CF_IP` is set). Take the exclusive `flock` on `$AW_DATA_DIR/relay.lock` (a second relay on the same dir refuses to start), open the store, and serve the local admin socket `$AW_DATA_DIR/admin.sock` (`0600`). Serve `http.Server{ReadHeaderTimeout: 10s, IdleTimeout: 120s}` on `AW_LISTEN`, with **no** `ReadTimeout` or `WriteTimeout`: both apply only outside a handler, so they never cut SSE or the hijacked WebSocket. On SIGTERM: cancel every request context at once (open SSE streams end immediately), close the host, shut down within 10 s, flush the store, exit 0 |
+| `devices list` | Print id, name, created, last seen |
+| `devices revoke <id>` | Remove the device. **Works with the relay running:** the CLI goes through `admin.sock`, the revoked token is rejected from the next request on, the device's open SSE streams and in-flight requests are cancelled, and `store.json` is saved at once. With the relay stopped, the CLI takes the lock and edits `store.json` itself |
 | `version` | Print the version |
+
+Run `devices` as the service user or root, with the same `AW_DATA_DIR` as the service (`deploy/relay/README.md`).
 
 ### 8. Tests (`pkg/relay/*_test.go`, all with `httptest`)
 
@@ -212,6 +219,10 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 | Slow subscriber | A subscriber that never reads is dropped without blocking others |
 | Command round-trip | `POST …/answer` → the fake host receives `CommandMsg` with the right fields → replies ok → `200 {"ok":true}` |
 | Command errors | Host replies `stale_state` → `409`; host silent → `504 timeout`; host offline → `503 host_offline`; unknown pane → `404` |
+| Host drop | A missed pong drops the host; a host that disconnects or is replaced while a command waits → `host_offline` at once, not after 10 s |
+| Client IP | Forwarding headers ignored from untrusted peers; rightmost untrusted `X-Forwarded-For` hop from trusted ones |
+| Live revoke | `devices revoke` through `admin.sock` → the token gets `401` and its SSE stream closes |
+| Shutdown | With a watch on SSE and a host connected, `serve` stops quickly and returns nil |
 | URL-encoded pane id | `POST /v1/agents/w5%3ApAW/prompt` reaches the handler with `PathValue == "w5:pAW"` |
 | History | Dedup by ID; limits 20/200; `GET /v1/history?pane_id=…&limit=5` newest first |
 | Store durability | Write, restart the server from the same dir, devices and history survive; a corrupt file → startup error |
@@ -230,7 +241,8 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 
 ## Pitfalls
 
-- **`WriteTimeout` on the server** kills SSE after N seconds. Leave it at zero; use per-handler contexts instead.
+- **`WriteTimeout` on the server** kills SSE after N seconds. Leave it at zero; bound each SSE write with a deadline instead.
+- **Trusting `X-Forwarded-For` (or `CF-Connecting-IP`) from any peer** lets a client choose its rate-limit bucket. Only from `AW_TRUSTED_PROXIES`.
 - **Taking the snapshot before subscribing** loses an update that arrives in between.
 - **Holding the state mutex while writing to a subscriber channel** deadlocks under load. Copy the subscribers, then send non-blocking.
 - **Logging `r.URL.Path` with pane ids is fine; logging `Authorization` is not.**

@@ -10,6 +10,8 @@
 >
 > It is verified on the owner's **Google Pixel Watch 2**.
 
+> **State on 2026-09-25:** the data layer was reworked after review (`RelayEngine`, `UiState.auth` / `stale`, `RelayRepository.restart`, SSE silence detection, `FcmRegistrar`, `resolved` handling, pane-safe notification intents; 105 JVM tests). **The UI is still the alpha from the first pass and is being redesigned in a separate session**, which must adopt the data-layer API below (`docs/STATUS.md`, Phase 4). Nothing from the rework has been re-verified on the watch yet. `wearos-app/ARCHITECTURE.md` describes the current code.
+
 | | |
 |---|---|
 | **Depends on** | Phase 1 (contracts frozen). Build against a relay stub or the local relay (3a) until the real one is deployed |
@@ -68,8 +70,10 @@ Mirror `pkg/model` **field by field** with Gson, snake_case names, `@Keep` on ev
     val pane_id: String = "",
     val agent: String = "",
     val label: String = "",
+    val name: String? = null,
     val cwd: String? = null,
     val workspace_id: String = "",
+    val workspace: String? = null,
     val status: String = "unknown",        // idle | working | blocked | done | unknown
     val focused: Boolean = false,
     val state_change_seq: Long = 0,        // uint64 in Go; Long is enough in practice
@@ -94,7 +98,7 @@ Mirror `pkg/model` **field by field** with Gson, snake_case names, `@Keep` on ev
 @Keep data class PairResponse(val device_id: String = "", val device_token: String = "")
 @Keep data class PromptRequest(val text: String, val expected_seq: Long)
 @Keep data class AnswerRequest(val option_id: String, val expected_seq: Long, val fingerprint: String)
-@Keep data class CancelRequest(val expected_seq: Long)
+@Keep data class CancelRequest(val expected_seq: Long, val fingerprint: String? = null) // null is omitted from the JSON
 @Keep data class PushRegisterRequest(val platform: String = "fcm", val token: String)
 @Keep data class ErrorBody(val code: String = "internal", val message: String = "")
 @Keep data class ErrorResponse(val error: ErrorBody = ErrorBody())
@@ -121,50 +125,73 @@ A tiny wrapper over `SharedPreferences("AgentWatchPrefs")` with these keys:
 | `device_token` | from `/v1/pair` |
 | `device_id` | from `/v1/pair` |
 | `fcm_token` | the latest token from `onNewToken` |
-| `fcm_registered_token` | the token last sent to the relay |
+| `fcm_registration` | `<binding>\|<fcm token>`: the FCM token the relay **accepted** (200) for this pairing, where the binding is the first 16 hex chars of `sha256(relay_url + "\n" + device_token)`. Written only by `FcmRegistrar`. Re-pairing needs a new registration even with the same FCM token |
 | `pinned_pane_id` | the agent used for dictation |
 
-On first launch of the new version, **delete** `local_ip` and `tailscale_ip`.
+On first launch of the new version, **delete** `local_ip`, `tailscale_ip` and the old `fcm_registered_token`. `clearAuth()` (a 401) removes `device_token`, `device_id` and `fcm_registration`. `Prefs.fcmRegisteredToken` is now read-only in effect: its setter is deprecated and ignored.
 
 ### 3. Networking
 
-**`network/RelayClient.kt`**: a stateless HTTP client. One shared `OkHttpClient` with `readTimeout(0)` for SSE, plus a normal one with a 15 s timeout for REST.
+**`network/RelayClient.kt`**: a stateless HTTP client. Three OkHttp clients share one connection pool (`RelayHttpClients.shared`):
+
+| Client | Used for | Timeout |
+|---|---|---|
+| `rest` | `GET /v1/agents`, `/v1/history` | 15 s for the whole call |
+| `command` | pairing, prompt, answer, cancel, push register | 8 s for the whole call (fits a notification action's `goAsync()`) |
+| `sse` | `GET /v1/events` | **45 s read timeout = the silence limit**: three missed 15 s keepalives mean a dead (often half-open) socket, and the engine reconnects |
 
 ```kotlin
-class RelayClient(private val baseUrl: String, private val token: String?) {
+class RelayClient(val baseUrl: String, token: String? = null, http: RelayHttpClients = RelayHttpClients.shared,
+                  onUnauthorized: ((token: String) -> Unit)? = null) {
     suspend fun pair(code: String, deviceName: String): Result<PairResponse>
     suspend fun agents(): Result<AgentsSnapshot>
-    suspend fun history(paneId: String?, limit: Int = 20): Result<List<HistoryItem>>
+    suspend fun history(paneId: String? = null, limit: Int = 20): Result<List<HistoryItem>>
     suspend fun prompt(paneId: String, text: String, expectedSeq: Long): Result<Unit>
     suspend fun answer(paneId: String, optionId: String, expectedSeq: Long, fingerprint: String): Result<Unit>
-    suspend fun cancel(paneId: String, expectedSeq: Long): Result<Unit>
+    suspend fun cancel(paneId: String, expectedSeq: Long, fingerprint: String? = null): Result<Unit>
     suspend fun registerPush(fcmToken: String): Result<Unit>
     fun events(listener: EventSourceListener): EventSource   // GET /v1/events
 }
 ```
+
+- **Every call is cancellable:** cancelling the coroutine (or a `withTimeout` around it) cancels the OkHttp call at once.
+- **Every 401** (REST or SSE) is reported with the rejected token to `onUnauthorized`, or to the process-wide `RelayClient.unauthorizedListener` (the repository), so clients built by the tile, the complication or `QuickDictateActivity` revoke the pairing too.
 
 - Every request carries `Authorization: Bearer <token>`. **Never** put the token in the URL.
 - Encode pane ids in paths with `URLEncoder.encode(paneId, "UTF-8")`.
 - Map non-2xx responses to `Result.failure(RelayError(code, message, httpStatus))` by parsing `ErrorResponse`.
 - Run REST on `Dispatchers.IO`.
 
-**`network/RelayRepository.kt`**: a process-wide singleton (`object`, or created in `Application`) that owns the live state.
+**`network/RelayEngine.kt`** holds the relay link without Android (SSE lifecycle and reconnect, the merged agent/history state, the commands), so it is tested on the JVM against a fake relay. **`network/RelayRepository.kt`** is the process-wide Android façade over one engine.
 
 ```kotlin
+enum class AuthState { PAIRED, UNPAIRED, REVOKED }
+
 data class UiState(
     val connection: Connection = Connection.Connecting, // Connecting | Live | Offline(reason)
     val hostOnline: Boolean = false,
     val herdrOnline: Boolean = false,
     val agents: List<AgentState> = emptyList(),          // sorted: severity desc, label asc
     val history: List<HistoryItem> = emptyList(),        // newest first, max 200
+    val stale: Boolean = true,   // not backed by a live stream: before the first snapshot, while reconnecting
+                                 // (closed, failed or 45 s silent), after stop(). Cleared by the next snapshot
+    val auth: AuthState = AuthState.PAIRED,
 )
 object RelayRepository {
     val state: StateFlow<UiState>
-    fun start(context: Context)   // opens SSE if paired; idempotent
+    fun start(context: Context)    // opens SSE if paired; idempotent
+    fun restart(context: Context)  // after pairing or re-pairing: drops the old pairing's client, data and stream, then starts
     fun stop()
-    suspend fun refresh()         // GET /v1/agents + GET /v1/history
+    suspend fun refresh()          // GET /v1/agents + GET /v1/history
+    suspend fun answer(paneId: String, optionId: String, expectedSeq: Long, fingerprint: String): Result<Unit>
+    suspend fun cancel(paneId: String, expectedSeq: Long, fingerprint: String? = null): Result<Unit>
+    suspend fun prompt(paneId: String, text: String, expectedSeq: Long): Result<Unit>
 }
 ```
+
+- **The UI checks `auth` before anything else:** `UNPAIRED` or `REVOKED` → the pairing screen (with "Pairing revoked" for `REVOKED`), never "Mac is offline" or "No active agents".
+- **`stale`:** keep showing the list, dimmed or with "Reconnecting…", not as current.
+- **Merging:** SSE and `refresh()` race. A refresh never overrides a pane that SSE touched after the refresh started, and within a pane the higher `state_change_seq` wins (`AgentStore`). History from SSE and from refreshes is merged and deduplicated by `id` (`HistoryMerge`).
 
 **SSE handling:**
 
@@ -176,9 +203,10 @@ object RelayRepository {
 | `host` | Update the flags |
 | `history` | Prepend, dedup by `id` |
 
-- **Reconnect** on `onFailure`/`onClosed`: 1 s, 2 s, 4 s … up to 30 s. After reconnecting, rely on the next `snapshot`.
+- **Reconnect** on `onFailure`/`onClosed`, and on 45 s of silence (the SSE read timeout): 1 s, 2 s, 4 s … up to 30 s. Only a stream that delivered a `snapshot` resets the backoff. After reconnecting, rely on the next `snapshot`.
 - **Lifecycle:** start SSE while the app is in the foreground (`ProcessLifecycleOwner` `ON_START`/`ON_STOP`), to save battery. Notifications cover the background.
-- **On 401 anywhere:** clear `device_token` and navigate to pairing.
+- **On 401 anywhere** (stream, refresh, commands, notification actions, tile, complication): if the rejected token is still the stored one, clear the pairing (`clearAuth()`), stop the stream without reconnecting, drop agents and history, and set `auth = REVOKED`. A 401 for an older token (re-paired meanwhile) is ignored.
+- **After pairing:** call `RelayRepository.restart(context)`. The stream opening triggers the FCM registration (`PushRegistration.ensure`); do not register by hand.
 
 ### 4. Screens and navigation (`MainActivity.kt` + `ui/screens/`)
 
@@ -186,7 +214,7 @@ Use `SwipeDismissableNavHost` (wear compose navigation, already a dependency):
 
 | Route | Screen | Notes |
 |---|---|---|
-| `pairing` | `PairingScreen` | Relay URL field (prefill `https://`), 6-digit code field, "Pair" button. On success: save the token, register FCM (§5), go to `agents`. Show relay errors from §2.4 of the contracts |
+| `pairing` | `PairingScreen` | Relay URL field (`https://` is added if missing), 6-digit code field, "Pair" button. On success: save the token, call `RelayRepository.restart(context)` (which also registers FCM, §5), go to `agents`. Show relay errors from §2.4 of the contracts |
 | `agents` | `AgentListScreen` | `ScalingLazyColumn` with `rotaryScrollable`. Header: connection state + "Mac offline" / "herdr stopped" banners. One `Chip` per agent: label, agent kind, status color, and ⚠ when blocked. Bottom: "History" chip |
 | `agent/{paneId}` | `AgentDetailScreen` | Status, cwd (shortened), `PromptCard` when blocked, "Dictate" button (idle/done, or working if the agent allows it; otherwise disabled with the reason), "History" for this agent. **Opening this screen sets `pinned_pane_id`** |
 | `history?paneId=` | `HistoryListScreen` | From `UiState.history` (filtered), then `refresh()` on open |
@@ -212,23 +240,25 @@ Reuse the existing palette where it fits.
 | `question` | Title + detail. One chip per option. **Cancel** at the bottom |
 | `unknown` | `raw_tail` in monospace, plus a single **Cancel** button and a hint "Answer this on the computer" |
 
-- **Every tap sends** `expected_seq = agent.state_change_seq` and `fingerprint = prompt.fingerprint`.
-- **While the request is in flight,** disable the buttons.
-- **On `409` (`stale_state`, `prompt_changed`, `unknown_option`),** show a short confirmation ("Changed — refreshed") and wait for the SSE update. **Never auto-retry an answer.**
+- **Every tap sends** `expected_seq = agent.state_change_seq` and `fingerprint = prompt.fingerprint`, **Cancel included** (`cancel(paneId, seq, fingerprint)`).
+- **While the request is in flight,** disable the buttons. After a success, keep them locked until the agent's state changes (a second tap would be refused anyway: the bridge acts once per prompt).
+- **On `409` (`stale_state`, `prompt_changed`, `unknown_option`),** show a short confirmation ("Changed — refreshed") and wait for the SSE update. **Never auto-retry an answer.** Map errors by the relay's `code`, and always show them as errors.
 
 **Dictation:**
 1. Reuse the existing speech-input flow (`MicrophoneIcon` / `RemoteInput`).
 2. Show the target label **before** sending ("To: bizum").
 3. Send `prompt(paneId, text, expectedSeq)`.
-4. On `agent_busy` / `agent_blocked`, show the reason.
+4. On `agent_busy` / `agent_blocked`, show the reason. `agent_blocked` also comes back while a dialog is open on the Mac that herdr reports as `done`/`working` (agy's permission dialog, Claude's WebFetch under herdr 0.9.1): the bridge refuses to type into a menu.
 
 ### 5. Notifications (`MyFirebaseMessagingService.kt`, `NotificationActionReceiver.kt`)
 
-**`onNewToken`:** save it to `fcm_token`. If paired and different from `fcm_registered_token`, call `registerPush` (via `WorkManager` or a coroutine) and store `fcm_registered_token` on success. Also register right after pairing.
+**`onNewToken`:** save it to `fcm_token` and let `FcmRegistrar` (`PushRegistration`) register it. It sends `POST /v1/push/register` when the relay has no accepted registration for exactly this token and pairing, records `fcm_registration` **only after a 200**, retries a failure a few times, and is triggered again on app start, on every stream open and on a new token. A 401 is not retried (the pairing is revoked).
 
-**`onMessageReceived`:** read the data keys from `contracts.md` §4.1, all strings.
+**`onMessageReceived`:** read the data keys from `contracts.md` §4.1, all strings (`PushMessage.parse`). An unknown `event`, or one missing its `pane_id`, shows nothing.
 
 - **Notification id:** `pane_id.hashCode()`, so a pane has at most one notification and a new one replaces the old. Digest notifications use a fixed id.
+- **`resolved`** (data-only, sent only once the relay enables it): dismiss the pane's approval notification unless the shown one is newer (its `state_change_seq` > the resolved seq). Show nothing.
+- **Approvals are also dismissed from the live state:** when SSE or a refresh shows the pane gone, or no longer `blocked` at a seq at least as new as the notification's.
 - **Channels:**
   - `agent_blocked`: `IMPORTANCE_HIGH`, vibration;
   - `agent_done`: `IMPORTANCE_DEFAULT`.
@@ -238,15 +268,17 @@ Reuse the existing palette where it fits.
   - **Deny:** if `deny_option_id` is set, `ACTION_ANSWER` with that option; else `ACTION_CANCEL` with `pane_id` and `state_change_seq`.
   - **Open:** open the app on that agent.
 - **Action for `done`:** **Reply** (`RemoteInput`) → broadcast `ACTION_PROMPT` with `pane_id`, `state_change_seq` and the text.
-- **`PendingIntent` request codes** must be unique per pane **and** action (e.g. `pane_id.hashCode() * 10 + actionIndex`). Otherwise extras from different panes overwrite each other.
+- **`PendingIntent` identity** must be unique per pane **and** action, or extras from different panes overwrite each other. Request codes alone can collide across panes, so every intent also carries a data URI `agentwatch://notification/<action>/<url-encoded pane_id>` (`AgentNotifications.intentUri`): Android compares action, data, class and request code, never extras.
 
 **`NotificationActionReceiver`:**
-- Use `goAsync()`, and run the call on a coroutine with a 10 s timeout.
-- **On success:** replace the notification with a silent one ("Approved", "Denied", "Sent") that auto-cancels after 3 s.
-- **On `409`:** replace it with "Changed — open the app" plus an Open action.
-- **On network error:** "Could not reach the relay".
+- Use `goAsync()`, and run the call on a coroutine with a 9 s `withTimeout` over the command client's 8 s call timeout (both end inside `goAsync()`'s ~10 s).
+- **Deny without a `deny` option** calls `cancel` with the push's `fingerprint`.
+- **On success:** replace the notification with a silent one on the low-importance feedback channel ("Approved", "Denied", "Canceled" for a cancel, "Sent") that auto-cancels after 3 s.
+- **On failure:** a silent message mapped from the relay's error code (`CommandFeedback`: e.g. "Prompt changed" or "Agent changed" for a `409`, "Mac is offline", "Can't reach the relay" for a network error), with an Open action.
 
 ### 6. Complication and tile
+
+**Updates:** besides their system schedule, the complication and the tile are asked to refresh (throttled) when what they show changes: from the repository's state and after each push (`SurfaceUpdates`).
 
 **`AgentStatusComplicationService`:**
 - `GET /v1/agents` with the token.
@@ -260,7 +292,8 @@ Reuse the existing palette where it fits.
   1. the `pinned_pane_id`, if it is still in `GET /v1/agents`;
   2. otherwise the agent with status `done` and the most recent `updated_at`;
   3. otherwise the agent with `focused == true`.
-- The tile shows the target label.
+  4. otherwise **nothing**: "No active agents". Never an arbitrary agent.
+- The tile shows the target label and opens `QuickDictateActivity` with a `LaunchAction` (so the activity is exported).
 - `QuickDictateActivity`:
   1. fetches `/v1/agents`;
   2. resolves the target;
@@ -283,11 +316,14 @@ export JAVA_HOME="/Applications/Android Studio.app/Contents/jbr/Contents/Home"
 3. `./gradlew :app:installDebug`
 4. `adb logcat -s AgentWatch:V FCM:V OkHttp:V AndroidRuntime:E`
 
-`google-services.json` is required for FCM and is git-ignored. The owner has it in `wearos-app/app/`. Never commit it.
+`google-services.json` is required for FCM and for the build (the Google Services Gradle plugin fails without it). It is git-ignored; the owner has it in `wearos-app/app/`. Never commit it.
+
+The release build type is minified (R8) but **signed with the debug key**: fine for the owner's watch, not for distribution.
 
 ### 8. Manifest and network security
 
 - Remove `android:usesCleartextTraffic="true"`: production is HTTPS only.
+- `android:allowBackup="false"`: the device token in `SharedPreferences` must never reach a cloud backup.
 - To test against a local relay over HTTP, add **debug-only** `src/debug/res/xml/network_security_config.xml`, allowing cleartext for `10.0.2.2` and the Mac's LAN IP, and reference it from `src/debug/AndroidManifest.xml`. Release builds must not allow cleartext.
 
 ---
@@ -312,7 +348,7 @@ export JAVA_HOME="/Applications/Android Studio.app/Contents/jbr/Contents/Home"
 
 ## Pitfalls
 
-- **`PendingIntent` extras overwritten** between notifications → approving the wrong pane. Use unique request codes.
+- **`PendingIntent` extras overwritten** between notifications → approving the wrong pane. Give every intent a data URI unique per pane and action.
 - **R8 strips Gson models** without `@Keep` → every field is null in release builds only.
 - **SSE left open in the background** drains the battery. Tie it to the process lifecycle.
 - **Sending `expected_seq` from a stale screen:** always use the value from the `AgentState` rendered at tap time, never one cached elsewhere.

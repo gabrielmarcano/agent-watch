@@ -108,7 +108,10 @@ func (c *Client) Prompt(ctx context.Context, paneID, text string) error // never
 ```
 
 - **`Call`** follows the reference implementation in `herdr-socket-api.md` §1: one connection per call.
-- **Request `id`:** use a counter plus a random prefix, formatted as a **string**.
+  - It is bounded by ctx's deadline, or by `Timeout` when ctx has none. **Cancelling ctx abandons the call at once**; the error then wraps ctx's error (`context.Canceled` / `context.DeadlineExceeded`), never `ErrUnavailable`.
+  - It **rejects an answer to another request** (response `id` ≠ request `id`; herdr answers a malformed request with an error and an empty `id`, which is kept) and a response with neither `result` nor `error`.
+- **Request `id`:** use a counter plus a random per-process prefix, formatted as a **string**.
+- **`Ping`, `ListAgents` and `Read` check the result `type`** (`pong`, `agent_list`, `pane_read`) and fail on anything else.
 - **`ListAgents`** decodes `{"type":"agent_list","agents":[...]}` and returns `agents`.
 - **`Read`** decodes `{"type":"pane_read","read":{"text":...}}` and returns `read.text`.
 - **Offline detection:** a dial error must be distinguishable. Export `var ErrUnavailable = errors.New("herdr unavailable")` and wrap dial errors with it, so callers can check `errors.Is(err, herdr.ErrUnavailable)`.
@@ -131,7 +134,8 @@ type Subscription struct {
 func (c *Client) Subscribe(ctx context.Context, subs []Subscription) (<-chan Event, error)
 ```
 
-- **No read deadline.** Unlike `Call`, this connection has no deadline after the ack.
+- **Bounded handshake:** dial, request and ack share one deadline: ctx's, or the client's `Timeout` (5 s) when that is sooner. A hung herdr can never block the Syncer here. The ack's `id` and `type` are checked like `Call`'s.
+- **No read deadline after the ack.** The stream itself is long-lived. An event that arrives in the same read as the ack is kept, not lost.
 - **Reader goroutine:** scan lines with a `bufio.Scanner`. Raise the buffer to 1 MB with `scanner.Buffer(make([]byte, 64*1024), 1<<20)`, because events can be large.
 - **Parsing:** decode each line into `{"event":..., "data":...}` and send an `Event`. Skip lines without `event`.
 - **Cancellation:** on `ctx.Done()`, close the connection so the scanner returns, then close the channel.
@@ -155,6 +159,10 @@ type Change struct {
     Prev    *AgentInfo // nil for Added
 }
 
+// Callbacks never run concurrently with each other, and batches arrive in the
+// order their lists were fetched. A callback must not call Syncer.Refresh
+// synchronously (it would wait for itself): start a goroutine instead. For the
+// same reason, never call Refresh while holding a lock a callback takes.
 type Listener interface {
     OnChanges(changes []Change)   // called with a batch, never concurrently
     OnHerdrOnline(online bool, pong Pong)
@@ -175,9 +183,13 @@ func (s *Syncer) Run(ctx context.Context) error
 // Snapshot returns the last known agent list (copy). Safe for concurrent use.
 func (s *Syncer) Snapshot() []AgentInfo
 
-// Refresh forces an immediate re-list (used by the bridge right before executing a command).
+// Refresh forces an immediate re-list. Refreshes are serialized with each
+// other and with Run's own lists (fetch, diff, apply, notify, then the next),
+// so an older list never overwrites a newer one. Waiting honours ctx.
 func (s *Syncer) Refresh(ctx context.Context) ([]AgentInfo, error)
 ```
+
+The bridge's command executor does **not** validate against `Refresh`'s result: it calls `Client.ListAgents` itself, so its check can never be a list some other caller fetched earlier.
 
 **Algorithm for `Run`:**
 
@@ -185,17 +197,27 @@ func (s *Syncer) Refresh(ctx context.Context) ([]AgentInfo, error)
 loop:
   pong, err := Ping()
   if err: mark offline (OnHerdrOnline(false) once), sleep backoff, continue   // 500ms→30s, ±20% jitter
-  mark online (OnHerdrOnline(true, pong) once per transition), reset backoff
+  mark online (OnHerdrOnline(true, pong) once per transition)
   list()                                // diff + OnChanges
-  open stream with subscriptionsFor(current agents)
-  while stream healthy:
+  open stream with subscriptionsFor(current agents), then schedule one more debounced list()
+                                        // covers changes between the list and the subscription
+  loop:
      select:
-       event on stream     → schedule debounced list()
-       poll timer (15s)    → list()
-       after list(): if the set of pane_ids changed → close stream, reopen with new subscriptions
-       stream closed       → break (degraded)
-  degraded: poll every 2s with list(); retry the stream on every tick; if Ping fails → back to top (offline)
+       event on stream     → schedule a debounced list() (events inside the window coalesce into one)
+       poll timer          → list(); every 15 s while the stream is up, every 2 s while it is down
+       pane set changed    → if it differs from the set the open stream covers: close it, resubscribe now
+                              (signalled by every applied list, whoever called Refresh)
+       stream closed       → list() at once, then resubscribe after a backoff (500 ms→30 s, ±20 %),
+                              polling every 2 s meanwhile (degraded); the backoff resets once a
+                              stream survives a whole healthy poll interval
+       subscribe fails     → same backoff and degraded polling; herdr errors are not "offline"
+     any list or subscribe that finds herdr gone (dial error, or a transport error and Ping fails)
+                           → back to the top (offline)
+  a herdr that answers ping but never completes a list is retried with the same backoff
 ```
+
+- **Offline at startup is reported.** The first observation counts as a transition: if herdr is down when `Run` starts, the Listener gets `OnHerdrOnline(false)` once.
+- **List failures** are logged once per streak (warning), then at debug level, and once more when a list succeeds again.
 
 - **`subscriptionsFor(agents)`:** the global types `pane.created`, `pane.closed`, `pane.exited`, `pane.agent_detected`, plus one `pane.agent_status_changed` with `PaneID` for **every** agent pane.
 - **Diff:** compare the new list with the previous one by `pane_id`.
@@ -203,7 +225,7 @@ loop:
   - Missing pane → `Removed`.
   - `Updated` when **any** of these differ: `AgentStatus`, `StateChangeSeq`, `Agent`, `Name`, `TerminalTitleStripped`, `Focused`, `CWD`, `ForegroundCWD`, `AgentSession`.
 - **Panes without an agent:** filter out those where `Agent == nil` **and** `AgentStatus == "unknown"`. They are plain shells, not agents.
-- **Delivery:** call `Listener.OnChanges` from a single goroutine, only with a non-empty batch.
+- **Delivery:** list → diff → apply → `Listener` runs under one turn (a channel semaphore that honours ctx), only with a non-empty batch, so callbacks are serialized and in fetch order.
 
 ### 5. Tests (all against `herdrtest`)
 
@@ -217,11 +239,19 @@ loop:
 | `TestSubscribeAck` | `Subscribe` returns after the ack; `EmitStatusChanged` arrives on the channel |
 | `TestSyncerAddUpdateRemove` | `SetAgents` + `EmitStatusChanged` → Added, then Updated (status), then Removed |
 | `TestSyncerResubscribesOnNewPane` | After adding a pane, the fake receives a new `events.subscribe` that includes it |
+| `TestSyncerSubscribesPaneFoundByAnotherRefresh` | A pane first seen by an outside `Refresh` still triggers the resubscription |
 | `TestSyncerOfflineOnline` | `Stop()` → `OnHerdrOnline(false)` exactly once; `Start()` → `OnHerdrOnline(true)` and a full list |
+| `TestSyncerReportsOfflineAtStartup` | herdr down when `Run` starts → `OnHerdrOnline(false)` once |
+| `TestSyncerStreamDropRelistsThenBacksOff` | `DropStreams()` → an immediate list, then a resubscribe only after the backoff |
+| `TestSyncerPollsDegradedWhileStreamDown` | `SetDropStreamsAfterAck(true)` → lists every `PollDegraded` |
+| `TestSyncerShutdownWithHungSubscribe` / `TestSyncerShutdownWithHungList` | `HoldNext` on the call; cancelling ctx still ends `Run` |
+| `TestRefreshAppliesListsInFetchOrder` | Two overlapping refreshes (`HoldNext`) apply in the order they were fetched |
+| `TestRefreshWaitingForAnotherHonoursContext` | A refresh waiting for its turn returns when its ctx ends |
 | `TestSyncerIgnoresPlainShells` | A pane with `agent: null, agent_status: unknown` never appears |
 | `TestTrustedSession` | Mismatched `agent_session.agent` → nil |
+| `call_test.go`, `subscribe_test.go` | Cancel and deadline handling, mismatched response `id`, unexpected result or ack `type`, the bounded subscribe handshake |
 
-Use short durations in tests (`Debounce: 10ms`, `PollDegraded: 50ms`). Wait on conditions with a polling helper; never use fixed `time.Sleep` longer than 50 ms.
+Use short durations in tests (`Debounce: 10ms`, `PollDegraded: 50ms`), or the Syncer's internal fake clock (`clock.go`, `export_test.go`) to drive backoff, polling and debouncing deterministically. Wait on conditions with a polling helper; never use fixed `time.Sleep` longer than 50 ms.
 
 ### 6. Manual smoke test (read-only, against the real herdr)
 

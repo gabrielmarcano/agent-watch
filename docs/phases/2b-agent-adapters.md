@@ -129,6 +129,8 @@ Each adapter embeds `genericAdapter` and overrides only what `agents.md` (after 
 | `agy` | `LastTurn` = `transcript_full.jsonl` algorithm (§4.2); keys and cancel per fixtures |
 | `opencode` | `LastTurn` = SQLite algorithm (§5.2); keys and cancel per fixtures (may be `arrowKeys`) |
 
+**Dialog rule (added 2026-09-25):** the `claude`, `agy` and `opencode` adapters parse a menu only while their dialog is open (the numbered block at the bottom, in place of the input box, or OpenCode's `┃` frame; `agents.md` §3.1, §4.1, §5.1). A numbered list in an answer is not a menu: the bridge refuses dictation while `ParsePrompt` finds one, so a false positive would block the agent. The `no-menu-*-numbered-list` fixtures cover it.
+
 **Transcript rules** (all readers):
 - Use `tail.go` to read at most 256 KB from the end of the file.
 - Treat a missing file, an unparseable line, an empty result or any SQL error as `ErrNoTranscript`. **Never panic.**

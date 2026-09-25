@@ -1,19 +1,21 @@
-# Phase 3c — Deploy the Relay to the VPS behind Cloudflare
+# Phase 3c — Deploy the Relay to the VPS behind a TLS Reverse Proxy
 
-> **Goal:** `https://relay.<domain>` serving the relay 24/7 on the DigitalOcean VPS, behind Cloudflare, with TLS end to end, restarting on failure and surviving reboots.
+> **Goal:** `https://relay.<domain>` serving the relay 24/7 on a small VPS, behind a TLS reverse proxy (nginx, Caddy or Nginx Proxy Manager; optionally with Cloudflare in front), restarting on failure and surviving reboots.
+>
+> **Status:** done (the files exist and the relay runs). Day-to-day operations, the Nginx Proxy Manager-in-docker topology, client IP and device revocation are in [`deploy/relay/README.md`](../../deploy/relay/README.md).
 
 | | |
 |---|---|
 | **Depends on** | 3a (3b optional: without it the relay runs with push disabled) |
 | **Touches** | `deploy/relay/**`, `docs/STATUS.md` |
-| **Needs the owner?** | **Yes.** SSH access to the VPS, Cloudflare DNS, the domain name, and the secrets. The agent prepares files and commands; the owner runs anything that needs credentials |
+| **Needs the owner?** | **Yes.** SSH access to the VPS, DNS (and Cloudflare, if used), the domain name, and the secrets. The agent prepares files and commands; the owner runs anything that needs credentials |
 
 **Placeholders used below** (the owner provides the real values; never commit them):
 
 | Placeholder | Meaning |
 |---|---|
 | `<vps>` | SSH target of the VPS, e.g. `root@203.0.113.10` or an `~/.ssh/config` alias |
-| `<domain>` | Base domain managed in Cloudflare |
+| `<domain>` | Base domain (managed in Cloudflare if you use it) |
 | `relay.<domain>` | Public hostname of the relay |
 
 ---
@@ -22,91 +24,26 @@
 
 ### 1. Repository files (`deploy/relay/`)
 
-**`deploy/relay/agent-watch-relay.service`** (systemd, the recommended way):
+The files are the source of truth; this table says what each one must keep. **No real secrets** in any of them.
 
-```ini
-[Unit]
-Description=Agent Watch relay
-After=network-online.target
-Wants=network-online.target
+| File | What it is |
+|---|---|
+| `agent-watch-relay.service` | systemd unit: runs `/usr/local/bin/agent-watch-relay serve` as `agentwatch`, `EnvironmentFile=/etc/agent-watch-relay/env`, `Restart=always`. Hardened: no capabilities, `NoNewPrivileges`, `ProtectSystem=strict`, `ProtectHome`, `PrivateTmp`, `UMask=0077`, only `AF_INET`/`AF_INET6`/`AF_UNIX` (the admin socket needs `AF_UNIX`), `SystemCallFilter=@system-service`; writable only `/var/lib/agent-watch-relay` (`StateDirectory`, mode `0700`). **Not yet checked with `systemd-analyze security`** |
+| `env.example` | Every variable of `contracts.md` §5 with safe defaults: `AW_LISTEN=127.0.0.1:8080`, `AW_HOST_TOKEN` placeholder, `AW_DATA_DIR`, and commented `AW_FCM_CREDENTIALS`, `AW_NTFY_*`, `AW_PUSH_RESOLVED`, `AW_TRUSTED_PROXIES`, `AW_CLIENT_IP_HEADER` |
+| `nginx.conf.example` | A full `server` block: TLS, WebSocket upgrade (`map $http_upgrade $connection_upgrade`), `X-Forwarded-For` / `X-Real-IP`, `proxy_buffering off` and `proxy_cache off` for SSE, `proxy_read_timeout`/`proxy_send_timeout 90s`. Relay env: `AW_TRUSTED_PROXIES=127.0.0.1/32` |
+| `Caddyfile.example` | Caddy with a Cloudflare Origin Certificate and `flush_interval -1` for SSE. Relay env: `AW_TRUSTED_PROXIES=127.0.0.1/32` |
+| `deploy.sh` | Builds and ships the binary (below). Never touches secrets |
+| `Dockerfile` | Optional container: distroless `nonroot`, a `0700` data dir owned by uid 65532, `VOLUME /var/lib/agent-watch-relay`. Build it from the repo root after `make relay-linux` |
+| `README.md` | Operations: deploys, client IP per topology, Nginx Proxy Manager in docker, firewall, hardening, devices, lost watch |
 
-[Service]
-User=agentwatch
-Group=agentwatch
-EnvironmentFile=/etc/agent-watch-relay/env
-ExecStart=/usr/local/bin/agent-watch-relay serve
-Restart=always
-RestartSec=5
-# Hardening
-NoNewPrivileges=true
-ProtectSystem=strict
-ProtectHome=true
-PrivateTmp=true
-ReadWritePaths=/var/lib/agent-watch-relay
-StateDirectory=agent-watch-relay
-StateDirectoryMode=0700
+**`deploy.sh <ssh-target>`** (optional `SSH_OPTS="-i <key> -o Port=<port>"`, passed to both `ssh` and `scp`):
 
-[Install]
-WantedBy=multi-user.target
-```
+1. Refuses a dirty tree (uncommitted or untracked files), so the binary always matches a commit.
+2. `make relay-linux VERSION=<Makefile VERSION>-<short sha>`.
+3. Copies it to a temp dir on the box, keeps the current binary as `/usr/local/bin/agent-watch-relay.prev`, installs the new one and restarts the unit.
+4. Curls `/v1/healthz` on the `AW_LISTEN` address from `/etc/agent-watch-relay/env` for up to 15 s. If it never answers: prints the last journal lines, restores `.prev`, restarts, and exits non-zero.
 
-**`deploy/relay/env.example`** (committed; the real `/etc/agent-watch-relay/env` is not):
-
-```bash
-AW_LISTEN=127.0.0.1:8080
-AW_HOST_TOKEN=__generate_with_openssl_rand_hex_32__
-AW_DATA_DIR=/var/lib/agent-watch-relay
-# AW_FCM_CREDENTIALS=/etc/agent-watch-relay/firebase-service-account.json
-# AW_NTFY_URL=https://ntfy.sh
-# AW_NTFY_TOPIC=__random_unguessable_topic__
-# AW_NTFY_TOKEN=
-AW_TRUST_CF_IP=true
-```
-
-**`deploy/relay/Caddyfile.example`**. Use it only if the VPS has no reverse proxy yet. Caddy handles TLS, WebSocket and SSE with no extra flags:
-
-```caddy
-relay.<domain> {
-    tls /etc/caddy/certs/origin.pem /etc/caddy/certs/origin-key.pem   # Cloudflare Origin Certificate
-    reverse_proxy 127.0.0.1:8080 {
-        flush_interval -1        # stream SSE immediately
-    }
-}
-```
-
-**`deploy/relay/nginx.conf.example`**. Use it only if the VPS already runs nginx. The important lines:
-
-```nginx
-location / {
-    proxy_pass http://127.0.0.1:8080;
-    proxy_http_version 1.1;
-    proxy_set_header Upgrade $http_upgrade;       # WebSocket
-    proxy_set_header Connection $connection_upgrade;
-    proxy_set_header Host $host;
-    proxy_buffering off;                          # SSE
-    proxy_read_timeout 1h;                        # long-lived SSE/WS
-}
-```
-
-**`deploy/relay/deploy.sh`**: builds and ships the binary. It never touches secrets.
-
-```bash
-#!/usr/bin/env bash
-set -euo pipefail
-VPS="${1:?usage: deploy.sh <ssh-target>}"
-make relay-linux
-scp bin/agent-watch-relay-linux-amd64 "$VPS":/tmp/agent-watch-relay
-ssh "$VPS" 'install -m 0755 /tmp/agent-watch-relay /usr/local/bin/agent-watch-relay && systemctl restart agent-watch-relay && systemctl --no-pager status agent-watch-relay | head -5'
-```
-
-`Dockerfile` (optional; only if the owner prefers containers on the VPS):
-
-```dockerfile
-FROM gcr.io/distroless/static:nonroot
-COPY bin/agent-watch-relay-linux-amd64 /agent-watch-relay
-USER nonroot
-ENTRYPOINT ["/agent-watch-relay", "serve"]
-```
+Needs root over SSH (it writes `/usr/local/bin` and runs `systemctl`) and `curl` on the box.
 
 ### 2. One-time VPS setup (owner runs, or the agent with explicit permission)
 
@@ -122,16 +59,26 @@ cp agent-watch-relay.service /etc/systemd/system/   # scp it first
 systemctl daemon-reload && systemctl enable agent-watch-relay
 ```
 
+- **Listen address:** the address your proxy reaches, never a public interface: `127.0.0.1:8080` for nginx/Caddy on the host; the docker bridge `172.17.0.1:8080` for Nginx Proxy Manager in docker, plus an `After=docker.service` drop-in (`deploy/relay/README.md`).
+- **`AW_TRUSTED_PROXIES`:** your proxy's address or network, so the pairing rate limit sees the real client (`deploy/relay/README.md` has the table per topology).
+- **A custom `AW_DATA_DIR`** must be added to `ReadWritePaths=` in a drop-in.
+
 Then run `deploy/relay/deploy.sh <vps>` from the Mac.
 
-### 3. Cloudflare (owner, in the dashboard)
+### 3. TLS in front of the relay (owner)
+
+Any reverse proxy that terminates TLS and passes WebSockets and unbuffered SSE works: nginx or Caddy on the host (examples above), or Nginx Proxy Manager in docker (`deploy/relay/README.md`: forward to `http://172.17.0.1:8080` with **Websockets Support** on).
+
+**Optional: Cloudflare** (in the dashboard):
 
 1. **DNS:** an `A` record `relay` → the VPS IP, **Proxied** (orange cloud).
 2. **SSL/TLS mode:** **Full (strict)**.
-3. **Origin Certificates:** create one for `relay.<domain>`, and install it where the Caddyfile or nginx expects it.
+3. **Origin Certificates:** create one for `relay.<domain>`, and install it where your proxy expects it.
 4. **Network:** WebSockets **On** (the default).
 5. **Caching:** add a Cache Rule "Bypass cache" for `relay.<domain>/*`. SSE and API responses must never be cached.
-6. **Firewall (VPS):** allow 443 only from Cloudflare IP ranges (`ufw` + `https://www.cloudflare.com/ips-v4`). Port 8080 listens on `127.0.0.1` only.
+6. **Client IP:** set `AW_CLIENT_IP_HEADER=CF-Connecting-IP` **only** if the origin accepts traffic from Cloudflare alone; otherwise anyone can send that header.
+
+**Firewall (VPS):** the relay port must not be reachable from the internet; check it with `ss -ltnp` (`deploy/relay/README.md`, step 5). **Do not enable `ufw` blindly on a docker host:** ports published by containers bypass it, its default `deny incoming` drops the proxy container's traffic to `172.17.0.1:8080`, and enabling it without an SSH rule locks you out. The README has the safe order of commands.
 
 ### 4. Verify
 
@@ -148,10 +95,10 @@ Then point the bridge at it and start the service:
 ```bash
 ./bin/agent-watch-bridge configure --relay-url wss://relay.<domain> --host-token "$AW_HOST_TOKEN"
 herdr plugin action invoke --plugin herdr-agent-watch start
-herdr plugin action invoke --plugin herdr-agent-watch status   # relay_connected: true, host_online: true
+herdr plugin action invoke --plugin herdr-agent-watch status   # "relay: connected to relay.<domain>"; the relay api line shows "host_online":true
 ```
 
-**SSE through Cloudflare**, after pairing a device (Phase 4):
+**SSE through the proxy**, after pairing a device (Phase 4):
 
 ```bash
 curl -N -H "Authorization: Bearer <device_token>" https://relay.<domain>/v1/events
@@ -165,7 +112,7 @@ A `snapshot` must arrive immediately, then `:` keepalives every 15 s, for at lea
 
 - [ ] `deploy/relay/` contains the unit, `env.example`, the proxy example(s), `deploy.sh` (executable) and the optional Dockerfile. **No real secrets.**
 - [ ] The relay runs on the VPS under systemd, and survives `systemctl restart` and a reboot.
-- [ ] All the Verify commands pass; SSE stays open for more than 3 minutes through Cloudflare.
+- [ ] All the Verify commands pass; SSE stays open for more than 3 minutes through the proxy.
 - [ ] The bridge on the Mac shows `relay_connected: true`.
 - [ ] `docs/STATUS.md` Phase 3c ticked with the public URL, which is fine to record, but **not** the tokens.
 
@@ -175,7 +122,9 @@ A `snapshot` must arrive immediately, then `:` keepalives every 15 s, for at lea
 
 - **Cloudflare "Flexible" SSL** sends plain HTTP to the origin. Use Full (strict).
 - **Proxy buffering** makes SSE arrive in bursts or never. Use `flush_interval -1` in Caddy, `proxy_buffering off` in nginx.
-- **Idle timeouts:** Cloudflare closes idle connections after about 100 s. The relay's 15 s SSE keepalive and the bridge's 30 s WebSocket ping prevent that. Do not lengthen them.
+- **Idle timeouts:** proxies (Cloudflare: about 100 s) close idle connections. The relay's 15 s SSE keepalive and the 30 s WebSocket pings (both the bridge and the relay send them) prevent that. Do not lengthen them.
+- **Binding to `0.0.0.0`** publishes the relay without TLS. Bind to the address the proxy reaches.
+- **`AW_TRUST_CF_IP` was removed.** An old env file that still sets it only gets a startup warning; set `AW_TRUSTED_PROXIES` instead.
 - **Secrets in shell history:** prefer editing `/etc/agent-watch-relay/env` with an editor over `echo TOKEN >> env`.
 
 ---

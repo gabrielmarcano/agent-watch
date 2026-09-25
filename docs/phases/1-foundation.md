@@ -156,21 +156,37 @@ type Server struct {
     // unexported: listener, mutex, agents, screens, recorded calls, subscribers
 }
 
-func New(t testing.TB) *Server                     // starts listening; t.Cleanup stops it
+func New(t testing.TB) *Server                     // starts listening; t.Cleanup closes it
 func (s *Server) SetAgents(agents []map[string]any) // replaces the agent.list payload; bumps nothing by itself
+func (s *Server) SetWorkspaces(ws []map[string]any) // replaces the workspace.list payload
 func (s *Server) SetScreen(paneID, source, text string) // what agent.read returns
 func (s *Server) EmitStatusChanged(paneID, status string) // pushes a pane_agent_status_changed event to matching subscribers
 func (s *Server) EmitGlobal(event string, data map[string]any) // e.g. "pane_created"
 func (s *Server) Calls() []Call                    // every request received, in order
 func (s *Server) FailNext(method, code, message string) // next call to method returns this error
-func (s *Server) Stop()                            // simulate herdr going away (close listener + streams)
+func (s *Server) HoldNext(method string) *Hold     // next call to method waits until Release (a slow or hung herdr)
+func (s *Server) DropStreams()                     // close every events.subscribe stream; the server keeps answering
+func (s *Server) SetDropStreamsAfterAck(on bool)   // every events.subscribe closes right after its ack (on) or streams normally (off)
+func (s *Server) Stop()                            // simulate herdr going away (close listener + streams, abandon held calls)
 func (s *Server) Start()                           // come back on the same SocketPath
+func (s *Server) Close()                           // stop for good and remove the temp socket dir
 
 type Call struct {
+    ID     string // the request id, as the client sent it
     Method string
     Params map[string]any
 }
+
+// Hold pauses one call. The answer is computed when the request arrives and
+// written only after Release; for events.subscribe, the ack and the stream
+// start after Release. A call never released is dropped when the server stops.
+type Hold struct{ /* unexported */ }
+func (h *Hold) Received() <-chan struct{} // closed once the held call reached the server
+func (h *Hold) Release()                  // let it be answered; safe to call twice
 ```
+
+- **Event writes are bounded:** each `Emit*` write to a subscriber has a 2 s deadline. A subscriber that stops reading is dropped, as herdr drops a dead stream, so an `Emit*` call never blocks the test.
+- **Subscribers are registered before the ack** is written, so an event emitted right after `Subscribe` returns is delivered.
 
 **Behaviour it must copy from real herdr** (see `herdr-socket-api.md`):
 
