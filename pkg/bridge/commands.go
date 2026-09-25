@@ -151,6 +151,21 @@ func (e *Engine) executeCommand(cmd model.CommandMsg) {
 			}
 		}
 
+		// herdr can report a pane as done while a menu is open (Antigravity's
+		// permission dialog under herdr 0.9.1): the text plus Enter would land
+		// in the menu, and a leading "1" would pick an option. herdr's status
+		// is kept as reported; the prompt is just refused. Fail closed if the
+		// screen cannot be read.
+		screen, err := e.readVisible(ctx, cmd.PaneID)
+		if err != nil {
+			reply(false, "herdr_offline", fmt.Sprintf("read screen: %v", err), agentName)
+			return
+		}
+		if _, menu := ad.ParsePrompt(screen); menu {
+			reply(false, "agent_blocked", "a menu is open on the pane; answer or cancel it first", agentName)
+			return
+		}
+
 		promptCtx, promptCancel := context.WithTimeout(ctx, 3*time.Second)
 		defer promptCancel()
 
@@ -282,9 +297,7 @@ func (e *Engine) refreshSoon() {
 // agent's adapter, right before keys are sent. It returns a contract error code
 // (and message) when the screen cannot be read or shows no menu.
 func (e *Engine) readFreshPrompt(ctx context.Context, paneID string, ad agents.Adapter) (agents.Prompt, string, string) {
-	readCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
-	screen, err := e.Herdr.Read(readCtx, paneID, herdr.SourceVisible, 0)
-	cancel()
+	screen, err := e.readVisible(ctx, paneID)
 	if err != nil {
 		return agents.Prompt{}, "herdr_offline", fmt.Sprintf("read screen: %v", err)
 	}
@@ -293,6 +306,13 @@ func (e *Engine) readFreshPrompt(ctx context.Context, paneID string, ad agents.A
 		return agents.Prompt{}, "prompt_changed", "no menu on the visible screen"
 	}
 	return p, "", ""
+}
+
+// readVisible reads the pane's visible screen with a 3 s slice of ctx.
+func (e *Engine) readVisible(ctx context.Context, paneID string) (string, error) {
+	readCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	return e.Herdr.Read(readCtx, paneID, herdr.SourceVisible, 0)
 }
 
 // publishedFingerprint returns the fingerprint of the prompt this bridge

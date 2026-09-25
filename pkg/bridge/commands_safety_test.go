@@ -450,6 +450,72 @@ func TestEngine_PrunesCommandBookkeeping(t *testing.T) {
 	}
 }
 
+// --- Bug 3: prompt must not type into a menu herdr does not report as blocked ---
+
+// herdr 0.9.1 reports agy as "done" while its permission menu is on screen.
+// Dictated text starting with "1" would pick "Yes, run command".
+func TestCommands_PromptRejectedWhileMenuOnScreen(t *testing.T) {
+	h := newTestHarness(t)
+	h.server.SetAgents([]map[string]any{agentRow("w1:p1", "agy", "done", 100)})
+	h.server.SetScreen("w1:p1", "visible", loadFixture(t, "agy", "permission-bash.txt"))
+	h.engine.OnHerdrOnline(true, herdr.Pong{Version: "0.9.1", Protocol: 22})
+
+	before := len(h.server.Calls())
+	res, _ := runCmd(t, h, model.CommandMsg{
+		RequestID: "req-prompt-menu", Action: "prompt", PaneID: "w1:p1",
+		ExpectedSeq: 100, Text: "1 and then run the tests",
+	})
+	if res.OK || res.ErrorCode != "agent_blocked" {
+		t.Errorf("prompt with a menu on screen: ok=%v code=%q, want agent_blocked", res.OK, res.ErrorCode)
+	}
+	if n := callsSince(h, before, "agent.prompt"); n != 0 {
+		t.Errorf("agent.prompt called %d times with a menu on screen, want 0", n)
+	}
+	if keys := sendKeysSince(h, before); len(keys) != 0 {
+		t.Errorf("keys sent: %v, want none", keys)
+	}
+}
+
+// If the screen cannot be read, the prompt is not sent (fail closed).
+func TestCommands_PromptRejectedWhenScreenUnreadable(t *testing.T) {
+	h := newTestHarness(t)
+	h.server.SetAgents([]map[string]any{agentRow("w1:p1", "agy", "done", 100)})
+	h.engine.OnHerdrOnline(true, herdr.Pong{Version: "0.9.1", Protocol: 22})
+	h.server.FailNext("agent.read", "internal", "read failed")
+
+	before := len(h.server.Calls())
+	res, _ := runCmd(t, h, model.CommandMsg{
+		RequestID: "req-prompt-noread", Action: "prompt", PaneID: "w1:p1",
+		ExpectedSeq: 100, Text: "hello",
+	})
+	if res.OK || res.ErrorCode != "herdr_offline" {
+		t.Errorf("prompt with unreadable screen: ok=%v code=%q, want herdr_offline", res.OK, res.ErrorCode)
+	}
+	if n := callsSince(h, before, "agent.prompt"); n != 0 {
+		t.Errorf("agent.prompt called %d times with an unreadable screen, want 0", n)
+	}
+}
+
+// Without a menu on screen, a done agent still takes the prompt.
+func TestCommands_PromptAcceptedWithoutMenu(t *testing.T) {
+	h := newTestHarness(t)
+	h.server.SetAgents([]map[string]any{agentRow("w1:p1", "agy", "done", 100)})
+	h.server.SetScreen("w1:p1", "visible", loadFixture(t, "agy", "no-menu-working.txt"))
+	h.engine.OnHerdrOnline(true, herdr.Pong{Version: "0.9.1", Protocol: 22})
+
+	before := len(h.server.Calls())
+	res, _ := runCmd(t, h, model.CommandMsg{
+		RequestID: "req-prompt-ok", Action: "prompt", PaneID: "w1:p1",
+		ExpectedSeq: 100, Text: "run the tests",
+	})
+	if !res.OK {
+		t.Fatalf("prompt without menu: code=%q msg=%q, want ok", res.ErrorCode, res.Message)
+	}
+	if n := callsSince(h, before, "agent.prompt"); n != 1 {
+		t.Errorf("agent.prompt called %d times, want 1", n)
+	}
+}
+
 func TestRequestIDLogIsBounded(t *testing.T) {
 	var l requestIDLog
 	if l.observe("") {
