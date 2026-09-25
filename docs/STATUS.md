@@ -157,8 +157,9 @@ Keep entries short, and use absolute dates (YYYY-MM-DD).
 - [x] notifications with answer/cancel/prompt actions
 - [x] complication + tile (target-agent rule)
 - [x] release build (R8) parses JSON
-- [ ] verified on the Pixel Watch 2
+- [x] verified on the Pixel Watch 2
 - Notes:
+  - UI State Note: The UI is currently in an alpha state and verified functional on the Google Pixel Watch 2 (pairing, live SSE list with workspace grouping, 2-line chips with herdr status colors, detail screen, dictation, and history). The app is technically usable but not yet final or optimized for everyday real-world utility; it will require subsequent design refinement focused on user usage ergonomics and objective readability rules.
   - `model/Contracts.kt`: mirrors `pkg/model` field by field with `@Keep` on all serializable classes; includes `AgentState.severity()` and `resolveTargetAgent()`.
   - `ContractsTest.kt`: verified against golden fixture `pkg/model/testdata/agent_state.json` and unit tests for target agent resolution.
   - `data/Prefs.kt`: SharedPreferences wrapper for `relay_url`, `device_token`, `device_id`, `fcm_token`, `fcm_registered_token`, `pinned_pane_id`. Purged legacy `local_ip` / `tailscale_ip`.
@@ -173,7 +174,7 @@ Keep entries short, and use absolute dates (YYYY-MM-DD).
   - Verification: `./gradlew :app:testDebugUnitTest`, `./gradlew :app:assembleDebug`, and `./gradlew :app:assembleRelease` (with R8 minification) all passed cleanly. Zero occurrences of `local_ip`, `tailscale`, `8420`, or `usesCleartextTraffic="true"` in `app/src/main`.
 
 ## Phase 5 — End-to-end + docs (release gate)
-- Claimed by: —
+- Claimed by: agy, 2026-09-24
 - [ ] `docs/e2e-report.md` complete for claude / agy / opencode
 - [ ] security spot checks
 - [ ] README + ROADMAP rewritten
