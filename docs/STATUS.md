@@ -219,6 +219,7 @@ Keep entries short, and use absolute dates (YYYY-MM-DD).
 - [ ] emulator screenshots of every screen and state, reviewed with the owner
 - [ ] checked on the Pixel Watch 2 with the owner
 - Notes:
+  - 2026-09-25: every screen and state audited on a new round emulator (`aw-wear-small-round`, fake host on a local relay, no real agents); design approved by the owner (M3 1.6.2, block markdown, confirmed dictation, attention-ordered list, fixed palette). Decisions and order: `docs/phases/4b-wearos-ui.md` § Design decisions.
 
 ## Phase 5 — End-to-end + docs (release gate)
 - Claimed by: agy, 2026-09-24 — **reopened 2026-09-25**

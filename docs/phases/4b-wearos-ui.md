@@ -6,7 +6,7 @@
 |---|---|
 | **Depends on** | Phase 4 (data-layer review fixes merged) |
 | **Parallel with** | The shared-config task (repo-level `agent-watch.env`), which adds `BuildConfig.DEFAULT_RELAY_URL`. It touches `wearos-app/app/build.gradle.kts` build config fields only; don't remove them |
-| **Touches** | `wearos-app/app/src/main/java/com/gabriel/agentwatch/{ui,tile,complication}/**`, navigation in `MainActivity.kt`, `wearos-app/app/src/main/res/**`, dependencies in `wearos-app/app/build.gradle.kts`, UI tests, `wearos-app/ARCHITECTURE.md`, `docs/STATUS.md` (Phase 4/4b lines) |
+| **Touches** | `wearos-app/app/src/main/java/com/gabriel/agentwatch/{ui,tile,complication}/**`, navigation in `MainActivity.kt`, `wearos-app/app/src/main/res/**`, dependencies in `wearos-app/app/build.gradle.kts`, UI tests, `wearos-app/ARCHITECTURE.md`, `docs/STATUS.md` (Phase 4/4b lines). Since the M3 decision (below): plugin versions in `wearos-app/build.gradle.kts`, the Gradle wrapper, and `approval/CommandFeedback` wording |
 | **Must not** | Change `model/`, `network/`, `data/` behaviour (report needs instead), send raw keys, hard-code any relay domain |
 
 ---
@@ -31,6 +31,7 @@
 | Default relay URL | `BuildConfig.DEFAULT_RELAY_URL` from the shared config (may be empty). Remove the hard-coded owner domain. The URL must be editable without voice-only input |
 | `CommandFeedback` | Use it everywhere, including `QuickDictateActivity` toasts (raw exception text today) |
 | `prompt_changed` focus refusal (OpenCode) | Show the relay `message` ("answer it on the Mac") instead of "Prompt changed — refreshed", and don't invite a retry |
+| Tile `LaunchAction` | `setPackageName(context.packageName)`, never the literal `com.gabriel.agentwatch`, so a build with another `applicationId` works |
 
 ## Findings of the 2026-09-25 UI review (evidence-based, on the Pixel Watch 2)
 
@@ -51,6 +52,24 @@
 The reviewer's backlog (impact ÷ effort): error mapping in red ✅ (done in Phase 4 review) · ALLOW never `allow_always` ✅ · status first in list chips · `raw_tail` last lines + "view all" · lock buttons after answering ✅ (logic done; keep it) · cancel notifications on resolve ✅ (logic done) · history row/time/per-pane · remove custom rotary + `scrollAway` · type floor (nothing < 12 sp, body ≥ 14 sp) · rebuild list (attention section) / detail (anchor on the name) / split PromptCard into items · complication + tile (ProtoLayout Material, state, `pane_id`) · dictation confirmation · 401 → pairing, offline reason, dim stale list · **Wear Compose Material 3 migration**.
 
 **Decide early** (propose to the owner with screenshots): migrate to Wear Compose Material 3 now (`ScreenScaffold`, `EdgeButton`, `ConfirmationDialog`) instead of polishing M2 and migrating later.
+
+## Design decisions (owner-approved 2026-09-25)
+
+Taken after an emulator audit of every screen (round 384 px / 192 dp AVD, fake host on a local relay). The audit confirmed every finding above.
+
+| # | Decision | Notes |
+|---|---|---|
+| 1 | **Wear Compose Material 3 now** | `compose-material3` **1.6.2**: the newest release that builds with AGP 8 (compileSdk 35, AGP ≥ 8.6). 1.7.0 needs AGP 9.1 and compileSdk 37: a separate toolchain step later. Toolchain: Gradle 8.14.3, AGP 8.13.2, Kotlin 2.2.21 + Compose compiler plugin, compileSdk 36, targetSdk stays 34. Tiles on `protolayout-material3` 1.4.2 |
+| 2 | **Own markdown renderer, by blocks** | Each paragraph, heading, list or code block is one list item, so long answers never sit in one bezel-clipped item. Drops `multiplatform-markdown-renderer-m2` and phone `compose.material` |
+| 3 | **Dictation is confirmed before sending** | Speak → screen with the text and the target → Send. Same flow from the detail screen and the tile |
+| 4 | **Flat list ordered by attention** | Sections "Needs you · Done · Working · Idle · Unknown"; the workspace is the agent's secondary text |
+| 5 | **Fixed palette** | Status colours carry meaning; no dynamic colour from the watch face |
+
+**Principles:** status before name (icon + word + colour, never truncated, colour never alone) · the first blocked agent visible on open · the prompt anchored under the clock, "View all" past 6 lines · Deny | Allow with the positive on the right, ≥ 52 dp tall, ≥ 8 dp apart, extra options styled apart and `allow_always` confirmed · feedback where the finger is (`ConfirmationDialog` + haptics, errors next to the buttons) · nothing < 12 sp, body ≥ 14 sp, checked at font scale 1.24 · AA contrast for all text · honest states (`auth` first, `stale` dims, "Mac offline" only for `host_online=false`) · no Back buttons · a real Settings screen.
+
+**Order:** toolchain + M3 theme → navigation, `auth`/`stale`, pure logic with JVM tests → list → agent + prompt → history + reader → pairing + settings → dictation, tile, complication → notifications → final screenshots → watch check with the owner. Sequential: one Gradle at a time on this Mac, and every step shares the theme and `MainActivity`.
+
+**Reported, outside 4b:** option label and description arrive glued (adapter or a `PromptOption.description` field) · Claude's "Type something." free-text option can't be completed from the watch (needs its own role or omission in `pkg/agents`) · `screen` history is raw TUI (bridge) · `done` push body is always "Task finished" (relay) · the focus refusal is recognised by its `message` text; a dedicated error code would be sturdier.
 
 ## Verification environment
 
