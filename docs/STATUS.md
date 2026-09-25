@@ -249,6 +249,11 @@ Keep entries short, and use absolute dates (YYYY-MM-DD).
 
 ---
 
+## Shared configuration (`agent-watch.env`, not a numbered phase)
+- Done 2026-09-25: one git-ignored `agent-watch.env` (template `agent-watch.env.example`) holds the relay domain, the host token shared by relay and bridge, the relay's SSH target and its server keys. Consumers: `make config` (creates it, generates the token), `make configure-bridge` (`configure --env-file`, token never in argv), `make deploy-relay [ARGS=--sync-env]` (key-by-key merge of the server env with backup and rollback), Wear OS `BuildConfig.DEFAULT_RELAY_URL`, `make watchos-config` (xcconfig for Phase 6). Guards treat the file as a secret.
+- The owner's file was filled from the running deployment (token matches the relay's by hash; nothing redeployed).
+- Deferred: `AW_ANDROID_APPLICATION_ID` until the tile stops hard-coding the package name (Phase 4b item); the first `--sync-env` on the VPS should be watched (the merge is POSIX awk, tested with BSD awk only).
+
 ## Blocked / questions
 - **herdr dialog-status gap — mitigated 2026-09-25, review regularly.** herdr 0.9.1 misses every agy 1.2.x permission dialog (its rule expects wording agy no longer shows) and any Claude dialog after Claude is relaunched in the same pane (a stale input box wins `live_prompt_box`; it is not WebFetch-specific). Hooks can't fix it: herdr ignores the state reported by the claude/agy integrations. Mitigation: temporary local detection overrides, `tools/herdr-overrides/` (installed on the owner's Mac, herdr keeps being the source of truth). **Remove them once upstream fixes it:** run `tools/herdr-overrides/herdr-overrides.sh check` after every herdr manifest update or upgrade. Draft upstream issues, not filed: `tools/herdr-overrides/UPSTREAM-ISSUES.md`.
 - **OpenCode button focus — guarded 2026-09-25.** Before focus-dependent keys (Allow once/always, Confirm) the bridge reads the pane with `format: "ansi"` and checks the focused button against the dialog's accent colour (works in every bundled theme); if focus moved, it refuses with `prompt_changed` and presses nothing. Verified live in the sandbox (default focus → accepted; focus moved → refused; moved back → accepted). Left: a millisecond window between the ANSI read and `send_keys`; the watch still shows the generic "Prompt changed" text (UI session item below).
