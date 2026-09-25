@@ -11,12 +11,16 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/google"
 )
 
-const defaultFCMEndpoint = "https://fcm.googleapis.com"
+const (
+	defaultFCMEndpoint   = "https://fcm.googleapis.com"
+	defaultFCMRetryDelay = time.Second
+)
 
 // FCM implements Sender for Wear OS via Firebase Cloud Messaging HTTP v1.
 type FCM struct {
@@ -26,6 +30,9 @@ type FCM struct {
 	Endpoint       string
 	OnInvalidToken func(token string)
 	Logger         *slog.Logger
+	// RetryDelay is the pause before retrying a token after a transient
+	// failure. Zero means 1s.
+	RetryDelay time.Duration
 }
 
 // NewFCMFromCredentials parses Firebase service account credentials and initializes FCM.
@@ -112,7 +119,6 @@ func (f *FCM) Send(ctx context.Context, m Message) error {
 	}
 
 	var sendErrors []error
-
 	for _, token := range tokens {
 		payload := fcmMessagePayload{
 			Message: fcmMessage{
@@ -124,42 +130,76 @@ func (f *FCM) Send(ctx context.Context, m Message) error {
 				},
 			},
 		}
-
-		bodyBytes, err := json.Marshal(payload)
-		if err != nil {
-			sendErrors = append(sendErrors, fmt.Errorf("marshal fcm payload: %w", err))
-			continue
+		if err := f.sendToken(ctx, client, url, payload); err != nil {
+			sendErrors = append(sendErrors, err)
 		}
-
-		req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(bodyBytes))
-		if err != nil {
-			sendErrors = append(sendErrors, fmt.Errorf("new fcm request: %w", err))
-			continue
-		}
-		req.Header.Set("Content-Type", "application/json")
-
-		resp, err := client.Do(req)
-		if err != nil {
-			sendErrors = append(sendErrors, fmt.Errorf("fcm post: %w", err))
-			continue
-		}
-
-		respBody, _ := io.ReadAll(resp.Body)
-		_ = resp.Body.Close()
-
-		if resp.StatusCode >= 200 && resp.StatusCode < 300 {
-			continue
-		}
-
-		respStr := string(respBody)
-		if isDeadTokenResponse(resp.StatusCode, respBody) && f.OnInvalidToken != nil {
-			f.OnInvalidToken(token)
-		}
-
-		sendErrors = append(sendErrors, fmt.Errorf("fcm status %d: %s", resp.StatusCode, respStr))
 	}
 
-	return errors.Join(sendErrors...)
+	// Each token was already retried as needed: the dispatcher must not
+	// retry the whole Send, or the tokens that succeeded get it twice.
+	return NoRetry(errors.Join(sendErrors...))
+}
+
+// sendToken delivers one message and retries it once after a transient
+// failure (network error, 429 or 5xx). Other failures are final.
+func (f *FCM) sendToken(ctx context.Context, client *http.Client, url string, payload fcmMessagePayload) error {
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("marshal fcm payload: %w", err)
+	}
+
+	delay := f.RetryDelay
+	if delay <= 0 {
+		delay = defaultFCMRetryDelay
+	}
+
+	retryable, err := f.post(ctx, client, url, payload.Message.Token, body)
+	if err == nil || !retryable {
+		return err
+	}
+
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return err
+	case <-timer.C:
+	}
+
+	_, retryErr := f.post(ctx, client, url, payload.Message.Token, body)
+	if retryErr != nil {
+		return fmt.Errorf("%w (after retry; first attempt: %v)", retryErr, err)
+	}
+	return nil
+}
+
+// post makes one FCM request. retryable reports whether the failure is
+// transient: a network error, 429 or 5xx.
+func (f *FCM) post(ctx context.Context, client *http.Client, url, token string, body []byte) (retryable bool, err error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
+	if err != nil {
+		return false, fmt.Errorf("new fcm request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		// A canceled or expired context is not worth a retry.
+		return ctx.Err() == nil, fmt.Errorf("fcm post: %w", err)
+	}
+	respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
+	_ = resp.Body.Close()
+
+	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		return false, nil
+	}
+
+	if isDeadTokenResponse(resp.StatusCode, respBody) && f.OnInvalidToken != nil {
+		f.OnInvalidToken(token)
+	}
+
+	retryable = resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode >= 500
+	return retryable, fmt.Errorf("fcm status %d: %s", resp.StatusCode, string(respBody))
 }
 
 // fcmErrorResponse is the FCM v1 error body (a google.rpc.Status).

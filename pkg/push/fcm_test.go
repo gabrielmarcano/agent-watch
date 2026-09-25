@@ -6,7 +6,11 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
+	"time"
+
+	"github.com/gabrielmarcano/agent-monitor/pkg/model"
 )
 
 func TestFCM_Payload(t *testing.T) {
@@ -176,6 +180,73 @@ const (
 	fcmErrUnregistered400 = `{"error":{"code":400,"message":"Requested entity was not found.","status":"INVALID_ARGUMENT","details":[{"@type":"type.googleapis.com/google.firebase.fcm.v1.FcmError","errorCode":"UNREGISTERED"}]}}`
 	fcmErrNotJSON         = `<html>Bad Request: INVALID_ARGUMENT</html>`
 )
+
+// TestDispatcher_FCMRetriesPerToken checks that a failure on one token never
+// re-sends the push to the tokens that already got it, and that only transient
+// failures (5xx, 429, network) are retried, once.
+func TestDispatcher_FCMRetriesPerToken(t *testing.T) {
+	var mu sync.Mutex
+	hits := map[string]int{}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var p fcmMessagePayload
+		_ = json.NewDecoder(r.Body).Decode(&p)
+		tok := p.Message.Token
+		mu.Lock()
+		hits[tok]++
+		n := hits[tok]
+		mu.Unlock()
+
+		switch {
+		case tok == "tok-down":
+			w.WriteHeader(http.StatusServiceUnavailable)
+		case tok == "tok-flaky" && n == 1:
+			w.WriteHeader(http.StatusInternalServerError)
+		case tok == "tok-throttled" && n == 1:
+			w.WriteHeader(http.StatusTooManyRequests)
+		case tok == "tok-net" && n == 1:
+			conn, _, err := w.(http.Hijacker).Hijack()
+			if err == nil {
+				_ = conn.Close() // network error on the client side
+			}
+		case tok == "tok-payload":
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = w.Write([]byte(fcmErrTTL))
+		default:
+			w.WriteHeader(http.StatusOK)
+		}
+	}))
+	defer server.Close()
+
+	tokens := []string{"tok-good", "tok-down", "tok-flaky", "tok-throttled", "tok-net", "tok-payload", "tok-good-2"}
+	fcm := &FCM{
+		ProjectID:  "test-proj",
+		Endpoint:   server.URL,
+		Tokens:     func() []string { return tokens },
+		Client:     server.Client(),
+		RetryDelay: time.Millisecond,
+	}
+	d := NewDispatcher([]Sender{fcm}, nil, nil)
+
+	d.OnAgentUpdate(nil, model.AgentState{PaneID: "p1", Label: "test", Status: model.StatusBlocked})
+	d.Wait()
+
+	want := map[string]int{
+		"tok-good":      1, // delivered once, never duplicated
+		"tok-good-2":    1,
+		"tok-down":      2, // 503: one retry
+		"tok-flaky":     2, // 500 then delivered
+		"tok-throttled": 2, // 429 then delivered
+		"tok-net":       2, // network error then delivered
+		"tok-payload":   1, // 400 payload error: retrying cannot help
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	for tok, n := range want {
+		if hits[tok] != n {
+			t.Errorf("%s: %d requests, want %d", tok, hits[tok], n)
+		}
+	}
+}
 
 func TestFCM_DeadTokenDetection(t *testing.T) {
 	tests := []struct {

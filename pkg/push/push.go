@@ -2,6 +2,7 @@ package push
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -39,6 +40,25 @@ type Message struct {
 type Sender interface {
 	Name() string
 	Send(ctx context.Context, m Message) error
+}
+
+// noRetryError marks a Send error that the Dispatcher must not retry.
+type noRetryError struct {
+	err error
+}
+
+func (e noRetryError) Error() string { return e.err.Error() }
+func (e noRetryError) Unwrap() error { return e.err }
+
+// NoRetry marks err so the Dispatcher does not call Send again. A sender with
+// several targets returns it once it has retried each failed target itself:
+// retrying the whole Send would deliver twice to the targets that succeeded.
+// NoRetry(nil) is nil.
+func NoRetry(err error) error {
+	if err == nil {
+		return nil
+	}
+	return noRetryError{err: err}
 }
 
 // Dispatcher processes agent updates, filters them, applies debounce/digest windows,
@@ -263,6 +283,17 @@ func (d *Dispatcher) dispatchLocked(m Message) {
 			defer cancel()
 
 			if err := sender.Send(ctx, m); err != nil {
+				var noRetry noRetryError
+				if errors.As(err, &noRetry) {
+					d.Logger.Error("push send failed",
+						"sender", sender.Name(),
+						"event", m.Event,
+						"pane", m.PaneID,
+						"err", err,
+					)
+					return
+				}
+
 				d.Logger.Warn("push send failed, retrying once",
 					"sender", sender.Name(),
 					"event", m.Event,
