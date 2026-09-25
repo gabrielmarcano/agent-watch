@@ -17,9 +17,39 @@ type sseEvent struct {
 	Data []byte // must be single-line JSON without trailing newline
 }
 
+// subscriber is one SSE client. Its channel is closed exactly once, under mu,
+// and every send also happens under mu, so a send can never hit a closed
+// channel. Sends are non-blocking, so holding mu never blocks a broadcaster.
 type subscriber struct {
-	ch      chan sseEvent
-	dropped bool
+	mu     sync.Mutex
+	ch     chan sseEvent
+	closed bool
+}
+
+// trySend delivers ev without blocking. It returns false when the buffer is
+// full. Sending to a closed subscriber is a no-op that reports success.
+func (sub *subscriber) trySend(ev sseEvent) bool {
+	sub.mu.Lock()
+	defer sub.mu.Unlock()
+	if sub.closed {
+		return true
+	}
+	select {
+	case sub.ch <- ev:
+		return true
+	default:
+		return false
+	}
+}
+
+// close closes the channel once; the SSE handler sees it and returns.
+func (sub *subscriber) close() {
+	sub.mu.Lock()
+	defer sub.mu.Unlock()
+	if !sub.closed {
+		sub.closed = true
+		close(sub.ch)
+	}
 }
 
 // State maintains current agent states, host/herdr online flags, and active SSE subscribers.
@@ -181,18 +211,15 @@ func (s *State) Subscribe() (*subscriber, <-chan sseEvent) {
 // Unsubscribe unregisters an SSE subscriber.
 func (s *State) Unsubscribe(sub *subscriber) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	if _, ok := s.subscribers[sub]; ok {
-		delete(s.subscribers, sub)
-		if !sub.dropped {
-			close(sub.ch)
-		}
-	}
+	delete(s.subscribers, sub)
+	s.mu.Unlock()
+	sub.close()
 }
 
-// broadcast sends ev to all subscribers. Drops slow subscribers whose buffer is full.
-// Never blocks and never holds the mutex while sending.
+// broadcast sends ev to all subscribers and drops slow subscribers whose
+// buffer is full (their channel is closed so the client reconnects and
+// resyncs from a snapshot). It never blocks and never holds the state mutex
+// while sending; each send is guarded by its subscriber's own lock.
 func (s *State) broadcast(ev sseEvent) {
 	s.mu.RLock()
 	subs := make([]*subscriber, 0, len(s.subscribers))
@@ -203,9 +230,7 @@ func (s *State) broadcast(ev sseEvent) {
 
 	var slowSubs []*subscriber
 	for _, sub := range subs {
-		select {
-		case sub.ch <- ev:
-		default:
+		if !sub.trySend(ev) {
 			slowSubs = append(slowSubs, sub)
 		}
 	}
@@ -213,12 +238,11 @@ func (s *State) broadcast(ev sseEvent) {
 	if len(slowSubs) > 0 {
 		s.mu.Lock()
 		for _, sub := range slowSubs {
-			if _, ok := s.subscribers[sub]; ok {
-				delete(s.subscribers, sub)
-				sub.dropped = true
-				close(sub.ch)
-			}
+			delete(s.subscribers, sub)
 		}
 		s.mu.Unlock()
+		for _, sub := range slowSubs {
+			sub.close()
+		}
 	}
 }

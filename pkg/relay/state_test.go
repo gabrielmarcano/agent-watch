@@ -3,6 +3,7 @@ package relay
 import (
 	"encoding/json"
 	"fmt"
+	"sync"
 	"testing"
 	"time"
 
@@ -161,5 +162,79 @@ func TestState_SlowSubscriberDropped(t *testing.T) {
 	<-fastDone
 	if fastReceived < 80 {
 		t.Fatalf("expected fast subscriber to receive 80 events, got %d", fastReceived)
+	}
+}
+
+// TestState_BroadcastUnsubscribeChurn races broadcasters against subscribers
+// that disconnect (Unsubscribe) or get dropped as slow by another broadcaster.
+// A send on a channel closed concurrently panics and takes the host WebSocket
+// handler down with it.
+func TestState_BroadcastUnsubscribeChurn(t *testing.T) {
+	state := NewState()
+	stop := make(chan struct{})
+	var wg sync.WaitGroup
+
+	// Broadcasters.
+	for i := 0; i < 4; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			for n := 0; ; n++ {
+				select {
+				case <-stop:
+					return
+				default:
+				}
+				state.Upsert(model.AgentState{PaneID: fmt.Sprintf("p%d-%d", i, n%8), Status: model.StatusWorking})
+			}
+		}(i)
+	}
+
+	// Subscribers that disconnect after reading a little, and slow ones that
+	// never read, so they are dropped while other broadcasters are sending.
+	for i := 0; i < 8; i++ {
+		wg.Add(1)
+		go func(slow bool) {
+			defer wg.Done()
+			for {
+				select {
+				case <-stop:
+					return
+				default:
+				}
+				sub, ch := state.Subscribe()
+				if slow {
+					// Never read: the buffer fills and a broadcaster drops us.
+					time.Sleep(200 * time.Microsecond)
+				} else {
+				read:
+					for j := 0; j < 3; j++ {
+						select {
+						case _, ok := <-ch:
+							if !ok {
+								break read
+							}
+						case <-stop:
+							break read
+						}
+					}
+				}
+				state.Unsubscribe(sub)
+			}
+		}(i%2 == 0)
+	}
+
+	time.Sleep(time.Second)
+	close(stop)
+
+	finished := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(finished)
+	}()
+	select {
+	case <-finished:
+	case <-time.After(10 * time.Second):
+		t.Fatal("broadcasters or subscribers did not finish (blocked broadcaster?)")
 	}
 }
