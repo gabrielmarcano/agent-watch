@@ -2,27 +2,35 @@ package bridge
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/gabrielmarcano/agent-monitor/pkg/agents"
 	"github.com/gabrielmarcano/agent-monitor/pkg/herdr"
 	"github.com/gabrielmarcano/agent-monitor/pkg/model"
 )
 
-// commandTimeout bounds one command end to end (list, read, send). It stays
-// below the relay's 10 s wait so the watch gets our answer, not a timeout.
+// commandTimeout bounds one command end to end, counted from its arrival:
+// waiting for the pane lock, list, read, send. It stays below the relay's
+// 10 s wait so the watch gets our answer, and so nothing runs after the relay
+// has already answered "timeout".
 const commandTimeout = 9 * time.Second
+
+// maxPromptChars is the contract limit for prompt text, in characters.
+const maxPromptChars = 4000
 
 // HandleRelayMessage processes inbound messages from the relay.
 func (e *Engine) HandleRelayMessage(msg any) {
 	switch m := msg.(type) {
 	case model.CommandMsg:
-		go e.executeCommand(m)
+		e.startCommand(m)
 	case *model.CommandMsg:
-		go e.executeCommand(*m)
+		e.startCommand(*m)
 	case model.ResyncMsg, *model.ResyncMsg:
 		if e.Relay != nil {
 			msgs := e.ConnectMessages(context.Background())
@@ -35,12 +43,47 @@ func (e *Engine) HandleRelayMessage(msg any) {
 	}
 }
 
-func (e *Engine) executeCommand(cmd model.CommandMsg) {
-	unlock := e.lockPane(cmd.PaneID)
-	defer unlock()
+// startCommand starts the command's clock now, on arrival, and runs it in its
+// own goroutine.
+func (e *Engine) startCommand(cmd model.CommandMsg) {
+	timeout := e.CommandTimeout
+	if timeout <= 0 {
+		timeout = commandTimeout
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	go func() {
+		defer cancel()
+		e.executeCommand(ctx, cmd)
+	}()
+}
 
+// herdrErrorCode maps a failed herdr call to a contract error code. fallback
+// covers errors that say nothing more specific.
+func herdrErrorCode(ctx context.Context, err error, fallback string) string {
+	switch {
+	case herdr.IsCode(err, "agent_not_found"):
+		return string(model.ErrUnknownPane) // the pane closed after the list
+	case herdr.IsCode(err, "agent_blocked"):
+		return string(model.ErrAgentBlocked)
+	case errors.Is(err, herdr.ErrUnavailable):
+		return string(model.ErrHerdrOffline)
+	case ctx.Err() != nil:
+		return string(model.ErrTimeout)
+	default:
+		return fallback
+	}
+}
+
+// promptClaim is the replay-guard key for a prompt: a hash, so the text
+// itself is never kept.
+func promptClaim(text string) string {
+	sum := sha256.Sum256([]byte(text))
+	return "prompt:" + hex.EncodeToString(sum[:])
+}
+
+func (e *Engine) executeCommand(ctx context.Context, cmd model.CommandMsg) {
 	reply := func(ok bool, code, errMsg, agentName string) {
-		textLen := len(cmd.Text)
+		textLen := utf8.RuneCountInString(cmd.Text)
 		if e.Logger != nil {
 			if ok {
 				e.Logger.Info("bridge executed command successfully",
@@ -72,6 +115,13 @@ func (e *Engine) executeCommand(cmd model.CommandMsg) {
 		}
 	}
 
+	unlock, err := e.lockPane(ctx, cmd.PaneID)
+	if err != nil {
+		reply(false, string(model.ErrTimeout), "waited too long behind another command on this pane", "")
+		return
+	}
+	defer unlock()
+
 	// Checked under the pane lock, so a replay waits for the original to finish.
 	if e.requests.observe(cmd.RequestID) {
 		reply(false, "stale_state", "duplicate request_id", "")
@@ -83,11 +133,8 @@ func (e *Engine) executeCommand(cmd model.CommandMsg) {
 		return
 	}
 
-	// One budget for the whole command, below the relay's 10 s wait; each herdr
+	// ctx is the whole command's budget, counted from its arrival; each herdr
 	// call gets its own 3 s slice of it.
-	ctx, cancel := context.WithTimeout(context.Background(), commandTimeout)
-	defer cancel()
-
 	if e.Herdr == nil {
 		reply(false, "herdr_offline", "herdr client is nil", "")
 		return
@@ -100,11 +147,7 @@ func (e *Engine) executeCommand(cmd model.CommandMsg) {
 	agentsList, err := e.Herdr.ListAgents(listCtx)
 	listCancel()
 	if err != nil {
-		if errors.Is(err, herdr.ErrUnavailable) {
-			reply(false, "herdr_offline", err.Error(), "")
-			return
-		}
-		reply(false, "herdr_offline", fmt.Sprintf("herdr list: %v", err), "")
+		reply(false, herdrErrorCode(ctx, err, "herdr_offline"), fmt.Sprintf("herdr list: %v", err), "")
 		return
 	}
 	// Whatever the outcome, let the engine catch up so the watch sees the
@@ -137,8 +180,8 @@ func (e *Engine) executeCommand(cmd model.CommandMsg) {
 	switch cmd.Action {
 	case "prompt":
 		trimmed := strings.TrimSpace(cmd.Text)
-		if trimmed == "" || len(cmd.Text) > 4000 {
-			reply(false, "invalid_request", "prompt text must be 1-4000 characters", agentName)
+		if trimmed == "" || utf8.RuneCountInString(cmd.Text) > maxPromptChars {
+			reply(false, "invalid_request", fmt.Sprintf("prompt text must be 1-%d characters", maxPromptChars), agentName)
 			return
 		}
 
@@ -166,7 +209,7 @@ func (e *Engine) executeCommand(cmd model.CommandMsg) {
 		// screen cannot be read.
 		screen, err := e.readVisible(ctx, cmd.PaneID)
 		if err != nil {
-			reply(false, "herdr_offline", fmt.Sprintf("read screen: %v", err), agentName)
+			reply(false, herdrErrorCode(ctx, err, "herdr_offline"), fmt.Sprintf("read screen: %v", err), agentName)
 			return
 		}
 		if _, menu := ad.ParsePrompt(screen); menu {
@@ -174,19 +217,25 @@ func (e *Engine) executeCommand(cmd model.CommandMsg) {
 			return
 		}
 
+		// A double tap sends the same text twice under two request ids,
+		// before herdr reports the new state: type it once. Claimed before
+		// the send, like key presses: typing twice is the worse outcome.
+		claim := promptClaim(cmd.Text)
+		if !e.claimPrompt(cmd.PaneID, info.StateChangeSeq, claim) {
+			reply(false, "stale_state", "this prompt was already sent; waiting for herdr to report a new state", agentName)
+			return
+		}
+
 		promptCtx, promptCancel := context.WithTimeout(ctx, 3*time.Second)
 		defer promptCancel()
 
 		if err := e.Herdr.Prompt(promptCtx, cmd.PaneID, cmd.Text); err != nil {
-			if herdr.IsCode(err, "agent_blocked") {
-				reply(false, "agent_blocked", err.Error(), agentName)
-				return
+			// Nothing was typed only when the dial failed or herdr refused
+			// a blocked agent; anything else may have reached the pane.
+			if errors.Is(err, herdr.ErrUnavailable) || herdr.IsCode(err, "agent_blocked") {
+				e.releasePrompt(cmd.PaneID, info.StateChangeSeq, claim)
 			}
-			if errors.Is(err, herdr.ErrUnavailable) {
-				reply(false, "herdr_offline", err.Error(), agentName)
-				return
-			}
-			reply(false, "internal", err.Error(), agentName)
+			reply(false, herdrErrorCode(ctx, err, "internal"), err.Error(), agentName)
 			return
 		}
 
@@ -234,7 +283,7 @@ func (e *Engine) executeCommand(cmd model.CommandMsg) {
 		// which means "always allow" in its bash prompt).
 		screen, err := e.readVisible(ctx, cmd.PaneID)
 		if err != nil {
-			reply(false, "herdr_offline", fmt.Sprintf("read screen: %v", err), agentName)
+			reply(false, herdrErrorCode(ctx, err, "herdr_offline"), fmt.Sprintf("read screen: %v", err), agentName)
 			return
 		}
 		p, menu := ad.ParsePrompt(screen)
@@ -297,10 +346,7 @@ func (e *Engine) pressPromptKeys(ctx context.Context, paneID string, seq uint64,
 	err := e.Herdr.SendKeys(sendCtx, paneID, keys)
 	cancel()
 	if err != nil {
-		if errors.Is(err, herdr.ErrUnavailable) {
-			return "herdr_offline", err.Error()
-		}
-		return "internal", err.Error()
+		return herdrErrorCode(ctx, err, "internal"), err.Error()
 	}
 	return "", ""
 }
@@ -324,7 +370,7 @@ func (e *Engine) refreshSoon() {
 func (e *Engine) readFreshPrompt(ctx context.Context, paneID string, ad agents.Adapter) (agents.Prompt, string, string) {
 	screen, err := e.readVisible(ctx, paneID)
 	if err != nil {
-		return agents.Prompt{}, "herdr_offline", fmt.Sprintf("read screen: %v", err)
+		return agents.Prompt{}, herdrErrorCode(ctx, err, "herdr_offline"), fmt.Sprintf("read screen: %v", err)
 	}
 	p, ok := ad.ParsePrompt(screen)
 	if !ok {

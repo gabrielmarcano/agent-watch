@@ -34,6 +34,9 @@ type Engine struct {
 	Logger       *slog.Logger
 	RetryDelay   time.Duration // delay between prompt parse retries (defaults to 300ms)
 	HistoryDelay time.Duration // delay before capturing history (defaults to 500ms)
+	// CommandTimeout bounds a command from its arrival, including the wait
+	// for the pane lock (defaults to 9s, below the relay's 10s wait).
+	CommandTimeout time.Duration
 
 	mu          sync.RWMutex
 	states      map[string]*paneState

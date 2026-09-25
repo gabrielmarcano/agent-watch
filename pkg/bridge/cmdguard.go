@@ -1,6 +1,7 @@
 package bridge
 
 import (
+	"context"
 	"sync"
 
 	"github.com/gabrielmarcano/agent-monitor/pkg/herdr"
@@ -85,6 +86,24 @@ func (e *Engine) claimPrompt(paneID string, seq uint64, fp string) bool {
 	return true
 }
 
+// releasePrompt undoes claimPrompt for an action herdr provably never
+// performed (the socket could not be dialed, or herdr refused the prompt
+// without typing it), so a retry at the same seq is not rejected.
+func (e *Engine) releasePrompt(paneID string, seq uint64, fp string) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	c, ok := e.consumed[paneID]
+	if !ok || c.seq != seq {
+		return
+	}
+	for i, f := range c.fingerprints {
+		if f == fp {
+			c.fingerprints = append(c.fingerprints[:i:i], c.fingerprints[i+1:]...)
+			return
+		}
+	}
+}
+
 // forgetConsumedLocked drops the pane's record when the pane is gone or herdr
 // reports a different seq. Callers hold e.mu.
 func (e *Engine) forgetConsumedLocked(paneID string, gone bool, seq uint64) {
@@ -116,28 +135,29 @@ func (e *Engine) pruneConsumed(live []herdr.AgentInfo) {
 // paneLock serialises commands on one pane. It lives only while commands for
 // that pane are waiting or running.
 type paneLock struct {
-	mu   sync.Mutex
-	refs int
+	held chan struct{} // cap 1: a value in it means a command holds the pane
+	refs int           // commands waiting for or holding the lock (guarded by lockMu)
 }
 
-// lockPane blocks until no other command runs on paneID and returns the
-// matching unlock. The entry is removed once no command references it.
-func (e *Engine) lockPane(paneID string) func() {
+// lockPane waits until no other command runs on paneID and returns the
+// matching unlock. It gives up with ctx's error when ctx ends first: a
+// command queued behind a slow one must not run after its deadline, by which
+// time the relay has already answered the watch. The entry is removed once
+// no command references it.
+func (e *Engine) lockPane(ctx context.Context, paneID string) (func(), error) {
 	e.lockMu.Lock()
 	if e.paneLocks == nil {
 		e.paneLocks = make(map[string]*paneLock)
 	}
 	pl, ok := e.paneLocks[paneID]
 	if !ok {
-		pl = &paneLock{}
+		pl = &paneLock{held: make(chan struct{}, 1)}
 		e.paneLocks[paneID] = pl
 	}
 	pl.refs++
 	e.lockMu.Unlock()
 
-	pl.mu.Lock()
-	return func() {
-		pl.mu.Unlock()
+	release := func() {
 		e.lockMu.Lock()
 		pl.refs--
 		if pl.refs == 0 {
@@ -145,4 +165,21 @@ func (e *Engine) lockPane(paneID string) func() {
 		}
 		e.lockMu.Unlock()
 	}
+
+	select {
+	case pl.held <- struct{}{}:
+	case <-ctx.Done():
+		release()
+		return nil, ctx.Err()
+	}
+	// Both cases can be ready at once; never start past the deadline.
+	if err := ctx.Err(); err != nil {
+		<-pl.held
+		release()
+		return nil, err
+	}
+	return func() {
+		<-pl.held
+		release()
+	}, nil
 }
