@@ -5,8 +5,9 @@
 
     <uses-feature android:name="android.hardware.type.watch" />
 
+    <!-- allowBackup=false: the device token in SharedPreferences must never reach cloud backup. -->
     <application
-        android:allowBackup="true"
+        android:allowBackup="false"
         android:icon="@mipmap/ic_launcher"
         android:roundIcon="@mipmap/ic_launcher"
         android:label="Agent Watch"
@@ -33,16 +34,11 @@
             </intent-filter>
         </service>
 
-        <!-- BroadcastReceiver for Notification Actions -->
+        <!-- BroadcastReceiver for Notification Actions: reached only through explicit PendingIntents
+             (ACTION_ANSWER / ACTION_CANCEL / ACTION_PROMPT), so no intent-filter and not exported. -->
         <receiver
             android:name=".network.NotificationActionReceiver"
-            android:exported="false">
-            <intent-filter>
-                <action android:name="com.gabriel.agentwatch.ACTION_ALLOW" />
-                <action android:name="com.gabriel.agentwatch.ACTION_DENY" />
-                <action android:name="com.gabriel.agentwatch.ACTION_REPLY" />
-            </intent-filter>
-        </receiver>
+            android:exported="false" />
 
         <!-- Complication Service -->
         <service
@@ -77,9 +73,11 @@
                 android:resource="@mipmap/ic_launcher" />
         </service>
 
+        <!-- Exported because the tile opens it with a LaunchAction from the system tile renderer,
+             which can only start exported activities. -->
         <activity
             android:name=".tile.QuickDictateActivity"
-            android:exported="false"
+            android:exported="true"
             android:theme="@android:style/Theme.DeviceDefault" />
         
     </application>

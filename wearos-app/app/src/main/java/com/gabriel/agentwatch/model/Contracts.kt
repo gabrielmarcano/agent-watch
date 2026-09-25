@@ -127,6 +127,11 @@ fun AgentState.severity(): Int = when (status) {
     else -> 0
 }
 
+/**
+ * Quick-dictation target (HERDR_REFACTOR_PLAN §11): the pinned agent if it still exists, else the most
+ * recently finished (`done`) one, else herdr's focused pane, else none. Never an arbitrary agent: a
+ * dictated prompt must not land in a pane the user did not choose.
+ */
 fun resolveTargetAgent(agents: List<AgentState>, pinnedPaneId: String?): AgentState? {
     if (agents.isEmpty()) return null
     if (!pinnedPaneId.isNullOrEmpty()) {
@@ -137,5 +142,5 @@ fun resolveTargetAgent(agents: List<AgentState>, pinnedPaneId: String?): AgentSt
     if (doneAgents.isNotEmpty()) {
         return doneAgents.maxByOrNull { it.updated_at }
     }
-    return agents.find { it.focused } ?: agents.firstOrNull()
+    return agents.find { it.focused }
 }

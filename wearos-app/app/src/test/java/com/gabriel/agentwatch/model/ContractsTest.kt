@@ -79,9 +79,10 @@ class ContractsTest {
         val listNoDone = listOf(a1, a4)
         assertEquals("p4", resolveTargetAgent(listNoDone, null)?.pane_id)
 
-        // 5. No focused -> falls back to first
+        // 5. No pinned, no done, no focused -> no target (plan §11): never an arbitrary first agent
         val listNoFocused = listOf(a1)
-        assertEquals("p1", resolveTargetAgent(listNoFocused, null)?.pane_id)
+        assertEquals(null, resolveTargetAgent(listNoFocused, null))
+        assertEquals(null, resolveTargetAgent(listNoFocused, "gone"))
 
         // 6. Empty list -> null
         assertEquals(null, resolveTargetAgent(emptyList(), "p1"))
