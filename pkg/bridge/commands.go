@@ -304,8 +304,10 @@ func (e *Engine) executeCommand(ctx context.Context, cmd model.CommandMsg) {
 			return
 		}
 
-		// The relay's cancel carries no fingerprint (contracts §2.2), so fall back
-		// to the prompt this bridge published for this seq: it is what the watch showed.
+		// The relay forwards the fingerprint the watch sent with cancel; it is
+		// optional (contracts §2.2), and older watches send none. Without one,
+		// fall back to the prompt this bridge published for this seq: it is
+		// what the watch showed.
 		expected := cmd.Fingerprint
 		if expected == "" {
 			expected = e.publishedFingerprint(cmd.PaneID, info.StateChangeSeq)

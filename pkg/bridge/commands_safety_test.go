@@ -159,7 +159,7 @@ func TestCommands_CancelRereadsScreenInsteadOfCachedPrompt(t *testing.T) {
 	h.server.SetScreen("w1:p1", "visible", bash)
 	before := len(h.server.Calls())
 
-	// The relay sends cancel without a fingerprint (CancelRequest has none).
+	// A cancel without a fingerprint (optional in CancelRequest; older watches send none).
 	res, _ := runCmd(t, h, model.CommandMsg{
 		RequestID:   "req-cancel-switched",
 		Action:      "cancel",

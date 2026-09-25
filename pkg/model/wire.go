@@ -69,9 +69,9 @@ type CommandMsg struct {
 	Action      string `json:"action"`     // "prompt" | "answer" | "cancel"
 	PaneID      string `json:"pane_id"`
 	ExpectedSeq uint64 `json:"expected_seq"`
-	Text        string `json:"text,omitempty"`
-	OptionID    string `json:"option_id,omitempty"`
-	Fingerprint string `json:"fingerprint,omitempty"`
+	Text        string `json:"text,omitempty"`        // prompt
+	OptionID    string `json:"option_id,omitempty"`   // answer
+	Fingerprint string `json:"fingerprint,omitempty"` // answer; cancel when the watch sent one
 }
 
 // CommandResultMsg reports command execution outcome from bridge to relay.

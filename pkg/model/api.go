@@ -35,7 +35,7 @@ type HistoryResponse struct {
 
 // PromptRequest delivers user input to an agent pane.
 type PromptRequest struct {
-	Text        string `json:"text"` // 1..4000 chars
+	Text        string `json:"text"` // 1..4000 characters (Unicode code points, not bytes)
 	ExpectedSeq uint64 `json:"expected_seq"`
 }
 

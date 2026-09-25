@@ -25,8 +25,8 @@ func TestFingerprintKnownAnswers(t *testing.T) {
 		labels              []string
 	}{
 		{
-			// The example PendingPrompt in contracts.md §1.2. The document prints
-			// 9f2c61d0a4b3e871 for it; its own formula gives this value.
+			// The example PendingPrompt in contracts.md §1.2. The document
+			// prints this value since 2026-09-25 (it used to show a made-up one).
 			name: "contracts.md example", kind: model.PromptPermission,
 			title: "Bash command", detail: "go test ./...",
 			labels: []string{"Yes", "Yes, and don't ask again for go test commands", "No, and tell Claude what to do differently"},
