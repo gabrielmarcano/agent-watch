@@ -34,7 +34,7 @@ class FakeRelay : Closeable {
     @Volatile var historyJson: String = """{"items":[]}"""
     /** Status for new `/v1/events` connections; 200 opens a stream that starts with a `snapshot` of [agents]. */
     @Volatile var eventsStatus: Int = 200
-    /** Status + body per exact path for anything else; default `200 {"ok":true}`. */
+    /** Status + body per exact path, overriding the defaults (`200 {"ok":true}` for commands). */
     val responses = ConcurrentHashMap<String, Pair<Int, String>>()
 
     init {
@@ -89,7 +89,9 @@ class FakeRelay : Closeable {
 
             val out = socket.getOutputStream()
             val basePath = path.substringBefore('?')
+            val override = responses[basePath]
             when {
+                override != null -> respond(socket, override.first, override.second)
                 basePath == "/v1/events" && eventsStatus == 200 -> {
                     out.write("HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-cache\r\n\r\n".toByteArray())
                     out.write("event: snapshot\ndata: ${gson.toJson(agents)}\n\n".toByteArray())

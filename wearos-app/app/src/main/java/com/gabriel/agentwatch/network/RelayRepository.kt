@@ -16,6 +16,11 @@ private class PrefsCredentials(private val prefs: Prefs) : RelayCredentials {
 
 /**
  * Process-wide owner of the relay link and the live [state]. Android façade over [RelayEngine].
+ *
+ * Every 401 (stream, refresh, commands, notification actions, and clients built elsewhere once [init]
+ * ran) ends in one state: token cleared, stream stopped, `state.auth == AuthState.REVOKED`, empty
+ * lists. The UI must check [UiState.auth] before anything else and show pairing instead of
+ * "Mac is offline" / "No active agents".
  */
 object RelayRepository {
     private const val TAG = "RelayRepository"
@@ -30,11 +35,14 @@ object RelayRepository {
     fun init(context: Context) {
         if (engine != null) return
         val appContext = context.applicationContext
-        engine = RelayEngine(
+        val newEngine = RelayEngine(
             state = _state,
             credentials = PrefsCredentials(Prefs(appContext)),
             log = { Log.d(TAG, it) }
         )
+        engine = newEngine
+        // Clients built outside the repository (tile, complication, QuickDictate) report 401s here too.
+        RelayClient.unauthorizedListener = newEngine::onUnauthorized
     }
 
     fun getClient(): RelayClient? = engine?.getClient()

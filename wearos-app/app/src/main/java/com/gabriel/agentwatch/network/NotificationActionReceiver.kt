@@ -11,7 +11,6 @@ import androidx.core.app.RemoteInput
 import com.gabriel.agentwatch.MainActivity
 import com.gabriel.agentwatch.approval.FeedbackSurface
 import com.gabriel.agentwatch.approval.commandErrorFeedback
-import com.gabriel.agentwatch.data.Prefs
 import kotlinx.coroutines.*
 
 class NotificationActionReceiver : BroadcastReceiver() {
@@ -31,14 +30,17 @@ class NotificationActionReceiver : BroadcastReceiver() {
 
         Log.d(TAG, "Received notification action: $action for pane: $paneId, seq: $expectedSeq")
 
-        val prefs = Prefs(context)
-        if (!prefs.isPaired) {
-            Log.e(TAG, "Not paired; cannot perform action")
+        val notifManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+
+        // The repository's client: a 401 here revokes the pairing like anywhere else in the app.
+        RelayRepository.init(context)
+        val client = RelayRepository.getClient()
+        if (client == null) {
+            Log.w(TAG, "Not paired; cannot perform action")
+            val message = commandErrorFeedback(RelayError("not_paired", "Client not configured", 0), FeedbackSurface.NOTIFICATION).message
+            showFeedback(context, notifManager, notifId, paneId, message, isSuccess = false)
             return
         }
-
-        val client = RelayClient(prefs.relayUrl, prefs.deviceToken)
-        val notifManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
 
         val pendingResult = goAsync()
 

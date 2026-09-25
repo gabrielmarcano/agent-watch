@@ -23,6 +23,12 @@ interface RelayCredentials {
         get() = relayUrl.isNotBlank() && !deviceToken.isNullOrBlank()
 }
 
+/** Side effects the engine triggers but does not own. Called outside the engine's lock. */
+interface RelayEngineHooks {
+    /** The relay rejected the stored token (401); the credentials are already cleared. */
+    fun onAuthRevoked() {}
+}
+
 /**
  * The relay link without Android: SSE lifecycle and reconnect, the merged agent/history state, and the
  * commands. [RelayRepository] is the process-wide Android façade over one instance.
@@ -33,6 +39,7 @@ class RelayEngine(
     private val state: MutableStateFlow<UiState>,
     private val credentials: RelayCredentials,
     private val http: RelayHttpClients = RelayHttpClients.shared,
+    private val hooks: RelayEngineHooks = object : RelayEngineHooks {},
     private val reconnectDelayMs: (attempt: Int) -> Long = ::defaultReconnectDelayMs,
     private val dispatcher: CoroutineDispatcher = Dispatchers.IO,
     private val log: (String) -> Unit = {}
@@ -61,7 +68,7 @@ class RelayEngine(
         val token = credentials.deviceToken
         val current = client
         if (current != null && current.baseUrl == url && current.token == token) return current
-        return RelayClient(url, token, http).also { client = it }
+        return RelayClient(url, token, http, onUnauthorized = ::onUnauthorized).also { client = it }
     }
 
     /**
@@ -74,7 +81,33 @@ class RelayEngine(
         pairingEpoch++
         client = null
         store.clear()
-        state.value = UiState(connection = Connection.Connecting)
+        state.value = UiState(connection = Connection.Connecting, auth = authWhenStoppedLocked())
+    }
+
+    /** PAIRED if a token is stored; otherwise REVOKED stays REVOKED (the UI explains why), else UNPAIRED. */
+    private fun authWhenStoppedLocked(): AuthState = when {
+        credentials.isPaired -> AuthState.PAIRED
+        state.value.auth == AuthState.REVOKED -> AuthState.REVOKED
+        else -> AuthState.UNPAIRED
+    }
+
+    /**
+     * The relay rejected [token] with 401 (any request or the stream). If it is still the stored token,
+     * the pairing is revoked: token cleared, stream stopped, no reconnect, agents and history dropped,
+     * and [UiState.auth] = [AuthState.REVOKED]. A 401 for an older token (re-paired meanwhile) is ignored.
+     */
+    fun onUnauthorized(token: String) {
+        synchronized(lock) {
+            if (token.isBlank() || credentials.deviceToken != token) return
+            log("Relay rejected the device token (401): pairing revoked")
+            credentials.clearAuth()
+            stopLocked("Session expired")
+            pairingEpoch++
+            client = null
+            store.clear()
+            state.value = UiState(connection = Connection.Offline("Session expired"), auth = AuthState.REVOKED)
+        }
+        hooks.onAuthRevoked()
     }
 
     /** Reconnects from scratch with the stored pairing (call after pairing or re-pairing). */
@@ -85,11 +118,13 @@ class RelayEngine(
 
     fun start() = synchronized(lock) {
         if (!credentials.isPaired) {
-            state.update { it.copy(connection = Connection.Offline("Not paired")) }
+            val auth = authWhenStoppedLocked()
+            state.update { it.copy(connection = Connection.Offline("Not paired"), stale = true, auth = auth) }
             return
         }
         if (started) return
         started = true
+        state.update { it.copy(auth = AuthState.PAIRED) }
 
         val newScope = CoroutineScope(SupervisorJob() + dispatcher)
         scope = newScope
@@ -145,14 +180,8 @@ class RelayEngine(
                     else -> "HTTP $statusCode"
                 }
                 log("SSE onFailure: $reason (code: $statusCode)")
-                if (statusCode == 401) {
-                    credentials.clearAuth()
-                    client = null
-                    stopLocked("Authentication revoked")
-                    store.clear()
-                    state.value = UiState(connection = Connection.Offline("Authentication revoked"))
-                    return@onStream
-                }
+                // A 401 was already reported by RelayClient.events → onUnauthorized; never retry with that token.
+                if (statusCode == 401) return@onStream
                 scheduleReconnectLocked(reason)
             }
         })

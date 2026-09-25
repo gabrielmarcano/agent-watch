@@ -9,6 +9,16 @@ sealed class Connection {
     data class Offline(val reason: String) : Connection()
 }
 
+/** Whether the watch holds a device token the relay accepts. */
+enum class AuthState {
+    /** A token is stored (assumed valid until the relay says otherwise). */
+    PAIRED,
+    /** No token stored: never paired, or cleared before this process started. */
+    UNPAIRED,
+    /** The relay answered 401 during this process; the token has been cleared. */
+    REVOKED
+}
+
 data class UiState(
     val connection: Connection = Connection.Connecting,
     val hostOnline: Boolean = false,
@@ -21,5 +31,6 @@ data class UiState(
      * reconnects, and after `stop()`. Cleared by the next `snapshot`. The list stays visible; the UI
      * should dim it or show "Reconnecting…" rather than present it as current.
      */
-    val stale: Boolean = true
+    val stale: Boolean = true,
+    val auth: AuthState = AuthState.PAIRED
 )

@@ -128,6 +128,41 @@ class RelayClientTest {
     }
 
     @Test
+    fun a401IsReportedWithTheTokenThatWasRejected() = runBlocking {
+        server.enqueue(MockResponse().setResponseCode(401).setBody("""{"error":{"code":"unauthorized","message":"no"}}"""))
+        val rejected = mutableListOf<String>()
+        val client = RelayClient(baseUrl(), "tok", onUnauthorized = { rejected += it })
+
+        client.agents()
+
+        assertEquals(listOf("tok"), rejected)
+    }
+
+    @Test
+    fun clientsBuiltOutsideTheRepositoryReportThroughTheProcessWideListener() = runBlocking {
+        server.enqueue(MockResponse().setResponseCode(401))
+        val rejected = mutableListOf<String>()
+        RelayClient.unauthorizedListener = { rejected += it }
+        try {
+            RelayClient(baseUrl(), "tile-token").agents() // e.g. the tile or complication
+        } finally {
+            RelayClient.unauthorizedListener = null
+        }
+
+        assertEquals(listOf("tile-token"), rejected)
+    }
+
+    @Test
+    fun a401WithoutATokenIsNotARevocation() = runBlocking {
+        server.enqueue(MockResponse().setResponseCode(401))
+        val rejected = mutableListOf<String>()
+
+        RelayClient(baseUrl(), null, onUnauthorized = { rejected += it }).pair("123456", "watch")
+
+        assertTrue(rejected.isEmpty())
+    }
+
+    @Test
     fun relayErrorBodyIsMapped() = runBlocking {
         server.enqueue(
             MockResponse().setResponseCode(409)

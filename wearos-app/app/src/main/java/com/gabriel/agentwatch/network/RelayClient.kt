@@ -77,11 +77,16 @@ class RelayHttpClients private constructor(
  *
  * Every suspending call is cancellable: cancelling the coroutine (or a `withTimeout` around it)
  * cancels the OkHttp call at once, and the caller sees the `CancellationException`, never a failure.
+ *
+ * Any 401 (REST or SSE) is reported with the rejected [token] to [onUnauthorized], or, for clients
+ * built without one, to the process-wide [unauthorizedListener] (the repository), which revokes the
+ * pairing only if that token is still the stored one.
  */
 class RelayClient(
     val baseUrl: String,
     internal val token: String? = null,
-    private val http: RelayHttpClients = RelayHttpClients.shared
+    private val http: RelayHttpClients = RelayHttpClients.shared,
+    private val onUnauthorized: ((token: String) -> Unit)? = null
 ) {
     private val gson = Gson()
     private val jsonMediaType = "application/json; charset=utf-8".toMediaType()
@@ -151,6 +156,7 @@ class RelayClient(
                 } catch (e: RuntimeException) { // malformed JSON (JsonSyntaxException)
                     Result.failure(e)
                 }
+                if (response.code == 401) reportUnauthorized()
                 cont.resume(result)
             }
         })
@@ -208,21 +214,46 @@ class RelayClient(
         return executeRequest(http.command, request, Unit::class.java)
     }
 
+    /** `GET /v1/events`. A 401 is reported to the unauthorized handler before [listener] sees the failure. */
     fun events(listener: EventSourceListener): EventSource {
         val request = newRequestBuilder("/v1/events")
             .header("Accept", "text/event-stream")
             .get()
             .build()
-        return EventSources.createFactory(http.sse).newEventSource(request, listener)
+        val reporting = object : EventSourceListener() {
+            override fun onOpen(eventSource: EventSource, response: Response) = listener.onOpen(eventSource, response)
+            override fun onEvent(eventSource: EventSource, id: String?, type: String?, data: String) =
+                listener.onEvent(eventSource, id, type, data)
+            override fun onClosed(eventSource: EventSource) = listener.onClosed(eventSource)
+            override fun onFailure(eventSource: EventSource, t: Throwable?, response: Response?) {
+                if (response?.code == 401) reportUnauthorized()
+                listener.onFailure(eventSource, t, response)
+            }
+        }
+        return EventSources.createFactory(http.sse).newEventSource(request, reporting)
     }
 
-    private companion object {
+    /** The relay rejected [token] (HTTP 401, `unauthorized`): tell whoever owns the pairing. */
+    private fun reportUnauthorized() {
+        val rejected = token
+        if (rejected.isNullOrBlank()) return // e.g. /v1/pair: no token, nothing was revoked
+        (onUnauthorized ?: unauthorizedListener)?.invoke(rejected)
+    }
+
+    companion object {
+        /**
+         * Receives 401s from clients built without an [onUnauthorized] handler (tile, complication,
+         * QuickDictate). Set by [RelayRepository.init]; null until then.
+         */
+        @Volatile
+        var unauthorizedListener: ((token: String) -> Unit)? = null
+
         /**
          * OkHttp's `callTimeout` fails with a bare `InterruptedIOException("timeout")`. Report it as a
          * [SocketTimeoutException] so `commandErrorFeedback` shows "Relay timed out" (the command may
          * still have run) instead of "Can't reach the relay".
          */
-        fun asTimeout(e: IOException): IOException =
+        private fun asTimeout(e: IOException): IOException =
             if (e is InterruptedIOException && e !is SocketTimeoutException) {
                 SocketTimeoutException(e.message ?: "timeout").also { it.initCause(e) }
             } else {
