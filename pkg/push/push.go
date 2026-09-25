@@ -25,8 +25,12 @@ const (
 	EventResolved Event = "resolved"
 )
 
-// maxShownBlocked caps Dispatcher.blockedShown.
-const maxShownBlocked = 1024
+const (
+	defaultDebounce = 5 * time.Second
+	defaultWindow   = 10 * time.Second
+	// maxShownBlocked caps Dispatcher.blockedShown.
+	maxShownBlocked = 1024
+)
 
 // Message is the push notification payload forwarded to Senders.
 type Message struct {
@@ -132,8 +136,8 @@ func NewDispatcher(senders []Sender, now func() time.Time, logger *slog.Logger) 
 		Senders:          senders,
 		Now:              now,
 		Logger:           logger,
-		DebounceDuration: 5 * time.Second,
-		WindowDuration:   10 * time.Second,
+		DebounceDuration: defaultDebounce,
+		WindowDuration:   defaultWindow,
 		afterFunc:        realAfterFunc,
 		lastPush:         make(map[string]time.Time),
 		latest:           make(map[string]model.AgentState),
@@ -141,8 +145,21 @@ func NewDispatcher(senders []Sender, now func() time.Time, logger *slog.Logger) 
 	}
 }
 
-// initLocked fills in what a Dispatcher built without NewDispatcher lacks.
+// initLocked gives a Dispatcher built without NewDispatcher (or with zero
+// fields) the same defaults, so it never panics on a nil clock or logger.
 func (d *Dispatcher) initLocked() {
+	if d.Now == nil {
+		d.Now = time.Now
+	}
+	if d.Logger == nil {
+		d.Logger = slog.Default()
+	}
+	if d.DebounceDuration <= 0 {
+		d.DebounceDuration = defaultDebounce
+	}
+	if d.WindowDuration <= 0 {
+		d.WindowDuration = defaultWindow
+	}
 	if d.afterFunc == nil {
 		d.afterFunc = realAfterFunc
 	}
@@ -450,7 +467,7 @@ func (d *Dispatcher) dispatchLocked(m Message) {
 			continue
 		}
 		d.wg.Add(1)
-		go func(sender Sender) {
+		go func(sender Sender, logger *slog.Logger) {
 			defer d.wg.Done()
 
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -459,7 +476,7 @@ func (d *Dispatcher) dispatchLocked(m Message) {
 			if err := sender.Send(ctx, m); err != nil {
 				var noRetry noRetryError
 				if errors.As(err, &noRetry) {
-					d.Logger.Error("push send failed",
+					logger.Error("push send failed",
 						"sender", sender.Name(),
 						"event", m.Event,
 						"pane", m.PaneID,
@@ -468,7 +485,7 @@ func (d *Dispatcher) dispatchLocked(m Message) {
 					return
 				}
 
-				d.Logger.Warn("push send failed, retrying once",
+				logger.Warn("push send failed, retrying once",
 					"sender", sender.Name(),
 					"event", m.Event,
 					"pane", m.PaneID,
@@ -479,7 +496,7 @@ func (d *Dispatcher) dispatchLocked(m Message) {
 				defer retryCancel()
 
 				if retryErr := sender.Send(retryCtx, m); retryErr != nil {
-					d.Logger.Error("push retry failed",
+					logger.Error("push retry failed",
 						"sender", sender.Name(),
 						"event", m.Event,
 						"pane", m.PaneID,
@@ -487,7 +504,7 @@ func (d *Dispatcher) dispatchLocked(m Message) {
 					)
 				}
 			}
-		}(s)
+		}(s, d.Logger)
 	}
 }
 

@@ -2,6 +2,7 @@ package push
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -123,6 +124,27 @@ func newTestDispatcher(senders ...Sender) (*Dispatcher, *fakeClock, *fakeTimers)
 
 func blockedState(pane, label string) model.AgentState {
 	return model.AgentState{PaneID: pane, Label: label, Status: model.StatusBlocked}
+}
+
+// A Dispatcher built without NewDispatcher gets the defaults instead of
+// panicking: no clock, no logger, no durations. No panics in daemons.
+func TestDispatcher_ZeroValueIsUsable(t *testing.T) {
+	good := &mockSender{name: "good"}
+	failing := &mockSender{name: "failing", failErr: errors.New("boom")} // logs through Logger
+	d := &Dispatcher{Senders: []Sender{good, failing}}
+
+	d.OnAgentUpdate(nil, blockedState("p1", "one")) // sent at once
+	d.OnAgentUpdate(nil, blockedState("p2", "two")) // held
+	d.Flush()                                       // also stops the real window timer
+	d.Wait()
+
+	if n := len(good.getMessages()); n != 2 {
+		t.Fatalf("good sender got %d messages, want 2", n)
+	}
+	if d.DebounceDuration != 5*time.Second || d.WindowDuration != 10*time.Second {
+		t.Fatalf("durations = %v/%v, want the 5s/10s defaults", d.DebounceDuration, d.WindowDuration)
+	}
+	(&Dispatcher{}).Flush() // nothing to flush, nothing to panic on
 }
 
 // The debounce map must not keep one entry per pane forever: entries the
