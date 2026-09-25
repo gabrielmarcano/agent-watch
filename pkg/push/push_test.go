@@ -442,17 +442,19 @@ func TestDispatcher_DigestBodyIsTruncated(t *testing.T) {
 	}
 }
 
-// A digest of finished agents only must not claim they need the user.
+// A digest of finished agents only must not claim they need the user, and
+// only a digest covering a blocked agent is urgent (FCM high priority).
 func TestDispatcher_DigestTitleFitsTheEvents(t *testing.T) {
 	tests := []struct {
-		name      string
-		blocked   []string // panes that block, after p0
-		done      []string // panes that finish, after p0
-		wantTitle string
+		name       string
+		blocked    []string // panes that block, after p0
+		done       []string // panes that finish, after p0
+		wantTitle  string
+		wantUrgent bool
 	}{
-		{"done only", nil, []string{"p1", "p2", "p3", "p4"}, "4 agents finished"},
-		{"blocked only", []string{"p1", "p2", "p3", "p4"}, nil, "4 agents need you"},
-		{"mixed", []string{"p1", "p2"}, []string{"p3", "p4"}, "4 agents need you"},
+		{"done only", nil, []string{"p1", "p2", "p3", "p4"}, "4 agents finished", false},
+		{"blocked only", []string{"p1", "p2", "p3", "p4"}, nil, "4 agents need you", true},
+		{"mixed", []string{"p1", "p2"}, []string{"p3", "p4"}, "4 agents need you", true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -475,6 +477,9 @@ func TestDispatcher_DigestTitleFitsTheEvents(t *testing.T) {
 			}
 			if msgs[1].Title != tt.wantTitle {
 				t.Errorf("digest title = %q, want %q", msgs[1].Title, tt.wantTitle)
+			}
+			if msgs[1].AnyBlocked != tt.wantUrgent {
+				t.Errorf("digest AnyBlocked = %t, want %t", msgs[1].AnyBlocked, tt.wantUrgent)
 			}
 		})
 	}

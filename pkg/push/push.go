@@ -44,6 +44,9 @@ type Message struct {
 	Fingerprint    string
 	AllowOptionID  string
 	DenyOptionID   string
+	// AnyBlocked is set on a digest that covers at least one blocked agent:
+	// it waits for an approval, so it is as urgent as a blocked push.
+	AnyBlocked bool
 }
 
 // Sender delivers a push notification to a platform.
@@ -454,9 +457,10 @@ func digestMessage(due []Message) Message {
 		title = fmt.Sprintf("%d agents need you", len(due))
 	}
 	return Message{
-		Event: EventDigest,
-		Title: title,
-		Body:  TruncateRunes(strings.Join(labels, ", "), 240),
+		Event:      EventDigest,
+		Title:      title,
+		Body:       TruncateRunes(strings.Join(labels, ", "), 240),
+		AnyBlocked: anyBlocked,
 	}
 }
 

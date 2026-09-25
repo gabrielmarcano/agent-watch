@@ -82,11 +82,23 @@ func TestFCM_Payload(t *testing.T) {
 				"android":{"priority":"normal","ttl":"600s"}}}`,
 		},
 		{
-			name: "digest",
-			msg:  Message{Event: EventDigest, Title: "4 agents need you", Body: "a, b, c, d"},
+			// A digest covering a blocked agent is an approval too: high
+			// priority, or Doze may hold it.
+			name: "digest with a blocked agent",
+			msg:  Message{Event: EventDigest, Title: "4 agents need you", Body: "a, b, c, d", AnyBlocked: true},
 			want: `{"message":{"token":"device-token-1",
 				"data":{"event":"digest","pane_id":"","agent":"","label":"",
 				        "title":"4 agents need you","body":"a, b, c, d",
+				        "state_change_seq":"0","fingerprint":"",
+				        "allow_option_id":"","deny_option_id":""},
+				"android":{"priority":"high","ttl":"600s"}}}`,
+		},
+		{
+			name: "digest of done agents",
+			msg:  Message{Event: EventDigest, Title: "4 agents finished", Body: "a, b, c, d"},
+			want: `{"message":{"token":"device-token-1",
+				"data":{"event":"digest","pane_id":"","agent":"","label":"",
+				        "title":"4 agents finished","body":"a, b, c, d",
 				        "state_change_seq":"0","fingerprint":"",
 				        "allow_option_id":"","deny_option_id":""},
 				"android":{"priority":"normal","ttl":"600s"}}}`,

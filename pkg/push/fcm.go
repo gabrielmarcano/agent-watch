@@ -103,8 +103,9 @@ func (f *FCM) Send(ctx context.Context, m Message) error {
 	}
 	url := fmt.Sprintf("%s/v1/projects/%s/messages:send", strings.TrimRight(endpoint, "/"), f.ProjectID)
 
+	// An approval is waiting: high priority, or Doze may hold the push.
 	priority := "normal"
-	if m.Event == EventBlocked {
+	if m.Event == EventBlocked || (m.Event == EventDigest && m.AnyBlocked) {
 		priority = "high"
 	}
 

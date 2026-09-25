@@ -432,7 +432,7 @@ It carries **only** these three keys, and never a notification block:
 - Apps must ignore an `event` value they do not know, like unknown JSON fields.
 
 FCM message options:
-- `android.priority = "high"` for `blocked`, `"normal"` otherwise (`resolved` included).
+- `android.priority = "high"` for `blocked` and for a `digest` covering at least one `blocked` agent (otherwise Doze may hold an approval). `"normal"` otherwise: `done`, a `done`-only `digest`, `resolved`.
 - `android.ttl = "600s"`.
 
 **Dead tokens:** the relay unregisters a device's FCM token only when FCM says the token itself is dead:
