@@ -52,6 +52,28 @@ class RelayEngineTest {
     }
 
     @Test
+    fun agentNewsIsReportedForNotificationsAndSurfaces() {
+        val updates = java.util.concurrent.CopyOnWriteArrayList<AgentsUpdate>()
+        engine.stop()
+        engine = RelayEngine(
+            state, FakeCredentials(relay.url, "tok"), reconnectDelayMs = { 50 },
+            hooks = object : RelayEngineHooks {
+                override fun onAgentsUpdated(update: AgentsUpdate) { updates += update }
+            }
+        )
+        engine.start()
+        awaitTrue(what = "snapshot news") { updates.any { it is AgentsUpdate.All && it.agents.isNotEmpty() } }
+
+        relay.sendAgent(agent("A", 2, status = "working"))
+        relay.send("event: agent_removed\ndata: {\"pane_id\":\"A\"}\n\n")
+
+        awaitTrue(what = "changed + removed news") {
+            updates.any { it is AgentsUpdate.Changed && it.agent.state_change_seq == 2L } &&
+                updates.any { it == AgentsUpdate.Removed("A") }
+        }
+    }
+
+    @Test
     fun aDroppedStreamIsReconnected() {
         engine.start()
         awaitValue(state, what = "live snapshot") { it.agents.isNotEmpty() }

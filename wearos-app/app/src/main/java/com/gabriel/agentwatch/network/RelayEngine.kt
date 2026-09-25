@@ -23,8 +23,20 @@ interface RelayCredentials {
         get() = relayUrl.isNotBlank() && !deviceToken.isNullOrBlank()
 }
 
+/** Authoritative news about agents, for side effects (notifications, complication, tile). */
+sealed interface AgentsUpdate {
+    /** The whole list: an SSE snapshot or a merged refresh. */
+    data class All(val agents: List<AgentState>) : AgentsUpdate
+    /** One agent changed (SSE `agent`, applied). */
+    data class Changed(val agent: AgentState) : AgentsUpdate
+    /** A pane closed or lost its agent (SSE `agent_removed`). */
+    data class Removed(val paneId: String) : AgentsUpdate
+}
+
 /** Side effects the engine triggers but does not own. Called outside the engine's lock. */
 interface RelayEngineHooks {
+    /** The agent list changed; see [AgentsUpdate]. */
+    fun onAgentsUpdated(update: AgentsUpdate) {}
     /** The SSE stream opened: the relay is reachable and accepts the token (retry pending work here). */
     fun onStreamOpened() {}
     /** The relay rejected the stored token (401); the credentials are already cleared. */
@@ -169,7 +181,9 @@ class RelayEngine(
             }
 
             override fun onEvent(eventSource: EventSource, id: String?, type: String?, data: String) {
-                onStream(generation) { handleEventLocked(type ?: "", data) }
+                var update: AgentsUpdate? = null
+                onStream(generation) { update = handleEventLocked(type ?: "", data) }
+                update?.let(hooks::onAgentsUpdated)
             }
 
             override fun onClosed(eventSource: EventSource) {
@@ -230,7 +244,8 @@ class RelayEngine(
         state.update { it.copy(agents = agents, hostOnline = hostOnline, herdrOnline = herdrOnline) }
     }
 
-    private fun handleEventLocked(type: String, data: String) {
+    /** Applies one SSE event; returns the agent news it carries, if any. */
+    private fun handleEventLocked(type: String, data: String): AgentsUpdate? {
         try {
             when (type) {
                 "snapshot" -> {
@@ -238,13 +253,19 @@ class RelayEngine(
                     publishAgentsLocked()
                     reconnectAttempt = 0 // only a stream that delivered data resets the backoff
                     state.update { it.copy(connection = Connection.Live, stale = false) }
+                    return AgentsUpdate.All(store.agents())
                 }
                 "agent" -> {
-                    if (store.applyAgent(gson.fromJson(data, AgentState::class.java))) publishAgentsLocked()
+                    val agent = gson.fromJson(data, AgentState::class.java)
+                    if (!store.applyAgent(agent)) return null
+                    publishAgentsLocked()
+                    return AgentsUpdate.Changed(agent)
                 }
                 "agent_removed" -> {
-                    store.applyRemoved(gson.fromJson(data, PaneRef::class.java).pane_id)
+                    val paneId = gson.fromJson(data, PaneRef::class.java).pane_id
+                    store.applyRemoved(paneId)
                     publishAgentsLocked()
+                    return AgentsUpdate.Removed(paneId)
                 }
                 "host" -> {
                     store.applyHost(gson.fromJson(data, HostEvent::class.java))
@@ -256,8 +277,9 @@ class RelayEngine(
                 }
             }
         } catch (e: Exception) {
-            log("Failed to parse SSE event $type: ${e.message}")
+            log("Failed to parse SSE event $type: ${e.javaClass.simpleName}")
         }
+        return null
     }
 
     suspend fun refresh() {
@@ -266,11 +288,13 @@ class RelayEngine(
             launch {
                 val since = synchronized(lock) { store.beginFetch() }
                 currentClient.agents().onSuccess { snapshot ->
-                    synchronized(lock) {
+                    val merged = synchronized(lock) {
                         if (epoch != pairingEpoch) return@onSuccess
                         store.applyFetched(snapshot, since)
                         publishAgentsLocked()
+                        store.agents()
                     }
+                    hooks.onAgentsUpdated(AgentsUpdate.All(merged))
                 }
             }
             launch {

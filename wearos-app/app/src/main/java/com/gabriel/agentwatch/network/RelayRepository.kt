@@ -42,6 +42,9 @@ object RelayRepository {
                 // Reachable relay + accepted token: the moment to (re)send a pending FCM registration,
                 // including right after pairing (PairingScreen restarts the engine).
                 override fun onStreamOpened() = PushRegistration.ensure(appContext)
+
+                // An agent that is no longer blocked must not keep an approval notification around.
+                override fun onAgentsUpdated(update: AgentsUpdate) = ApprovalNotifications.onAgentsUpdated(appContext, update)
             },
             log = { Log.d(TAG, it) }
         )
