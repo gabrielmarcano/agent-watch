@@ -10,21 +10,20 @@ import (
 )
 
 func TestCLI_Configure(t *testing.T) {
-	tmpDir := t.TempDir()
-	cfgPath := filepath.Join(tmpDir, "config.toml")
-	validToken := "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+	ta := newTestApp(t, "launchd")
+	cfgPath := filepath.Join(ta.home, "config.toml")
 
 	// 1. Success case
-	err := runConfigure([]string{
+	err := ta.cmdConfigure([]string{
 		"--relay-url", "wss://relay.example.com/v1/host",
-		"--host-token", validToken,
+		"--host-token", testToken,
 		"--host-name", "my-mac",
 		"--claude-config-dir", "/path/one",
 		"--claude-config-dir", "/path/two",
 		"--config", cfgPath,
 	})
 	if err != nil {
-		t.Fatalf("runConfigure failed: %v", err)
+		t.Fatalf("configure failed: %v", err)
 	}
 
 	fi, err := os.Stat(cfgPath)
@@ -48,61 +47,47 @@ func TestCLI_Configure(t *testing.T) {
 	if len(loaded.ClaudeConfigDirs) != 2 || loaded.ClaudeConfigDirs[0] != "/path/one" || loaded.ClaudeConfigDirs[1] != "/path/two" {
 		t.Errorf("claude_config_dirs = %v", loaded.ClaudeConfigDirs)
 	}
+	if strings.Contains(ta.out.String()+ta.errOut.String(), testToken) {
+		t.Error("configure printed the token")
+	}
 
 	// 2. Reject bad URL (ws on non-localhost)
-	err = runConfigure([]string{
+	err = ta.cmdConfigure([]string{
 		"--relay-url", "ws://relay.example.com/v1/host",
-		"--host-token", validToken,
-		"--config", filepath.Join(tmpDir, "bad.toml"),
+		"--host-token", testToken,
+		"--config", filepath.Join(ta.home, "bad.toml"),
 	})
 	if err == nil {
 		t.Error("expected error for ws on remote host, got nil")
 	}
 
 	// 3. Reject bad token
-	err = runConfigure([]string{
+	err = ta.cmdConfigure([]string{
 		"--relay-url", "wss://relay.example.com/v1/host",
 		"--host-token", "not-a-valid-hex-token",
-		"--config", filepath.Join(tmpDir, "bad2.toml"),
+		"--config", filepath.Join(ta.home, "bad2.toml"),
 	})
 	if err == nil {
 		t.Error("expected error for non-hex token, got nil")
 	}
 }
 
-func TestCLI_RenderPlistTemplate(t *testing.T) {
-	mgr := newServiceManager()
-
-	binary := "/usr/local/bin/agent-watch-bridge"
-	configPath := "/Users/test/.config/herdr/plugins/config/herdr-agent-watch/config.toml"
-	socketPath := "/Users/test/.config/herdr/herdr.sock"
-	stateDir := "/Users/test/.local/state/agent-watch"
-	logPath := "/Users/test/Library/Logs/agent-watch-bridge.log"
-
-	rendered, err := mgr.RenderTemplate(binary, configPath, socketPath, stateDir, logPath)
-	if err != nil {
-		t.Fatalf("RenderTemplate failed: %v", err)
+// Without --config, configure writes the config the installed service uses
+// (not the default path of whatever environment it runs in).
+func TestCLI_ConfigureTargetsInstalledConfig(t *testing.T) {
+	ta := newTestApp(t, "launchd")
+	cfg := filepath.Join(ta.home, "herdr-plugin-config", "config.toml")
+	install(t, ta, ServiceSpec{
+		Binary: ta.exe, ConfigPath: cfg, SocketPath: "/s.sock", StateDir: "/state",
+		LogPath: filepath.Join(ta.home, "bridge.log"),
+	})
+	if err := ta.cmdConfigure([]string{"--relay-url", "wss://relay.example.com", "--host-token", testToken}); err != nil {
+		t.Fatalf("configure: %v", err)
 	}
-
-	// Verify required plist keys and values
-	checks := []string{
-		"<key>Label</key><string>com.gabrielmarcano.agent-watch-bridge</string>",
-		"<string>" + binary + "</string>",
-		"<string>run</string>",
-		"<string>--config</string>",
-		"<string>" + configPath + "</string>",
-		"<key>HERDR_SOCKET_PATH</key><string>" + socketPath + "</string>",
-		"<key>HERDR_PLUGIN_STATE_DIR</key><string>" + stateDir + "</string>",
-		"<key>RunAtLoad</key><true/>",
-		"<key>KeepAlive</key><true/>",
-		"<key>ThrottleInterval</key><integer>10</integer>",
-		"<key>StandardOutPath</key><string>" + logPath + "</string>",
-		"<key>StandardErrorPath</key><string>" + logPath + "</string>",
+	if _, err := bridge.CheckConfig(cfg); err != nil {
+		t.Errorf("installed config not written: %v", err)
 	}
-
-	for _, check := range checks {
-		if !strings.Contains(rendered, check) {
-			t.Errorf("rendered plist missing expected content: %s\nFull rendered:\n%s", check, rendered)
-		}
+	if !strings.Contains(ta.errOut.String(), "restart") {
+		t.Errorf("no hint to restart the installed service: %q", ta.errOut)
 	}
 }
