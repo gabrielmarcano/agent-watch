@@ -2,8 +2,9 @@ package herdr
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"log/slog"
-	"math/rand/v2"
 	"sync"
 	"time"
 )
@@ -25,6 +26,11 @@ type Change struct {
 }
 
 // Listener receives change batches and connectivity transitions from Syncer.
+//
+// Callbacks are never run concurrently with each other, and batches arrive in
+// the order their lists were fetched. A callback must not call Syncer.Refresh
+// synchronously (it would wait for itself); start a goroutine instead. For
+// the same reason, never call Refresh while holding a lock a callback takes.
 type Listener interface {
 	OnChanges(changes []Change) // called with a batch, never concurrently
 	OnHerdrOnline(online bool, pong Pong)
@@ -39,284 +45,487 @@ type Syncer struct {
 	PollDegraded time.Duration // default 2s
 	Logger       *slog.Logger
 
-	mu       sync.Mutex
-	current  map[string]AgentInfo // pane_id -> AgentInfo
-	online   bool
-	lastPong Pong
+	initOnce sync.Once
+	// turn serializes list → diff → apply → Listener, so snapshots are
+	// applied in the order they were fetched and callbacks never overlap.
+	// A channel instead of a mutex so waiting honours ctx.
+	turn chan struct{}
+	// paneSetChanged is signalled whenever an applied list changes the set of
+	// agent panes, whoever called Refresh, so Run can resubscribe.
+	paneSetChanged chan struct{}
+
+	listFailures int // consecutive agent.list failures; guarded by turn
+
+	mu          sync.Mutex
+	current     map[string]AgentInfo // pane_id -> AgentInfo
+	list        []AgentInfo          // same agents, in herdr's order
+	online      bool
+	onlineKnown bool
+	lastPong    Pong
+
+	// Test hooks, set before Run: the clock timers come from and the jitter
+	// applied to every backoff step.
+	clock  clock
+	spread func(time.Duration) time.Duration
+}
+
+type syncConfig struct {
+	debounce     time.Duration
+	pollHealthy  time.Duration
+	pollDegraded time.Duration
+}
+
+func (s *Syncer) init() {
+	s.initOnce.Do(func() {
+		s.turn = make(chan struct{}, 1)
+		s.paneSetChanged = make(chan struct{}, 1)
+	})
+}
+
+func (s *Syncer) config() syncConfig {
+	cfg := syncConfig{debounce: s.Debounce, pollHealthy: s.PollHealthy, pollDegraded: s.PollDegraded}
+	if cfg.debounce <= 0 {
+		cfg.debounce = 150 * time.Millisecond
+	}
+	if cfg.pollHealthy <= 0 {
+		cfg.pollHealthy = 15 * time.Second
+	}
+	if cfg.pollDegraded <= 0 {
+		cfg.pollDegraded = 2 * time.Second
+	}
+	return cfg
+}
+
+func (s *Syncer) clk() clock {
+	if s.clock != nil {
+		return s.clock
+	}
+	return realClock{}
+}
+
+func (s *Syncer) newBackoff() *backoff {
+	spread := s.spread
+	if spread == nil {
+		spread = randomJitter
+	}
+	return &backoff{spread: spread}
+}
+
+func (s *Syncer) log() *slog.Logger {
+	if s.Logger != nil {
+		return s.Logger
+	}
+	return slog.New(discardHandler{})
 }
 
 // Run blocks until ctx is cancelled, maintaining the sync loop against herdr.
 // It never returns an error when herdr is down; it keeps retrying with backoff.
+//
+//	ping ─fail→ OnHerdrOnline(false) once, back off 500ms…30s (±20%), ping again
+//	  │ok → OnHerdrOnline(true) once per transition
+//	list, subscribe (then list again, to cover the gap)
+//	  event          → debounced list
+//	  poll           → list every PollHealthy (stream up) / PollDegraded (down)
+//	  pane set moved → resubscribe at once
+//	  stream drop    → list, then resubscribe after a backoff
+//	  herdr gone     → back to ping
 func (s *Syncer) Run(ctx context.Context) error {
-	debounce := s.Debounce
-	if debounce <= 0 {
-		debounce = 150 * time.Millisecond
-	}
-	pollHealthy := s.PollHealthy
-	if pollHealthy <= 0 {
-		pollHealthy = 15 * time.Second
-	}
-	pollDegraded := s.PollDegraded
-	if pollDegraded <= 0 {
-		pollDegraded = 2 * time.Second
-	}
-
-	backoff := 500 * time.Millisecond
+	s.init()
+	cfg := s.config()
+	retry := s.newBackoff()
 
 	for {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
+		if err := ctx.Err(); err != nil {
+			return err
 		}
 
 		pong, err := s.Client.Ping(ctx)
 		if err != nil {
-			s.mu.Lock()
-			wasOnline := s.online
-			s.online = false
-			s.mu.Unlock()
-
-			if wasOnline && s.Listener != nil {
-				s.Listener.OnHerdrOnline(false, Pong{})
+			if ctx.Err() != nil {
+				return ctx.Err()
 			}
-
-			sleepJitter(ctx, backoff)
-			backoff = min(backoff*2, 30*time.Second)
+			s.setOnline(ctx, false, Pong{}, err)
+			if !s.sleep(ctx, retry.Next()) {
+				return ctx.Err()
+			}
 			continue
 		}
 
-		// Ping succeeded
-		s.mu.Lock()
-		wasOnline := s.online
-		s.online = true
-		s.lastPong = pong
-		s.mu.Unlock()
-
-		if !wasOnline {
-			backoff = 500 * time.Millisecond
-			if s.Listener != nil {
-				s.Listener.OnHerdrOnline(true, pong)
-			}
-		}
-
-		// Initial list
-		agents, err := s.Client.ListAgents(ctx)
-		if err != nil {
-			sleepJitter(ctx, backoff)
+		s.setOnline(ctx, true, pong, nil)
+		if s.runOnline(ctx, cfg) {
+			retry.Reset()
 			continue
 		}
-		s.applyAgents(agents)
-
-		// Run stream / degraded polling loop
-		s.runStream(ctx, pollHealthy, pollDegraded, debounce)
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		// herdr answers ping but never managed a list: pace the retries.
+		if !s.sleep(ctx, retry.Next()) {
+			return ctx.Err()
+		}
 	}
 }
 
-// runStream manages the event subscription and degraded fallback polling.
-func (s *Syncer) runStream(ctx context.Context, pollHealthy, pollDegraded, debounce time.Duration) {
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		default:
+// runOnline keeps the agent list in sync while herdr answers. It returns when
+// ctx ends or herdr stops answering; listed reports whether any agent.list
+// succeeded meanwhile.
+func (s *Syncer) runOnline(ctx context.Context, cfg syncConfig) (listed bool) {
+	clk := s.clk()
+	log := s.log()
+
+	// relist re-lists herdr; false means herdr looks gone.
+	relist := func() bool {
+		_, err := s.Refresh(ctx)
+		if err == nil {
+			listed = true
+			return true
 		}
-
-		stream, cancelSub, ok := s.obtainStream(ctx, pollDegraded)
-		if !ok {
-			return
-		}
-
-		s.handleStream(ctx, stream, cancelSub, pollHealthy, debounce)
+		return !s.offline(ctx, err)
 	}
-}
 
-func (s *Syncer) obtainStream(ctx context.Context, pollDegraded time.Duration) (<-chan Event, context.CancelFunc, bool) {
-	subs := s.subscriptionsFor(s.Snapshot())
-	subCtx, cancelSub := context.WithCancel(ctx)
-	stream, err := s.Client.Subscribe(subCtx, subs)
-	if err == nil {
-		return stream, cancelSub, true
+	if !relist() {
+		return listed
 	}
-	cancelSub()
 
-	// Degraded polling mode until we can re-subscribe or herdr goes offline
-	degradedTicker := time.NewTicker(pollDegraded)
-	defer degradedTicker.Stop()
+	var (
+		stream      <-chan Event
+		cancelSub   = func() {}
+		subscribed  map[string]bool // the pane set the open stream covers
+		dialNow     = true
+		debouncing  = false
+		subFailing  = false
+		streamRetry = s.newBackoff()
+	)
+	closeStream := func() {
+		cancelSub()
+		cancelSub = func() {}
+		stream = nil
+		subscribed = nil
+	}
+	defer func() { cancelSub() }()
+
+	retryT := newStoppedTimer(clk)
+	defer stopTimer(retryT)
+	debounceT := newStoppedTimer(clk)
+	defer stopTimer(debounceT)
+	pollT := clk.NewTimer(cfg.pollDegraded)
+	defer stopTimer(pollT)
 
 	for {
-		select {
-		case <-ctx.Done():
-			return nil, nil, false
-		case <-degradedTicker.C:
-			if _, pingErr := s.Client.Ping(ctx); pingErr != nil {
-				return nil, nil, false
+		if stream == nil && dialNow {
+			dialNow = false
+			st, cancel, set, err := s.openStream(ctx)
+			switch {
+			case err == nil:
+				stream, cancelSub, subscribed = st, cancel, set
+				if subFailing {
+					log.Info("herdr: event stream restored")
+					subFailing = false
+				}
+				resetTimer(pollT, cfg.pollHealthy)
+				// List once more: anything that changed between the last
+				// list and the subscription produced no event.
+				debouncing = true
+				resetTimer(debounceT, cfg.debounce)
+			case ctx.Err() != nil:
+				return listed
+			case s.offline(ctx, err):
+				return listed
+			default:
+				d := streamRetry.Next()
+				if !subFailing {
+					log.Warn("herdr: events.subscribe failed; polling until it works", "err", err, "retry_in", d)
+					subFailing = true
+				} else {
+					log.Debug("herdr: events.subscribe failed again", "err", err, "retry_in", d)
+				}
+				resetTimer(retryT, d)
 			}
-			_, _ = s.Refresh(ctx)
-
-			subs = s.subscriptionsFor(s.Snapshot())
-			subCtx, cancelSub = context.WithCancel(ctx)
-			stream, err = s.Client.Subscribe(subCtx, subs)
-			if err == nil {
-				return stream, cancelSub, true
-			}
-			cancelSub()
 		}
-	}
-}
 
-func (s *Syncer) handleStream(ctx context.Context, stream <-chan Event, cancelSub context.CancelFunc, pollHealthy, debounce time.Duration) {
-	defer cancelSub()
-
-	pollTicker := time.NewTicker(pollHealthy)
-	defer pollTicker.Stop()
-
-	var debounceTimer *time.Timer
-	var debounceC <-chan time.Time
-	defer func() {
-		if debounceTimer != nil {
-			debounceTimer.Stop()
-		}
-	}()
-
-	for {
 		select {
 		case <-ctx.Done():
-			return
+			return listed
+
+		case <-retryT.C():
+			dialNow = true
 
 		case _, ok := <-stream:
 			if !ok {
-				// Stream dropped
-				return
-			}
-
-			if debounceC == nil {
-				debounceTimer = time.NewTimer(debounce)
-				debounceC = debounceTimer.C
-			} else {
-				if !debounceTimer.Stop() {
-					select {
-					case <-debounceTimer.C:
-					default:
-					}
+				first := streamRetry.Fresh()
+				closeStream()
+				stopTimer(debounceT)
+				debouncing = false
+				d := streamRetry.Next()
+				if first {
+					log.Info("herdr: event stream closed; re-listing and polling until it is back", "retry_in", d)
+				} else {
+					log.Debug("herdr: event stream closed again", "retry_in", d)
 				}
-				debounceTimer.Reset(debounce)
+				if !relist() {
+					return listed
+				}
+				resetTimer(retryT, d)
+				resetTimer(pollT, cfg.pollDegraded)
+				continue
+			}
+			if !debouncing {
+				debouncing = true
+				resetTimer(debounceT, cfg.debounce)
 			}
 
-		case <-debounceC:
-			debounceC = nil
-			panesBefore := s.paneIDSet()
-			_, _ = s.Refresh(ctx)
-			panesAfter := s.paneIDSet()
-			if !setsEqual(panesBefore, panesAfter) {
-				return
+		case <-debounceT.C():
+			debouncing = false
+			if !relist() {
+				return listed
 			}
 
-		case <-pollTicker.C:
-			panesBefore := s.paneIDSet()
-			_, _ = s.Refresh(ctx)
-			panesAfter := s.paneIDSet()
-			if !setsEqual(panesBefore, panesAfter) {
-				return
+		case <-pollT.C():
+			interval := cfg.pollDegraded
+			if stream != nil {
+				// The stream survived a whole healthy interval.
+				streamRetry.Reset()
+				interval = cfg.pollHealthy
+			}
+			if !relist() {
+				return listed
+			}
+			resetTimer(pollT, interval)
+
+		case <-s.paneSetChanged:
+			if stream != nil && !setsEqual(s.paneIDSet(), subscribed) {
+				log.Debug("herdr: agent panes changed; resubscribing")
+				closeStream()
+				stopTimer(retryT)
+				dialNow = true
 			}
 		}
 	}
 }
 
-// Snapshot returns the last known agent list (copy). Safe for concurrent use.
+// openStream subscribes for the agents currently known and returns the pane
+// set the subscription covers.
+func (s *Syncer) openStream(ctx context.Context) (<-chan Event, context.CancelFunc, map[string]bool, error) {
+	subs, set := subscriptionsFor(s.Snapshot())
+	subCtx, cancel := context.WithCancel(ctx)
+	stream, err := s.Client.Subscribe(subCtx, subs)
+	if err != nil {
+		cancel()
+		return nil, nil, nil, err
+	}
+	return stream, cancel, set, nil
+}
+
+// offline decides whether err means herdr is gone (or ctx is done).
+func (s *Syncer) offline(ctx context.Context, err error) bool {
+	if ctx.Err() != nil || errors.Is(err, ErrUnavailable) {
+		return true
+	}
+	var herdrErr *Error
+	if errors.As(err, &herdrErr) {
+		return false // herdr answered, just not with what we wanted
+	}
+	// Transport trouble (timeout, reset, garbage): ask herdr directly.
+	_, pingErr := s.Client.Ping(ctx)
+	return pingErr != nil
+}
+
+// setOnline records herdr's reachability and tells the Listener once per
+// transition, including the first observation (so "offline at startup" is
+// reported too). Only Run calls it.
+func (s *Syncer) setOnline(ctx context.Context, online bool, pong Pong, cause error) {
+	s.mu.Lock()
+	changed := !s.onlineKnown || s.online != online
+	s.onlineKnown = true
+	s.online = online
+	if online {
+		s.lastPong = pong
+	}
+	s.mu.Unlock()
+	if !changed {
+		return
+	}
+
+	if online {
+		s.log().Info("herdr: online", "version", pong.Version, "protocol", pong.Protocol)
+	} else {
+		s.log().Warn("herdr: offline; retrying with backoff", "err", cause)
+	}
+	if s.Listener == nil {
+		return
+	}
+	if s.acquire(ctx) != nil {
+		return // shutting down
+	}
+	defer s.release()
+	s.Listener.OnHerdrOnline(online, pong)
+}
+
+// sleep waits d on the Syncer's clock; false if ctx ended first.
+func (s *Syncer) sleep(ctx context.Context, d time.Duration) bool {
+	t := s.clk().NewTimer(d)
+	defer stopTimer(t)
+	select {
+	case <-t.C():
+		return true
+	case <-ctx.Done():
+		return false
+	}
+}
+
+// Snapshot returns the last known agent list (copy), in herdr's order. Safe for concurrent use.
 func (s *Syncer) Snapshot() []AgentInfo {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	res := make([]AgentInfo, 0, len(s.current))
-	for _, a := range s.current {
-		res = append(res, a)
-	}
+	res := make([]AgentInfo, len(s.list))
+	copy(res, s.list)
 	return res
 }
 
 // Refresh forces an immediate re-list (used by the bridge right before executing a command).
+//
+// Refreshes are serialized with each other and with Run's own lists: each one
+// fetches, diffs, applies and notifies the Listener before the next starts, so
+// an older list can never overwrite a newer one. It returns the (plain-shell
+// filtered) list it applied, in herdr's order. Waiting for an in-flight
+// refresh honours ctx.
 func (s *Syncer) Refresh(ctx context.Context) ([]AgentInfo, error) {
-	agents, err := s.Client.ListAgents(ctx)
-	if err != nil {
+	if err := s.acquire(ctx); err != nil {
 		return nil, err
 	}
-	s.applyAgents(agents)
-	return s.Snapshot(), nil
+	defer s.release()
+
+	agents, err := s.Client.ListAgents(ctx)
+	if err != nil {
+		s.noteListFailure(ctx, err)
+		return nil, err
+	}
+	s.noteListSuccess()
+	return s.apply(agents), nil
 }
 
-func (s *Syncer) applyAgents(rawAgents []AgentInfo) []Change {
-	newMap := make(map[string]AgentInfo)
-	for _, a := range rawAgents {
-		// Filter out plain shells
+func (s *Syncer) acquire(ctx context.Context) error {
+	s.init()
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("herdr refresh: %w", err)
+	}
+	select {
+	case s.turn <- struct{}{}:
+		return nil
+	case <-ctx.Done():
+		return fmt.Errorf("herdr refresh: %w", ctx.Err())
+	}
+}
+
+func (s *Syncer) release() { <-s.turn }
+
+// noteListFailure logs a failed agent.list once per streak. Caller holds the turn.
+func (s *Syncer) noteListFailure(ctx context.Context, err error) {
+	log := s.log()
+	switch {
+	case ctx.Err() != nil:
+		log.Debug("herdr: agent.list cancelled", "err", err)
+	case errors.Is(err, ErrUnavailable):
+		log.Debug("herdr: agent.list failed; herdr unavailable", "err", err) // Run reports offline
+	case s.listFailures == 0:
+		s.listFailures++
+		log.Warn("herdr: agent.list failed", "err", err)
+	default:
+		s.listFailures++
+		log.Debug("herdr: agent.list failed again", "err", err, "failures", s.listFailures)
+	}
+}
+
+// noteListSuccess ends a failure streak. Caller holds the turn.
+func (s *Syncer) noteListSuccess() {
+	if s.listFailures > 0 {
+		s.log().Info("herdr: agent.list recovered", "failures", s.listFailures)
+		s.listFailures = 0
+	}
+}
+
+// apply diffs raw against the current list, stores it, signals a pane-set
+// change and notifies the Listener. Caller holds the turn.
+func (s *Syncer) apply(raw []AgentInfo) []AgentInfo {
+	list := make([]AgentInfo, 0, len(raw))
+	newMap := make(map[string]AgentInfo, len(raw))
+	for _, a := range raw {
+		// Plain shells are not agents.
 		if a.Agent == nil && a.AgentStatus == "unknown" {
 			continue
 		}
+		if _, dup := newMap[a.PaneID]; dup {
+			continue
+		}
 		newMap[a.PaneID] = a
+		list = append(list, a)
 	}
 
 	s.mu.Lock()
-	if s.current == nil {
-		s.current = make(map[string]AgentInfo)
-	}
-
+	oldMap, oldList := s.current, s.list
 	var changes []Change
-
-	// Added and Updated
-	for paneID, newAgent := range newMap {
-		if oldAgent, exists := s.current[paneID]; exists {
-			if agentDiffers(oldAgent, newAgent) {
-				prevCopy := oldAgent
-				changes = append(changes, Change{
-					Kind:  Updated,
-					Agent: newAgent,
-					Prev:  &prevCopy,
-				})
+	for _, a := range list {
+		old, exists := oldMap[a.PaneID]
+		switch {
+		case !exists:
+			changes = append(changes, Change{Kind: Added, Agent: a})
+		case agentDiffers(old, a):
+			prev := old
+			changes = append(changes, Change{Kind: Updated, Agent: a, Prev: &prev})
+		}
+	}
+	for _, old := range oldList {
+		if _, exists := newMap[old.PaneID]; !exists {
+			prev := old
+			changes = append(changes, Change{Kind: Removed, Agent: old, Prev: &prev})
+		}
+	}
+	paneSetMoved := len(oldMap) != len(newMap)
+	if !paneSetMoved {
+		for id := range newMap {
+			if _, ok := oldMap[id]; !ok {
+				paneSetMoved = true
+				break
 			}
-		} else {
-			changes = append(changes, Change{
-				Kind:  Added,
-				Agent: newAgent,
-				Prev:  nil,
-			})
 		}
 	}
-
-	// Removed
-	for paneID, oldAgent := range s.current {
-		if _, exists := newMap[paneID]; !exists {
-			prevCopy := oldAgent
-			changes = append(changes, Change{
-				Kind:  Removed,
-				Agent: oldAgent,
-				Prev:  &prevCopy,
-			})
-		}
-	}
-
 	s.current = newMap
+	s.list = list
 	s.mu.Unlock()
 
+	if paneSetMoved {
+		select {
+		case s.paneSetChanged <- struct{}{}:
+		default: // a signal is already pending
+		}
+	}
 	if len(changes) > 0 && s.Listener != nil {
 		s.Listener.OnChanges(changes)
 	}
 
-	return changes
+	out := make([]AgentInfo, len(list))
+	copy(out, list)
+	return out
 }
 
-func (s *Syncer) subscriptionsFor(agents []AgentInfo) []Subscription {
+// subscriptionsFor returns the subscriptions for agents and the pane set they
+// cover: the global pane events plus one status subscription per agent pane.
+func subscriptionsFor(agents []AgentInfo) ([]Subscription, map[string]bool) {
 	subs := []Subscription{
 		{Type: "pane.created"},
 		{Type: "pane.closed"},
 		{Type: "pane.exited"},
 		{Type: "pane.agent_detected"},
 	}
+	set := make(map[string]bool, len(agents))
 	for _, a := range agents {
 		subs = append(subs, Subscription{
 			Type:   "pane.agent_status_changed",
 			PaneID: a.PaneID,
 		})
+		set[a.PaneID] = true
 	}
-	return subs
+	return subs, set
 }
 
 func (s *Syncer) paneIDSet() map[string]bool {
@@ -376,11 +585,10 @@ func agentDiffers(a, b AgentInfo) bool {
 	return false
 }
 
-func sleepJitter(ctx context.Context, base time.Duration) {
-	factor := 0.8 + 0.4*rand.Float64()
-	d := time.Duration(float64(base) * factor)
-	select {
-	case <-time.After(d):
-	case <-ctx.Done():
-	}
-}
+// discardHandler drops every record (slog.DiscardHandler needs Go 1.24).
+type discardHandler struct{}
+
+func (discardHandler) Enabled(context.Context, slog.Level) bool  { return false }
+func (discardHandler) Handle(context.Context, slog.Record) error { return nil }
+func (d discardHandler) WithAttrs([]slog.Attr) slog.Handler      { return d }
+func (d discardHandler) WithGroup(string) slog.Handler           { return d }
