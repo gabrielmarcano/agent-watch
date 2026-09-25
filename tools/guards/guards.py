@@ -228,7 +228,8 @@ def check_command(command: str):
 # ─────────────────────────────── paths ───────────────────────────────
 
 LEGACY = re.compile(r"^(bridge|claude-plugin|\.claude-plugin)/")
-SECRET_PATH = re.compile(r"(^|/)(google-services\.json|firebase-service-account[^/]*\.json|\.env)$")
+# agent-watch.env holds the host token; agent-watch.env.example stays writable.
+SECRET_PATH = re.compile(r"(^|/)(google-services\.json|firebase-service-account[^/]*\.json|\.env|agent-watch\.env)$")
 
 
 def rel_to_root(path: str) -> str:
@@ -247,12 +248,13 @@ def check_write(path: str):
                       "See AGENTS.md §1.1: the replacement lives in cmd/, pkg/ and herdr-plugin.toml.")
     if SECRET_PATH.search(rel):
         raise Blocked(f"{rel} holds secrets and is placed by the owner by hand, never written by an agent. "
-                      "Use the *.example files for templates.")
+                      "Use the *.example files for templates (agent-watch.env comes from `make config`).")
 
 # ───────────────────────────── pre-commit ────────────────────────────
 
 SECRET_FILES = re.compile(
-    r"(^|/)(google-services\.json|firebase-service-account[^/]*\.json|\.env(\.[^/]*)?|store\.json)$"
+    r"(^|/)(google-services\.json|firebase-service-account[^/]*\.json|\.env(\.[^/]*)?|agent-watch\.env(\.[^/]*)?"
+    r"|store\.json)$"
 )
 ALLOWED_FILES = re.compile(r"(\.example|\.template|\.sample)$")
 SKIP_SCAN = ("tools/guards/",)  # the patterns themselves live here

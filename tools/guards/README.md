@@ -16,7 +16,7 @@ One Python script (`guards.py`, standard library only) holds every safety rule. 
 | `herdr server stop`, `integration install/uninstall`, closing a non-sandbox workspace | Owner-only |
 | Raw socket scripts using mutating herdr methods | They would bypass the sandbox check |
 | `git add -A` / `.`, `commit --amend`, `commit --no-verify`, `push` without `AW_OWNER_APPROVED_PUSH=1` | Shared worktree; the owner decides when to publish |
-| Writes to `bridge/`, `claude-plugin/`, `.claude-plugin/`, `google-services.json`, `firebase-service-account*.json`, `.env` | Legacy code must not return; secrets are placed by hand |
+| Writes to `bridge/`, `claude-plugin/`, `.claude-plugin/`, `google-services.json`, `firebase-service-account*.json`, `.env`, `agent-watch.env` | Legacy code must not return; secrets are placed by hand (`agent-watch.env` by `make config`; its `.example` stays writable) |
 | Commits with secrets, unformatted Go, or `pkg/model` changes without `contracts.md` + both client models | Permanent leaks; schema drift. Escape hatch for helper-only changes: `AW_CONTRACT_NO_JSON_CHANGE=1` |
 
 ## One-time setup per machine / clone

@@ -63,6 +63,9 @@ write "$ROOT/claude-plugin/hooks/hooks.json" 2 "legacy claude-plugin refused"
 write "$ROOT/pkg/bridge/engine.go" 0 "pkg/bridge allowed"
 write "wearos-app/app/google-services.json" 2 "google-services.json refused (relative)"
 write "$ROOT/deploy/relay/env.example" 0 "env.example allowed"
+write "$ROOT/agent-watch.env" 2 "agent-watch.env refused"
+write "agent-watch.env" 2 "agent-watch.env refused (relative)"
+write "$ROOT/agent-watch.env.example" 0 "agent-watch.env.example allowed"
 
 # ── agy adapter (PreToolUse contract: toolCall.name/args → decision) ──
 agy '{"toolCall":{"name":"run_command","args":{"CommandLine":"git add -A"}}}' deny "run_command git add -A denied"
@@ -75,6 +78,7 @@ agy 'not json' allow "garbage input is a no-op"
 oc '{"tool":"bash","args":{"command":"git commit --amend"}}' 2 "bash amend blocked"
 oc '{"tool":"bash","args":{"command":"make check"}}' 0 "bash make allowed"
 oc "{\"tool\":\"write\",\"args\":{\"filePath\":$(j "$ROOT/.env")}}" 2 "write .env blocked"
+oc "{\"tool\":\"edit\",\"args\":{\"filePath\":$(j "$ROOT/agent-watch.env")}}" 2 "edit agent-watch.env blocked"
 oc "{\"tool\":\"edit\",\"args\":{\"filePath\":$(j "$ROOT/pkg/model/agent.go")}}" 0 "edit pkg/model allowed"
 oc '{"tool":"apply_patch","args":{"patchText":"*** Begin Patch\n*** Add File: claude-plugin/x.sh\n+x\n*** End Patch"}}' 2 "patch into legacy blocked"
 oc '{"tool":"read","args":{"filePath":".env"}}' 0 "read is not a write"
@@ -92,11 +96,19 @@ TMP="$(mktemp -d)"; (
   git rm -q --cached pkg/model/bad_test.go
   printf 'AW_HOST_TOKEN=%s\n' "$(printf 'a%.0s' $(seq 64))" > leak.txt; git add leak.txt
   AW_REPO_ROOT="$TMP" AW_CONTRACT_NO_JSON_CHANGE=1 python3 "$G" precommit >/dev/null 2>&1; echo $? > "$TMP/r4"
+  git rm -q --cached leak.txt
+  printf 'AW_RELAY_DOMAIN=relay.example.com\n' > agent-watch.env; git add -f agent-watch.env
+  AW_REPO_ROOT="$TMP" AW_CONTRACT_NO_JSON_CHANGE=1 python3 "$G" precommit >/dev/null 2>&1; echo $? > "$TMP/r5"
+  git rm -q --cached agent-watch.env
+  printf 'AW_HOST_TOKEN=\n' > agent-watch.env.example; git add -f agent-watch.env.example
+  AW_REPO_ROOT="$TMP" AW_CONTRACT_NO_JSON_CHANGE=1 python3 "$G" precommit >/dev/null 2>&1; echo $? > "$TMP/r6"
 )
 expect 1 "$(cat "$TMP/r1")" "precommit: pkg/model without peers blocked"
 expect 0 "$(cat "$TMP/r2")" "precommit: explicit no-JSON-change allowed"
 expect 1 "$(cat "$TMP/r3")" "precommit: unformatted Go blocked"
 expect 1 "$(cat "$TMP/r4")" "precommit: host token blocked"
+expect 1 "$(cat "$TMP/r5")" "precommit: agent-watch.env blocked"
+expect 0 "$(cat "$TMP/r6")" "precommit: agent-watch.env.example allowed"
 rm -rf "$TMP"
 
 echo "guards: $pass passed, $fail failed"
