@@ -2,6 +2,7 @@ package com.gabriel.agentwatch.data
 
 import android.content.Context
 import android.content.SharedPreferences
+import com.gabriel.agentwatch.network.ResolvedSeqs
 
 class Prefs(context: Context) : FcmRegistrationStore {
     private val prefs: SharedPreferences = context.getSharedPreferences("AgentWatchPrefs", Context.MODE_PRIVATE)
@@ -57,6 +58,11 @@ class Prefs(context: Context) : FcmRegistrationStore {
         get() = prefs.getString("pinned_pane_id", null)
         set(value) = prefs.edit().putString("pinned_pane_id", value).apply()
 
+    /** Last `resolved` push seq per pane (contracts §4.1): late `blocked` pushes at or below it are stale. */
+    var resolvedSeqs: ResolvedSeqs
+        get() = ResolvedSeqs.decode(prefs.getString("resolved_seqs", null))
+        set(value) = prefs.edit().putString("resolved_seqs", value.encode()).apply()
+
     val isPaired: Boolean
         get() = !relayUrl.isBlank() && !deviceToken.isNullOrBlank()
 
@@ -65,6 +71,7 @@ class Prefs(context: Context) : FcmRegistrationStore {
             .remove("device_token")
             .remove("device_id")
             .remove("fcm_registration")
+            .remove("resolved_seqs")
             .apply()
     }
 }

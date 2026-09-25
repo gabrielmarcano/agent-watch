@@ -6,6 +6,7 @@ import android.content.Context
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.app.RemoteInput
+import com.gabriel.agentwatch.data.Prefs
 import com.gabriel.agentwatch.util.MarkdownFormatter
 import com.google.firebase.messaging.FirebaseMessagingService
 import com.google.firebase.messaging.RemoteMessage
@@ -29,8 +30,18 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
 
         val notifManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         when (message) {
-            is PushMessage.Resolved -> ApprovalNotifications.onResolved(this, message)
+            is PushMessage.Resolved -> {
+                message.seq?.let { seq ->
+                    val prefs = Prefs(this)
+                    prefs.resolvedSeqs = prefs.resolvedSeqs.record(message.paneId, seq)
+                }
+                ApprovalNotifications.onResolved(this, message)
+            }
             is PushMessage.Blocked -> {
+                if (!shouldShowBlocked(message.seq, Prefs(this).resolvedSeqs.lastFor(message.paneId))) {
+                    Log.d(TAG, "Dropping a stale blocked push: pane=${message.paneId} seq=${message.seq} already resolved")
+                    return
+                }
                 NotificationChannels.ensure(this)
                 notifManager.notify(AgentNotifications.idForPane(message.paneId), blockedNotification(message))
             }
