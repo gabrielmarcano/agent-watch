@@ -226,6 +226,7 @@ func (e *Engine) resolvePrompt(paneID string, seq uint64, agentName string) {
 	var lastScreen string
 
 	delay := e.RetryDelay
+retry:
 	for attempt := 0; attempt < 3; attempt++ {
 		screen, err := e.Herdr.Read(ctx, paneID, herdr.SourceVisible, 0)
 		if err == nil {
@@ -239,10 +240,14 @@ func (e *Engine) resolvePrompt(paneID string, seq uint64, agentName string) {
 			}
 		}
 		if attempt < 2 && delay > 0 {
+			timer := time.NewTimer(delay)
 			select {
 			case <-ctx.Done():
-				break
-			case <-time.After(delay):
+				// Out of time: stop retrying (a bare break would only leave
+				// the select) and fall back to an unknown prompt.
+				timer.Stop()
+				break retry
+			case <-timer.C:
 			}
 		}
 	}
