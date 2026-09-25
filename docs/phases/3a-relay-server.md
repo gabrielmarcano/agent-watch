@@ -252,7 +252,7 @@ Run `devices` as the service user or root, with the same `AW_DATA_DIR` as the se
 ## Prompt for the executing agent
 
 ```
-You are executing Phase 3a (the relay server) of the Agent Watch refactor in /Users/me/Code/personal/agent-watch-herdr.
+You are executing Phase 3a (the relay server) of the Agent Watch refactor in this repository.
 Read AGENTS.md, docs/reference/contracts.md (entirely), HERDR_REFACTOR_PLAN.md §9 and §15, and
 docs/phases/3a-relay-server.md. Implement pkg/relay and cmd/relay exactly as specified, with Go 1.22 ServeMux
 routing and github.com/coder/websocket. Security is part of correctness: tokens only in Authorization headers,

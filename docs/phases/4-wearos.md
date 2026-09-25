@@ -358,7 +358,7 @@ The release build type is minified (R8) but **signed with the debug key**: fine 
 ## Prompt for the executing agent
 
 ```
-You are executing Phase 4 (Wear OS client) of the Agent Watch refactor in /Users/me/Code/personal/agent-watch-herdr.
+You are executing Phase 4 (Wear OS client) of the Agent Watch refactor in this repository.
 Read AGENTS.md, .agents/rules/wearos.md, docs/reference/contracts.md (§1, §2, §4.1), HERDR_REFACTOR_PLAN.md §11 and §13.1,
 and docs/phases/4-wearos.md. Rewrite wearos-app/ as the guide specifies: models mirroring pkg/model with @Keep, RelayClient +
 RelayRepository over /v1 with bearer tokens, pairing screen, agent list/detail, PromptCard, notifications with

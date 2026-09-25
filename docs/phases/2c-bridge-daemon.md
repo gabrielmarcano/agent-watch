@@ -341,7 +341,7 @@ tail -f ~/Library/Logs/agent-watch-bridge.log
 ## Prompt for the executing agent
 
 ```
-You are executing Phase 2c (the bridge daemon) of the Agent Watch refactor in /Users/me/Code/personal/agent-watch-herdr.
+You are executing Phase 2c (the bridge daemon) of the Agent Watch refactor in this repository.
 Read AGENTS.md, docs/reference/contracts.md (§3, §6), HERDR_REFACTOR_PLAN.md §6.2 and §12, the safety warning in
 docs/reference/herdr-socket-api.md, and docs/phases/2c-bridge-daemon.md. Implement pkg/relayclient, pkg/bridge,
 cmd/bridge, deploy/launchd and herdr-plugin.toml exactly as specified. The command executor is safety-critical:

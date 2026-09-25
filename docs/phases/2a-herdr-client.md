@@ -283,7 +283,7 @@ Create a throw-away `pkg/herdr/cmd_smoke_test.go`, **or** a tiny program in the 
 ## Prompt for the executing agent
 
 ```
-You are executing Phase 2a (pkg/herdr) of the Agent Watch refactor in /Users/me/Code/personal/agent-watch-herdr.
+You are executing Phase 2a (pkg/herdr) of the Agent Watch refactor in this repository.
 Read AGENTS.md, docs/reference/herdr-socket-api.md (entirely, including the safety warning) and
 docs/phases/2a-herdr-client.md, then implement exactly what the guide specifies. The package must stay
 agent-agnostic and depend only on the standard library. Test only against pkg/herdrtest. The optional manual

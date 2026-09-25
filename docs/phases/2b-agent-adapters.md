@@ -211,7 +211,7 @@ func ScreenTurn(text string) *model.HistoryItem // Source="screen", Query=""
 ## Prompt for the executing agent
 
 ```
-You are executing Phase 2b (pkg/agents) of the Agent Watch refactor in /Users/me/Code/personal/agent-watch-herdr.
+You are executing Phase 2b (pkg/agents) of the Agent Watch refactor in this repository.
 Read AGENTS.md, docs/reference/agents.md, docs/reference/contracts.md §1.3–1.4 and docs/phases/2b-agent-adapters.md,
 then implement the package exactly as specified. Every behaviour must be driven by the fixtures in
 pkg/agents/testdata (captured in Phase 0) or by synthetic cases you add under testdata/generic. Never infer

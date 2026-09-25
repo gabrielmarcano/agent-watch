@@ -216,7 +216,7 @@ Use an injectable clock. **No real network calls in tests.**
 ## Prompt for the executing agent
 
 ```
-You are executing Phase 3b (push notifications) of the Agent Watch refactor in /Users/me/Code/personal/agent-watch-herdr.
+You are executing Phase 3b (push notifications) of the Agent Watch refactor in this repository.
 Read AGENTS.md, docs/reference/contracts.md §4–§5 and docs/phases/3b-push.md, then implement pkg/push and wire it into
 pkg/relay/server.go as specified. Use golang.org/x/oauth2/google for FCM auth (no hand-written JWT). Every FCM data value
 must be a string and every key must always be present. Tests use httptest fakes and an injectable clock; no real network.

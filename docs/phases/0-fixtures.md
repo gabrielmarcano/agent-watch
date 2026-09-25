@@ -188,7 +188,7 @@ Then add `pkg/agents/testdata/<agent>/transcript.expected.json` with the `query`
 ## Prompt for the executing agent
 
 ```
-You are executing Phase 0 of the Agent Watch refactor in /Users/me/Code/personal/agent-watch-herdr.
+You are executing Phase 0 of the Agent Watch refactor in this repository.
 Read docs/phases/0-fixtures.md and follow it step by step. Also read docs/reference/herdr-socket-api.md
 (the safety warning at the top is mandatory) and .agents/skills/capture-fixture/SKILL.md.
 Rules: only send keys or prompts to panes you created inside the "aw-sandbox" workspace; never touch other

@@ -121,7 +121,7 @@ Replace the simulator name with one from the `simctl` list. To check the UI, ope
 ## Prompt for the executing agent
 
 ```
-You are executing Phase 6 (watchOS client, best-effort) of the Agent Watch refactor in /Users/me/Code/personal/agent-watch-herdr.
+You are executing Phase 6 (watchOS client, best-effort) of the Agent Watch refactor in this repository.
 Read AGENTS.md, .agents/rules/watchos.md, docs/reference/contracts.md (§1, §2), docs/phases/4-wearos.md (the UX to copy) and
 docs/phases/6-watchos.md. Rewrite watchos-app/ as specified, regenerate the project with xcodegen, and verify with
 xcodebuild build/test on a watchOS simulator. There is no physical Apple Watch: report results as "verified in simulator"

@@ -132,7 +132,7 @@ A `snapshot` must arrive immediately, then `:` keepalives every 15 s, for at lea
 ## Prompt for the executing agent
 
 ```
-You are executing Phase 3c (relay deployment) of the Agent Watch refactor in /Users/me/Code/personal/agent-watch-herdr.
+You are executing Phase 3c (relay deployment) of the Agent Watch refactor in this repository.
 Read docs/phases/3c-relay-deploy.md. Create the files under deploy/relay/ exactly as specified, with placeholders and no
 real secrets. Do NOT run anything against the VPS or Cloudflare yourself: prepare the exact commands and hand them to the
 owner, who runs the steps that need credentials. After the owner confirms deployment, run the Verify commands that need

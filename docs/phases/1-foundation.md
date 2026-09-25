@@ -246,7 +246,7 @@ git grep -nE 'osascript|agy-sidecar|claude-plugin|/webhook|Warp' -- ':!docs' ':!
 ## Prompt for the executing agent
 
 ```
-You are executing Phase 1 of the Agent Watch refactor in /Users/me/Code/personal/agent-watch-herdr.
+You are executing Phase 1 of the Agent Watch refactor in this repository.
 Read AGENTS.md, then docs/phases/1-foundation.md, and follow it exactly. The types must match
 docs/reference/contracts.md field for field; the fake server must behave as docs/reference/herdr-socket-api.md
 describes. Use Go 1.22 features only and no third-party modules in this phase. Do not contact the real herdr
