@@ -88,22 +88,29 @@ func (e *Engine) executeCommand(cmd model.CommandMsg) {
 	ctx, cancel := context.WithTimeout(context.Background(), commandTimeout)
 	defer cancel()
 
-	if e.Syncer == nil {
-		reply(false, "herdr_offline", "syncer is nil", "")
+	if e.Herdr == nil {
+		reply(false, "herdr_offline", "herdr client is nil", "")
 		return
 	}
 
+	// Validate against the list this command fetched itself. Syncer.Refresh
+	// returns the shared snapshot, which a concurrent, older refresh can
+	// overwrite between its fetch and its return.
 	listCtx, listCancel := context.WithTimeout(ctx, 3*time.Second)
-	agentsList, err := e.Syncer.Refresh(listCtx)
+	agentsList, err := e.Herdr.ListAgents(listCtx)
 	listCancel()
 	if err != nil {
 		if errors.Is(err, herdr.ErrUnavailable) {
 			reply(false, "herdr_offline", err.Error(), "")
 			return
 		}
-		reply(false, "herdr_offline", fmt.Sprintf("herdr refresh: %v", err), "")
+		reply(false, "herdr_offline", fmt.Sprintf("herdr list: %v", err), "")
 		return
 	}
+	// Whatever the outcome, let the engine catch up so the watch sees the
+	// state this command acted on (or was rejected against).
+	defer e.refreshSoon()
+	e.pruneConsumed(agentsList)
 
 	var info *herdr.AgentInfo
 	for i := range agentsList {
@@ -117,8 +124,6 @@ func (e *Engine) executeCommand(cmd model.CommandMsg) {
 		reply(false, "unknown_pane", "pane not found or no agent detected", "")
 		return
 	}
-
-	e.pruneConsumed(agentsList)
 
 	agentName := *info.Agent
 	if info.StateChangeSeq != cmd.ExpectedSeq {
@@ -186,7 +191,6 @@ func (e *Engine) executeCommand(cmd model.CommandMsg) {
 		}
 
 		reply(true, "", "", agentName)
-		e.refreshSoon()
 
 	case "answer":
 		if status != model.StatusBlocked {
@@ -218,7 +222,6 @@ func (e *Engine) executeCommand(cmd model.CommandMsg) {
 		}
 
 		reply(true, "", "", agentName)
-		e.refreshSoon()
 
 	case "cancel":
 		if status != model.StatusBlocked {
@@ -258,7 +261,6 @@ func (e *Engine) executeCommand(cmd model.CommandMsg) {
 		}
 
 		reply(true, "", "", agentName)
-		e.refreshSoon()
 
 	default:
 		reply(false, "invalid_request", fmt.Sprintf("unsupported command action: %q", cmd.Action), agentName)

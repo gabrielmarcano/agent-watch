@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -652,6 +653,70 @@ func TestCommands_CancelPromptChangedPublishesFreshPrompt(t *testing.T) {
 	}
 	if keys := sendKeysSince(h, before); len(keys) != 1 || len(keys[0]) != 1 || keys[0][0] != "esc" {
 		t.Errorf("cancel keys = %v, want [[esc]]", keys)
+	}
+}
+
+// --- Bug 6: validate against the command's own herdr list ---
+
+// interleavingListener forwards to the engine. Once armed, it runs inject
+// right after the next change batch: inside Syncer.Refresh, between applying
+// the list it fetched and returning Snapshot(), like another goroutine's
+// older refresh landing at the wrong moment.
+type interleavingListener struct {
+	eng    *Engine
+	armed  atomic.Bool
+	inject func()
+}
+
+func (l *interleavingListener) OnChanges(changes []herdr.Change) {
+	l.eng.OnChanges(changes)
+	if l.armed.CompareAndSwap(true, false) {
+		l.inject()
+	}
+}
+
+func (l *interleavingListener) OnHerdrOnline(online bool, pong herdr.Pong) {
+	l.eng.OnHerdrOnline(online, pong)
+}
+
+func TestCommands_ValidatesAgainstOwnHerdrList(t *testing.T) {
+	h := newTestHarness(t)
+	bash := loadFixture(t, "claude", "permission-bash.txt")
+	oldRows := []map[string]any{agentRow("w1:p1", "claude", "blocked", 99)}
+	newRows := []map[string]any{agentRow("w1:p1", "claude", "blocked", 100)}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	l := &interleavingListener{eng: h.engine}
+	l.inject = func() {
+		// An older list (seq 99) is applied, then herdr's truth (seq 100) is restored.
+		h.server.SetAgents(oldRows)
+		_, _ = h.syncer.Refresh(ctx)
+		h.server.SetAgents(newRows)
+	}
+	h.syncer.Listener = l
+	h.engine.OnHerdrOnline(true, herdr.Pong{Version: "0.9.1", Protocol: 22})
+
+	// The syncer last saw seq 99; herdr has moved on to seq 100.
+	h.server.SetAgents(oldRows)
+	if _, err := h.syncer.Refresh(ctx); err != nil {
+		t.Fatalf("syncer refresh: %v", err)
+	}
+	h.server.SetAgents(newRows)
+	h.server.SetScreen("w1:p1", "visible", bash)
+	l.armed.Store(true)
+
+	before := len(h.server.Calls())
+	res, _ := runCmd(t, h, model.CommandMsg{
+		RequestID: "req-own-list", Action: "answer", PaneID: "w1:p1",
+		ExpectedSeq: 99, OptionID: "opt-1", Fingerprint: fingerprintOf(t, h, "claude", bash),
+	})
+	l.armed.Store(false)
+	if res.OK || res.ErrorCode != "stale_state" {
+		t.Errorf("answer at seq 99 while herdr reports 100: ok=%v code=%q, want stale_state", res.OK, res.ErrorCode)
+	}
+	if keys := sendKeysSince(h, before); len(keys) != 0 {
+		t.Errorf("keys sent on a stale seq: %v, want none", keys)
 	}
 }
 
