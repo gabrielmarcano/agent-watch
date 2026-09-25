@@ -1,3 +1,5 @@
 {
-  "prompt": null
+  "prompt": null,
+  "herdr_status": "working",
+  "notes": "Captured while actually working ('Generating...' spinner, 'esc to cancel' footer), herdr status working."
 }

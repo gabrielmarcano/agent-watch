@@ -1,18 +1,41 @@
 {
   "prompt": {
     "kind": "question",
-    "title": "Nombre",
-    "detail": "¿Qué nombre nuevo quieres para note.txt?",
+    "title": "Claude has written up a plan and is ready to execute. Would you like to proceed?",
+    "detail": "",
     "options": [
-      {"id": "opt-1", "label": "notes.txt Solo pasa a plural; la extensión no cambia", "role": "choice"},
-      {"id": "opt-2", "label": "hello.txt Nombrado por su primera línea", "role": "choice"},
-      {"id": "opt-3", "label": "README.md Lo convierte en el README del repo (pasa a Markdown)", "role": "choice"},
-      {"id": "opt-4", "label": "Type something.", "role": "choice"},
-      {"id": "opt-5", "label": "Chat about this", "role": "choice"}
+      {
+        "id": "opt-1",
+        "label": "Yes, and use auto mode",
+        "role": "allow_always"
+      },
+      {
+        "id": "opt-2",
+        "label": "Yes, manually approve edits",
+        "role": "allow_once"
+      },
+      {
+        "id": "opt-3",
+        "label": "Tell Claude what to change",
+        "role": "choice"
+      }
     ]
   },
-  "keys": {"opt-1": ["1"], "opt-2": ["2"], "opt-3": ["3"], "opt-4": ["4"], "opt-5": ["5"]},
-  "cancel_keys": ["esc"],
+  "keys": {
+    "opt-1": [
+      "1"
+    ],
+    "opt-2": [
+      "2"
+    ],
+    "opt-3": [
+      "3"
+    ]
+  },
+  "cancel_keys": [
+    "esc"
+  ],
   "verified_keys": true,
-  "notes": "Plan mode questions render as numbered menus. Digit selects immediately without Enter."
+  "herdr_status": "blocked",
+  "notes": "Real ExitPlanMode dialog (plan mode, 'Ready to code?'). No deny option, so kind=question and the Deny button uses esc. The hint line 'shift+tab to approve with this feedback' under option 3 is not part of its label. The numbered plan steps inside the ╌ block above are not the menu. Digit 2 approved immediately."
 }

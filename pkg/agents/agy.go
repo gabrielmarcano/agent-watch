@@ -36,10 +36,14 @@ func (a *agyAdapter) ParsePrompt(screen string) (Prompt, bool) {
 		return Prompt{}, false
 	}
 
-	cleanScreen := stripANSI(screen)
-	cleanScreen = strings.ReplaceAll(cleanScreen, "\r\n", "\n")
-	cleanScreen = strings.ReplaceAll(cleanScreen, "\r", "\n")
-	lines := strings.Split(cleanScreen, "\n")
+	lines := screenLines(screen)
+
+	// Antigravity replaces its input box (">" between two rules) with the
+	// dialog. herdr may report the pane as done or working while the dialog is
+	// open, so the screen, not the status, decides.
+	if !dialogAtBottom(lines, m, ">") {
+		return Prompt{}, false
+	}
 
 	// Find the separator line above the menu
 	sepIdx := -1

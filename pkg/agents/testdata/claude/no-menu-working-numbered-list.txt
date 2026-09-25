@@ -1,0 +1,41 @@
+
+     Steps
+
+     1. Check the target is free. Run ls notes.txt in /private/tmp/aw-sandbox. It should report "No such file". A plain mv would silently
+        overwrite an existing notes.txt.
+     2. Rename the file. Run mv -n note.txt notes.txt. Use plain mv, not git mv, because the file is untracked. The -n flag refuses to overwrite
+        as a second safeguard.
+
+     Verification
+
+     - ls note.txt notes.txt shows only notes.txt.
+     - git status --short shows ?? notes.txt and no note.txt.
+
+     No commit is included, since none was requested.
+
+  Listed 1 directory (ctrl+o to expand)
+
+⏺ The target name is free, so I'll do the rename.
+
+⏺ Bash(mv -n note.txt notes.txt && ls note.txt notes.txt; git status --short)
+  ⎿  Interrupted · What should Claude do instead?
+
+✻ Sautéed for 15s · done 10:33 AM
+
+❯ First write a numbered list of three fruits as plain text, then run the shell command sleep 15 with the Bash tool.
+
+⏺ 1. Apple
+  2. Banana
+  3. Cherry
+
+  Bash(sleep 15)
+  ⎿  Running… (13s)
+     (ctrl+b to run in background)
+
+· Booping… (16s · ↓ 275 tokens)
+  ⎿  Tip: Run /install-github-app to tag @claude right from your Github issues and PRs
+
+───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── rename-note-to-notes ─
+❯
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  ⏸ manual mode on · esc to interrupt · ← for agents

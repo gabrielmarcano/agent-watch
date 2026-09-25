@@ -5,14 +5,122 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/gabrielmarcano/agent-monitor/pkg/model"
 )
 
 var (
 	ansiRegex = regexp.MustCompile(`\x1b\[[0-9;?]*[A-Za-z]`)
-	reOption  = regexp.MustCompile(`^\s*(?:([❯›>▶●])\s*)?(\d+)[.)]\s+(.+?)\s*$`)
+	// reOption matches the content of an option line once lineContent has
+	// removed its indentation and any box border around it.
+	reOption = regexp.MustCompile(`^(?:([❯›>▶●])\s*)?(\d+)[.)]\s+(.+?)\s*$`)
 )
+
+// maxDetailRunes caps PendingPrompt.Detail (agents.md §2: max 400 chars).
+const maxDetailRunes = 400
+
+// maxDialogTail is how many non-empty lines may follow a menu that is still
+// the open dialog: footers and hints, never the agent's input box.
+const maxDialogTail = 6
+
+// verticalBorders are the box characters that may frame a line on the left
+// or right ("│ 1. Yes │", OpenCode's "┃").
+const verticalBorders = "│┃║"
+
+// screenLines normalises a captured screen: ANSI stripped, CR/CRLF turned
+// into LF, split into lines.
+func screenLines(screen string) []string {
+	s := stripANSI(screen)
+	s = strings.ReplaceAll(s, "\r\n", "\n")
+	s = strings.ReplaceAll(s, "\r", "\n")
+	return strings.Split(s, "\n")
+}
+
+// lineContent returns the column (in runes) where a line's content starts,
+// counting spaces, tabs and vertical borders on the left as blank, and the
+// content with blanks and borders trimmed from both ends.
+func lineContent(line string) (int, string) {
+	indent := 0
+	rest := line
+	for len(rest) > 0 {
+		r, size := utf8.DecodeRuneInString(rest)
+		if r != ' ' && r != '\t' && !strings.ContainsRune(verticalBorders, r) {
+			break
+		}
+		indent++
+		rest = rest[size:]
+	}
+	return indent, strings.TrimRight(rest, " \t"+verticalBorders)
+}
+
+// matchOption parses an option line. labelCol is the column where the label
+// text starts; continuation lines of that option are indented to it.
+func matchOption(line string) (opt menuOption, labelCol int, ok bool) {
+	indent, content := lineContent(line)
+	loc := reOption.FindStringSubmatchIndex(content)
+	if loc == nil {
+		return menuOption{}, 0, false
+	}
+	num, _ := strconv.Atoi(content[loc[4]:loc[5]])
+	opt = menuOption{
+		Number: num,
+		Label:  cleanBoxChars(content[loc[6]:loc[7]]),
+		Cursor: loc[2] >= 0,
+	}
+	return opt, indent + utf8.RuneCountInString(content[:loc[6]]), true
+}
+
+// isKeyHint reports whether s is a key hint the TUI prints under an option
+// (Claude's "shift+tab to approve with this feedback"), not label text.
+func isKeyHint(s string) bool {
+	l := strings.ToLower(strings.TrimSpace(s))
+	for _, p := range []string{"shift+", "ctrl+", "alt+", "tab to ", "esc to ", "enter to ", "↑/↓"} {
+		if strings.HasPrefix(l, p) {
+			return true
+		}
+	}
+	return false
+}
+
+// truncateRunes cuts s to at most max runes, never inside a UTF-8 sequence.
+func truncateRunes(s string, max int) string {
+	if utf8.RuneCountInString(s) <= max {
+		return s
+	}
+	n := 0
+	for i := range s {
+		if n == max {
+			return s[:i]
+		}
+		n++
+	}
+	return s
+}
+
+// dialogAtBottom reports whether the menu is still the open dialog: nothing
+// but a few footer lines may follow it, and none of them may be the agent's
+// input line (a line starting with inputMarker, e.g. Claude's "❯", agy's ">").
+// Agents draw their input box below the conversation when idle or working
+// and hide it while a dialog is open, so a numbered list in an answer always
+// has the input box after it.
+func dialogAtBottom(lines []string, m parsedMenu, inputMarker string) bool {
+	tail := 0
+	for i := m.EndLine + 1; i < len(lines); i++ {
+		_, content := lineContent(lines[i])
+		if content == "" {
+			continue
+		}
+		tail++
+		if tail > maxDialogTail {
+			return false
+		}
+		if content == inputMarker || strings.HasPrefix(content, inputMarker+" ") {
+			return false
+		}
+	}
+	return true
+}
 
 type menuOption struct {
 	Number int
@@ -58,6 +166,8 @@ func isBoxOrSepLine(s string) bool {
 // Never maps by position.
 func classify(label string) model.OptionRole {
 	l := strings.ToLower(label)
+	// Claude writes "don’t" with a typographic apostrophe in some menus.
+	l = strings.NewReplacer("’", "'", "‘", "'").Replace(l)
 
 	// allow_always checked first
 	if strings.Contains(l, "don't ask again") ||
@@ -171,13 +281,14 @@ func buildPrompt(m parsedMenu, keysFor func(o menuOption, idx int, m parsedMenu)
 	for _, o := range opts {
 		labels = append(labels, o.Label)
 	}
-	fp := model.Fingerprint(kind, m.Title, m.Detail, labels)
+	detail := truncateRunes(m.Detail, maxDetailRunes)
+	fp := model.Fingerprint(kind, m.Title, detail, labels)
 
 	return Prompt{
 		Public: model.PendingPrompt{
 			Kind:        kind,
 			Title:       m.Title,
-			Detail:      m.Detail,
+			Detail:      detail,
 			Options:     opts,
 			Fingerprint: fp,
 		},
@@ -186,11 +297,10 @@ func buildPrompt(m parsedMenu, keysFor func(o menuOption, idx int, m parsedMenu)
 }
 
 // findMenu scans screen text for the LAST numbered block of >= 2 options per agents.md §2.
+// It knows nothing about dialogs: adapters check that the block is really an
+// open dialog (see dialogAtBottom) before trusting it.
 func findMenu(screen string) (parsedMenu, bool) {
-	cleanScreen := stripANSI(screen)
-	cleanScreen = strings.ReplaceAll(cleanScreen, "\r\n", "\n")
-	cleanScreen = strings.ReplaceAll(cleanScreen, "\r", "\n")
-	rawLines := strings.Split(cleanScreen, "\n")
+	rawLines := screenLines(screen)
 
 	type rawBlock struct {
 		startLine int
@@ -203,11 +313,7 @@ func findMenu(screen string) (parsedMenu, bool) {
 	n := len(rawLines)
 
 	for i < n {
-		line := strings.TrimRight(rawLines[i], " \t")
-		lineClean := strings.Trim(line, "│┃")
-
-		match := reOption.FindStringSubmatch(lineClean)
-		if match == nil {
+		if _, _, ok := matchOption(rawLines[i]); !ok {
 			i++
 			continue
 		}
@@ -218,50 +324,43 @@ func findMenu(screen string) (parsedMenu, bool) {
 
 		for i < n {
 			currLine := strings.TrimRight(rawLines[i], " \t")
-			currClean := strings.Trim(currLine, "│┃")
 
-			sub := reOption.FindStringSubmatch(currClean)
-			if sub != nil {
-				num, _ := strconv.Atoi(sub[2])
-				cursor := sub[1] != ""
-				label := cleanBoxChars(sub[3])
-
-				currentOpts = append(currentOpts, menuOption{
-					Number: num,
-					Label:  label,
-					Cursor: cursor,
-				})
+			if opt, labelCol, ok := matchOption(currLine); ok {
+				currentOpts = append(currentOpts, opt)
 				i++
 
-				// Check up to 2 continuation lines following this option
+				// Up to 2 continuation lines, indented to the label column
+				// (a little deeper is tolerated). A footer at the menu's own
+				// indentation ("  Esc to cancel" under "  2. No") is not one.
 				contCount := 0
 				for i < n && contCount < 2 {
 					nextLine := strings.TrimRight(rawLines[i], " \t")
-					nextClean := cleanBoxChars(nextLine)
+					indent, content := lineContent(nextLine)
 
-					// Stop continuation if empty, separator line, or next option
-					if nextClean == "" || isBoxOrSepLine(nextLine) || reOption.MatchString(strings.Trim(nextLine, "│┃")) {
+					if content == "" || isBoxOrSepLine(nextLine) {
 						break
 					}
-
-					// Continuation line must be indented
-					trimmedLeft := strings.TrimLeft(nextLine, " │┃\t")
-					leadingSpaces := len(nextLine) - len(trimmedLeft)
-					if leadingSpaces >= 2 {
-						currentOpts[len(currentOpts)-1].Label += " " + nextClean
-						contCount++
-						i++
-					} else {
+					if _, _, isOpt := matchOption(nextLine); isOpt {
 						break
 					}
+					if indent < labelCol || indent > labelCol+4 {
+						break
+					}
+					if !isKeyHint(content) {
+						currentOpts[len(currentOpts)-1].Label += " " + cleanBoxChars(content)
+					}
+					contCount++
+					i++
 				}
 				continue
 			}
 
 			// If current line is a separator line (like ─────), peek if next line is an option
-			if isBoxOrSepLine(currLine) && i+1 < n && reOption.MatchString(strings.Trim(rawLines[i+1], "│┃")) {
-				i++ // skip separator inside menu block
-				continue
+			if isBoxOrSepLine(currLine) && i+1 < n {
+				if _, _, ok := matchOption(rawLines[i+1]); ok {
+					i++ // skip separator inside menu block
+					continue
+				}
 			}
 
 			// Not an option and not an internal separator -> block ends
@@ -384,10 +483,5 @@ func extractTitleAndDetail(lines []string, menuStartLine int) (string, string) {
 		}
 	}
 
-	detail := strings.Join(detailLines, "\n")
-	if len(detail) > 400 {
-		detail = detail[:400]
-	}
-
-	return title, detail
+	return title, truncateRunes(strings.Join(detailLines, "\n"), maxDetailRunes)
 }

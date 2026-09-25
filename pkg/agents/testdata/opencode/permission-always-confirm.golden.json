@@ -1,0 +1,33 @@
+{
+  "prompt": {
+    "kind": "permission",
+    "title": "Always allow",
+    "detail": "This will allow the following patterns until OpenCode is restarted\nPatterns: wc *",
+    "options": [
+      {
+        "id": "opt-1",
+        "label": "Confirm",
+        "role": "allow_always"
+      },
+      {
+        "id": "opt-2",
+        "label": "Cancel",
+        "role": "deny"
+      }
+    ]
+  },
+  "keys": {
+    "opt-1": [
+      "Enter"
+    ],
+    "opt-2": [
+      "esc"
+    ]
+  },
+  "cancel_keys": [
+    "esc"
+  ],
+  "verified_keys": true,
+  "herdr_status": "blocked",
+  "notes": "Second stage after choosing 'Allow always' (Right+Enter). Confirm is focused on mount; esc goes back to the first stage with the focus reset to 'Allow once' (verified), it does not reject."
+}

@@ -5,7 +5,10 @@ import (
 	"database/sql"
 	"encoding/json"
 	"os"
+	"regexp"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/gabrielmarcano/agent-monitor/pkg/model"
 	_ "modernc.org/sqlite"
@@ -31,91 +34,226 @@ func (o *opencodeAdapter) PromptWhileWorking() bool {
 	return true
 }
 
+// ParsePrompt reads OpenCode's dialogs (1.18.32). They are drawn inside a "┃"
+// frame at the bottom of the screen, in place of the input box (which is
+// closed by a "╹▀▀▀" line). Permission prompts are a button bar, not a
+// numbered list; the question tool is a numbered list with an "esc dismiss"
+// footer. A numbered list anywhere else is conversation text.
 func (o *opencodeAdapter) ParsePrompt(screen string) (Prompt, bool) {
-	cleanScreen := stripANSI(screen)
-	cleanScreen = strings.ReplaceAll(cleanScreen, "\r\n", "\n")
-	cleanScreen = strings.ReplaceAll(cleanScreen, "\r", "\n")
-	lines := strings.Split(cleanScreen, "\n")
+	lines := screenLines(screen)
+	if p, ok := ocParseButtons(lines); ok {
+		return p, true
+	}
+	return ocParseQuestion(lines)
+}
 
-	// OpenCode permission prompt renders a horizontal button bar:
-	// "Allow once   Allow always   Reject"
-	buttonBarIdx := -1
-	for i := len(lines) - 1; i >= 0; i-- {
-		l := lines[i]
-		if strings.Contains(l, "Allow once") && strings.Contains(l, "Allow always") && strings.Contains(l, "Reject") {
-			buttonBarIdx = i
-			break
+// ocSidebarGap separates the dialog text from OpenCode's right-hand sidebar
+// ("Context", "LSP", the cwd) on wide terminals.
+var ocSidebarGap = regexp.MustCompile(` {8,}`)
+
+// ocFrame returns the text inside OpenCode's "┃" frame, keeping its
+// indentation and cutting off the sidebar, and whether the line is framed.
+func ocFrame(line string) (string, bool) {
+	trimmed := strings.TrimLeft(line, " ")
+	if !strings.HasPrefix(trimmed, "┃") {
+		return "", false
+	}
+	inner := strings.TrimPrefix(trimmed, "┃")
+	lead := len(inner) - len(strings.TrimLeft(inner, " "))
+	if loc := ocSidebarGap.FindStringIndex(inner[lead:]); loc != nil {
+		inner = inner[:lead+loc[0]]
+	}
+	return strings.TrimRight(inner, " "), true
+}
+
+// ocDialogStart returns the first line of the framed block that ends at
+// anchor, provided the block is the open dialog: the input box ("╹") is not
+// drawn below it.
+func ocDialogStart(lines []string, anchor int) (int, bool) {
+	for i := anchor + 1; i < len(lines); i++ {
+		if strings.HasPrefix(strings.TrimLeft(lines[i], " "), "╹") {
+			return 0, false
 		}
 	}
-
-	if buttonBarIdx < 0 {
-		// Fall back to generic numbered menu if any
-		return o.genericAdapter.ParsePrompt(screen)
+	start := anchor
+	for start > 0 {
+		if _, framed := ocFrame(lines[start-1]); !framed {
+			break
+		}
+		start--
 	}
+	return start, true
+}
 
-	// Parse Title and Detail above button bar
-	var title string
-	var actionLine string
-	var patternLine string
+// ocStripIcon drops the one-rune icon OpenCode puts before a permission's
+// action ("# Shell command", "→ Edit note.txt", "← Access external directory").
+func ocStripIcon(s string) string {
+	r, size := utf8.DecodeRuneInString(s)
+	if size > 0 && !unicode.IsLetter(r) && !unicode.IsDigit(r) && strings.HasPrefix(s[size:], " ") {
+		return strings.TrimSpace(s[size:])
+	}
+	return s
+}
 
-	for i := buttonBarIdx - 1; i >= 0; i-- {
-		curr := cleanBoxChars(lines[i])
-		if curr == "" {
+// ocParseButtons parses the permission dialog ("Allow once   Allow always
+// Reject") and its "Always allow" confirmation stage ("Confirm   Cancel").
+func ocParseButtons(lines []string) (Prompt, bool) {
+	for i := len(lines) - 1; i >= 0; i-- {
+		inner, framed := ocFrame(lines[i])
+		if !framed {
 			continue
 		}
-
-		if strings.Contains(curr, "Permission required") {
-			title = "Permission required"
-			break
+		bar := strings.TrimSpace(inner)
+		permission := strings.Contains(bar, "Allow once") && strings.Contains(bar, "Allow always") && strings.Contains(bar, "Reject")
+		confirm := strings.HasPrefix(bar, "Confirm") && strings.Contains(bar, "Cancel")
+		if !permission && !confirm {
+			continue
+		}
+		start, ok := ocDialogStart(lines, i)
+		if !ok {
+			return Prompt{}, false
 		}
 
-		if strings.HasPrefix(curr, "← ") {
-			actionLine = strings.TrimPrefix(curr, "← ")
-		} else if strings.HasPrefix(curr, "- ") && patternLine == "" {
-			patternLine = strings.TrimPrefix(curr, "- ")
+		// "△ <title>" heads the dialog; the lines below it are the body.
+		title := ""
+		var body []string
+		for _, l := range lines[start:i] {
+			in, _ := ocFrame(l)
+			c := strings.TrimSpace(in)
+			if title == "" {
+				if strings.HasPrefix(c, "△") {
+					title = strings.TrimSpace(strings.TrimPrefix(c, "△"))
+				}
+				continue
+			}
+			if c != "" {
+				body = append(body, c)
+			}
+		}
+		if permission && title == "Permission required" {
+			return ocPermissionPrompt(title, body), true
+		}
+		if confirm && title == "Always allow" {
+			return ocAlwaysPrompt(title, body), true
+		}
+		return Prompt{}, false
+	}
+	return Prompt{}, false
+}
+
+// ocPermissionPrompt builds the first stage. Keys assume the focus OpenCode
+// gives the bar when it mounts ("Allow once"); see agents.md §5.1.
+func ocPermissionPrompt(title string, body []string) Prompt {
+	var action string
+	var extra, patterns []string
+	inPatterns := false
+	for _, c := range body {
+		switch {
+		case action == "":
+			action = ocStripIcon(c)
+		case c == "Patterns":
+			inPatterns = true
+		case inPatterns && strings.HasPrefix(c, "- "):
+			patterns = append(patterns, strings.TrimPrefix(c, "- "))
+		case strings.HasPrefix(c, "$ "), strings.HasPrefix(c, "Path: "):
+			extra = append(extra, c) // the shell command the watch must show
 		}
 	}
+	detail := ocJoinDetail(action, extra, patterns)
 
-	if title == "" {
-		title = "Permission required"
-	}
-
-	var detailParts []string
-	if actionLine != "" {
-		detailParts = append(detailParts, actionLine)
-	}
-	if patternLine != "" {
-		detailParts = append(detailParts, "Patterns: "+patternLine)
-	}
-	detail := strings.Join(detailParts, "\n")
-
-	opts := []model.PromptOption{
+	return ocPrompt(title, detail, []model.PromptOption{
 		{ID: "opt-1", Label: "Allow once", Role: model.RoleAllowOnce},
 		{ID: "opt-2", Label: "Allow always", Role: model.RoleAllowAlways},
 		{ID: "opt-3", Label: "Reject", Role: model.RoleDeny},
-	}
-
-	keys := map[string][]string{
+	}, map[string][]string{
 		"opt-1": {"Enter"},
-		"opt-2": {"Right", "Enter"},
+		// "Allow always" opens a Confirm/Cancel stage with Confirm focused.
+		"opt-2": {"Right", "Enter", "Enter"},
 		"opt-3": {"esc"},
+	})
+}
+
+// ocAlwaysPrompt builds the "Always allow" confirmation stage. Its esc goes
+// back to the first stage (focus reset to "Allow once"); it does not reject.
+func ocAlwaysPrompt(title string, body []string) Prompt {
+	var text string
+	var patterns []string
+	for _, c := range body {
+		switch {
+		case strings.HasPrefix(c, "- "):
+			patterns = append(patterns, strings.TrimPrefix(c, "- "))
+		case text == "":
+			text = c
+		}
 	}
+	detail := ocJoinDetail(text, nil, patterns)
 
-	kind := model.PromptPermission
-	labels := []string{"Allow once", "Allow always", "Reject"}
-	fp := model.Fingerprint(kind, title, detail, labels)
+	return ocPrompt(title, detail, []model.PromptOption{
+		{ID: "opt-1", Label: "Confirm", Role: model.RoleAllowAlways},
+		{ID: "opt-2", Label: "Cancel", Role: classify("Cancel")},
+	}, map[string][]string{
+		"opt-1": {"Enter"},
+		"opt-2": {"esc"},
+	})
+}
 
+func ocJoinDetail(first string, extra, patterns []string) string {
+	var parts []string
+	if first != "" {
+		parts = append(parts, first)
+	}
+	parts = append(parts, extra...)
+	if len(patterns) > 0 {
+		parts = append(parts, "Patterns: "+strings.Join(patterns, ", "))
+	}
+	return strings.Join(parts, "\n")
+}
+
+func ocPrompt(title, detail string, opts []model.PromptOption, keys map[string][]string) Prompt {
+	detail = truncateRunes(detail, maxDetailRunes)
+	labels := make([]string, len(opts))
+	for i, o := range opts {
+		labels[i] = o.Label
+	}
+	kind := kindFor(opts)
 	return Prompt{
 		Public: model.PendingPrompt{
 			Kind:        kind,
 			Title:       title,
 			Detail:      detail,
 			Options:     opts,
-			Fingerprint: fp,
+			Fingerprint: model.Fingerprint(kind, title, detail, labels),
 		},
 		Keys:       keys,
 		CancelKeys: []string{"esc"},
-	}, true
+	}
+}
+
+// ocParseQuestion parses the question tool's dialog: a numbered list whose
+// footer is "↑↓ select  enter submit  esc dismiss". Digits pick an answer.
+func ocParseQuestion(lines []string) (Prompt, bool) {
+	for i := len(lines) - 1; i >= 0; i-- {
+		inner, framed := ocFrame(lines[i])
+		if !framed || !strings.Contains(inner, "esc dismiss") {
+			continue
+		}
+		start, ok := ocDialogStart(lines, i)
+		if !ok {
+			return Prompt{}, false
+		}
+		region := make([]string, 0, i-start)
+		for _, l := range lines[start:i] {
+			in, _ := ocFrame(l)
+			region = append(region, in)
+		}
+		m, ok := findMenu(strings.Join(region, "\n"))
+		if !ok {
+			return Prompt{}, false
+		}
+		m.Title, m.Detail = extractTitleAndDetail(region, m.StartLine)
+		return buildPrompt(m, digitKeys), true
+	}
+	return Prompt{}, false
 }
 
 type opencodeMessageData struct {

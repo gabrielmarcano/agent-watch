@@ -1,45 +1,42 @@
-    drwxr-xr-x@   9 me  wheel   288 Sep 23 20:57 .git
-    -rw-r--r--@   1 me  wheel    12 Sep 23 20:35 note.txt
+  routine was a stubborn anchor. For twenty-four years, the lantern had not faltered on his watch, and tonight, with the barometer plummeting
+  and the Atlantic heaving against the granite foundations, failure was not an option.
 
-  ### Contents:
+  He reached the lantern room, where the damp cold of the ocean gave way to the sharp, comforting aromas of whale oil, brass polish, and
+  paraffin. Outside, a gale whipped sheets of spray against the curved storm panes, rattling the iron frame with frantic, shuddering gusts.
+  Arthur checked the brass clockwork mechanism that rotated the great Fresnel lens. He caught the heavy counterweight rope, hauling it upward
+  hand over hand until the iron cylinder clicked securely against its ceiling stop. With a calibrated nudge, he engaged the escapement,
+  setting the concentric rings of prismatic glass into their steady, hypnotic rotation.
 
-  • ..: Parent directory (/private/tmp)
-  • .: Current working directory (/tmp/aw-sandbox)
-  • **.git**: Git repository metadata folder
-  • **note.txt**: A 12-byte text file owned by me
+  Striking a long wooden match against the wall, Arthur shielded the sulfur flame with a calloused palm and touched it to the primary burner.
+  The wick caught, guttered briefly, and then flared into brilliant gold. Instantly, the faceted lenses seized the flame, bending and
+  magnifying its modest radiance into three blazing spears that pierced the gloom, sweeping over the roiling surf every fifteen seconds.
 
-────────────────────────────────────────────────────────────
-> Append the line world to note.txt
+  Arthur settled onto his high wooden stool by the logbook. Below, black rollers smashed against the jagged spine of Devil’s Tooth, throwing
+  plumes of spectral froth fifty feet into the night. It was an unforgiving coast, littered with the ribs of forgotten schooners. Through his
+  brass spyglass, he scanned the squall-choked horizon. There, barely visible between the swells three miles south, flickered the faint green
+  running light of an outbound freighter.
 
-● Read(/tmp/aw-sandbox/note.txt)
-● Bash(git status) (ctrl+o to expand)
-
-▸ Thought for 6s, 947 tokens
-  The initial file contents seem inconsistent with the user's implicit expectations. Appending "world" in a standard command-line context would add...
-
-● Bash(cat note.txt) (ctrl+o to expand)
-
-▸ Thought for 3s, 565 tokens
-  `note.txt` unexpectedly contains "hello\nworld\n". The modification timestamp indicates this content existed before the current session, suggestin...
-
-● Edit(/tmp/aw-sandbox/note.txt) (ctrl+o to expand)
-
-Pending edit
-  ⎿  User declined the tool call
+  He watched in silence as the ship altered course by five degrees, aligning itself cleanly with the safe channel marked by his sweeping
+  beacon. The light touched the drenched hull once, twice, and then the vessel slipped safely away toward open water. Outside, the storm
+  continued to howl, but inside the glass crown, the mechanical pulse beat on without haste. Arthur dipped his steel nib into dark ink and
+  recorded the hour, the squall's bearing, and the solitary passage, deeply content in the purposeful quiet of his vigil.
 
 ────────────────────────────────────────────────────────────
-> Run a python script with Bash that sleeps for 15 seconds: python3 -c 'import time; time.sleep(15)'
+> Run the shell command sleep 20 and then tell me it finished
 
-▸ Thought for 5s, 531 tokens
-  The new command executes a Python script that sleeps for 15 seconds. The function parameter `WaitMsBeforeAsync` has a maximum value of 10000 ms, w...
+▸ Thought for 6s, 764 tokens
+  The explicit user request to run a shell command overrides the general instruction against using sleep for timers. Using the execution too...
 
-● Bash(python3 -c 'import time; time.sleep(15)') (ctrl+o to expand)
+● Bash(sleep 20) (ctrl+o to expand)
 
-  I have launched the Python command (python3 -c 'import time; time.sleep(15)') in the background. I will notify you once it completes.
+  I have started running sleep 20 in the background and will let you know once it finishes.
 
-  The Python script has finished running successfully (exit code 0).
+  The command sleep 20 has finished.
 
-────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+────────────────────────────────────────────────────────────
+> Run the shell command sleep 25 in the foreground, wait for it, and then tell me it finished
+⢿  Generating...
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 >
-────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-? for shortcuts                                                                                                                  Gemini 3.8 Flash · high
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+esc to cancel                                                                                                            Gemini 3.8 Flash · high

@@ -1,0 +1,49 @@
+{
+  "prompt": {
+    "kind": "permission",
+    "title": "Bash command",
+    "detail": "mv -n note.txt notes.txt && ls note.txt notes.txt; git status --short\nRename note.txt to notes.txt and verify\nmv command with flags requires manual approval",
+    "options": [
+      {
+        "id": "opt-1",
+        "label": "Yes",
+        "role": "allow_once"
+      },
+      {
+        "id": "opt-2",
+        "label": "Yes, and don’t ask again for: mv *",
+        "role": "allow_always"
+      },
+      {
+        "id": "opt-3",
+        "label": "Yes, and switch to auto mode · auto mode handles these prompts for you",
+        "role": "allow_always"
+      },
+      {
+        "id": "opt-4",
+        "label": "No",
+        "role": "deny"
+      }
+    ]
+  },
+  "keys": {
+    "opt-1": [
+      "1"
+    ],
+    "opt-2": [
+      "2"
+    ],
+    "opt-3": [
+      "3"
+    ],
+    "opt-4": [
+      "4"
+    ]
+  },
+  "cancel_keys": [
+    "esc"
+  ],
+  "verified_keys": true,
+  "herdr_status": "blocked",
+  "notes": "Option 2 is written with a typographic apostrophe (don’t, U+2019); it must still be allow_always. Digit 4 denied immediately."
+}

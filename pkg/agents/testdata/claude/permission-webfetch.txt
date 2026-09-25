@@ -1,0 +1,41 @@
+
+❯ /exit
+
+✽ Garnishing…
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  ⏵⏵ auto mode on (shift+tab to cycle) · esc to interrupt · ← for agents
+
+󰉋 /private/tmp/aw-sandbox 󰘬 main 󰈙 1 󱎫 24s
+❯ claude --permission-mode default --model sonnet
+ ▐▛███▛█   Claude Code v2.1.282
+▝▜██████▀  Sonnet 5 with xhigh effort · Claude Max
+ ▝▝   ▝▝   /private/tmp/aw-sandbox
+
+
+❯ Without using any tools, reply with a numbered list of exactly three short options for a new name for note.txt, one per line, like "1.
+  notes.txt". Nothing else.
+
+⏺ 1. notes.txt
+  2. scratch-notes.txt
+  3. todo-notes.txt
+
+✻ Worked for 1s · done 10:25 AM
+
+❯ Use the WebFetch tool to fetch https://example.com and tell me the page title.
+
+⏺ Fetch(https://example.com)
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ Fetch
+
+   url: https://example.com/
+   │ prompt: What is the page title (the contents of the <title> element, or the main heading if the title is not available)?
+   Claude wants to fetch content from example.com
+
+ Do you want to allow Claude to fetch this content?
+ ❯ 1. Yes
+   2. Yes, and don't ask again for example.com
+   3. No, and tell Claude what to do differently (esc)

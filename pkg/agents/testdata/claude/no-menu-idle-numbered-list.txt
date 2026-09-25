@@ -1,0 +1,37 @@
+
+󰉋 /private/tmp/aw-sandbox 󰘬 main 󰈙 1
+❯ claude
+ ▐▛███▛█   Claude Code v2.1.282
+▝▜██████▀  Opus 5.5 with xhigh effort · Claude Max
+ ▝▝   ▝▝   /private/tmp/aw-sandbox
+
+
+❯ /exit
+
+✽ Garnishing…
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  ⏵⏵ auto mode on (shift+tab to cycle) · esc to interrupt · ← for agents
+
+󰉋 /private/tmp/aw-sandbox 󰘬 main 󰈙 1 󱎫 24s
+❯ claude --permission-mode default --model sonnet
+ ▐▛███▛█   Claude Code v2.1.282
+▝▜██████▀  Sonnet 5 with xhigh effort · Claude Max
+ ▝▝   ▝▝   /private/tmp/aw-sandbox
+
+
+❯ Without using any tools, reply with a numbered list of exactly three short options for a new name for note.txt, one per line, like "1.
+  notes.txt". Nothing else.
+
+⏺ 1. notes.txt
+  2. scratch-notes.txt
+  3. todo-notes.txt
+
+✻ Worked for 1s · done 10:25 AM
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  ⏸ manual mode on · ? for shortcuts · ← for agents

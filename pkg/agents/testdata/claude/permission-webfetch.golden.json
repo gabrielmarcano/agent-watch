@@ -1,0 +1,41 @@
+{
+  "prompt": {
+    "kind": "permission",
+    "title": "Fetch",
+    "detail": "url: https://example.com/\nprompt: What is the page title (the contents of the <title> element, or the main heading if the title is not available)?\nClaude wants to fetch content from example.com",
+    "options": [
+      {
+        "id": "opt-1",
+        "label": "Yes",
+        "role": "allow_once"
+      },
+      {
+        "id": "opt-2",
+        "label": "Yes, and don't ask again for example.com",
+        "role": "allow_always"
+      },
+      {
+        "id": "opt-3",
+        "label": "No, and tell Claude what to do differently (esc)",
+        "role": "deny"
+      }
+    ]
+  },
+  "keys": {
+    "opt-1": [
+      "1"
+    ],
+    "opt-2": [
+      "2"
+    ],
+    "opt-3": [
+      "3"
+    ]
+  },
+  "cancel_keys": [
+    "esc"
+  ],
+  "verified_keys": true,
+  "herdr_status": "done",
+  "notes": "WebFetch dialog, no footer line. herdr 0.9.1 reported the pane as done (not blocked) while this dialog was open: `herdr agent explain` showed rule live_prompt_box matching a stale shell prompt line in scrollback. Digit 3 denied immediately."
+}

@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/gabrielmarcano/agent-monitor/pkg/model"
 )
@@ -274,5 +275,123 @@ line 14
 	expectedFP := model.Fingerprint(model.PromptUnknown, "", "", nil)
 	if p.Public.Fingerprint != expectedFP {
 		t.Errorf("fingerprint mismatch: got %q, want %q", p.Public.Fingerprint, expectedFP)
+	}
+}
+
+func labelsOf(m parsedMenu) []string {
+	var out []string
+	for _, o := range m.Options {
+		out = append(out, o.Label)
+	}
+	return out
+}
+
+// A box indented from the left edge ("  │ 1. Yes │") is still a menu, and
+// its labels carry no border characters.
+func TestFindMenu_IndentedBox(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("testdata", "generic", "indented-box.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	m, ok := findMenu(string(data))
+	if !ok {
+		t.Fatal("indented box: no menu found")
+	}
+	if got, want := labelsOf(m), []string{"Yes", "No"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("labels = %q, want %q", got, want)
+	}
+	if m.Title != "Delete the build cache?" {
+		t.Errorf("title = %q", m.Title)
+	}
+}
+
+// Real screen: OpenCode draws its question dialog inside an indented "┃"
+// frame ("  ┃  1. red"). The descriptions under each option are continuation
+// lines; the cwd drawn far to the right on the line after the last option is not.
+func TestFindMenu_IndentedFrameRealScreen(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("testdata", "opencode", "question-multiple.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	m, ok := findMenu(string(data))
+	if !ok {
+		t.Fatal("framed question: no menu found")
+	}
+	want := []string{"red Prefer red", "green Prefer green", "blue Prefer blue", "Type your own answer"}
+	if got := labelsOf(m); !reflect.DeepEqual(got, want) {
+		t.Errorf("labels = %q, want %q", got, want)
+	}
+}
+
+// A footer at the options' own indentation, with no blank line before it, is
+// not a continuation of the last label ("No Esc to cancel").
+func TestFindMenu_FooterWithoutBlankLine(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("testdata", "generic", "footer-no-blank.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	m, ok := findMenu(string(data))
+	if !ok {
+		t.Fatal("no menu found")
+	}
+	if got, want := labelsOf(m), []string{"Yes", "No"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("labels = %q, want %q", got, want)
+	}
+}
+
+// Real screen: Claude's plan approval prints a key hint under option 3; it is
+// not part of the label (and "approve" in it would make the option allow_once).
+func TestFindMenu_KeyHintIsNotLabel(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("testdata", "claude", "plan-approval.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	m, ok := findMenu(string(data))
+	if !ok {
+		t.Fatal("no menu found")
+	}
+	want := []string{"Yes, and use auto mode", "Yes, manually approve edits", "Tell Claude what to change"}
+	if got := labelsOf(m); !reflect.DeepEqual(got, want) {
+		t.Errorf("labels = %q, want %q", got, want)
+	}
+}
+
+func TestClassify_TypographicApostrophe(t *testing.T) {
+	if got := classify("Yes, and don’t ask again for: mv *"); got != model.RoleAllowAlways {
+		t.Errorf("classify(don’t ask again) = %v, want allow_always", got)
+	}
+}
+
+// Detail is capped at 400 characters on a rune boundary: the watch must never
+// receive half a UTF-8 sequence (it would render U+FFFD).
+func TestDetailTruncationKeepsUTF8(t *testing.T) {
+	long := strings.Repeat("a", 399) + strings.Repeat("é", 10) // 'é' is 2 bytes: byte 400 splits one
+	screen := "────────────────────\n Bash command\n\n   " + long +
+		"\n\n Do you want to proceed?\n ❯ 1. Yes\n   2. No\n\n Esc to cancel · Tab to amend\n"
+
+	claudePrompt, ok := newClaudeAdapter(Config{}).ParsePrompt(screen)
+	if !ok {
+		t.Fatal("claude: no menu")
+	}
+	_, extracted := extractTitleAndDetail([]string{"Title", long, "1. Yes"}, 2)
+	built := buildPrompt(parsedMenu{Title: "t", Detail: long, Options: []menuOption{{Number: 1, Label: "Yes"}, {Number: 2, Label: "No"}}}, digitKeys)
+
+	for name, detail := range map[string]string{
+		"claude":                claudePrompt.Public.Detail,
+		"extractTitleAndDetail": extracted,
+		"buildPrompt":           built.Public.Detail,
+	} {
+		if !utf8.ValidString(detail) {
+			t.Errorf("%s: detail is not valid UTF-8", name)
+		}
+		if n := utf8.RuneCountInString(detail); n != maxDetailRunes {
+			t.Errorf("%s: detail has %d runes, want %d", name, n, maxDetailRunes)
+		}
+		if !strings.HasSuffix(detail, "aé") {
+			t.Errorf("%s: detail should end with one whole 'é', got tail %q", name, detail[len(detail)-3:])
+		}
+	}
+	if built.Public.Fingerprint != model.Fingerprint(built.Public.Kind, "t", built.Public.Detail, []string{"Yes", "No"}) {
+		t.Error("buildPrompt: fingerprint not computed over the truncated detail")
 	}
 }

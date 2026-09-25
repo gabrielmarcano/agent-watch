@@ -2,7 +2,7 @@
   "prompt": {
     "kind": "permission",
     "title": "Permission required",
-    "detail": "Shell command\n$ wc -l note.txt",
+    "detail": "Access external directory /etc\nPatterns: /etc/*",
     "options": [
       {
         "id": "opt-1",
@@ -39,5 +39,5 @@
   ],
   "verified_keys": true,
   "herdr_status": "blocked",
-  "notes": "Buttons, not digits. Focus starts on 'Allow once' every time the dialog mounts, so Enter allows once. 'Allow always' opens a second 'Always allow' stage (Confirm / Cancel, Confirm focused), so it needs Right, Enter, Enter. esc rejects whatever the focus. Verified: Right+Enter stopped at the confirm stage; Right+Enter+Enter allowed always; esc rejected."
+  "notes": "Captured in Phase 0 (was permission-bash.txt; it is the external-directory read prompt). Buttons, not digits. Focus starts on 'Allow once' every time the dialog mounts, so Enter allows once. 'Allow always' opens a second 'Always allow' stage (Confirm / Cancel, Confirm focused), so it needs Right, Enter, Enter. esc rejects whatever the focus. Verified: Right+Enter stopped at the confirm stage; Right+Enter+Enter allowed always; esc rejected."
 }

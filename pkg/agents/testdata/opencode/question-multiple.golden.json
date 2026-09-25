@@ -1,0 +1,49 @@
+{
+  "prompt": {
+    "kind": "question",
+    "title": "Which color do you prefer: red, green or blue?",
+    "detail": "",
+    "options": [
+      {
+        "id": "opt-1",
+        "label": "red Prefer red",
+        "role": "choice"
+      },
+      {
+        "id": "opt-2",
+        "label": "green Prefer green",
+        "role": "choice"
+      },
+      {
+        "id": "opt-3",
+        "label": "blue Prefer blue",
+        "role": "choice"
+      },
+      {
+        "id": "opt-4",
+        "label": "Type your own answer",
+        "role": "choice"
+      }
+    ]
+  },
+  "keys": {
+    "opt-1": [
+      "1"
+    ],
+    "opt-2": [
+      "2"
+    ],
+    "opt-3": [
+      "3"
+    ],
+    "opt-4": [
+      "4"
+    ]
+  },
+  "cancel_keys": [
+    "esc"
+  ],
+  "verified_keys": true,
+  "herdr_status": "blocked",
+  "notes": "OpenCode's question tool dialog (footer '↑↓ select  enter submit  esc dismiss'). Digits 1-9 pick an answer; for a single question the pick is submitted at once (digit 2 answered 'green'). esc dismisses (rejects) the question."
+}

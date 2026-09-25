@@ -1,0 +1,41 @@
+{
+  "prompt": {
+    "kind": "permission",
+    "title": "Create file",
+    "detail": "colors.txt",
+    "options": [
+      {
+        "id": "opt-1",
+        "label": "Yes",
+        "role": "allow_once"
+      },
+      {
+        "id": "opt-2",
+        "label": "Yes, and switch to accept edits (auto-approve file edits and common file commands) for this session (shift+tab)",
+        "role": "allow_always"
+      },
+      {
+        "id": "opt-3",
+        "label": "No",
+        "role": "deny"
+      }
+    ]
+  },
+  "keys": {
+    "opt-1": [
+      "1"
+    ],
+    "opt-2": [
+      "2"
+    ],
+    "opt-3": [
+      "3"
+    ]
+  },
+  "cancel_keys": [
+    "esc"
+  ],
+  "verified_keys": true,
+  "herdr_status": "blocked",
+  "notes": "A numbered list in the answer and numbered lines in the diff sit above the real dialog; the dialog wins. Digit 3 denied immediately."
+}

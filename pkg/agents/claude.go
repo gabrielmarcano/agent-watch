@@ -35,10 +35,13 @@ func (c *claudeAdapter) ParsePrompt(screen string) (Prompt, bool) {
 		return Prompt{}, false
 	}
 
-	cleanScreen := stripANSI(screen)
-	cleanScreen = strings.ReplaceAll(cleanScreen, "\r\n", "\n")
-	cleanScreen = strings.ReplaceAll(cleanScreen, "\r", "\n")
-	lines := strings.Split(cleanScreen, "\n")
+	lines := screenLines(screen)
+
+	// Claude hides its input box ("❯" between two rules) while a dialog is
+	// open. A numbered list with the input box below it is part of an answer.
+	if !dialogAtBottom(lines, m, "❯") {
+		return Prompt{}, false
+	}
 
 	// Find the top border of the Claude prompt box above m.StartLine (solid line, not dashed diff border)
 	topSep := -1
@@ -98,10 +101,7 @@ func (c *claudeAdapter) ParsePrompt(screen string) (Prompt, bool) {
 
 	if title != "" {
 		m.Title = title
-		m.Detail = strings.Join(detailLines, "\n")
-		if len(m.Detail) > 400 {
-			m.Detail = m.Detail[:400]
-		}
+		m.Detail = strings.Join(detailLines, "\n") // buildPrompt caps it on a rune boundary
 	}
 
 	p := buildPrompt(m, digitKeys)

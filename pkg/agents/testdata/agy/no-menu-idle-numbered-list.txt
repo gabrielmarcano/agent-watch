@@ -1,0 +1,23 @@
+
+󰉋 /private/tmp/aw-sandbox 󰘬 main 󰈙 1
+❯ agy
+
+      ▄▀▀▄        Antigravity CLI 1.2.10
+     ▀▀▀▀▀▀       REDACTED (Google AI Pro)
+    ▀▀▀▀▀▀▀▀      Gemini 3.8 Flash (High)
+   ▄▀▀    ▀▀▄     /private/tmp/aw-sandbox
+  ▄▀▀      ▀▀▄
+
+────────────────────────────────────────────────────────────
+> Without using any tools, reply with a numbered list of exactly three short options for a new name for note.txt, one per line, like "1.
+  notes.txt". Nothing else.
+
+
+  1. notes.txt
+  2. memo.txt
+  3. scratchpad.txt
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+>
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+? for shortcuts                                                                                                          Gemini 3.8 Flash · high

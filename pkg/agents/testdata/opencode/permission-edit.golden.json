@@ -2,19 +2,42 @@
   "prompt": {
     "kind": "permission",
     "title": "Permission required",
-    "detail": "Access external directory /tmp/aw-other\nPatterns: /tmp/aw-other/*",
+    "detail": "Edit note.txt",
     "options": [
-      {"id": "opt-1", "label": "Allow once", "role": "allow_once"},
-      {"id": "opt-2", "label": "Allow always", "role": "allow_always"},
-      {"id": "opt-3", "label": "Reject", "role": "deny"}
+      {
+        "id": "opt-1",
+        "label": "Allow once",
+        "role": "allow_once"
+      },
+      {
+        "id": "opt-2",
+        "label": "Allow always",
+        "role": "allow_always"
+      },
+      {
+        "id": "opt-3",
+        "label": "Reject",
+        "role": "deny"
+      }
     ]
   },
   "keys": {
-    "opt-1": ["Enter"],
-    "opt-2": ["Right", "Enter"],
-    "opt-3": ["esc"]
+    "opt-1": [
+      "Enter"
+    ],
+    "opt-2": [
+      "Right",
+      "Enter",
+      "Enter"
+    ],
+    "opt-3": [
+      "esc"
+    ]
   },
-  "cancel_keys": ["esc"],
+  "cancel_keys": [
+    "esc"
+  ],
   "verified_keys": true,
-  "notes": "Horizontal button bar: Allow once is focused by default, Enter confirms. Right+Enter selects Allow always. esc or Right+Right+Enter rejects."
+  "herdr_status": "blocked",
+  "notes": "Buttons, not digits. Focus starts on 'Allow once' every time the dialog mounts, so Enter allows once. 'Allow always' opens a second 'Always allow' stage (Confirm / Cancel, Confirm focused), so it needs Right, Enter, Enter. esc rejects whatever the focus. Verified: Right+Enter stopped at the confirm stage; Right+Enter+Enter allowed always; esc rejected."
 }

@@ -1,0 +1,5 @@
+{
+  "prompt": null,
+  "herdr_status": "idle",
+  "notes": "Idle screen whose last answer is a numbered list (1. notes.txt / 2. ... / 3. ...). The input box (rule, '❯', rule) is rendered below it, so it is not a dialog. Before the fix it parsed as a question and blocked dictation."
+}

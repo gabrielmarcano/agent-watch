@@ -1,0 +1,4 @@
+Run the migration now?
+  1. Yes
+  2. No
+  Esc to cancel
