@@ -32,7 +32,8 @@ Full reference: `docs/reference/herdr-socket-api.md` (verified on herdr 0.9.1, p
   4. re-parse it and compare the fingerprint.
 
   On mismatch, send nothing.
-- `agent.prompt` is never sent to `blocked` agents. Answers go through `send_keys`.
+- `agent.prompt` is never sent to `blocked` agents, nor while the adapter parses a menu on the screen (herdr 0.9.1 reports some open dialogs as `done`/`working`). Answers go through `send_keys`.
+- `cancel` keys come from the menu on screen right now, never from a cached prompt.
 
 ## Plugin and service
 - The plugin actions are one-shot. The long-running process is `agent-watch-bridge run` under launchd (`com.gabrielmarcano.agent-watch-bridge`).

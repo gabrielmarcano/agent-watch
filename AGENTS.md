@@ -78,7 +78,7 @@ This document defines the development rules, architectural boundaries, and codin
 ### 1.3 Go for Host Bridge & Cloud Relay
 - Backend is **Go 1.22+**, a single module: `github.com/gabrielmarcano/agent-monitor`.
 - `agent-watch-bridge`: static binary on the Mac/Linux host. Keep it thin: herdr ↔ relay translation plus on-demand transcript reads.
-  - The herdr plugin (`herdr-plugin.toml`) is only the manifest that installs and controls this binary. Its actions (`start`, `stop`, `status`, `pair`) are one-shot.
+  - The herdr plugin (`herdr-plugin.toml`) is only the manifest that installs and controls this binary. Its actions (`start`, `restart`, `stop`, `status`, `pair`) are one-shot. `configure` is a CLI subcommand only.
   - The long-running process is `agent-watch-bridge run`, supervised by launchd (macOS) or systemd `--user` (Linux). Never rely on herdr to keep it alive.
 - `agent-watch-relay`: static Linux binary on the VPS. It owns state aggregation, history storage, push, pairing and auth.
 - `pkg/model` is the **only** schema source. Clients mirror it field by field.
@@ -91,6 +91,7 @@ This document defines the development rules, architectural boundaries, and codin
 - **Wear OS is the primary client and reference implementation.** Features ship there first and are verified on a real Google Pixel Watch 2.
 - **watchOS is extra support**, verified only in the Xcode simulator. It never blocks a phase or a release.
 - **Schema/API changes must still update both clients' models**, so `watchos-app/` always compiles against the current `/v1` API. watchOS UI features may lag behind Wear OS.
+  - Until Phase 6, `watchos-app/` is still the legacy LAN client: its models are not the `/v1` contracts yet (only `CancelRequest` was appended to them). Phase 6 rewrites it.
 - **Never claim a watchOS feature works on a real device.** Say "verified in the simulator".
 
 ### 1.6 Scope Boundaries
@@ -113,7 +114,7 @@ agent-monitor/
 ├── go.mod · go.sum · Makefile
 ├── herdr-plugin.toml             # herdr-agent-watch plugin manifest
 ├── cmd/
-│   ├── bridge/                   # host daemon (run/start/stop/status/pair)
+│   ├── bridge/                   # host daemon + CLI (configure/run/start/restart/stop/status/pair)
 │   └── relay/                    # VPS relay (serve/devices)
 ├── pkg/
 │   ├── model/                    # shared contracts: state, API DTOs, wire envelopes
@@ -123,9 +124,13 @@ agent-monitor/
 │   ├── relayclient/              # bridge side of the WSS link
 │   ├── relay/                    # relay server: hub, api, sse, auth, store
 │   └── push/                     # Notifier: FCM v1 (Wear OS), ntfy (watchOS)
-├── deploy/                       # launchd template, relay Dockerfile + systemd unit
+├── deploy/
+│   ├── launchd/                  # LaunchAgent template
+│   └── relay/                    # systemd unit, env/proxy examples, deploy.sh, Dockerfile, README.md (operations)
+├── macos-bar/                    # macOS menu bar app over the bridge CLI (make bar, make bar-test)
+├── tools/guards/                 # guard implementation (hooks, pre-commit)
 ├── wearos-app/                   # Wear OS client (Kotlin, Jetpack Compose)
-└── watchos-app/                  # watchOS client (Swift, SwiftUI)
+└── watchos-app/                  # watchOS client (Swift, SwiftUI; legacy until Phase 6)
 ```
 
 ---

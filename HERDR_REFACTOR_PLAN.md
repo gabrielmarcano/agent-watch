@@ -26,6 +26,8 @@
 | 14 | §12.1 spells out what runs on the Mac: one binary; the plugin is only its installer/controller | The first draft did not say which process is long-running or who keeps it alive |
 | 15 | Phases split into executable guides under `docs/`; contracts frozen in `docs/reference/contracts.md`; Phase 0 is now only fixtures, and `pkg/model` moved to Phase 1 | Lets smaller agents execute phases without design context |
 | 16 | The socket's `agent.read` source is `recent_unwrapped` (underscore) | Verified: the hyphenated CLI spelling fails on the socket with `invalid_request` |
+| 17 | Review batch (2026-09-25): `prompt` is refused while a menu is on screen; `cancel` re-reads the screen and may carry `fingerprint`; commands are idempotent; the relay pings the host too | herdr 0.9.1 reports some open dialogs as `done`/`working`; a stale cached prompt or a double tap must never type into a live menu |
+| 18 | Relay client IP comes from `AW_TRUSTED_PROXIES` (+ optional `AW_CLIENT_IP_HEADER`); `AW_TRUST_CF_IP` removed. FCM `resolved` push added, off until `AW_PUSH_RESOLVED` | Forwarding headers are client-controlled unless a trusted proxy wrote them; older watch apps show an unknown push as a bogus approval |
 
 ---
 
@@ -73,7 +75,7 @@
 └──────────────────────────────────┬───────────────────────────────────────┘
                                    │ WSS + Authorization: Bearer <host token>
                                    ▼
-┌───────────────────── VPS (relay.<domain>, Cloudflare SSL) ───────────────┐
+┌───────────────────── VPS (relay.<domain>, TLS proxy) ────────────────────┐
 │  agent-watch-relay (Go, systemd)                                         │
 │   ├─ host hub (one host), command routing + timeouts                     │
 │   ├─ /v1 REST + SSE for watches, device pairing + tokens                 │
@@ -128,7 +130,7 @@ agent-monitor/                      (repo root, module github.com/gabrielmarcano
 ├── go.mod · go.sum · Makefile
 ├── herdr-plugin.toml
 ├── cmd/
-│   ├── bridge/main.go              # subcommands: run, start, stop, status, pair
+│   ├── bridge/                     # subcommands: configure, run, start, restart, stop, status, pair, version
 │   └── relay/main.go               # subcommands: serve, devices (list/revoke)
 ├── pkg/
 │   ├── model/                      # shared contracts (the ONLY schema source)
@@ -150,7 +152,7 @@ agent-monitor/                      (repo root, module github.com/gabrielmarcano
 │   └── push/                       # Notifier interface: fcm.go, ntfy.go
 └── deploy/
     ├── launchd/                    # LaunchAgent template (written by `bridge start`)
-    └── relay/                      # Dockerfile, systemd unit, Cloudflare notes
+    └── relay/                      # systemd unit, env + proxy examples, deploy.sh, Dockerfile, ops README
 ```
 
 ---
@@ -174,9 +176,11 @@ const (
 type AgentState struct {
     PaneID         string         `json:"pane_id"`          // stable key
     Agent          string         `json:"agent"`            // herdr id: "claude", "agy", "opencode", ...
-    Label          string         `json:"label"`            // herdr name || terminal_title_stripped || basename(cwd)
+    Label          string         `json:"label"`            // task title (terminal_title_stripped) || herdr name || basename(cwd) || pane_id
+    Name           string         `json:"name,omitempty"`   // herdr pane name
     CWD            string         `json:"cwd,omitempty"`
     WorkspaceID    string         `json:"workspace_id"`
+    Workspace      string         `json:"workspace,omitempty"` // herdr workspace label
     Status         AgentStatus    `json:"status"`
     Focused        bool           `json:"focused"`
     StateChangeSeq uint64         `json:"state_change_seq"`
@@ -273,10 +277,11 @@ type Prompt struct {
 ### 6.2 Command safety rules (bridge-side, all agents)
 
 1. The watch **never sends raw keys**. It sends `answer {option_id}` or `cancel`, and the Mac resolves the keys.
-2. `answer` carries `expected_seq` and `fingerprint`. Right before sending, the bridge re-lists the agent and re-reads the screen, and rejects with `stale_state` or `prompt_changed` on any mismatch.
-3. `prompt` is accepted when `idle` or `done`. When `working`, it is accepted only if `PromptWhileWorking()`; otherwise it returns `agent_busy`. It is rejected when `blocked` (`agent_blocked`) or `unknown`.
+2. `answer` carries `expected_seq` and `fingerprint`; `cancel` carries `expected_seq` and, optionally, `fingerprint`. Right before sending keys, the bridge re-lists the agent (its own `agent.list`, not the shared snapshot) and re-reads the screen, and rejects with `stale_state` or `prompt_changed` on any mismatch. `cancel` takes its keys from the menu on screen, never from the cached prompt; with no parseable menu it cancels only a prompt the watch saw as `unknown`, with the adapter's default cancel keys.
+3. `prompt` is accepted when `idle` or `done`. When `working`, it is accepted only if `PromptWhileWorking()`; otherwise it returns `agent_busy`. It is rejected when `blocked` (`agent_blocked`), `unknown` or any other status (`agent_state_unknown`). **It is also rejected (`agent_blocked`) while the adapter parses a menu on the screen**, whatever herdr's status: herdr 0.9.1 reports some open dialogs as `done` or `working`, and the text plus Enter would land in the menu.
 4. Commands are accepted only for panes with a detected agent. No `pane.send_text` or shell panes.
 5. `allow_always` options are shown in a secondary "More" list, never as the primary button.
+6. **Each command acts at most once.** A replayed `request_id`, a second answer or cancel for a prompt already answered at that `state_change_seq`, and the same prompt text sent twice at one seq are rejected with `stale_state` until herdr reports a new seq.
 
 ---
 
@@ -313,9 +318,9 @@ type Prompt struct {
 | R → H | `command` | `request_id`, `action: prompt\|answer\|cancel`, `pane_id`, `expected_seq`, `text` / `option_id` + `fingerprint` |
 | R → H | `resync` | (asks for a full snapshot) |
 
-- **Keepalive:** WebSocket ping every 30 s (Cloudflare drops idle connections at 100 s).
+- **Keepalive:** both sides ping the WebSocket every 30 s and expect the pong within 10 s (proxies such as Cloudflare drop idle connections at about 100 s). No pong: the bridge reconnects; the relay drops the host.
 - **Host offline:** the relay marks `host_online=false` and broadcasts it.
-- **Command timeout:** 10 s → `timeout`. A command sent while the host is offline fails immediately with `host_offline`.
+- **Command timeout:** one 10 s budget for sending the command and waiting for its result → `timeout`. The bridge answers within 9 s of receiving it. A command sent while the host is offline fails immediately with `host_offline`, and so do in-flight commands the moment their host disconnects, misses a pong or is replaced.
 - **Error codes:** `stale_state`, `prompt_changed`, `agent_busy`, `agent_blocked`, `agent_state_unknown`, `unknown_pane`, `host_offline`, `timeout`.
 
 ---
@@ -332,7 +337,7 @@ All endpoints except `POST /v1/pair` require `Authorization: Bearer <device_toke
 | GET | `/v1/history?pane_id=&limit=` | History items, newest first |
 | POST | `/v1/agents/{pane_id}/prompt` | `{text, expected_seq}` |
 | POST | `/v1/agents/{pane_id}/answer` | `{option_id, expected_seq, fingerprint}` |
-| POST | `/v1/agents/{pane_id}/cancel` | `{expected_seq}` |
+| POST | `/v1/agents/{pane_id}/cancel` | `{expected_seq, fingerprint?}` |
 | POST | `/v1/push/register` | `{platform: "fcm", token}` (Wear OS) |
 | POST | `/v1/host/pair-code` | Host token. Returns a 6-digit code (used by the bridge `pair` action) |
 | GET | `/v1/host/status` | Host token. `host_online`, `herdr_online`, device and agent counts |
@@ -341,7 +346,7 @@ All endpoints except `POST /v1/pair` require `Authorization: Bearer <device_toke
 **Pairing:**
 1. `herdr plugin action invoke … pair` asks the relay for a 6-digit code (5-minute TTL).
 2. The watch enters the relay URL + code and receives a random 256-bit device token. The relay stores only its hash.
-3. Devices are listed and revoked with `agent-watch-relay devices`.
+3. Devices are listed and revoked with `agent-watch-relay devices`, also while the relay runs (local admin socket; a revoked token is rejected at once).
 
 **Relay store:** one JSON file, written atomically (temp file + rename), holding devices, push targets and history. No database.
 
@@ -352,9 +357,10 @@ All endpoints except `POST /v1/pair` require `Authorization: Bearer <device_toke
 - **Triggers**, from `agent_update` diffs:
   - `→ blocked`: high priority, "`<label>` needs approval: `<detail>`"
   - `working → done`: normal priority, first line of the response
-- **Anti-spam:**
-  - Debounce 5 s per pane.
-  - When more than 3 panes fire within 10 s, coalesce into one "3 agents need you".
+- **Anti-spam** (exact rules: `contracts.md` §4.3):
+  - Debounce 5 s per pane and event. A repeated `done` is dropped; a quick re-block is held to the end of the window, never dropped.
+  - The first push of a 10 s window goes out at once; when more than 3 would go out in the window, the held ones become one digest ("N agents need you" / "N agents finished").
+- **`resolved`** (FCM only, opt-in with `AW_PUSH_RESOLVED`): withdraws a pane's approval notification once it leaves `blocked`.
 - **`pkg/push.Notifier` interface:**
   - **FCM v1** (Wear OS): data messages, JWT service-account auth. The service account JSON lives only on the VPS.
   - **ntfy** (watchOS, free): the relay POSTs to a topic (ntfy.sh or self-hosted on the same VPS); the ntfy iPhone app mirrors to the Apple Watch. Topic name + access token are secrets. Limitation: tapping the notification does not open Agent Watch.
@@ -385,7 +391,7 @@ There is **one binary**, `agent-watch-bridge`. The herdr plugin is not a second 
 | Piece | What it is | Lifetime |
 |---|---|---|
 | `herdr-plugin.toml` | Manifest: how to build the binary and which actions herdr exposes | Static file |
-| `agent-watch-bridge start` / `stop` / `status` / `pair` | One-shot commands herdr runs when you invoke an action | Seconds, then exit |
+| `agent-watch-bridge start` / `restart` / `stop` / `status` / `pair` | One-shot commands herdr runs when you invoke an action (also runnable from a terminal or the macOS menu bar app) | Seconds, then exit |
 | `agent-watch-bridge run` | The actual bridge: herdr socket ↔ relay WebSocket | Long-running, kept alive by **launchd** |
 
 - **Why launchd and not herdr keeps it alive:**
@@ -397,6 +403,8 @@ There is **one binary**, `agent-watch-bridge`. The herdr plugin is not a second 
 
 ### 12.2 Manifest
 
+The repository's `herdr-plugin.toml`:
+
 ```toml
 id = "herdr-agent-watch"
 name = "Agent Watch"
@@ -405,15 +413,21 @@ min_herdr_version = "0.9.0"   # the version this plan was verified against
 description = "Monitor and answer your agent herd from your smartwatch via a remote relay"
 platforms = ["macos", "linux"]
 
-# Runs on `herdr plugin install` only. For `herdr plugin link`, run `make build` first.
+# Runs on `herdr plugin install` only. For `herdr plugin link`, run `make bridge` first.
+# Same flags as `make bridge`: static (CGO_ENABLED=0), stripped, version stamped.
 [[build]]
-command = ["go", "build", "-o", "bin/agent-watch-bridge", "./cmd/bridge"]
+command = ["env", "CGO_ENABLED=0", "go", "build", "-ldflags", "-s -w -X main.version=0.2.0", "-o", "bin/agent-watch-bridge", "./cmd/bridge"]
 platforms = ["macos", "linux"]
 
 [[actions]]
 id = "start"     # writes/loads the LaunchAgent (macOS) or systemd --user unit (Linux)
 title = "Start bridge service"
 command = ["./bin/agent-watch-bridge", "start"]
+
+[[actions]]
+id = "restart"   # restarts the installed service without rewriting it
+title = "Restart bridge service"
+command = ["./bin/agent-watch-bridge", "restart"]
 
 [[actions]]
 id = "stop"      # unloads the service
@@ -431,10 +445,13 @@ title = "Pair a watch (shows a code)"
 command = ["./bin/agent-watch-bridge", "pair"]
 ```
 
-- **Service environment:** launchd does not inherit `HERDR_*`, so `start` copies `HERDR_SOCKET_PATH` and `HERDR_PLUGIN_CONFIG_DIR` into the LaunchAgent plist. The service itself runs `agent-watch-bridge run` with `KeepAlive`.
-- **Config file:** `$HERDR_PLUGIN_CONFIG_DIR/config.toml` (mode 0600) holds `relay_url`, `host_token` and `claude_config_dirs`.
+- **Five one-shot actions:** `start`, `restart`, `stop`, `status`, `pair`. `configure` is not an action (it takes the token as an argument): run `./bin/agent-watch-bridge configure …` in a terminal.
+- **Build:** static (`CGO_ENABLED=0`), stripped and version-stamped, the same flags as `make bridge`. Keep the version in sync with the Makefile's `VERSION`.
+- **Service environment:** launchd does not inherit `HERDR_*`, so `start` pins the config path (`run --config`), `HERDR_SOCKET_PATH` and `HERDR_PLUGIN_STATE_DIR` in the LaunchAgent plist (or the systemd `--user` unit). Each value comes from a `start` flag, else herdr's plugin environment, else the installed definition, else the default, so a `start` from a terminal or the menu bar keeps what herdr installed. The service runs `agent-watch-bridge run` with `KeepAlive`.
+- **`restart`** restarts the installed service without rewriting its definition (`make restart` rebuilds `bin/agent-watch-bridge` first).
+- **Config file:** `$HERDR_PLUGIN_CONFIG_DIR/config.toml` (mode 0600) holds `relay_url`, `host_token`, `host_name` and `claude_config_dirs`.
 - **No `[[events]]` hook:** the daemon's own subscription covers it.
-- **Local dev:** `make build && herdr plugin link "$PWD"` (absolute path).
+- **Local dev:** `make bridge && herdr plugin link "$PWD"` (absolute path).
 
 ---
 

@@ -94,11 +94,13 @@ type AgentState struct {
       { "id": "opt-2", "label": "Yes, and don't ask again for go test commands", "role": "allow_always" },
       { "id": "opt-3", "label": "No, and tell Claude what to do differently", "role": "deny" }
     ],
-    "fingerprint": "9f2c61d0a4b3e871"
+    "fingerprint": "fd6ff7388739252d"
   },
   "updated_at": "2026-09-23T17:04:05Z"
 }
 ```
+
+The `fingerprint` above is the real `model.Fingerprint` of this prompt (§1.3); `TestFingerprintKnownAnswers` in `pkg/agents` checks it. The golden file `pkg/model/testdata/agent_state.json` (and the tests that read it) still carries an older made-up value: those tests treat the fingerprint as an opaque string.
 
 ### 1.3 `PendingPrompt` and `PromptOption`
 
@@ -286,7 +288,7 @@ type ErrorBody struct {
 **Example** (`POST /v1/agents/w5%3ApAE/cancel`):
 
 ```json
-{ "expected_seq": 334, "fingerprint": "9f2c61d0a4b3e871" }
+{ "expected_seq": 334, "fingerprint": "fd6ff7388739252d" }
 ```
 
 ### 2.3 Server-Sent Events (`GET /v1/events`)
@@ -296,7 +298,7 @@ Response headers:
 - `Cache-Control: no-cache`
 - `X-Accel-Buffering: no`
 
-Every 15 s the relay writes the comment line `:` followed by a blank line, as a keepalive.
+Every 15 s the relay writes the comment line `:` followed by a blank line, as a keepalive. Each write has a 10 s deadline: a client that stops reading is disconnected (it reconnects), and a slow one never blocks the others.
 
 | `event:` | `data:` (one JSON line) | When |
 |---|---|---|
@@ -306,7 +308,9 @@ Every 15 s the relay writes the comment line `:` followed by a blank line, as a 
 | `host` | `{"host_online": bool, "herdr_online": bool}` | Either flag changed |
 | `history` | `HistoryItem` | A new history item was stored (never for a resent duplicate, same `id`) |
 
-**Client rule:** on any disconnect, reconnect with backoff (1 s, 2 s, 4 s … max 30 s) and **replace** local state with the next `snapshot`.
+**Client rules:**
+- On any disconnect, reconnect with backoff (1 s, 2 s, 4 s … max 30 s) and **replace** local state with the next `snapshot`.
+- **Silence is a disconnect.** A stream with no bytes for 45 s (three missed keepalives) is dead, often a half-open socket: drop it and reconnect. The Wear OS app does this with the SSE read timeout, and marks its list stale until the next `snapshot`.
 
 ### 2.4 Error codes
 
@@ -426,7 +430,7 @@ All values are strings (FCM data maps allow only strings). No `notification` blo
 | `title` | `bizum needs approval` | Ready to display |
 | `body` | `Bash: go test ./...` | ≤ 240 chars |
 | `state_change_seq` | `334` | Decimal string, always a number (`0` for `digest`) |
-| `fingerprint` | `9f2c61d0a4b3e871` | Only for `blocked` |
+| `fingerprint` | `fd6ff7388739252d` | Only for `blocked` |
 | `allow_option_id` | `opt-1` | First `allow_once` option, else empty |
 | `deny_option_id` | `opt-3` | First `deny` option, else empty (the app then calls `cancel`) |
 
@@ -552,19 +556,77 @@ ntfy never gets `resolved`: it cannot withdraw a notification it already deliver
 ## 6. Bridge configuration (`config.toml`)
 
 - **Location:** `$HERDR_PLUGIN_CONFIG_DIR/config.toml`. For the plugin id `herdr-agent-watch` this is `~/.config/herdr/plugins/config/herdr-agent-watch/config.toml`.
-- **Mode:** `0600`.
-- **Written by:** `agent-watch-bridge configure`.
+- **Mode:** `0600`, in a `0700` directory. Both are enforced on every write, also for a file that already exists.
+- **Written by:** `agent-watch-bridge configure` (atomically). Without `--config` it writes the config herdr's environment names, else the one the installed service uses, else the default above.
+- **`relay_url`:** `wss://` (`ws://` only for `localhost` / `127.0.0.1`). A URL without a path gets `/v1/host` appended.
 
 ```toml
-relay_url  = "wss://relay.example.com"   # https:// is derived for /v1/host/* calls
+relay_url  = "wss://relay.example.com/v1/host"   # https:// is derived for /v1/host/* calls
 host_token = "…64 hex chars…"
 host_name  = ""                          # empty → os.Hostname()
 claude_config_dirs = ["~/.claude"]       # where to resolve Claude session ids; add custom CLAUDE_CONFIG_DIR values
 ```
 
-- **State file:** the daemon writes `$HERDR_PLUGIN_STATE_DIR/status.json` every 5 s. If that variable is unset, it uses `~/.local/state/agent-watch/status.json`. The `status` action reads this file.
+### 6.1 `status.json` (written by `agent-watch-bridge run`)
+
+- **Path:** `$HERDR_PLUGIN_STATE_DIR/status.json`, else `~/.local/state/agent-watch/status.json`. The installed service pins `HERDR_PLUGIN_STATE_DIR` in its definition, and `status` reads the installed service's state dir first.
+- **Written** atomically at start, every 5 s, and once more on exit.
+- **Every key is always present** (no `omitempty`): older readers decode the first six unconditionally.
 
 ```json
-{ "pid": 4242, "relay_connected": true, "herdr_online": true, "agents": 11,
-  "last_error": "", "updated_at": "2026-09-23T17:04:05Z" }
+{ "pid": 4242, "relay_connected": true, "herdr_online": true, "agents": 11, "blocked": 1,
+  "last_error": "", "relay_error": "", "herdr_error": "", "version": "0.2.0",
+  "updated_at": "2026-09-23T17:04:05Z" }
 ```
+
+| Key | Meaning |
+|---|---|
+| `pid` | The running bridge's pid. **`0` means not running**: a clean stop writes `pid: 0` with an empty `last_error`; a start that failed (e.g. an invalid config) writes `pid: 0` with the reason in `last_error` |
+| `relay_connected`, `herdr_online` | Link state |
+| `agents`, `blocked` | Agents tracked; how many are `blocked` |
+| `relay_error` | Why the relay is not connected (a rejected token, a failed dial). Never contains the token |
+| `herdr_error` | Why herdr is offline |
+| `last_error` | `relay_error` and `herdr_error` joined with `; `, or the start failure. `""` when healthy |
+| `version` | Version of the bridge that wrote the file |
+
+A reader must not trust `pid` alone: a file left by a crash names a dead pid. `status` checks that the pid is alive and that the file is fresh (15 s).
+
+### 6.2 `agent-watch-bridge status --json [--local]`
+
+`--local` reads local files only (service definition, config, `status.json`, a pid check): no network and no `launchctl` / `systemctl`. The macOS menu bar polls it. Every key is always present.
+
+```json
+{
+  "installed": true, "definition_error": "",
+  "configured": true, "config_error": "",
+  "running": true, "stale": false,
+  "relay_connected": true, "herdr_online": true,
+  "agents": 11, "blocked": 1,
+  "last_error": "", "relay_error": "", "herdr_error": "",
+  "relay_host": "relay.example.com",
+  "pid": 4242, "updated_at": "2026-09-23T17:04:05Z", "age_seconds": 3,
+  "version": "0.2.0", "daemon_version": "0.2.0",
+  "service": "launchd",
+  "definition_path": "/Users/me/Library/LaunchAgents/com.gabrielmarcano.agent-watch-bridge.plist",
+  "binary": "/Users/me/Code/agent-watch/bin/agent-watch-bridge",
+  "config_path": "/Users/me/.config/herdr/plugins/config/herdr-agent-watch/config.toml",
+  "state_dir": "/Users/me/.local/state/agent-watch",
+  "status_path": "/Users/me/.local/state/agent-watch/status.json",
+  "log_path": "/Users/me/Library/Logs/agent-watch-bridge.log"
+}
+```
+
+- **`running`:** `status.json` names a live pid. While not running, `relay_connected`, `herdr_online`, `agents` and `blocked` are reported as `false` / `0`, whatever the file says.
+- **`stale`:** running, but `status.json` is older than 15 s.
+- **`age_seconds`:** `-1` when unknown. **`version`** is the CLI; **`daemon_version`** is the bridge that wrote `status.json`.
+- **`relay_host`:** `host[:port]` of `relay_url`, never a token. **`service`:** `launchd` or `systemd`; on Linux `log_path` is a `journalctl` command.
+- **Without `--local`** the output adds `relay_status` (the relay's `HostStatusResponse`, §2.2) or `relay_status_error`.
+- The human form (no `--json`) exits with status 1 when the bridge is not running.
+
+### 6.3 `agent-watch-bridge pair --json`
+
+```json
+{"code":"417293","expires_at":"2026-09-23T17:09:05Z","expires_in_seconds":300,"relay_host":"relay.example.com"}
+```
+
+`expires_at` is the relay's `PairCodeResponse.expires_at`; `expires_in_seconds` is computed from it (`0` if it cannot be parsed or has passed). `pair` needs only the config and the relay, not a running bridge.

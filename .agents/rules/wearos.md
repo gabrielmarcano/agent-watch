@@ -19,9 +19,9 @@ Guide: `docs/phases/4-wearos.md`. Contracts: `docs/reference/contracts.md`.
   - no LAN/Tailscale IPs, no port 8420, no cleartext in release builds.
 - **Commands:**
   - never send raw keys;
-  - approvals are `answer {option_id, expected_seq, fingerprint}` or `cancel {expected_seq}`, using the values from the `AgentState` shown at tap time;
+  - approvals are `answer {option_id, expected_seq, fingerprint}` or `cancel {expected_seq, fingerprint}` (send the shown prompt's fingerprint whenever a prompt is shown; it is optional only for old clients), using the values from the `AgentState` shown at tap time;
   - never auto-retry an answer after a 409.
-- **Notifications:** `PendingIntent` request codes must be unique per pane **and** action, or extras from different agents overwrite each other.
+- **Notifications:** every `PendingIntent` needs an identity unique per pane **and** action, or extras from different agents overwrite each other. Request codes alone are not enough (they can collide across panes): put a data URI per (pane, action) on the intent (`AgentNotifications.intentUri`).
 - **Battery:** SSE runs only while the app is in the foreground (process lifecycle). Complications and tiles make one `GET /v1/agents` and do no heavy parsing.
 - **UI:** Wear Compose Material, `ScalingLazyColumn` with `rotaryScrollable`, list → detail navigation. The dictation target label is shown before sending.
 - **Secrets:** never create, edit or commit `google-services.json`. The owner places it.
