@@ -1,45 +1,54 @@
-# Ubuntu 24.04 LTS Nginx configuration: /etc/nginx/sites-available/relay
+# nginx in front of the relay: /etc/nginx/sites-available/relay
 # Enable with: ln -s /etc/nginx/sites-available/relay /etc/nginx/sites-enabled/
+#
+# Relay env for this layout (nginx on the same host):
+#   AW_LISTEN=127.0.0.1:8080
+#   AW_TRUSTED_PROXIES=127.0.0.1/32    (so the pairing rate limit sees X-Forwarded-For)
 
-# If you don't already have this map in /etc/nginx/nginx.conf, you can place it in /etc/nginx/conf.d/websocket.conf:
-# map $http_upgrade $connection_upgrade {
-#     default upgrade;
-#     ''      close;
-# }
+# Upgrade only when the client asks for it; plain requests keep "close".
+# Site files are included inside http {}, so the map is valid here. If another
+# site already defines $connection_upgrade, delete this copy (nginx refuses a
+# duplicate variable).
+map $http_upgrade $connection_upgrade {
+    default upgrade;
+    ''      close;
+}
 
 server {
     listen 443 ssl;
     listen [::]:443 ssl;
     server_name relay.<domain>;
 
-    # Cloudflare Origin Certificate and Private Key
-    ssl_certificate /etc/ssl/certs/cloudflare-origin.pem;
-    ssl_certificate_key /etc/ssl/private/cloudflare-origin.key;
-
-    # SSL protocols and ciphers (Cloudflare Strict)
+    # Any valid certificate for relay.<domain>, e.g. Let's Encrypt (certbot).
+    ssl_certificate     /etc/letsencrypt/live/relay.<domain>/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/relay.<domain>/privkey.pem;
     ssl_protocols TLSv1.2 TLSv1.3;
-    ssl_ciphers HIGH:!aNULL:!MD5;
 
     location / {
         proxy_pass http://127.0.0.1:8080;
         proxy_http_version 1.1;
 
-        # WebSocket support
+        # WebSocket (/v1/host)
         proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection "upgrade";
+        proxy_set_header Connection $connection_upgrade;
 
-        # Preserve client host header
         proxy_set_header Host $host;
-
-        # Cloudflare forwards client IP in CF-Connecting-IP; pass it through
-        proxy_set_header CF-Connecting-IP $http_cf_connecting_ip;
+        # The relay trusts these only from AW_TRUSTED_PROXIES. $remote_addr is
+        # appended last, so the relay takes the rightmost untrusted entry and
+        # anything the client put in X-Forwarded-For is ignored.
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-Proto $scheme;
 
-        # SSE: disable buffering and keep connection open
+        # SSE (/v1/events): stream every event at once, never cache.
         proxy_buffering off;
         proxy_cache off;
-        proxy_read_timeout 3600s;
-        proxy_send_timeout 3600s;
+
+        # Idle limits for long-lived streams. The relay writes an SSE keepalive
+        # every 15 s and the bridge and relay ping the WebSocket every 30 s, so
+        # a healthy stream is never quiet for more than 30 s. 90 s (3 pings)
+        # tolerates a slow ping while still freeing dead connections quickly.
+        proxy_read_timeout 90s;
+        proxy_send_timeout 90s;
     }
 }

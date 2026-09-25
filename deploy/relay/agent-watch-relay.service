@@ -2,6 +2,8 @@
 Description=Agent Watch relay
 After=network-online.target
 Wants=network-online.target
+# Listening on the docker bridge (AW_LISTEN=172.17.0.1:8080)? Add the drop-in
+# described in deploy/relay/README.md so the relay starts after docker.
 
 [Service]
 User=agentwatch
@@ -10,11 +12,25 @@ EnvironmentFile=/etc/agent-watch-relay/env
 ExecStart=/usr/local/bin/agent-watch-relay serve
 Restart=always
 RestartSec=5
-# Hardening
-NoNewPrivileges=true
+
+# Hardening. The relay only needs: its state dir, reading its env file and
+# the FCM credentials under /etc, TCP (listener, bridge, FCM/ntfy, DNS) and
+# a Unix socket (the admin socket in the state dir).
+NoNewPrivileges=yes
+UMask=0077
+CapabilityBoundingSet=
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
 ProtectSystem=strict
 ProtectHome=true
 PrivateTmp=true
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+LockPersonality=yes
+RestrictNamespaces=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
 ReadWritePaths=/var/lib/agent-watch-relay
 StateDirectory=agent-watch-relay
 StateDirectoryMode=0700

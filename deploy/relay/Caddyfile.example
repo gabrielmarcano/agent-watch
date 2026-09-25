@@ -1,3 +1,5 @@
+# Relay env for this layout: AW_LISTEN=127.0.0.1:8080, AW_TRUSTED_PROXIES=127.0.0.1/32
+# (Caddy sets X-Forwarded-For; the relay only reads it from trusted proxies).
 relay.<domain> {
     tls /etc/caddy/certs/origin.pem /etc/caddy/certs/origin-key.pem   # Cloudflare Origin Certificate
     reverse_proxy 127.0.0.1:8080 {
