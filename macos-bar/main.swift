@@ -55,11 +55,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         FileManager.default.homeDirectoryForCurrentUser.path
     }
 
-    private var statusPath: String {
+    private var statusPaths: [String] {
+        var paths: [String] = []
         if let env = ProcessInfo.processInfo.environment["HERDR_PLUGIN_STATE_DIR"] {
-            return "\(env)/status.json"
+            paths.append("\(env)/status.json")
         }
-        return "\(homeDir)/.local/state/agent-watch/status.json"
+        paths.append("\(homeDir)/.local/state/herdr/plugins/herdr-agent-watch/status.json")
+        paths.append("\(homeDir)/.local/state/agent-watch/status.json")
+        return paths
     }
 
     private var configPath: String {
@@ -78,7 +81,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let cwd = FileManager.default.currentDirectoryPath
         let candidates = [
             "\(cwd)/bin/agent-watch-bridge",
-            "\(homeDir)/Code/personal/agent-watch-herdr/bin/agent-watch-bridge",
+            "\(homeDir)/Code/personal/agent-watch/bin/agent-watch-bridge",
             "/usr/local/bin/agent-watch-bridge"
         ]
         for candidate in candidates {
@@ -132,24 +135,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func refreshStatus() {
-        var status: BridgeStatus?
+        var activeStatus: BridgeStatus?
         var running = false
 
-        if let data = try? Data(contentsOf: URL(fileURLWithPath: statusPath)),
-           let decoded = try? JSONDecoder().decode(BridgeStatus.self, from: data) {
-            status = decoded
-            // Verify PID is genuinely alive
-            if decoded.pid > 0 && kill(pid_t(decoded.pid), 0) == 0 {
-                running = true
+        for path in statusPaths {
+            if let data = try? Data(contentsOf: URL(fileURLWithPath: path)),
+               let decoded = try? JSONDecoder().decode(BridgeStatus.self, from: data) {
+                if decoded.pid > 0 && kill(pid_t(decoded.pid), 0) == 0 {
+                    activeStatus = decoded
+                    running = true
+                    break
+                } else if activeStatus == nil {
+                    activeStatus = decoded
+                }
             }
         }
 
-        self.cachedStatus = status
+        self.cachedStatus = activeStatus
         self.isProcessRunning = running
 
         DispatchQueue.main.async { [weak self] in
             guard let self = self else { return }
-            self.updateButton(status: status, running: running)
+            self.updateButton(status: activeStatus, running: running)
             self.buildMenu()
         }
     }
