@@ -491,6 +491,15 @@ func TestEngine_PrunesCommandBookkeeping(t *testing.T) {
 	h.server.SetScreen("w1:p1", "visible", bash)
 	h.engine.OnHerdrOnline(true, herdr.Pong{Version: "0.9.1", Protocol: 22})
 
+	// Let the syncer know the pane first, as the running daemon always does.
+	// Otherwise the removal below is only seen as a change if the command's
+	// background refresh happened to finish first, and the test flakes.
+	primeCtx, primeCancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer primeCancel()
+	if _, err := h.syncer.Refresh(primeCtx); err != nil {
+		t.Fatalf("prime syncer: %v", err)
+	}
+
 	if res, _ := runCmd(t, h, model.CommandMsg{
 		RequestID: "req-prune", Action: "answer", PaneID: "w1:p1",
 		ExpectedSeq: 100, OptionID: "opt-1", Fingerprint: fingerprintOf(t, h, "claude", bash),
