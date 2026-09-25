@@ -3,6 +3,7 @@ package herdr_test
 import (
 	"context"
 	"errors"
+	"regexp"
 	"testing"
 	"time"
 
@@ -17,17 +18,33 @@ func TestCallStringID(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
-	_, err := client.Ping(ctx)
-	if err != nil {
-		t.Fatalf("Ping failed: %v", err)
+	for i := 0; i < 2; i++ {
+		if _, err := client.Ping(ctx); err != nil {
+			t.Fatalf("Ping failed: %v", err)
+		}
 	}
 
 	calls := srv.Calls()
-	if len(calls) == 0 {
-		t.Fatalf("expected at least 1 call, got 0")
+	if len(calls) != 2 {
+		t.Fatalf("expected 2 calls, got %d", len(calls))
 	}
-	// The fake server rejects numeric or missing IDs with an error;
-	// since Ping succeeded, the ID was a valid string.
+	// A counter plus a random per-process prefix (not a clock reading).
+	idRE := regexp.MustCompile(`^([0-9a-f]{16})-([0-9]+)$`)
+	var prefixes, counters []string
+	for _, c := range calls {
+		m := idRE.FindStringSubmatch(c.ID)
+		if m == nil {
+			t.Fatalf("request id %q does not match <16 hex>-<counter>", c.ID)
+		}
+		prefixes = append(prefixes, m[1])
+		counters = append(counters, m[2])
+	}
+	if prefixes[0] != prefixes[1] {
+		t.Errorf("id prefix changed between calls (%q, %q); want one random prefix per process", prefixes[0], prefixes[1])
+	}
+	if counters[0] == counters[1] {
+		t.Errorf("two calls reused counter %s", counters[0])
+	}
 }
 
 func TestReadUsesUnderscoreSource(t *testing.T) {

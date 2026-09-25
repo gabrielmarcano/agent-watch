@@ -3,8 +3,12 @@ package herdr
 import (
 	"bufio"
 	"context"
+	crand "crypto/rand"
+	"encoding/binary"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	mrand "math/rand/v2"
 	"net"
 	"os"
 	"path/filepath"
@@ -12,10 +16,25 @@ import (
 	"time"
 )
 
-var idCounter uint64
+var (
+	idCounter uint64
+	idPrefix  = randomIDPrefix()
+)
 
+// randomIDPrefix returns 16 hex characters chosen once per process, so ids
+// from two bridge processes (or a restart) never collide.
+func randomIDPrefix() string {
+	var b [8]byte
+	if _, err := crand.Read(b[:]); err != nil {
+		binary.BigEndian.PutUint64(b[:], mrand.Uint64())
+	}
+	return hex.EncodeToString(b[:])
+}
+
+// nextID returns a request id: the random process prefix plus a counter,
+// formatted as a string (herdr rejects numeric ids).
 func nextID() string {
-	return fmt.Sprintf("req-%d-%d", time.Now().UnixNano(), atomic.AddUint64(&idCounter, 1))
+	return fmt.Sprintf("%s-%d", idPrefix, atomic.AddUint64(&idCounter, 1))
 }
 
 // Client communicates with the herdr socket over NDJSON RPC.
