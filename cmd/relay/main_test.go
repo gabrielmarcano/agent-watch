@@ -1,13 +1,280 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"context"
+	"fmt"
+	"io"
+	"net"
+	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/gabrielmarcano/agent-monitor/pkg/model"
 	"github.com/gabrielmarcano/agent-monitor/pkg/relay"
 )
+
+const testHostToken = "1111222233334444555566667777888899990000aaaabbbbccccddddeeeeffff"
+
+// shortTempDir returns a temp dir with a short path: Unix socket paths are
+// limited to ~104 bytes on macOS, and t.TempDir() paths can exceed that.
+func shortTempDir(t *testing.T) string {
+	t.Helper()
+	dir, err := os.MkdirTemp("", "awr")
+	if err != nil {
+		t.Fatalf("MkdirTemp: %v", err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	return dir
+}
+
+func freeListenAddr(t *testing.T) string {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	addr := ln.Addr().String()
+	_ = ln.Close()
+	return addr
+}
+
+// startRelay runs `agent-watch-relay serve` in-process and returns its base URL
+// and a stop function that shuts it down and waits for run() to return.
+func startRelay(t *testing.T) (string, func()) {
+	t.Helper()
+	addr := freeListenAddr(t)
+	t.Setenv("AW_LISTEN", addr)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		var stdout, stderr bytes.Buffer
+		done <- run(ctx, []string{"serve"}, &stdout, &stderr)
+	}()
+
+	base := "http://" + addr
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		resp, err := http.Get(base + "/v1/healthz")
+		if err == nil {
+			resp.Body.Close()
+			if resp.StatusCode == http.StatusOK {
+				break
+			}
+		}
+		select {
+		case err := <-done:
+			cancel()
+			t.Fatalf("relay exited during startup: %v", err)
+		default:
+		}
+		if time.Now().After(deadline) {
+			cancel()
+			t.Fatalf("relay did not become healthy at %s", base)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	stopped := false
+	stop := func() {
+		if stopped {
+			return
+		}
+		stopped = true
+		cancel()
+		select {
+		case err := <-done:
+			if err != nil {
+				t.Errorf("relay serve returned error on shutdown: %v", err)
+			}
+		case <-time.After(15 * time.Second):
+			t.Errorf("relay did not shut down")
+		}
+		http.DefaultClient.CloseIdleConnections()
+	}
+	t.Cleanup(stop)
+	return base, stop
+}
+
+func deviceRequest(t *testing.T, method, url, token, body string) int {
+	t.Helper()
+	var rdr io.Reader
+	if body != "" {
+		rdr = strings.NewReader(body)
+	}
+	req, err := http.NewRequest(method, url, rdr)
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("%s %s: %v", method, url, err)
+	}
+	_, _ = io.Copy(io.Discard, resp.Body)
+	resp.Body.Close()
+	return resp.StatusCode
+}
+
+// TestCLI_RevokeWhileRelayRunning is the end-to-end check for device revocation:
+// revoking through the CLI while the relay runs must take effect in the running
+// process immediately, close the device's SSE streams, never be undone by a later
+// save, and survive a restart.
+func TestCLI_RevokeWhileRelayRunning(t *testing.T) {
+	dir := shortTempDir(t)
+	t.Setenv("AW_DATA_DIR", dir)
+	t.Setenv("AW_HOST_TOKEN", testHostToken)
+	t.Setenv("AW_FCM_CREDENTIALS", "")
+	t.Setenv("AW_NTFY_URL", "")
+	t.Setenv("AW_NTFY_TOPIC", "")
+
+	// Seed two devices and one history item while the relay is stopped.
+	stolenToken, _ := relay.GenerateDeviceToken()
+	keeperToken, _ := relay.GenerateDeviceToken()
+	store, err := relay.NewStore(dir)
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	stolen, _ := store.AddDevice("Stolen Watch", relay.Sha256Hex(stolenToken))
+	keeper, _ := store.AddDevice("Keeper Watch", relay.Sha256Hex(keeperToken))
+	store.AddHistory(model.HistoryItem{ID: "hist-keep", PaneID: "w1:p1", CompletedAt: model.Now()})
+	if err := store.Close(); err != nil {
+		t.Fatalf("store close: %v", err)
+	}
+
+	base, stop := startRelay(t)
+
+	// The admin socket is local-only and owner-only.
+	fi, err := os.Stat(filepath.Join(dir, "admin.sock"))
+	if err != nil {
+		t.Fatalf("admin socket missing while the relay runs: %v", err)
+	}
+	if fi.Mode()&os.ModeSocket == 0 || fi.Mode().Perm() != 0600 {
+		t.Fatalf("admin socket mode = %v, want a 0600 Unix socket", fi.Mode())
+	}
+
+	if code := deviceRequest(t, http.MethodGet, base+"/v1/agents", stolenToken, ""); code != http.StatusOK {
+		t.Fatalf("before revoke: GET /v1/agents = %d, want 200", code)
+	}
+
+	// Open an SSE stream for the device that is about to be revoked.
+	sseCtx, sseCancel := context.WithCancel(context.Background())
+	defer sseCancel()
+	sseReq, _ := http.NewRequestWithContext(sseCtx, http.MethodGet, base+"/v1/events", nil)
+	sseReq.Header.Set("Authorization", "Bearer "+stolenToken)
+	sseResp, err := http.DefaultClient.Do(sseReq)
+	if err != nil {
+		t.Fatalf("GET /v1/events: %v", err)
+	}
+	defer sseResp.Body.Close()
+	reader := bufio.NewReader(sseResp.Body)
+	if line, _ := reader.ReadString('\n'); strings.TrimSpace(line) != "event: snapshot" {
+		t.Fatalf("expected snapshot first, got %q", line)
+	}
+	sseClosed := make(chan struct{})
+	go func() {
+		_, _ = io.Copy(io.Discard, reader)
+		close(sseClosed)
+	}()
+
+	// `devices list` while running shows both devices.
+	var stdout, stderr bytes.Buffer
+	if err := run(context.Background(), []string{"devices", "list"}, &stdout, &stderr); err != nil {
+		t.Fatalf("devices list: %v", err)
+	}
+	if !strings.Contains(stdout.String(), stolen.ID) || !strings.Contains(stdout.String(), keeper.ID) {
+		t.Fatalf("devices list while running = %q, want both devices", stdout.String())
+	}
+
+	// Revoke through the CLI path while the relay is running.
+	stdout.Reset()
+	if err := run(context.Background(), []string{"devices", "revoke", stolen.ID}, &stdout, &stderr); err != nil {
+		t.Fatalf("devices revoke: %v", err)
+	}
+	if !strings.Contains(stdout.String(), "revoked successfully") {
+		t.Errorf("revoke output = %q", stdout.String())
+	}
+
+	// The running relay rejects the token on the very next request.
+	if code := deviceRequest(t, http.MethodGet, base+"/v1/agents", stolenToken, ""); code != http.StatusUnauthorized {
+		t.Errorf("after revoke: GET /v1/agents = %d, want 401", code)
+	}
+	if code := deviceRequest(t, http.MethodPost, base+"/v1/push/register", stolenToken, `{"platform":"fcm","token":"x"}`); code != http.StatusUnauthorized {
+		t.Errorf("after revoke: POST /v1/push/register = %d, want 401", code)
+	}
+	// The other device is untouched.
+	if code := deviceRequest(t, http.MethodGet, base+"/v1/agents", keeperToken, ""); code != http.StatusOK {
+		t.Errorf("after revoke: keeper GET /v1/agents = %d, want 200", code)
+	}
+
+	// The revoked device's open SSE stream is closed by the relay.
+	select {
+	case <-sseClosed:
+	case <-time.After(3 * time.Second):
+		t.Errorf("SSE stream of the revoked device is still open")
+		sseCancel()
+	}
+
+	// `devices list` while running no longer shows it.
+	stdout.Reset()
+	if err := run(context.Background(), []string{"devices", "list"}, &stdout, &stderr); err != nil {
+		t.Fatalf("devices list: %v", err)
+	}
+	if strings.Contains(stdout.String(), stolen.ID) {
+		t.Errorf("devices list after revoke still shows %s: %q", stolen.ID, stdout.String())
+	}
+
+	stop()
+
+	// On disk: the revoked device is gone, everything else survived.
+	data, err := os.ReadFile(filepath.Join(dir, "store.json"))
+	if err != nil {
+		t.Fatalf("read store.json: %v", err)
+	}
+	if strings.Contains(string(data), stolen.ID) {
+		t.Errorf("store.json still contains revoked device %s after shutdown", stolen.ID)
+	}
+	for _, want := range []string{keeper.ID, "hist-keep"} {
+		if !strings.Contains(string(data), want) {
+			t.Errorf("store.json lost %q", want)
+		}
+	}
+
+	// After a restart the device stays revoked.
+	base, stop = startRelay(t)
+	if code := deviceRequest(t, http.MethodGet, base+"/v1/agents", stolenToken, ""); code != http.StatusUnauthorized {
+		t.Errorf("after restart: GET /v1/agents = %d, want 401", code)
+	}
+	if code := deviceRequest(t, http.MethodGet, base+"/v1/agents", keeperToken, ""); code != http.StatusOK {
+		t.Errorf("after restart: keeper GET /v1/agents = %d, want 200", code)
+	}
+	stop()
+}
+
+// TestCLI_SecondRelayRefusesSameDataDir checks the data-dir lock: two relays on
+// one store would overwrite each other's saves.
+func TestCLI_SecondRelayRefusesSameDataDir(t *testing.T) {
+	dir := shortTempDir(t)
+	t.Setenv("AW_DATA_DIR", dir)
+	t.Setenv("AW_HOST_TOKEN", testHostToken)
+
+	_, stop := startRelay(t)
+	defer stop()
+
+	t.Setenv("AW_LISTEN", freeListenAddr(t))
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	var stdout, stderr bytes.Buffer
+	err := run(ctx, []string{"serve"}, &stdout, &stderr)
+	if err == nil || !strings.Contains(fmt.Sprint(err), "already") {
+		t.Fatalf("second relay on the same data dir: err = %v, want 'already running' error", err)
+	}
+}
 
 func TestCLI_Version(t *testing.T) {
 	var stdout, stderr bytes.Buffer

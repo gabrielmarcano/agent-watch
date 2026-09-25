@@ -36,7 +36,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	case "serve":
 		return runServe(ctx)
 	case "devices":
-		return runDevices(args[1:], stdout)
+		return runDevices(ctx, args[1:], stdout)
 	case "version":
 		fmt.Fprintf(stdout, "agent-watch-relay %s\n", version)
 		return nil
@@ -61,8 +61,14 @@ Usage:
 Environment variables:
   AW_LISTEN        Listen address (default ":8080")
   AW_HOST_TOKEN    64-character hex token shared with the bridge (required)
-  AW_DATA_DIR      Directory holding store.json (default "/var/lib/agent-watch-relay")
+  AW_DATA_DIR      Directory holding store.json, relay.lock and admin.sock
+                   (default "/var/lib/agent-watch-relay")
   AW_TRUST_CF_IP   Trust CF-Connecting-IP header for rate limiting (default "true")
+
+"devices list|revoke" work whether the relay is running or not. While it runs,
+they go through its local admin socket ($AW_DATA_DIR/admin.sock): a revoked
+device is rejected immediately and its open streams are closed. Run them as the
+service user or as root, with the same AW_DATA_DIR as the service.
 `, version)
 }
 
@@ -84,7 +90,7 @@ func runServe(ctx context.Context) error {
 	return nil
 }
 
-func runDevices(args []string, stdout io.Writer) error {
+func runDevices(ctx context.Context, args []string, stdout io.Writer) error {
 	if len(args) < 1 {
 		return errors.New("usage: agent-watch-relay devices <list|revoke <id>>")
 	}
@@ -97,11 +103,10 @@ func runDevices(args []string, stdout io.Writer) error {
 	sub := args[0]
 	switch sub {
 	case "list":
-		store, err := relay.NewStore(dataDir)
+		devices, err := relay.AdminListDevices(ctx, dataDir)
 		if err != nil {
-			return fmt.Errorf("read store from %s: %w", dataDir, err)
+			return fmt.Errorf("list devices in %s: %w", dataDir, err)
 		}
-		devices := store.ListDevices()
 		if len(devices) == 0 {
 			fmt.Fprintln(stdout, "No registered devices found.")
 			return nil
@@ -116,17 +121,18 @@ func runDevices(args []string, stdout io.Writer) error {
 			return errors.New("usage: agent-watch-relay devices revoke <device_id>")
 		}
 		deviceID := args[1]
-		store, err := relay.NewStore(dataDir)
-		if err != nil {
-			return fmt.Errorf("read store from %s: %w", dataDir, err)
-		}
-		if !store.RevokeDevice(deviceID) {
+		viaRelay, err := relay.AdminRevokeDevice(ctx, dataDir, deviceID)
+		if errors.Is(err, relay.ErrDeviceNotFound) {
 			return fmt.Errorf("device %q not found", deviceID)
 		}
-		if err := store.Flush(); err != nil {
-			return fmt.Errorf("save store: %w", err)
+		if err != nil {
+			return fmt.Errorf("revoke device %q: %w", deviceID, err)
 		}
-		fmt.Fprintf(stdout, "Device %s revoked successfully.\nNote: Ensure the relay service is stopped while modifying devices directly on disk.\n", deviceID)
+		if viaRelay {
+			fmt.Fprintf(stdout, "Device %s revoked successfully by the running relay: its token is rejected and its open streams were closed.\n", deviceID)
+		} else {
+			fmt.Fprintf(stdout, "Device %s revoked successfully (relay not running; store.json updated).\n", deviceID)
+		}
 		return nil
 	default:
 		return fmt.Errorf("unknown devices subcommand: %s", sub)

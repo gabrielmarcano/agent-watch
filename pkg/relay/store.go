@@ -223,8 +223,9 @@ func (s *Store) ListDevices() []Device {
 	return out
 }
 
-// RevokeDevice removes a device by ID. Returns true if found and removed.
-func (s *Store) RevokeDevice(deviceID string) bool {
+// RevokeDevice removes a device by ID and returns the removed device.
+// ok is false when no device has that ID.
+func (s *Store) RevokeDevice(deviceID string) (removed Device, ok bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -236,13 +237,14 @@ func (s *Store) RevokeDevice(deviceID string) bool {
 		}
 	}
 	if idx == -1 {
-		return false
+		return Device{}, false
 	}
 
+	removed = s.devices[idx]
 	s.devices = append(s.devices[:idx], s.devices[idx+1:]...)
 	delete(s.lastSeen, deviceID)
 	s.scheduleSaveLocked()
-	return true
+	return removed, true
 }
 
 // AddHistory appends a history item for a pane, enforcing dedup and size limits.
@@ -420,6 +422,14 @@ func (s *Store) saveAtomicLocked() error {
 	f, err := os.OpenFile(tmpPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
 	if err != nil {
 		return fmt.Errorf("open tmp store file: %w", err)
+	}
+
+	// Under sudo, keep the file owned by the data dir's owner (the service
+	// user), or the relay could no longer read its own store.
+	if err := matchDirOwner(f, filepath.Dir(s.filePath)); err != nil {
+		_ = f.Close()
+		_ = os.Remove(tmpPath)
+		return err
 	}
 
 	if _, err := f.Write(data); err != nil {

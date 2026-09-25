@@ -59,6 +59,14 @@ type AuthManager struct {
 	pairCodes      []pairCodeEntry
 	ipAttempts     map[string][]time.Time
 	globalAttempts []time.Time
+
+	sessMu   sync.Mutex
+	sessions map[string]map[*deviceSession]struct{} // token hash -> in-flight device requests
+}
+
+// deviceSession is one in-flight device request (an SSE stream or an API call).
+type deviceSession struct {
+	cancel context.CancelFunc
 }
 
 // NewAuthManager initializes an AuthManager.
@@ -68,7 +76,48 @@ func NewAuthManager(hostToken string, store *Store, trustCFIP bool) *AuthManager
 		store:      store,
 		trustCFIP:  trustCFIP,
 		ipAttempts: make(map[string][]time.Time),
+		sessions:   make(map[string]map[*deviceSession]struct{}),
 	}
+}
+
+// trackSession registers an in-flight request made with tokenHash so that
+// CloseDeviceSessions can cancel it. The returned func unregisters it.
+func (a *AuthManager) trackSession(tokenHash string, cancel context.CancelFunc) func() {
+	sess := &deviceSession{cancel: cancel}
+	a.sessMu.Lock()
+	set := a.sessions[tokenHash]
+	if set == nil {
+		set = make(map[*deviceSession]struct{})
+		a.sessions[tokenHash] = set
+	}
+	set[sess] = struct{}{}
+	a.sessMu.Unlock()
+
+	return func() {
+		a.sessMu.Lock()
+		defer a.sessMu.Unlock()
+		if set := a.sessions[tokenHash]; set != nil {
+			delete(set, sess)
+			if len(set) == 0 {
+				delete(a.sessions, tokenHash)
+			}
+		}
+	}
+}
+
+// CloseDeviceSessions cancels every in-flight request, SSE streams included,
+// authenticated with tokenHash, and returns how many it cancelled. Call it
+// after removing the device from the store.
+func (a *AuthManager) CloseDeviceSessions(tokenHash string) int {
+	a.sessMu.Lock()
+	set := a.sessions[tokenHash]
+	delete(a.sessions, tokenHash)
+	a.sessMu.Unlock()
+
+	for sess := range set {
+		sess.cancel()
+	}
+	return len(set)
 }
 
 // ExtractBearerToken parses the Bearer token from the Authorization header.
@@ -115,6 +164,15 @@ func (a *AuthManager) DeviceAuthMiddleware(next http.Handler) http.Handler {
 		}
 
 		tokenHash := Sha256Hex(token)
+
+		// Register the request before the lookup. A revocation removes the
+		// device from the store first and then cancels its sessions, so either
+		// the lookup below fails or this request is cancelled by the revocation.
+		ctx, cancel := context.WithCancel(r.Context())
+		defer cancel()
+		untrack := a.trackSession(tokenHash, cancel)
+		defer untrack()
+
 		dev, ok := a.store.FindDeviceByTokenHash(tokenHash)
 		if !ok {
 			writeError(w, model.ErrUnauthorized, "unknown device token")
@@ -122,7 +180,7 @@ func (a *AuthManager) DeviceAuthMiddleware(next http.Handler) http.Handler {
 		}
 
 		a.store.TouchDevice(dev.ID)
-		ctx := context.WithValue(r.Context(), deviceCtxKey, dev)
+		ctx = context.WithValue(ctx, deviceCtxKey, dev)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }

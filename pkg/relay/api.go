@@ -50,6 +50,12 @@ func (lrw *loggingResponseWriter) Flush() {
 	}
 }
 
+// Unwrap lets http.ResponseController reach the underlying connection
+// (the SSE handler sets write deadlines through it).
+func (lrw *loggingResponseWriter) Unwrap() http.ResponseWriter {
+	return lrw.ResponseWriter
+}
+
 func (lrw *loggingResponseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 	if h, ok := lrw.ResponseWriter.(http.Hijacker); ok {
 		return h.Hijack()

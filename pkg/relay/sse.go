@@ -1,6 +1,7 @@
 package relay
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -16,6 +17,14 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 		writeError(w, model.ErrInternal, "streaming unsupported")
 		return
 	}
+
+	// The request context is cancelled when the client goes away or the device
+	// is revoked. Then also expire the write deadline, so a write blocked on a
+	// client that stopped reading returns too.
+	ctx := r.Context()
+	rc := http.NewResponseController(w)
+	stopDeadline := context.AfterFunc(ctx, func() { _ = rc.SetWriteDeadline(time.Now()) })
+	defer stopDeadline()
 
 	h := w.Header()
 	h.Set("Content-Type", "text/event-stream")
@@ -47,7 +56,7 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 	for {
 		select {
 		case ev, ok := <-subCh:
-			if !ok {
+			if !ok || ctx.Err() != nil {
 				return
 			}
 			if _, writeErr := fmt.Fprintf(w, "event: %s\ndata: %s\n\n", ev.Name, ev.Data); writeErr != nil {
@@ -59,7 +68,7 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			flusher.Flush()
-		case <-r.Context().Done():
+		case <-ctx.Done():
 			return
 		}
 	}

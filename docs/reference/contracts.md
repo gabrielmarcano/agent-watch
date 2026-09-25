@@ -444,12 +444,26 @@ FCM message options:
 |---|---|---|---|
 | `AW_LISTEN` | no | `:8080` | Listen address (Cloudflare → origin) |
 | `AW_HOST_TOKEN` | **yes** | — | 64 hex chars; the same value goes in the bridge config |
-| `AW_DATA_DIR` | no | `/var/lib/agent-watch-relay` | Holds `store.json` |
+| `AW_DATA_DIR` | no | `/var/lib/agent-watch-relay` | Holds `store.json`, `relay.lock` and `admin.sock` (see below) |
 | `AW_FCM_CREDENTIALS` | no | — | Path to the Firebase service-account JSON. FCM is disabled if unset |
 | `AW_NTFY_URL` | no | — | e.g. `https://ntfy.sh`. ntfy is disabled if unset |
 | `AW_NTFY_TOPIC` | with ntfy | — | Random, unguessable topic name |
 | `AW_NTFY_TOKEN` | no | — | ntfy access token |
 | `AW_TRUST_CF_IP` | no | `true` | Use `CF-Connecting-IP` as the client IP for rate limiting |
+
+**Files in `AW_DATA_DIR`** (the directory is `0700`):
+
+| File | Meaning |
+|---|---|
+| `store.json` | Devices (token hashes only) and history. `0600`, owned by the service user |
+| `relay.lock` | Exclusive `flock` held by the running relay for its whole life. A second relay on the same directory refuses to start |
+| `admin.sock` | Local admin API, a `0600` Unix socket that exists only while the relay runs. Never exposed over TCP |
+
+**`agent-watch-relay devices list|revoke <id>`** works with the relay running or stopped:
+
+- **Relay running** (lock held): the CLI asks it over `admin.sock`. The revoked token is rejected from the next request on, the device's open SSE streams and in-flight requests are cancelled, and `store.json` is flushed at once.
+- **Relay stopped:** the CLI takes the lock and edits `store.json` itself.
+- Run it as the service user or as root, with the same `AW_DATA_DIR` as the service. Files written as root are handed to the owner of `AW_DATA_DIR`.
 
 ---
 

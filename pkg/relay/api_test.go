@@ -37,7 +37,7 @@ func setupTestServer(t *testing.T) (*Server, *httptest.Server) {
 	ts := httptest.NewServer(server.Handler())
 	t.Cleanup(func() {
 		ts.Close()
-		_ = server.Store().Close()
+		_ = server.Close()
 	})
 
 	return server, ts
