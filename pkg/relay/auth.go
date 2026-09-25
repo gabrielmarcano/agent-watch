@@ -54,6 +54,7 @@ type AuthManager struct {
 	hostToken string
 	store     *Store
 	ipPolicy  ClientIPPolicy
+	now       func() time.Time // rate-limiter clock (tests override)
 
 	mu             sync.Mutex
 	pairCodes      []pairCodeEntry
@@ -76,6 +77,7 @@ func NewAuthManager(hostToken string, store *Store, ipPolicy ClientIPPolicy) *Au
 		hostToken:  hostToken,
 		store:      store,
 		ipPolicy:   ipPolicy,
+		now:        time.Now,
 		ipAttempts: make(map[string][]time.Time),
 		sessions:   make(map[string]map[*deviceSession]struct{}),
 	}
@@ -260,21 +262,26 @@ func (a *AuthManager) CheckAndRecordAttempt(clientIP string) bool {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
-	now := time.Now()
+	now := a.now()
 	cutoff := now.Add(-rateLimitWindow)
 
-	// Prune IP attempts
-	var activeIP []time.Time
-	for _, t := range a.ipAttempts[clientIP] {
-		if t.After(cutoff) {
-			activeIP = append(activeIP, t)
+	// Prune every client's attempts, not only this one's, so IPs that
+	// stopped trying are forgotten. The map stays small: only allowed
+	// attempts are recorded, at most maxAttemptsGlobal per window.
+	for ip, attempts := range a.ipAttempts {
+		var active []time.Time
+		for _, t := range attempts {
+			if t.After(cutoff) {
+				active = append(active, t)
+			}
+		}
+		if len(active) == 0 {
+			delete(a.ipAttempts, ip)
+		} else {
+			a.ipAttempts[ip] = active
 		}
 	}
-	if len(activeIP) == 0 {
-		delete(a.ipAttempts, clientIP)
-	} else {
-		a.ipAttempts[clientIP] = activeIP
-	}
+	activeIP := a.ipAttempts[clientIP]
 
 	// Prune global attempts
 	var activeGlobal []time.Time

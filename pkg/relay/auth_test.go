@@ -1,11 +1,42 @@
 package relay
 
 import (
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
 )
+
+// Clients that stopped trying are forgotten once their window has passed,
+// so the per-IP map cannot grow without bound.
+func TestAuth_RateLimiterForgetsIdleClients(t *testing.T) {
+	store, err := NewStore(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	defer store.Close()
+	auth := NewAuthManager("test-host-token", store, ClientIPPolicy{})
+	now := time.Date(2026, 9, 25, 12, 0, 0, 0, time.UTC)
+	auth.now = func() time.Time { return now }
+
+	for i := 0; i < 10; i++ {
+		if !auth.CheckAndRecordAttempt(fmt.Sprintf("198.51.100.%d", i)) {
+			t.Fatalf("attempt %d rejected", i)
+		}
+	}
+	now = now.Add(rateLimitWindow + time.Second)
+	if !auth.CheckAndRecordAttempt("203.0.113.1") {
+		t.Fatalf("attempt after the window rejected")
+	}
+
+	auth.mu.Lock()
+	tracked := len(auth.ipAttempts)
+	auth.mu.Unlock()
+	if tracked != 1 {
+		t.Fatalf("rate limiter tracks %d IPs after the window, want 1 (the new one)", tracked)
+	}
+}
 
 func TestAuth_ExtractBearerToken(t *testing.T) {
 	// Query parameter should be completely ignored
