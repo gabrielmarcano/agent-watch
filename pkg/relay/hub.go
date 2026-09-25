@@ -78,6 +78,9 @@ type Hub struct {
 	pingInterval   time.Duration
 	pingTimeout    time.Duration
 	afterPing      func(err error) // test hook, see setAfterPing
+
+	closed   bool           // set by Shutdown: no new hosts
+	handlers sync.WaitGroup // running ServeHost calls; Add only under mu while !closed
 }
 
 // NewHub initializes a new host Hub.
@@ -136,6 +139,16 @@ func (h *Hub) ServeHost(w http.ResponseWriter, r *http.Request) {
 		writeError(w, model.ErrUnauthorized, "invalid or missing host token")
 		return
 	}
+
+	h.mu.Lock()
+	if h.closed {
+		h.mu.Unlock()
+		http.Error(w, "relay shutting down", http.StatusServiceUnavailable)
+		return
+	}
+	h.handlers.Add(1)
+	h.mu.Unlock()
+	defer h.handlers.Done()
 
 	conn, err := websocket.Accept(w, r, nil)
 	if err != nil {
@@ -229,6 +242,31 @@ func (h *Hub) ServeHost(w http.ResponseWriter, r *http.Request) {
 		}
 
 		h.handleWireMessage(wireMsg)
+	}
+}
+
+// Shutdown stops accepting hosts, drops the current one (watches see it go
+// offline and its in-flight commands fail with host_offline) and waits until
+// every host handler has returned, or ctx ends.
+func (h *Hub) Shutdown(ctx context.Context) error {
+	h.mu.Lock()
+	h.closed = true
+	host := h.currentHost
+	h.mu.Unlock()
+
+	if host != nil {
+		_ = host.conn.CloseNow()
+	}
+	done := make(chan struct{})
+	go func() {
+		h.handlers.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
 	}
 }
 

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"sync"
@@ -12,6 +13,9 @@ import (
 
 	"github.com/gabrielmarcano/agent-monitor/pkg/push"
 )
+
+// shutdownTimeout bounds a graceful stop (systemd's stop timeout is longer).
+const shutdownTimeout = 10 * time.Second
 
 // Server coordinates the relay components and serves the HTTP API.
 type Server struct {
@@ -147,6 +151,18 @@ func (s *Server) Hub() *Hub {
 // is canceled, then performs graceful shutdown. It always closes the Server
 // (store flushed, data-dir lock released) before returning.
 func (s *Server) Run(ctx context.Context) error {
+	ln, err := net.Listen("tcp", s.cfg.ListenAddr)
+	if err != nil {
+		if cerr := s.Close(); cerr != nil {
+			slog.Error("error closing store", "err", cerr)
+		}
+		return fmt.Errorf("listen on %s: %w", s.cfg.ListenAddr, err)
+	}
+	return s.Serve(ctx, ln)
+}
+
+// Serve is Run on an existing listener, which it takes over and closes.
+func (s *Server) Serve(ctx context.Context, ln net.Listener) error {
 	defer func() {
 		if err := s.Close(); err != nil {
 			slog.Error("error closing store during shutdown", "err", err)
@@ -155,6 +171,7 @@ func (s *Server) Run(ctx context.Context) error {
 
 	adminLn, err := listenAdmin(s.cfg.DataDir)
 	if err != nil {
+		_ = ln.Close()
 		return err
 	}
 	adminSrv := &http.Server{
@@ -167,17 +184,24 @@ func (s *Server) Run(ctx context.Context) error {
 		}
 	}()
 
+	// Every request context derives from reqCtx, which shutdown cancels at
+	// once (RegisterOnShutdown). Without it Shutdown waits out its budget on
+	// open SSE streams, and it never touches the hijacked host WebSocket.
+	reqCtx, cancelRequests := context.WithCancel(context.Background())
+	defer cancelRequests()
+
 	srv := &http.Server{
-		Addr:              s.cfg.ListenAddr,
 		Handler:           s.handler,
 		ReadHeaderTimeout: 10 * time.Second,
 		// Explicitly NO WriteTimeout as SSE and WebSocket are long-lived
+		BaseContext: func(net.Listener) context.Context { return reqCtx },
 	}
+	srv.RegisterOnShutdown(cancelRequests)
 
 	errCh := make(chan error, 1)
 	go func() {
-		slog.Info("relay server listening", "addr", s.cfg.ListenAddr)
-		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		slog.Info("relay server listening", "addr", ln.Addr().String())
+		if err := srv.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			errCh <- err
 		}
 		close(errCh)
@@ -191,11 +215,19 @@ func (s *Server) Run(ctx context.Context) error {
 		runErr = fmt.Errorf("listen and serve: %w", err)
 	}
 
-	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), shutdownTimeout)
 	defer shutdownCancel()
 
 	if runErr == nil {
-		runErr = srv.Shutdown(shutdownCtx)
+		if err := srv.Shutdown(shutdownCtx); err != nil {
+			slog.Error("graceful shutdown did not finish, closing connections", "err", err)
+			_ = srv.Close()
+			runErr = err
+		}
+	}
+	// The host handler must be done before the deferred Close saves the store.
+	if err := s.hub.Shutdown(shutdownCtx); err != nil {
+		slog.Error("host connection did not close in time", "err", err)
 	}
 	if err := adminSrv.Shutdown(shutdownCtx); err != nil {
 		slog.Error("error shutting down admin socket", "err", err)
