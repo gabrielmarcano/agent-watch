@@ -113,7 +113,7 @@ type Dispatcher struct {
 	// blockedShown holds the panes whose own blocked push went out and was
 	// not withdrawn yet, with when it went out. Capped at maxShownBlocked:
 	// a pane removed while blocked is never seen leaving blocked.
-	blockedShown map[string]time.Time
+	blockedShown map[string]shownPrompt
 
 	wg sync.WaitGroup
 }
@@ -144,7 +144,7 @@ func NewDispatcher(senders []Sender, now func() time.Time, logger *slog.Logger) 
 		afterFunc:        realAfterFunc,
 		lastPush:         make(map[string]time.Time),
 		latest:           make(map[string]model.AgentState),
-		blockedShown:     make(map[string]time.Time),
+		blockedShown:     make(map[string]shownPrompt),
 	}
 }
 
@@ -173,7 +173,7 @@ func (d *Dispatcher) initLocked() {
 		d.latest = make(map[string]model.AgentState)
 	}
 	if d.blockedShown == nil {
-		d.blockedShown = make(map[string]time.Time)
+		d.blockedShown = make(map[string]shownPrompt)
 	}
 }
 
@@ -300,28 +300,61 @@ func (d *Dispatcher) enqueueLocked(m Message, cur model.AgentState) {
 	now := d.Now()
 	d.pruneLocked(now)
 
-	// Debounce: drop if the same pane_id + event was accepted less than
-	// DebounceDuration ago.
-	key := m.PaneID + ":" + string(m.Event)
-	if last, ok := d.lastPush[key]; ok && now.Sub(last) < d.DebounceDuration {
+	// The prompt the pane's notification already shows is never pushed again.
+	if d.alreadyShownLocked(m) {
 		return
 	}
-	d.lastPush[key] = now
 
-	// Window & digest: latency matters for blocked agents, so the first
-	// message of a window goes out immediately and the later ones are held
-	// until the window ends. The flush then sends them one by one, or a
-	// single digest when more than 3 pushes would go out in the window.
-	if d.timer == nil {
+	// Debounce: the same pane pushed the same event less than
+	// DebounceDuration ago. A done push is dropped: the pane's notification
+	// already says it finished. A blocked push is a new prompt and must not
+	// be lost, so it is held until the window ends (trailing edge), then
+	// pushed if the agent is still blocked, for its prompt at that time.
+	if last, ok := d.lastPush[m.PaneID+":"+string(m.Event)]; ok && now.Sub(last) < d.DebounceDuration {
+		if m.Event == EventBlocked {
+			d.holdLocked(m, cur)
+		}
+		return
+	}
+
+	// Window & digest: latency matters for blocked agents, so the first push
+	// of a window goes out immediately and the later ones are held until the
+	// window ends. The flush then sends them one by one, or a single digest
+	// when more than 3 pushes would go out in the window.
+	if d.windowSent == 0 {
 		d.sendLocked(m, now)
 		d.windowSent = 1
-		d.windowGen++
-		gen := d.windowGen
-		d.timer = d.afterFunc(d.WindowDuration, func() { d.flush(gen) })
+		d.openWindowLocked()
 		return
 	}
+	d.holdLocked(m, cur)
+}
+
+// holdLocked keeps m, built from cur, for the end of the window, opening one
+// if none is open.
+func (d *Dispatcher) holdLocked(m Message, cur model.AgentState) {
+	d.openWindowLocked()
 	d.held = append(d.held, m)
 	d.latest[m.PaneID] = cur
+}
+
+func (d *Dispatcher) openWindowLocked() {
+	if d.timer != nil {
+		return
+	}
+	d.windowGen++
+	gen := d.windowGen
+	d.timer = d.afterFunc(d.WindowDuration, func() { d.flush(gen) })
+}
+
+// alreadyShownLocked reports whether m is a blocked push for the very prompt
+// its pane's notification shows: same state_change_seq, same fingerprint.
+func (d *Dispatcher) alreadyShownLocked(m Message) bool {
+	if m.Event != EventBlocked {
+		return false
+	}
+	shown, ok := d.blockedShown[m.PaneID]
+	return ok && shown.seq == m.StateChangeSeq && shown.fingerprint == m.Fingerprint
 }
 
 // pruneLocked drops the lastPush entries the debounce can no longer match, so
@@ -364,7 +397,13 @@ func (d *Dispatcher) flushLocked() {
 		d.timer.Stop()
 		d.timer = nil
 	}
-	due := dueMessages(d.held, d.latest)
+	var due []Message
+	for _, m := range dueMessages(d.held, d.latest) {
+		// A held prompt that went out in the meantime is not pushed twice.
+		if !d.alreadyShownLocked(m) {
+			due = append(due, m)
+		}
+	}
 	sent := d.windowSent
 	d.held, d.windowSent = nil, 0
 	clear(d.latest)
@@ -381,23 +420,33 @@ func (d *Dispatcher) flushLocked() {
 	d.dispatchLocked(digestMessage(due))
 }
 
-// sendLocked dispatches a message about one pane and remembers a blocked
-// one, so the pane's notification can be withdrawn when it leaves blocked.
+// sendLocked dispatches a message about one pane and records it: when the
+// pane pushed this event (debounce), and for a blocked one which prompt its
+// notification shows, to withdraw it when the pane leaves blocked and never
+// to push the same prompt twice.
 func (d *Dispatcher) sendLocked(m Message, now time.Time) {
 	d.dispatchLocked(m)
+	d.lastPush[m.PaneID+":"+string(m.Event)] = now
 	if m.Event != EventBlocked {
 		return
 	}
 	if _, ok := d.blockedShown[m.PaneID]; !ok && len(d.blockedShown) >= maxShownBlocked {
 		oldest := ""
-		for pane, at := range d.blockedShown {
-			if oldest == "" || at.Before(d.blockedShown[oldest]) {
+		for pane, shown := range d.blockedShown {
+			if oldest == "" || shown.at.Before(d.blockedShown[oldest].at) {
 				oldest = pane
 			}
 		}
 		delete(d.blockedShown, oldest)
 	}
-	d.blockedShown[m.PaneID] = now
+	d.blockedShown[m.PaneID] = shownPrompt{at: now, seq: m.StateChangeSeq, fingerprint: m.Fingerprint}
+}
+
+// shownPrompt is the prompt a pane's blocked notification shows.
+type shownPrompt struct {
+	at          time.Time
+	seq         uint64
+	fingerprint string
 }
 
 // paneEvent identifies what a held message announces.
@@ -436,8 +485,8 @@ func dueMessages(held []Message, latest map[string]model.AgentState) []Message {
 }
 
 // digestMessage covers due, which holds one message per agent. A digest only
-// goes out when more than 3 pushes would in a window, and the window's first
-// one is already sent, so len(due) >= 3: the title is always plural.
+// goes out when more than 3 pushes would in a window, and at most one of them
+// is already sent, so len(due) >= 3: the title is always plural.
 func digestMessage(due []Message) Message {
 	anyBlocked := false
 	seen := make(map[string]bool)

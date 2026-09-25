@@ -470,8 +470,13 @@ ntfy never gets `resolved`: it cannot withdraw a notification it already deliver
   - A pane that leaves `blocked` through a `snapshot` gets its `resolved` with its next `agent_update`.
   - A pane removed while blocked (`agent_removed`, or missing from a `snapshot`) gets none; its notification stays until dismissed.
 
-- **Debounce:** skip a push if the same pane pushed the same event less than 5 s ago.
+- **Debounce** (the same pane pushed the same event less than 5 s ago):
+  - `done`: skip it. The pane's notification already says it finished.
+  - `blocked`: **hold it** until the window ends (trailing edge), never drop it. A new prompt right after an answer is never lost.
+- **No duplicates:** a `blocked` push is never sent for the prompt the pane's notification already shows (same `state_change_seq` **and** `fingerprint`). This applies at once and at the end of the window.
 - **Window:** the first push of a 10 s window goes out at once (latency matters for `blocked`). Later ones are held until the window ends.
+  - A push held by the debounce opens a window if none is open.
+  - The first push that is not held still goes out at once.
 - **End of the window:** each held agent gets at most one push, built from its **current** state, and only if it is still in the state a held push announced (`blocked` or `done`).
   - An agent that left that state gets nothing: the watch never offers to approve a prompt that was already answered.
   - An agent that answered and blocked again gets the push for its current prompt (fingerprint and option ids included).

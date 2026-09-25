@@ -150,10 +150,11 @@ func TestDispatcher_ZeroValueIsUsable(t *testing.T) {
 // The debounce map must not keep one entry per pane forever: entries the
 // debounce can no longer match are dropped.
 func TestDispatcher_LastPushIsPruned(t *testing.T) {
-	d, clock, _ := newTestDispatcher(&mockSender{name: "mock"})
+	d, clock, timers := newTestDispatcher(&mockSender{name: "mock"})
 
 	for i := 0; i < 50; i++ {
-		d.OnAgentUpdate(nil, blockedState(fmt.Sprintf("p%d", i), "a"))
+		d.OnAgentUpdate(nil, blockedState(fmt.Sprintf("p%d", i), "a")) // pushed at once
+		timers.Fire()                                                  // its own window
 	}
 	clock.Advance(d.DebounceDuration)
 	d.OnAgentUpdate(nil, blockedState("p-last", "a"))
@@ -167,31 +168,30 @@ func TestDispatcher_LastPushIsPruned(t *testing.T) {
 	}
 }
 
-// Pruning must not shorten the debounce: an entry younger than it survives.
+// Pruning drops only the entries the debounce can no longer match: one
+// younger than DebounceDuration survives.
 func TestDispatcher_PruneKeepsDebounce(t *testing.T) {
-	sender := &mockSender{name: "mock"}
-	d, clock, timers := newTestDispatcher(sender)
+	d, clock, timers := newTestDispatcher(&mockSender{name: "mock"})
 
-	d.OnAgentUpdate(nil, blockedState("p1", "a")) // sent right away
+	d.OnAgentUpdate(nil, blockedState("p1", "a")) // pushed at t0
+	d.Wait()
 	clock.Advance(d.DebounceDuration - time.Second)
 	d.OnAgentUpdate(nil, blockedState("p2", "b")) // held
-	clock.Advance(time.Second / 2)
-	d.OnAgentUpdate(nil, blockedState("p2", "b")) // p2 debounced
-	clock.Advance(time.Second)                    // p1 entry is now past the debounce
-	d.OnAgentUpdate(nil, blockedState("p3", "c")) // prunes p1, keeps p2
-	clock.Advance(time.Second)
-	d.OnAgentUpdate(nil, blockedState("p2", "b")) // still debounced: p2's entry is 2.5 s old
-	timers.Fire()
+	timers.Fire()                                 // p2 pushed at t4
+	d.Wait()
+	clock.Advance(1500 * time.Millisecond)
+	d.OnAgentUpdate(nil, blockedState("p3", "c")) // t5.5: prunes p1 (5.5 s), keeps p2 (1.5 s)
 	d.Wait()
 
-	var p2 int
-	for _, m := range sender.getMessages() {
-		if m.PaneID == "p2" {
-			p2++
-		}
+	d.mu.Lock()
+	var keys []string
+	for k := range d.lastPush {
+		keys = append(keys, k)
 	}
-	if p2 != 1 {
-		t.Fatalf("p2 pushed %d times, want 1: pruning broke the debounce", p2)
+	d.mu.Unlock()
+	sort.Strings(keys)
+	if want := []string{"p2:blocked", "p3:blocked"}; fmt.Sprint(keys) != fmt.Sprint(want) {
+		t.Fatalf("lastPush keys = %v, want %v", keys, want)
 	}
 }
 
@@ -326,50 +326,216 @@ func TestDispatcher_UnknownPromptBody(t *testing.T) {
 	}
 }
 
+// The debounce spaces a pane's pushes: a new blocked prompt within 5 s of the
+// pane's last push is held until the window ends, not pushed at once.
 func TestDispatcher_Debounce(t *testing.T) {
 	sender := &mockSender{name: "mock"}
 	d, clock, timers := newTestDispatcher(sender)
 
-	blocked := model.AgentState{PaneID: "p1", Label: "agent1", Status: model.StatusBlocked}
-
 	// 1. First event goes through immediately
-	d.OnAgentUpdate(nil, blocked)
+	b1 := agentAt("p1", "agent1", model.StatusBlocked, 1)
+	d.OnAgentUpdate(nil, b1)
 	d.Wait()
-	msgs := sender.getMessages()
-	if len(msgs) != 1 {
-		t.Fatalf("expected 1 message, got %d", len(msgs))
+	if n := len(sender.getMessages()); n != 1 {
+		t.Fatalf("expected 1 message, got %d", n)
 	}
 
-	// 2. Second event for same pane + event within 3 seconds -> dropped by debounce
+	// 2. A new prompt on the same pane 3 s later is held, not pushed at once
 	clock.Advance(3 * time.Second)
-	d.OnAgentUpdate(nil, blocked)
+	w2 := agentAt("p1", "agent1", model.StatusWorking, 2)
+	d.OnAgentUpdate(&b1, w2)
+	b3 := agentAt("p1", "agent1", model.StatusBlocked, 3)
+	d.OnAgentUpdate(&w2, b3)
 	d.Wait()
-	msgs = sender.getMessages()
-	if len(msgs) != 1 {
-		t.Fatalf("expected second event within 3s to be debounced, got %d messages", len(msgs))
+	if n := len(sender.getMessages()); n != 1 {
+		t.Fatalf("a prompt within 3 s went out at once: %d messages", n)
 	}
 
-	// 3. Different pane after 3 seconds -> allowed
-	blocked2 := model.AgentState{PaneID: "p2", Label: "agent2", Status: model.StatusBlocked}
-	d.OnAgentUpdate(nil, blocked2)
+	// 3. Another pane is held too (the window is open); the timer sends both
+	d.OnAgentUpdate(nil, blockedState("p2", "agent2"))
 	d.Wait()
-	// blocked2 is within window, held until the window timer fires
 	if fired := timers.Fire(); len(fired) != 1 || fired[0] != d.WindowDuration {
 		t.Fatalf("window timers fired = %v, want one of %v", fired, d.WindowDuration)
 	}
 	d.Wait()
-	msgs = sender.getMessages()
-	if len(msgs) != 2 {
-		t.Fatalf("expected message from different pane, got %d", len(msgs))
+	if got, want := eventsOf(sender.getMessages()), []string{"blocked:p1", "blocked:p1", "blocked:p2"}; fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Fatalf("pushes = %v, want %v", got, want)
 	}
 
-	// 4. Same pane after 6 seconds (> 5s debounce window) -> allowed
+	// 4. Same pane 6 s after its last push (> 5 s debounce) -> at once
 	clock.Advance(6 * time.Second)
-	d.OnAgentUpdate(nil, blocked)
+	w4 := agentAt("p1", "agent1", model.StatusWorking, 4)
+	d.OnAgentUpdate(&b3, w4)
+	d.OnAgentUpdate(&w4, agentAt("p1", "agent1", model.StatusBlocked, 5))
 	d.Wait()
-	msgs = sender.getMessages()
-	if len(msgs) != 3 {
-		t.Fatalf("expected message after debounce window to succeed, got %d", len(msgs))
+	if n := len(sender.getMessages()); n != 4 {
+		t.Fatalf("expected the prompt after the debounce to go out at once, got %d messages", n)
+	}
+}
+
+// promptState is pane p1 blocked on a prompt with the given fingerprint.
+func promptState(seq uint64, fingerprint string) model.AgentState {
+	s := agentAt("p1", "one", model.StatusBlocked, seq)
+	s.Prompt = &model.PendingPrompt{
+		Kind: model.PromptPermission, Title: "Bash command", Detail: fingerprint, Fingerprint: fingerprint,
+		Options: []model.PromptOption{{ID: fingerprint + "-yes", Label: "Yes", Role: model.RoleAllowOnce}},
+	}
+	return s
+}
+
+// p1Pushes returns the fingerprints of the blocked pushes for p1, in order.
+func p1Pushes(sender *mockSender) []string {
+	var fps []string
+	for _, m := range sender.getMessages() {
+		if m.PaneID == "p1" && m.Event == EventBlocked {
+			fps = append(fps, m.Fingerprint)
+		}
+	}
+	return fps
+}
+
+// Trailing edge: a new prompt on a pane within 5 s of its last push is not
+// swallowed by the debounce. It is held and pushed when the window ends, for
+// the pane's current prompt.
+func TestDispatcher_QuickReblockIsHeldNotLost(t *testing.T) {
+	sender := &mockSender{name: "mock"}
+	d, clock, timers := newTestDispatcher(sender)
+
+	onA := promptState(10, "fp-A")
+	d.OnAgentUpdate(nil, onA) // pushed at once
+	d.Wait()
+	clock.Advance(time.Second)
+	working := agentAt("p1", "one", model.StatusWorking, 11)
+	d.OnAgentUpdate(&onA, working) // answered on the wrist
+	clock.Advance(time.Second)
+	d.OnAgentUpdate(&working, promptState(12, "fp-B")) // next prompt, 2 s after the push
+	d.Wait()
+	if got := p1Pushes(sender); fmt.Sprint(got) != "[fp-A]" {
+		t.Fatalf("before the flush p1 pushes = %v, want [fp-A]", got)
+	}
+
+	flushWindow(d, timers)
+	if got := p1Pushes(sender); fmt.Sprint(got) != "[fp-A fp-B]" {
+		t.Fatalf("p1 pushes = %v, want [fp-A fp-B]: the second prompt was lost", got)
+	}
+}
+
+// A held prompt with no window open opens one of its own; a push from
+// another pane in that window still goes out at once.
+func TestDispatcher_HeldPromptOpensItsOwnWindow(t *testing.T) {
+	sender := &mockSender{name: "mock"}
+	d, clock, timers := newTestDispatcher(sender)
+
+	d.OnAgentUpdate(nil, blockedState("p0", "zero")) // opens a window
+	d.Wait()
+	clock.Advance(9 * time.Second)
+	onA := promptState(10, "fp-A")
+	d.OnAgentUpdate(nil, onA) // held
+	flushWindow(d, timers)    // t9: fp-A pushed, no window open any more
+	clock.Advance(time.Second)
+	working := agentAt("p1", "one", model.StatusWorking, 11)
+	d.OnAgentUpdate(&onA, working)
+	d.OnAgentUpdate(&working, promptState(12, "fp-B")) // 1 s after fp-A: held
+	d.Wait()
+	if got := p1Pushes(sender); fmt.Sprint(got) != "[fp-A]" {
+		t.Fatalf("p1 pushes = %v, want [fp-A] until the flush", got)
+	}
+
+	d.OnAgentUpdate(nil, blockedState("p2", "two")) // first push of the new window
+	d.Wait()
+	if msgs := sender.getMessages(); msgs[len(msgs)-1].PaneID != "p2" {
+		t.Fatalf("p2 was held behind a held prompt instead of going out at once: %v", eventsOf(msgs))
+	}
+
+	if fired := timers.Fire(); len(fired) != 1 {
+		t.Fatalf("held prompt armed %d window timers, want 1", len(fired))
+	}
+	d.Wait()
+	if got := p1Pushes(sender); fmt.Sprint(got) != "[fp-A fp-B]" {
+		t.Fatalf("p1 pushes = %v, want [fp-A fp-B]", got)
+	}
+}
+
+// The prompt a pane's notification already shows (same state_change_seq and
+// fingerprint) is never pushed again, whether it comes back at once, after
+// the debounce, or at the flush.
+func TestDispatcher_SamePromptIsNeverPushedTwice(t *testing.T) {
+	t.Run("re-reported", func(t *testing.T) {
+		sender := &mockSender{name: "mock"}
+		d, clock, timers := newTestDispatcher(sender)
+
+		onA := promptState(10, "fp-A")
+		d.OnAgentUpdate(nil, onA)
+		clock.Advance(time.Second)
+		d.OnAgentUpdate(nil, onA) // the relay lost prev: same prompt again
+		flushWindow(d, timers)
+		clock.Advance(6 * time.Second)
+		d.OnAgentUpdate(nil, onA) // again, past the debounce
+		flushWindow(d, timers)
+
+		if got := p1Pushes(sender); fmt.Sprint(got) != "[fp-A]" {
+			t.Fatalf("p1 pushes = %v, want [fp-A] once", got)
+		}
+	})
+
+	t.Run("pushed at once, then flushed", func(t *testing.T) {
+		sender := &mockSender{name: "mock"}
+		d, clock, timers := newTestDispatcher(sender)
+
+		onA := promptState(10, "fp-A")
+		d.OnAgentUpdate(nil, onA) // t0
+		flushWindow(d, timers)
+		clock.Advance(time.Second)
+		w := agentAt("p1", "one", model.StatusWorking, 11)
+		d.OnAgentUpdate(&onA, w)
+		onB := promptState(12, "fp-B")
+		d.OnAgentUpdate(&w, onB) // t1: held, opens a window
+		clock.Advance(5 * time.Second)
+		w2 := agentAt("p1", "one", model.StatusWorking, 13)
+		d.OnAgentUpdate(&onB, w2)
+		d.OnAgentUpdate(&w2, promptState(14, "fp-C")) // t6: past the debounce, pushed at once
+		flushWindow(d, timers)                        // the held fp-B is now fp-C: already shown
+
+		if got := p1Pushes(sender); fmt.Sprint(got) != "[fp-A fp-C]" {
+			t.Fatalf("p1 pushes = %v, want [fp-A fp-C]", got)
+		}
+	})
+}
+
+// A held prompt answered before the window ends is not pushed.
+func TestDispatcher_HeldPromptAnsweredBeforeFlush(t *testing.T) {
+	sender := &mockSender{name: "mock"}
+	d, clock, timers := newTestDispatcher(sender)
+
+	onA := promptState(10, "fp-A")
+	d.OnAgentUpdate(nil, onA)
+	clock.Advance(time.Second)
+	w := agentAt("p1", "one", model.StatusWorking, 11)
+	d.OnAgentUpdate(&onA, w)
+	onB := promptState(12, "fp-B")
+	d.OnAgentUpdate(&w, onB) // held
+	d.OnAgentUpdate(&onB, agentAt("p1", "one", model.StatusWorking, 13))
+	flushWindow(d, timers)
+
+	if got := p1Pushes(sender); fmt.Sprint(got) != "[fp-A]" {
+		t.Fatalf("p1 pushes = %v, want [fp-A]", got)
+	}
+}
+
+// done keeps the plain debounce: a second "finished" within 5 s is dropped,
+// the pane's notification already says it finished.
+func TestDispatcher_QuickDoneIsDropped(t *testing.T) {
+	sender := &mockSender{name: "mock"}
+	d, clock, timers := newTestDispatcher(sender)
+
+	finish(d, "p1", "one", 5) // pushed at once
+	d.Wait()
+	clock.Advance(2 * time.Second)
+	finish(d, "p1", "one", 7)
+	flushWindow(d, timers)
+
+	if got := eventsOf(sender.getMessages()); fmt.Sprint(got) != "[done:p1]" {
+		t.Fatalf("pushes = %v, want one done", got)
 	}
 }
 
