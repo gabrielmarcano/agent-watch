@@ -17,3 +17,8 @@ func flockExclusive(*os.File) error {
 func matchDirOwner(*os.File, string) error {
 	return nil
 }
+
+// syncDir is a no-op off Unix.
+func syncDir(string) error {
+	return nil
+}

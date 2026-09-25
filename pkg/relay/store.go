@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"sort"
@@ -49,7 +50,11 @@ type Store struct {
 	dirty       bool
 	saveTimer   *time.Timer
 	saveClosing bool
-	saveDone    chan struct{}
+
+	saveMu    sync.Mutex             // serializes writes of store.json; taken before mu
+	saveDelay time.Duration          // coalescing delay before a background save
+	syncFile  func(f *os.File) error // fsync of the temp file (tests override)
+	syncDir   func(dir string) error // fsync of the data dir (tests override)
 }
 
 // NewStore loads an existing store file or initializes a new one.
@@ -60,17 +65,20 @@ func NewStore(dataDir string) (*Store, error) {
 
 	filePath := filepath.Join(dataDir, "store.json")
 	s := &Store{
-		filePath: filePath,
-		history:  make(map[string][]model.HistoryItem),
-		lastSeen: make(map[string]time.Time),
-		saveDone: make(chan struct{}),
+		filePath:  filePath,
+		history:   make(map[string][]model.HistoryItem),
+		lastSeen:  make(map[string]time.Time),
+		saveDelay: time.Second,
+		syncFile:  func(f *os.File) error { return f.Sync() },
+		syncDir:   syncDir,
 	}
 
 	data, err := os.ReadFile(filePath)
 	if err != nil {
 		if os.IsNotExist(err) {
 			// Brand new store, write initial empty file
-			if err := s.saveAtomicLocked(); err != nil {
+			s.dirty = true
+			if err := s.save(false); err != nil {
 				return nil, fmt.Errorf("init store file: %w", err)
 			}
 			return s, nil
@@ -383,24 +391,58 @@ func (s *Store) enforceTotalLimitLocked() {
 	}
 }
 
-// scheduleSaveLocked marks store dirty and triggers a timer to save within 1 second.
+// scheduleSaveLocked marks the store dirty and saves it in the background
+// after saveDelay (1 s), coalescing the changes made meanwhile.
 func (s *Store) scheduleSaveLocked() {
 	s.dirty = true
-	if s.saveTimer != nil {
+	if s.saveTimer != nil || s.saveClosing {
 		return
 	}
-	s.saveTimer = time.AfterFunc(time.Second, func() {
-		s.mu.Lock()
-		defer s.mu.Unlock()
-		s.saveTimer = nil
-		if s.dirty && !s.saveClosing {
-			_ = s.saveAtomicLocked()
-		}
-	})
+	s.saveTimer = time.AfterFunc(s.saveDelay, s.backgroundSave)
 }
 
-// saveAtomicLocked writes data to store.json.tmp, fsyncs, and renames over store.json.
-func (s *Store) saveAtomicLocked() error {
+func (s *Store) backgroundSave() {
+	s.mu.Lock()
+	s.saveTimer = nil
+	s.mu.Unlock()
+	if err := s.save(true); err != nil {
+		// The store stays dirty: the next change, Flush or Close retries.
+		slog.Error("save store failed; will retry on the next change or at shutdown", "path", s.filePath, "err", err)
+	}
+}
+
+// save writes the store to disk if it is dirty. The snapshot is taken under
+// mu; the slow part (write, fsync, rename, directory fsync) runs without it,
+// so a slow disk never stalls requests or the host. saveMu keeps saves in
+// order, so a later save always carries newer data. A background save
+// (the coalescing timer) is skipped once Close has started: Close saves.
+func (s *Store) save(background bool) error {
+	s.saveMu.Lock()
+	defer s.saveMu.Unlock()
+
+	s.mu.Lock()
+	if !s.dirty || (background && s.saveClosing) {
+		s.mu.Unlock()
+		return nil
+	}
+	data, err := s.marshalLocked()
+	if err != nil {
+		s.mu.Unlock()
+		return err
+	}
+	s.dirty = false
+	s.mu.Unlock()
+
+	if err := s.writeFile(data); err != nil {
+		s.mu.Lock()
+		s.dirty = true
+		s.mu.Unlock()
+		return err
+	}
+	return nil
+}
+
+func (s *Store) marshalLocked() ([]byte, error) {
 	sf := storeFile{
 		Version: storeVersion,
 		Devices: s.devices,
@@ -415,9 +457,15 @@ func (s *Store) saveAtomicLocked() error {
 
 	data, err := json.MarshalIndent(sf, "", "  ")
 	if err != nil {
-		return fmt.Errorf("marshal store file: %w", err)
+		return nil, fmt.Errorf("marshal store file: %w", err)
 	}
+	return data, nil
+}
 
+// writeFile writes data to store.json.tmp, fsyncs it, renames it over
+// store.json and fsyncs the directory so the rename survives a crash.
+// The caller holds saveMu.
+func (s *Store) writeFile(data []byte) error {
 	tmpPath := s.filePath + ".tmp"
 	f, err := os.OpenFile(tmpPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
 	if err != nil {
@@ -438,7 +486,7 @@ func (s *Store) saveAtomicLocked() error {
 		return fmt.Errorf("write tmp store file: %w", err)
 	}
 
-	if err := f.Sync(); err != nil {
+	if err := s.syncFile(f); err != nil {
 		_ = f.Close()
 		_ = os.Remove(tmpPath)
 		return fmt.Errorf("fsync tmp store file: %w", err)
@@ -454,26 +502,22 @@ func (s *Store) saveAtomicLocked() error {
 		return fmt.Errorf("rename store file: %w", err)
 	}
 
-	s.dirty = false
-	return nil
+	return s.syncDir(filepath.Dir(s.filePath))
 }
 
 // Flush immediately flushes any pending writes to disk.
 func (s *Store) Flush() error {
 	s.mu.Lock()
-	defer s.mu.Unlock()
-
 	if s.saveTimer != nil {
 		s.saveTimer.Stop()
 		s.saveTimer = nil
 	}
-	if s.dirty {
-		return s.saveAtomicLocked()
-	}
-	return nil
+	s.mu.Unlock()
+	return s.save(false)
 }
 
-// Close flushes data and closes the store.
+// Close flushes data and closes the store. Changes made after Close are
+// kept in memory only.
 func (s *Store) Close() error {
 	s.mu.Lock()
 	s.saveClosing = true
@@ -481,10 +525,6 @@ func (s *Store) Close() error {
 		s.saveTimer.Stop()
 		s.saveTimer = nil
 	}
-	var err error
-	if s.dirty {
-		err = s.saveAtomicLocked()
-	}
 	s.mu.Unlock()
-	return err
+	return s.save(false)
 }

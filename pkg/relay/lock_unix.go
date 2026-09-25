@@ -20,6 +20,20 @@ func flockExclusive(f *os.File) error {
 	return err
 }
 
+// syncDir fsyncs a directory, making a rename inside it durable: without it
+// a crash right after the rename can bring back the old store.json.
+func syncDir(dir string) error {
+	d, err := os.Open(dir)
+	if err != nil {
+		return fmt.Errorf("open dir %s: %w", dir, err)
+	}
+	defer d.Close()
+	if err := d.Sync(); err != nil {
+		return fmt.Errorf("fsync dir %s: %w", dir, err)
+	}
+	return nil
+}
+
 // matchDirOwner gives f the owner and group of dir when running as root.
 // The CLI may be run with sudo while the relay runs as a service user; files it
 // creates in the data dir must stay usable by that user. It is a no-op for
