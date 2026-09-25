@@ -14,7 +14,6 @@ type mockSender struct {
 	name     string
 	mu       sync.Mutex
 	messages []Message
-	delay    time.Duration
 	failErr  error
 }
 
@@ -23,13 +22,6 @@ func (m *mockSender) Name() string {
 }
 
 func (m *mockSender) Send(ctx context.Context, msg Message) error {
-	if m.delay > 0 {
-		select {
-		case <-time.After(m.delay):
-		case <-ctx.Done():
-			return ctx.Err()
-		}
-	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.failErr != nil {
@@ -45,6 +37,137 @@ func (m *mockSender) getMessages() []Message {
 	out := make([]Message, len(m.messages))
 	copy(out, m.messages)
 	return out
+}
+
+// fakeClock is the Dispatcher's injectable clock.
+type fakeClock struct {
+	mu  sync.Mutex
+	now time.Time
+}
+
+func (c *fakeClock) Now() time.Time {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.now
+}
+
+func (c *fakeClock) Advance(d time.Duration) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.now = c.now.Add(d)
+}
+
+// fakeTimers replaces time.AfterFunc for the window timer: nothing fires on
+// its own, the test fires it.
+type fakeTimers struct {
+	mu      sync.Mutex
+	pending []*fakeTimer
+}
+
+type fakeTimer struct {
+	owner   *fakeTimers
+	d       time.Duration
+	f       func()
+	stopped bool
+}
+
+func (t *fakeTimer) Stop() bool {
+	t.owner.mu.Lock()
+	defer t.owner.mu.Unlock()
+	wasActive := !t.stopped
+	t.stopped = true
+	return wasActive
+}
+
+func (ft *fakeTimers) AfterFunc(d time.Duration, f func()) stopper {
+	ft.mu.Lock()
+	defer ft.mu.Unlock()
+	t := &fakeTimer{owner: ft, d: d, f: f}
+	ft.pending = append(ft.pending, t)
+	return t
+}
+
+// Fire runs every timer that is armed and not stopped, as if its duration had
+// elapsed, and returns their durations.
+func (ft *fakeTimers) Fire() []time.Duration {
+	ft.mu.Lock()
+	var due []*fakeTimer
+	for _, t := range ft.pending {
+		if !t.stopped {
+			t.stopped = true
+			due = append(due, t)
+		}
+	}
+	ft.pending = nil
+	ft.mu.Unlock()
+
+	var ds []time.Duration
+	for _, t := range due {
+		ds = append(ds, t.d)
+		t.f()
+	}
+	return ds
+}
+
+// newTestDispatcher returns a Dispatcher on a fake clock and fake timers.
+func newTestDispatcher(senders ...Sender) (*Dispatcher, *fakeClock, *fakeTimers) {
+	clock := &fakeClock{now: time.Date(2026, 9, 24, 12, 0, 0, 0, time.UTC)}
+	timers := &fakeTimers{}
+	d := NewDispatcher(senders, clock.Now, nil)
+	d.afterFunc = timers.AfterFunc
+	return d, clock, timers
+}
+
+func blockedState(pane, label string) model.AgentState {
+	return model.AgentState{PaneID: pane, Label: label, Status: model.StatusBlocked}
+}
+
+// The debounce map must not keep one entry per pane forever: entries the
+// debounce can no longer match are dropped.
+func TestDispatcher_LastPushIsPruned(t *testing.T) {
+	d, clock, _ := newTestDispatcher(&mockSender{name: "mock"})
+
+	for i := 0; i < 50; i++ {
+		d.OnAgentUpdate(nil, blockedState(fmt.Sprintf("p%d", i), "a"))
+	}
+	clock.Advance(d.DebounceDuration)
+	d.OnAgentUpdate(nil, blockedState("p-last", "a"))
+	d.Wait()
+
+	d.mu.Lock()
+	n := len(d.lastPush)
+	d.mu.Unlock()
+	if n != 1 {
+		t.Fatalf("lastPush holds %d entries after the debounce window, want 1 (only p-last)", n)
+	}
+}
+
+// Pruning must not shorten the debounce: an entry younger than it survives.
+func TestDispatcher_PruneKeepsDebounce(t *testing.T) {
+	sender := &mockSender{name: "mock"}
+	d, clock, timers := newTestDispatcher(sender)
+
+	d.OnAgentUpdate(nil, blockedState("p1", "a")) // sent right away
+	clock.Advance(d.DebounceDuration - time.Second)
+	d.OnAgentUpdate(nil, blockedState("p2", "b")) // held
+	clock.Advance(time.Second / 2)
+	d.OnAgentUpdate(nil, blockedState("p2", "b")) // p2 debounced
+	clock.Advance(time.Second)                    // p1 entry is now past the debounce
+	d.OnAgentUpdate(nil, blockedState("p3", "c")) // prunes p1, keeps p2
+	clock.Advance(time.Second)
+	d.OnAgentUpdate(nil, blockedState("p2", "b")) // still debounced: p2's entry is 2.5 s old
+	timers.Fire()
+	d.Wait()
+
+	var p2 int
+	for _, m := range sender.getMessages() {
+		if m.PaneID == "p2" {
+			p2++
+		}
+	}
+	if p2 != 1 {
+		t.Fatalf("p2 pushed %d times, want 1: pruning broke the debounce", p2)
+	}
 }
 
 func TestDispatcher_TransitionTable(t *testing.T) {
@@ -180,8 +303,7 @@ func TestDispatcher_UnknownPromptBody(t *testing.T) {
 
 func TestDispatcher_Debounce(t *testing.T) {
 	sender := &mockSender{name: "mock"}
-	currentTime := time.Date(2026, 9, 24, 12, 0, 0, 0, time.UTC)
-	d := NewDispatcher([]Sender{sender}, func() time.Time { return currentTime }, nil)
+	d, clock, timers := newTestDispatcher(sender)
 
 	blocked := model.AgentState{PaneID: "p1", Label: "agent1", Status: model.StatusBlocked}
 
@@ -194,7 +316,7 @@ func TestDispatcher_Debounce(t *testing.T) {
 	}
 
 	// 2. Second event for same pane + event within 3 seconds -> dropped by debounce
-	currentTime = currentTime.Add(3 * time.Second)
+	clock.Advance(3 * time.Second)
 	d.OnAgentUpdate(nil, blocked)
 	d.Wait()
 	msgs = sender.getMessages()
@@ -206,8 +328,10 @@ func TestDispatcher_Debounce(t *testing.T) {
 	blocked2 := model.AgentState{PaneID: "p2", Label: "agent2", Status: model.StatusBlocked}
 	d.OnAgentUpdate(nil, blocked2)
 	d.Wait()
-	// blocked2 is within window, held for flush
-	d.Flush()
+	// blocked2 is within window, held until the window timer fires
+	if fired := timers.Fire(); len(fired) != 1 || fired[0] != d.WindowDuration {
+		t.Fatalf("window timers fired = %v, want one of %v", fired, d.WindowDuration)
+	}
 	d.Wait()
 	msgs = sender.getMessages()
 	if len(msgs) != 2 {
@@ -215,7 +339,7 @@ func TestDispatcher_Debounce(t *testing.T) {
 	}
 
 	// 4. Same pane after 6 seconds (> 5s debounce window) -> allowed
-	currentTime = currentTime.Add(6 * time.Second)
+	clock.Advance(6 * time.Second)
 	d.OnAgentUpdate(nil, blocked)
 	d.Wait()
 	msgs = sender.getMessages()
@@ -276,36 +400,65 @@ func TestDispatcher_Digest(t *testing.T) {
 	}
 }
 
+// chanSender reports every message it gets on a channel, and can be held
+// inside Send until released.
+type chanSender struct {
+	name    string
+	got     chan Message
+	release chan struct{} // nil: never blocks
+}
+
+func newChanSender(name string) *chanSender {
+	return &chanSender{name: name, got: make(chan Message, 64)}
+}
+
+func (s *chanSender) Name() string { return s.name }
+
+func (s *chanSender) Send(ctx context.Context, m Message) error {
+	if s.release != nil {
+		select {
+		case <-s.release:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	s.got <- m
+	return nil
+}
+
+// A sender stuck in Send delays neither OnAgentUpdate nor the other senders.
 func TestDispatcher_FailureIsolation(t *testing.T) {
-	slowSender := &mockSender{
-		name:  "slow",
-		delay: 100 * time.Millisecond,
-	}
-	fastSender := &mockSender{
-		name: "fast",
-	}
+	stuck := newChanSender("stuck")
+	stuck.release = make(chan struct{})
+	fast := newChanSender("fast")
+	d, _, _ := newTestDispatcher(stuck, fast)
 
-	d := NewDispatcher([]Sender{slowSender, fastSender}, nil, nil)
-	blocked := model.AgentState{PaneID: "p1", Label: "agent1", Status: model.StatusBlocked}
-
-	start := time.Now()
-	d.OnAgentUpdate(nil, blocked)
-	elapsed := time.Since(start)
-
-	// OnAgentUpdate must be asynchronous and return immediately without waiting for slow sender
-	if elapsed > 50*time.Millisecond {
-		t.Fatalf("OnAgentUpdate blocked for %v, expected non-blocking dispatch", elapsed)
+	returned := make(chan struct{})
+	go func() {
+		d.OnAgentUpdate(nil, blockedState("p1", "agent1"))
+		close(returned)
+	}()
+	select {
+	case <-returned:
+	case <-time.After(testDeadline):
+		t.Fatalf("OnAgentUpdate waited for a stuck sender")
 	}
 
-	// Fast sender should receive message before slow sender finishes
-	time.Sleep(10 * time.Millisecond)
-	if len(fastSender.getMessages()) != 1 {
-		t.Fatalf("expected fast sender to receive message promptly")
+	select {
+	case m := <-fast.got:
+		if m.PaneID != "p1" {
+			t.Fatalf("fast sender got pane %q, want p1", m.PaneID)
+		}
+	case <-time.After(testDeadline):
+		t.Fatalf("fast sender waited for the stuck one")
 	}
 
+	close(stuck.release)
 	d.Wait()
-	if len(slowSender.getMessages()) != 1 {
-		t.Fatalf("expected slow sender to eventually receive message")
+	select {
+	case <-stuck.got:
+	default:
+		t.Fatalf("the stuck sender never got the message once released")
 	}
 }
 

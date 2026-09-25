@@ -70,11 +70,22 @@ type Dispatcher struct {
 	DebounceDuration time.Duration
 	WindowDuration   time.Duration
 
-	mu       sync.Mutex
-	lastPush map[string]time.Time // key: pane_id + ":" + event
-	window   []Message            // pending messages in the current window
-	timer    *time.Timer
-	wg       sync.WaitGroup
+	mu        sync.Mutex
+	afterFunc func(time.Duration, func()) stopper // time.AfterFunc; tests fake it
+	lastPush  map[string]time.Time                // key: pane_id + ":" + event; pruned past DebounceDuration
+	lastPrune time.Time
+	window    []Message // pending messages in the current window
+	timer     stopper
+	wg        sync.WaitGroup
+}
+
+// stopper is the part of *time.Timer the Dispatcher uses.
+type stopper interface {
+	Stop() bool
+}
+
+func realAfterFunc(d time.Duration, f func()) stopper {
+	return time.AfterFunc(d, f)
 }
 
 // NewDispatcher creates a new Dispatcher.
@@ -91,6 +102,7 @@ func NewDispatcher(senders []Sender, now func() time.Time, logger *slog.Logger) 
 		Logger:           logger,
 		DebounceDuration: 5 * time.Second,
 		WindowDuration:   10 * time.Second,
+		afterFunc:        realAfterFunc,
 		lastPush:         make(map[string]time.Time),
 	}
 }
@@ -193,6 +205,7 @@ func (d *Dispatcher) enqueue(m Message) {
 	defer d.mu.Unlock()
 
 	now := d.Now()
+	d.pruneLocked(now)
 	key := m.PaneID + ":" + string(m.Event)
 
 	// Debounce: drop if the same pane_id + event was sent less than 5s ago
@@ -211,13 +224,28 @@ func (d *Dispatcher) enqueue(m Message) {
 		d.window = append(d.window, m)
 		d.dispatchLocked(m)
 
-		d.timer = time.AfterFunc(d.WindowDuration, func() {
+		d.timer = d.afterFunc(d.WindowDuration, func() {
 			d.Flush()
 		})
 		return
 	}
 
 	d.window = append(d.window, m)
+}
+
+// pruneLocked drops the lastPush entries the debounce can no longer match, so
+// the map holds only the panes pushed within the last DebounceDuration. It
+// scans at most once per DebounceDuration.
+func (d *Dispatcher) pruneLocked(now time.Time) {
+	if now.Sub(d.lastPrune) < d.DebounceDuration {
+		return
+	}
+	d.lastPrune = now
+	for key, last := range d.lastPush {
+		if now.Sub(last) >= d.DebounceDuration {
+			delete(d.lastPush, key)
+		}
+	}
 }
 
 // Flush flushes the current pending window, sending pending messages or a digest.

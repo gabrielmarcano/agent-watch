@@ -330,7 +330,7 @@ func TestDispatcher_FCMRetriesPerToken(t *testing.T) {
 		Client:     server.Client(),
 		RetryDelay: time.Millisecond,
 	}
-	d := NewDispatcher([]Sender{fcm}, nil, nil)
+	d, _, _ := newTestDispatcher(fcm)
 
 	d.OnAgentUpdate(nil, model.AgentState{PaneID: "p1", Label: "test", Status: model.StatusBlocked})
 	d.Wait()
