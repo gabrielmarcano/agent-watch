@@ -48,15 +48,19 @@ func NewFCMFromCredentials(ctx context.Context, credsJSON []byte, tokens func() 
 	if err != nil {
 		return nil, fmt.Errorf("parse google credentials: %w", err)
 	}
+	return NewFCM(ctx, creds, tokens, onInvalidToken), nil
+}
 
-	client := oauth2.NewClient(ctx, creds.TokenSource)
+// NewFCM initializes FCM from parsed credentials: every request carries an
+// OAuth token from creds.TokenSource, refreshed as needed.
+func NewFCM(ctx context.Context, creds *google.Credentials, tokens func() []string, onInvalidToken func(string)) *FCM {
 	return &FCM{
 		ProjectID:      creds.ProjectID,
-		Client:         client,
+		Client:         oauth2.NewClient(ctx, creds.TokenSource),
 		Tokens:         tokens,
 		Endpoint:       defaultFCMEndpoint,
 		OnInvalidToken: onInvalidToken,
-	}, nil
+	}
 }
 
 // Name implements Sender.

@@ -1,102 +1,164 @@
 package push
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"sort"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"golang.org/x/oauth2"
+	"golang.org/x/oauth2/google"
+
 	"github.com/gabrielmarcano/agent-monitor/pkg/model"
 )
 
+// testAccessToken is what the fake OAuth token source hands out. It is not a
+// credential: no real service account is ever read in tests.
+const testAccessToken = "test-access-token"
+
+// newTestFCM builds the sender the way the relay does (NewFCM, the part of
+// NewFCMFromCredentials after the JSON is parsed), with a static OAuth token
+// and the endpoint pointed at a fake server.
+func newTestFCM(endpoint string, tokens func() []string, onInvalidToken func(string)) *FCM {
+	creds := &google.Credentials{
+		ProjectID:   "test-proj",
+		TokenSource: oauth2.StaticTokenSource(&oauth2.Token{AccessToken: testAccessToken, TokenType: "Bearer"}),
+	}
+	f := NewFCM(context.Background(), creds, tokens, onInvalidToken)
+	f.Endpoint = endpoint
+	return f
+}
+
+// capturedRequest is one request seen by a fake FCM endpoint.
+type capturedRequest struct {
+	method, path, contentType, authorization string
+	body                                     []byte
+}
+
+// TestFCM_Payload checks the exact request FCM receives: no key missing, no
+// extra key, every data value a string, no notification block (data-only), and
+// the OAuth Authorization header from the credentials.
 func TestFCM_Payload(t *testing.T) {
-	var capturedReq *http.Request
-	var capturedPayload fcmMessagePayload
-
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		capturedReq = r
-		_ = json.NewDecoder(r.Body).Decode(&capturedPayload)
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`{"name":"projects/test-proj/messages/123"}`))
-	}))
-	defer server.Close()
-
-	tokens := []string{"device-token-1"}
-	fcm := &FCM{
-		ProjectID: "test-proj",
-		Endpoint:  server.URL,
-		Tokens:    func() []string { return tokens },
-		Client:    server.Client(),
+	tests := []struct {
+		name string
+		msg  Message
+		want string
+	}{
+		{
+			name: "blocked",
+			msg: Message{
+				Event: EventBlocked, PaneID: "w5:pAE", Agent: "claude", Label: "bizum",
+				Title: "bizum needs approval", Body: "Bash command: go test ./...",
+				StateChangeSeq: 334, Fingerprint: "9f2c61d0a4b3e871",
+				AllowOptionID: "opt-1", DenyOptionID: "opt-3",
+			},
+			// The example of docs/phases/3b-push.md, verbatim.
+			want: `{"message":{"token":"device-token-1",
+				"data":{"event":"blocked","pane_id":"w5:pAE","agent":"claude","label":"bizum",
+				        "title":"bizum needs approval","body":"Bash command: go test ./...",
+				        "state_change_seq":"334","fingerprint":"9f2c61d0a4b3e871",
+				        "allow_option_id":"opt-1","deny_option_id":"opt-3"},
+				"android":{"priority":"high","ttl":"600s"}}}`,
+		},
+		{
+			name: "done",
+			msg: Message{
+				Event: EventDone, PaneID: "w5:pAE", Agent: "claude", Label: "bizum",
+				Title: "bizum finished", Body: "Task finished", StateChangeSeq: 335,
+			},
+			want: `{"message":{"token":"device-token-1",
+				"data":{"event":"done","pane_id":"w5:pAE","agent":"claude","label":"bizum",
+				        "title":"bizum finished","body":"Task finished",
+				        "state_change_seq":"335","fingerprint":"",
+				        "allow_option_id":"","deny_option_id":""},
+				"android":{"priority":"normal","ttl":"600s"}}}`,
+		},
+		{
+			name: "digest",
+			msg:  Message{Event: EventDigest, Title: "4 agents need you", Body: "a, b, c, d"},
+			want: `{"message":{"token":"device-token-1",
+				"data":{"event":"digest","pane_id":"","agent":"","label":"",
+				        "title":"4 agents need you","body":"a, b, c, d",
+				        "state_change_seq":"0","fingerprint":"",
+				        "allow_option_id":"","deny_option_id":""},
+				"android":{"priority":"normal","ttl":"600s"}}}`,
+		},
 	}
 
-	msg := Message{
-		Event:          EventBlocked,
-		PaneID:         "w5:pAE",
-		Agent:          "claude",
-		Label:          "bizum",
-		Title:          "bizum needs approval",
-		Body:           "Bash command: go test ./...",
-		StateChangeSeq: 334,
-		Fingerprint:    "9f2c61d0a4b3e871",
-		AllowOptionID:  "opt-1",
-		DenyOptionID:   "opt-3",
-	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			reqs := make(chan capturedRequest, 1)
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				body, _ := io.ReadAll(r.Body)
+				reqs <- capturedRequest{
+					method: r.Method, path: r.URL.Path, body: body,
+					contentType: r.Header.Get("Content-Type"), authorization: r.Header.Get("Authorization"),
+				}
+				w.WriteHeader(http.StatusOK)
+				_, _ = w.Write([]byte(`{"name":"projects/test-proj/messages/123"}`))
+			}))
+			defer server.Close()
 
-	err := fcm.Send(context.Background(), msg)
-	if err != nil {
-		t.Fatalf("fcm.Send failed: %v", err)
-	}
+			fcm := newTestFCM(server.URL, func() []string { return []string{"device-token-1"} }, nil)
+			if err := fcm.Send(context.Background(), tt.msg); err != nil {
+				t.Fatalf("fcm.Send failed: %v", err)
+			}
 
-	if capturedReq == nil {
-		t.Fatalf("no request received by fake server")
-	}
+			var got capturedRequest
+			select {
+			case got = <-reqs:
+			default:
+				t.Fatalf("no request received by fake server")
+			}
 
-	expectedPath := "/v1/projects/test-proj/messages:send"
-	if capturedReq.URL.Path != expectedPath {
-		t.Errorf("Path = %q, want %q", capturedReq.URL.Path, expectedPath)
+			if got.method != http.MethodPost {
+				t.Errorf("Method = %s, want POST", got.method)
+			}
+			if want := "/v1/projects/test-proj/messages:send"; got.path != want {
+				t.Errorf("Path = %q, want %q", got.path, want)
+			}
+			if got.contentType != "application/json" {
+				t.Errorf("Content-Type = %q, want application/json", got.contentType)
+			}
+			if want := "Bearer " + testAccessToken; got.authorization != want {
+				t.Errorf("Authorization = %q, want %q", got.authorization, want)
+			}
+			assertSameJSON(t, got.body, tt.want)
+		})
 	}
-	if capturedReq.Header.Get("Content-Type") != "application/json" {
-		t.Errorf("Content-Type = %q, want application/json", capturedReq.Header.Get("Content-Type"))
-	}
+}
 
-	// Verify message fields
-	if capturedPayload.Message.Token != "device-token-1" {
-		t.Errorf("Token = %q, want device-token-1", capturedPayload.Message.Token)
+// assertSameJSON fails unless got and want decode to the same value: same
+// keys at every level, no extra ones, same types and values.
+func assertSameJSON(t *testing.T, got []byte, want string) {
+	t.Helper()
+	var g, w any
+	if err := json.Unmarshal(got, &g); err != nil {
+		t.Fatalf("request body is not JSON: %v\n%s", err, got)
 	}
-	if capturedPayload.Message.Android.Priority != "high" {
-		t.Errorf("Priority = %q, want high", capturedPayload.Message.Android.Priority)
+	if err := json.Unmarshal([]byte(want), &w); err != nil {
+		t.Fatalf("bad expected JSON in test: %v", err)
 	}
-	if capturedPayload.Message.Android.TTL != "600s" {
-		t.Errorf("TTL = %q, want 600s", capturedPayload.Message.Android.TTL)
+	if !reflect.DeepEqual(g, w) {
+		t.Fatalf("FCM request body mismatch\n got: %s\nwant: %s", got, compactJSON(t, want))
 	}
+}
 
-	// Verify all 10 data keys are present and are strings
-	expectedData := map[string]string{
-		"event":            "blocked",
-		"pane_id":          "w5:pAE",
-		"agent":            "claude",
-		"label":            "bizum",
-		"title":            "bizum needs approval",
-		"body":             "Bash command: go test ./...",
-		"state_change_seq": "334",
-		"fingerprint":      "9f2c61d0a4b3e871",
-		"allow_option_id":  "opt-1",
-		"deny_option_id":   "opt-3",
+func compactJSON(t *testing.T, s string) string {
+	t.Helper()
+	var buf bytes.Buffer
+	if err := json.Compact(&buf, []byte(s)); err != nil {
+		t.Fatalf("compact JSON: %v", err)
 	}
-
-	for k, expectedVal := range expectedData {
-		actualVal, exists := capturedPayload.Message.Data[k]
-		if !exists {
-			t.Errorf("missing data key %q", k)
-		} else if actualVal != expectedVal {
-			t.Errorf("data[%q] = %q, want %q", k, actualVal, expectedVal)
-		}
-	}
+	return buf.String()
 }
 
 func TestFCM_DonePriorityNormal(t *testing.T) {
