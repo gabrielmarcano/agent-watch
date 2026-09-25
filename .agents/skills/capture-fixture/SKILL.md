@@ -55,6 +55,8 @@ After a finished sandbox turn, locate the transcript through `herdr agent get $S
 - usernames → `me`;
 - emails and tokens → `REDACTED`.
 
+For Claude, keep **only** the lines whose `type` is `user` or `assistant`. The other lines (`attachment`, snapshots, `last-prompt`…) carry the owner's global instructions, session context and system prompt; the reader never needs them. Check: `grep -c '"type":"attachment"' pkg/agents/testdata/claude/*.jsonl` prints `0`.
+
 Then write `transcript.expected.json`.
 
 ## 6. Tear down

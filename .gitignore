@@ -34,5 +34,5 @@ Thumbs.db
 xcuserdata/
 *.xcuserstate
 
-# Legacy files
-bridge/
+# Legacy files (anchored: must not match pkg/bridge or cmd/bridge)
+/bridge/

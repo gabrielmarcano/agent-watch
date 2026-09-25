@@ -146,6 +146,8 @@ Before saving, scrub the sample. Replace these with `/tmp/aw-sandbox`, `me` or `
 - emails
 - tokens
 
+For Claude, also drop every line whose `type` is not `user` or `assistant`. `attachment` lines embed the owner's global instructions, session context and the full system prompt; the grep below does not catch them.
+
 Then add `pkg/agents/testdata/<agent>/transcript.expected.json` with the `query` and `response` you expect `LastTurn` to return.
 
 ### 7. Record the findings
@@ -168,6 +170,7 @@ Then add `pkg/agents/testdata/<agent>/transcript.expected.json` with the `query`
 - [ ] Each agent has a transcript sample plus `transcript.expected.json`, all scrubbed.
 - [ ] No 🔍 left in `docs/reference/agents.md`.
 - [ ] `git grep -nE '/Users/[a-z]+|@gmail|sk-|ghp_' pkg/agents/testdata` returns nothing.
+- [ ] `grep -c '"type":"attachment"' pkg/agents/testdata/claude/*.jsonl` prints `0`.
 - [ ] Sandbox removed.
 - [ ] Commit only the files listed under **Touches**: `git add pkg/agents/testdata docs/reference/agents.md docs/STATUS.md`.
 
