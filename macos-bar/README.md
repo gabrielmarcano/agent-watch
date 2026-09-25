@@ -18,6 +18,9 @@ open bin/AgentWatchBar.app
 - `APP_DIR=/path/AgentWatchBar.app macos-bar/build.sh` builds somewhere else;
   `VERSION=x.y.z` stamps the bundle version.
 - To update a running copy: quit it from its menu, rebuild, open it again.
+- `make bar-test` tests the decision logic (`BarLogic.swift`) with the
+  harness in `Tests/`: it runs the CLI with an empty temp dir as HOME, and
+  never launches the app or touches launchd or the real home.
 
 ## Launch at login
 
