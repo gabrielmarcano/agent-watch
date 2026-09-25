@@ -4,6 +4,29 @@ plugins {
     id("com.google.gms.google-services")
 }
 
+// Shared configuration: agent-watch.env at the repo root (see
+// agent-watch.env.example). Optional: without it the defaults apply. Same
+// rules as every other reader: KEY=value, '#' starts a comment, values are
+// trimmed and literal, the last assignment wins; other lines are ignored.
+val agentWatchEnv: Map<String, String> = run {
+    val file = rootProject.layout.projectDirectory.file("../agent-watch.env")
+    val text = providers.fileContents(file).asText.orNull ?: return@run emptyMap()
+    text.lines().mapNotNull { raw ->
+        val line = raw.substringBefore('#').trim()
+        val eq = line.indexOf('=')
+        if (eq <= 0) null else line.substring(0, eq).trim() to line.substring(eq + 1).trim()
+    }.toMap()
+}
+
+// The pairing screen's default relay URL: https://<AW_RELAY_DOMAIN>, or ""
+// (the user types it) when the file or the key is missing.
+val defaultRelayUrl: String = agentWatchEnv["AW_RELAY_DOMAIN"].orEmpty().let { domain ->
+    require(domain.isEmpty() || Regex("^[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?(:[0-9]{1,5})?$").matches(domain)) {
+        "AW_RELAY_DOMAIN in agent-watch.env must be a bare host name such as relay.example.com (no scheme, path or quotes)"
+    }
+    if (domain.isEmpty()) "" else "https://$domain"
+}
+
 android {
     namespace = "com.gabriel.agentwatch"
     compileSdk = 34
@@ -17,6 +40,7 @@ android {
         vectorDrawables {
             useSupportLibrary = true
         }
+        buildConfigField("String", "DEFAULT_RELAY_URL", "\"$defaultRelayUrl\"")
     }
 
     buildTypes {
@@ -38,6 +62,7 @@ android {
     }
     buildFeatures {
         compose = true
+        buildConfig = true
     }
     composeOptions {
         kotlinCompilerExtensionVersion = "1.5.8"
