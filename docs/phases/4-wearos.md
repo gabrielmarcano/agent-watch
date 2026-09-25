@@ -204,7 +204,7 @@ object RelayRepository {
 | `history` | Prepend, dedup by `id` |
 
 - **Reconnect** on `onFailure`/`onClosed`, and on 45 s of silence (the SSE read timeout): 1 s, 2 s, 4 s … up to 30 s. Only a stream that delivered a `snapshot` resets the backoff. After reconnecting, rely on the next `snapshot`.
-- **Lifecycle:** start SSE while the app is in the foreground (`ProcessLifecycleOwner` `ON_START`/`ON_STOP`), to save battery. Notifications cover the background.
+- **Lifecycle:** start SSE while the app is in the foreground (today `MainActivity.onStart`/`onStop`), to save battery. Notifications cover the background.
 - **On 401 anywhere** (stream, refresh, commands, notification actions, tile, complication): if the rejected token is still the stored one, clear the pairing (`clearAuth()`), stop the stream without reconnecting, drop agents and history, and set `auth = REVOKED`. A 401 for an older token (re-paired meanwhile) is ignored.
 - **After pairing:** call `RelayRepository.restart(context)`. The stream opening triggers the FCM registration (`PushRegistration.ensure`); do not register by hand.
 

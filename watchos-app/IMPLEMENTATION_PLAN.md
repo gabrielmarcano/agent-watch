@@ -1,5 +1,7 @@
 # watchOS Implementation Plan for Agent Watch
 
+> ⚠️ **Legacy document.** This plan describes the old LAN/Tailscale client (direct SSE to the computer on port 8420, the pre-herdr state model). It no longer matches the architecture: the watchOS app is to be rewritten against the relay's `/v1` API in **Phase 6** ([`docs/phases/6-watchos.md`](../docs/phases/6-watchos.md)), copying the Wear OS UX. Until then `watchos-app/` is the legacy client; its only `/v1` code is the `CancelRequest` struct in `Models/AgentState.swift`.
+
 This document outlines the step-by-step plan to implement a 1:1 watchOS (SwiftUI) client for Agent Watch, based on the existing Wear OS architecture.
 
 ## 1. Project Setup
