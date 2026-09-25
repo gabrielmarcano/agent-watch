@@ -3,9 +3,13 @@ package com.gabriel.agentwatch.network
 import android.content.Context
 import android.util.Log
 import com.gabriel.agentwatch.data.Prefs
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
 
 /** [RelayCredentials] backed by the app's [Prefs]. */
 private class PrefsCredentials(private val prefs: Prefs) : RelayCredentials {
@@ -35,9 +39,10 @@ object RelayRepository {
     fun init(context: Context) {
         if (engine != null) return
         val appContext = context.applicationContext
+        val prefs = Prefs(appContext)
         val newEngine = RelayEngine(
             state = _state,
-            credentials = PrefsCredentials(Prefs(appContext)),
+            credentials = PrefsCredentials(prefs),
             hooks = object : RelayEngineHooks {
                 // Reachable relay + accepted token: the moment to (re)send a pending FCM registration,
                 // including right after pairing (PairingScreen restarts the engine).
@@ -51,6 +56,10 @@ object RelayRepository {
         engine = newEngine
         // Clients built outside the repository (tile, complication, QuickDictate) report 401s here too.
         RelayClient.unauthorizedListener = newEngine::onUnauthorized
+        // Complication and tile: refresh when what they show changes (throttled), not every 15 min.
+        CoroutineScope(SupervisorJob() + Dispatchers.Default).launch {
+            _state.collect { SurfaceUpdates.onState(appContext, it, prefs.pinnedPaneId) }
+        }
     }
 
     fun getClient(): RelayClient? = engine?.getClient()

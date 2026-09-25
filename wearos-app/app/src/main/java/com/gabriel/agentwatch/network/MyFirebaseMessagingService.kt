@@ -44,6 +44,8 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
             }
             is PushMessage.Ignored -> return
         }
+        // Agent state changed while the app may be closed: refresh the complication and tile (throttled).
+        SurfaceUpdates.request(this)
     }
 
     private fun blockedNotification(message: PushMessage.Blocked): Notification {
