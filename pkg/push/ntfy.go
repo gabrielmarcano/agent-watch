@@ -2,9 +2,11 @@ package push
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 )
 
@@ -26,12 +28,12 @@ func (n *Ntfy) Send(ctx context.Context, m Message) error {
 	base := strings.TrimRight(n.BaseURL, "/")
 	topic := strings.TrimLeft(n.Topic, "/")
 	if base == "" || topic == "" {
-		return fmt.Errorf("ntfy missing BaseURL (%q) or Topic (%q)", base, topic)
+		return fmt.Errorf("ntfy missing BaseURL (%q) or Topic (set: %t)", base, topic != "")
 	}
 
-	url := fmt.Sprintf("%s/%s", base, topic)
+	target := fmt.Sprintf("%s/%s", base, topic)
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, strings.NewReader(m.Body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, target, strings.NewReader(m.Body))
 	if err != nil {
 		return fmt.Errorf("new ntfy request: %w", err)
 	}
@@ -63,6 +65,12 @@ func (n *Ntfy) Send(ctx context.Context, m Message) error {
 
 	resp, err := client.Do(req)
 	if err != nil {
+		// *url.Error prints the request URL, which contains the secret topic,
+		// and the dispatcher logs this error.
+		var ue *url.Error
+		if errors.As(err, &ue) {
+			err = &url.Error{Op: ue.Op, URL: base + "/<topic>", Err: ue.Err}
+		}
 		return fmt.Errorf("ntfy post: %w", err)
 	}
 	defer resp.Body.Close()

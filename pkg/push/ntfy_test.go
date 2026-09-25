@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -112,5 +113,24 @@ func TestNtfy_Non2xxError(t *testing.T) {
 	err := n.Send(context.Background(), Message{Title: "hi", Body: "there"})
 	if err == nil {
 		t.Fatalf("expected error on 403 response, got nil")
+	}
+}
+
+// Send errors are logged by the dispatcher; a network error must not carry the
+// request URL, which contains the secret topic.
+func TestNtfy_NetworkErrorDoesNotLeakTopic(t *testing.T) {
+	const topic = "secret-topic-4f9c2a7e1b"
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	baseURL := server.URL
+	server.Close() // connection refused from now on
+
+	n := &Ntfy{BaseURL: baseURL, Topic: topic}
+	err := n.Send(context.Background(), Message{Title: "hi", Body: "there"})
+	if err == nil {
+		t.Fatalf("expected a network error, got nil")
+	}
+	if strings.Contains(err.Error(), topic) {
+		t.Fatalf("ntfy error leaks the topic: %v", err)
 	}
 }

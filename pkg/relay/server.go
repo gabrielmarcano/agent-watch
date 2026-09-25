@@ -73,7 +73,8 @@ func NewServer(cfg *Config) (_ *Server, err error) {
 			Token:   cfg.NtfyToken,
 		}
 		senders = append(senders, ntfySender)
-		slog.Info("ntfy push enabled", "url", cfg.NtfyURL, "topic", cfg.NtfyTopic)
+		// Never log the topic: it is a secret (anyone who knows it can read the pushes).
+		slog.Info("ntfy push enabled", "url", cfg.NtfyURL)
 	}
 
 	var notifier Notifier
