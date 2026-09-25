@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/netip"
 	"os"
+	"strconv"
 	"strings"
 )
 
@@ -33,6 +34,11 @@ type Config struct {
 	// ClientIPHeader (AW_CLIENT_IP_HEADER) is an optional single-IP header,
 	// e.g. CF-Connecting-IP, honored only from a trusted proxy.
 	ClientIPHeader string
+	// PushResolved (AW_PUSH_RESOLVED) enables the FCM "resolved" push that
+	// withdraws an answered approval. Off by default: enable it only once the
+	// installed watch app handles "resolved" (older builds show it as a bogus
+	// approval).
+	PushResolved bool
 }
 
 // ClientIPPolicy returns the policy the rate limiter uses to identify clients.
@@ -81,6 +87,15 @@ func LoadConfig() (*Config, error) {
 			"and AW_CLIENT_IP_HEADER=CF-Connecting-IP only if the origin accepts traffic from Cloudflare alone")
 	}
 
+	pushResolved := false
+	if v := strings.TrimSpace(os.Getenv("AW_PUSH_RESOLVED")); v != "" {
+		b, err := strconv.ParseBool(v)
+		if err != nil {
+			return nil, fmt.Errorf("AW_PUSH_RESOLVED must be a boolean (1/0, true/false), got %q", v)
+		}
+		pushResolved = b
+	}
+
 	cfg := &Config{
 		ListenAddr:     listenAddr,
 		HostToken:      hostToken,
@@ -91,6 +106,7 @@ func LoadConfig() (*Config, error) {
 		NtfyToken:      os.Getenv("AW_NTFY_TOKEN"),
 		TrustedProxies: trustedProxies,
 		ClientIPHeader: clientIPHeader,
+		PushResolved:   pushResolved,
 	}
 
 	return cfg, nil

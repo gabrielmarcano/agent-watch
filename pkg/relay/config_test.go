@@ -107,3 +107,39 @@ func TestLoadConfig_NoLegacyWarningWhenUnset(t *testing.T) {
 		t.Fatalf("unexpected legacy warning: %q", logs.String())
 	}
 }
+
+func TestLoadConfig_PushResolved(t *testing.T) {
+	cases := []struct {
+		env     string
+		set     bool
+		want    bool
+		wantErr bool
+	}{
+		{set: false, want: false},
+		{env: "", set: true, want: false},
+		{env: "1", set: true, want: true},
+		{env: "true", set: true, want: true},
+		{env: "0", set: true, want: false},
+		{env: "maybe", set: true, wantErr: true},
+	}
+	for _, tc := range cases {
+		setBaseEnv(t)
+		t.Setenv("AW_PUSH_RESOLVED", tc.env)
+		if !tc.set {
+			os.Unsetenv("AW_PUSH_RESOLVED")
+		}
+		cfg, err := LoadConfig()
+		if tc.wantErr {
+			if err == nil {
+				t.Errorf("AW_PUSH_RESOLVED=%q: want an error", tc.env)
+			}
+			continue
+		}
+		if err != nil {
+			t.Fatalf("AW_PUSH_RESOLVED=%q: %v", tc.env, err)
+		}
+		if cfg.PushResolved != tc.want {
+			t.Errorf("AW_PUSH_RESOLVED=%q (set=%v): PushResolved = %v, want %v", tc.env, tc.set, cfg.PushResolved, tc.want)
+		}
+	}
+}

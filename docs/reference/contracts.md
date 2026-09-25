@@ -518,6 +518,7 @@ ntfy never gets `resolved`: it cannot withdraw a notification it already deliver
 | `AW_NTFY_URL` | no | — | e.g. `https://ntfy.sh`. ntfy is disabled if unset |
 | `AW_NTFY_TOPIC` | with ntfy | — | Random, unguessable topic name |
 | `AW_NTFY_TOKEN` | no | — | ntfy access token |
+| `AW_PUSH_RESOLVED` | no | `false` | `1`/`true` sends the FCM `resolved` push (§4.1) that withdraws an answered approval. Enable it only once the installed Wear OS app handles `resolved`: older builds show it as a bogus approval |
 | `AW_TRUSTED_PROXIES` | no | empty | Comma-separated CIDRs (a bare IP counts as one host) of the reverse proxies allowed to report the client IP. Empty: the TCP peer address is the client IP and every forwarding header is ignored |
 | `AW_CLIENT_IP_HEADER` | no | empty | A single-IP header, e.g. `CF-Connecting-IP`, honored from a trusted proxy before `X-Forwarded-For`. Requires `AW_TRUSTED_PROXIES`. Set it only when nothing but that CDN can reach the proxy, or clients can spoof it |
 

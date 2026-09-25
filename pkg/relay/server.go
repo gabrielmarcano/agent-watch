@@ -25,12 +25,15 @@ const (
 
 // newFCMSender builds the FCM sender from the service-account JSON. The relay
 // hands it the store's token list and its dead-token callback. Tests replace
-// it to check that wiring without talking to Google.
-var newFCMSender = func(ctx context.Context, credsJSON []byte, tokens func() []string, onInvalidToken func(string)) (push.Sender, string, error) {
+// it to check that wiring without talking to Google. enableResolved is set
+// once here, before the dispatcher starts (push.FCM.EnableResolved is not
+// safe to change later).
+var newFCMSender = func(ctx context.Context, credsJSON []byte, tokens func() []string, onInvalidToken func(string), enableResolved bool) (push.Sender, string, error) {
 	f, err := push.NewFCMFromCredentials(ctx, credsJSON, tokens, onInvalidToken)
 	if err != nil {
 		return nil, "", err
 	}
+	f.EnableResolved = enableResolved
 	return f, f.ProjectID, nil
 }
 
@@ -89,12 +92,12 @@ func NewServer(cfg *Config) (_ *Server, err error) {
 		if err != nil {
 			return nil, fmt.Errorf("read fcm credentials from %s: %w", cfg.FCMCredentials, err)
 		}
-		fcmSender, projectID, err := newFCMSender(context.Background(), credsData, store.AllFCMTokens, store.RemoveFCMToken)
+		fcmSender, projectID, err := newFCMSender(context.Background(), credsData, store.AllFCMTokens, store.RemoveFCMToken, cfg.PushResolved)
 		if err != nil {
 			return nil, fmt.Errorf("init fcm sender: %w", err)
 		}
 		senders = append(senders, fcmSender)
-		slog.Info("fcm push enabled", "project_id", projectID)
+		slog.Info("fcm push enabled", "project_id", projectID, "resolved_push", cfg.PushResolved)
 	}
 
 	if cfg.NtfyURL != "" && cfg.NtfyTopic != "" {

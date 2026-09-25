@@ -308,7 +308,7 @@ func TestServer_PushWiring(t *testing.T) {
 	var fcmTokens func() []string
 	var fcmTokenDead func(string)
 	prevNewFCM := newFCMSender
-	newFCMSender = func(_ context.Context, creds []byte, tokens func() []string, onInvalid func(string)) (push.Sender, string, error) {
+	newFCMSender = func(_ context.Context, creds []byte, tokens func() []string, onInvalid func(string), _ bool) (push.Sender, string, error) {
 		if string(creds) != "fake-credentials" {
 			return nil, "", errors.New("unexpected credentials file content")
 		}
@@ -397,6 +397,31 @@ func TestServer_PushWiring(t *testing.T) {
 	for _, d := range server.Store().ListDevices() {
 		if d.ID == dev.ID && d.FCMToken != "" {
 			t.Fatalf("device still has FCM token %q", d.FCMToken)
+		}
+	}
+}
+
+// The "resolved" push must stay off unless the operator enables it: the watch
+// app installed today shows unknown events as a bogus approval.
+func TestServer_PushResolvedReachesFCMSender(t *testing.T) {
+	for _, enable := range []bool{false, true} {
+		var got *bool
+		prevNewFCM := newFCMSender
+		newFCMSender = func(_ context.Context, _ []byte, _ func() []string, _ func(string), enableResolved bool) (push.Sender, string, error) {
+			got = &enableResolved
+			return &recordingSender{msgs: make(chan push.Message, 1)}, "test-project", nil
+		}
+		credsPath := filepath.Join(t.TempDir(), "fcm.json")
+		if err := os.WriteFile(credsPath, []byte("fake-credentials"), 0600); err != nil {
+			t.Fatalf("write creds: %v", err)
+		}
+		setupTestServerWith(t, func(cfg *Config) {
+			cfg.FCMCredentials = credsPath
+			cfg.PushResolved = enable
+		})
+		newFCMSender = prevNewFCM
+		if got == nil || *got != enable {
+			t.Fatalf("PushResolved=%v: FCM sender built with enableResolved=%v", enable, got)
 		}
 	}
 }
