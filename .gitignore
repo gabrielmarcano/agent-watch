@@ -33,3 +33,6 @@ Thumbs.db
 # Xcode User Data
 xcuserdata/
 *.xcuserstate
+
+# Legacy files
+bridge/
