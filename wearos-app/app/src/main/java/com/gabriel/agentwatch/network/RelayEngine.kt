@@ -11,6 +11,7 @@ import kotlinx.coroutines.flow.update
 import okhttp3.Response
 import okhttp3.sse.EventSource
 import okhttp3.sse.EventSourceListener
+import java.net.SocketTimeoutException
 
 /** Where the pairing is stored. Android: [com.gabriel.agentwatch.data.Prefs]; tests: in memory. */
 interface RelayCredentials {
@@ -110,7 +111,8 @@ class RelayEngine(
         eventSource = null
         scope?.cancel()
         scope = null
-        state.update { it.copy(connection = Connection.Offline(reason)) }
+        reconnectAttempt = 0
+        state.update { it.copy(connection = Connection.Offline(reason), stale = true) }
     }
 
     private fun connectLocked() {
@@ -123,7 +125,6 @@ class RelayEngine(
         eventSource = currentClient.events(object : EventSourceListener() {
             override fun onOpen(eventSource: EventSource, response: Response) = onStream(generation) {
                 log("SSE onOpen")
-                reconnectAttempt = 0
                 state.update { it.copy(connection = Connection.Live) }
             }
 
@@ -138,7 +139,11 @@ class RelayEngine(
 
             override fun onFailure(eventSource: EventSource, t: Throwable?, response: Response?) = onStream(generation) {
                 val statusCode = response?.code ?: 0
-                val reason = t?.message ?: "HTTP $statusCode"
+                val reason = when {
+                    t is SocketTimeoutException -> "No data from the relay"
+                    t != null -> t.message ?: t.javaClass.simpleName
+                    else -> "HTTP $statusCode"
+                }
                 log("SSE onFailure: $reason (code: $statusCode)")
                 if (statusCode == 401) {
                     credentials.clearAuth()
@@ -158,9 +163,13 @@ class RelayEngine(
         if (generation == streamGeneration && started) block()
     }
 
+    /** The stream is gone (closed, failed or silent): the list is now stale until the next snapshot. */
     private fun scheduleReconnectLocked(reason: String) {
         if (!started) return
-        state.update { it.copy(connection = Connection.Offline(reason)) }
+        streamGeneration++ // late callbacks from the dead stream are ignored
+        eventSource?.cancel()
+        eventSource = null
+        state.update { it.copy(connection = Connection.Offline(reason), stale = true) }
 
         val delayMs = reconnectDelayMs(reconnectAttempt++)
         log("Reconnecting SSE in ${delayMs}ms")
@@ -184,7 +193,8 @@ class RelayEngine(
                 "snapshot" -> {
                     store.applySnapshot(gson.fromJson(data, AgentsSnapshot::class.java))
                     publishAgentsLocked()
-                    state.update { it.copy(connection = Connection.Live) }
+                    reconnectAttempt = 0 // only a stream that delivered data resets the backoff
+                    state.update { it.copy(connection = Connection.Live, stale = false) }
                 }
                 "agent" -> {
                     if (store.applyAgent(gson.fromJson(data, AgentState::class.java))) publishAgentsLocked()

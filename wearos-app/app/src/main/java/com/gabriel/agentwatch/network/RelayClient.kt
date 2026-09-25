@@ -31,7 +31,7 @@ class RelayHttpClients private constructor(
     val rest: OkHttpClient,
     /** Commands and push registration: a hard cap on the whole call, so a notification action fits in `goAsync()`. */
     val command: OkHttpClient,
-    /** `GET /v1/events`. */
+    /** `GET /v1/events`: its read timeout is the silence limit ([SSE_SILENCE_TIMEOUT_MS]). */
     val sse: OkHttpClient
 ) {
     companion object {
@@ -40,12 +40,18 @@ class RelayHttpClients private constructor(
         const val WRITE_TIMEOUT_MS = 10_000L
         const val REST_CALL_TIMEOUT_MS = 15_000L
         const val COMMAND_CALL_TIMEOUT_MS = 8_000L
+        /**
+         * The relay writes an SSE keepalive every 15 s (contracts §2.3). A stream silent for three of them
+         * is a dead (often half-open) socket: the read times out and the engine reconnects.
+         */
+        const val SSE_SILENCE_TIMEOUT_MS = 45_000L
 
         val shared: RelayHttpClients by lazy { create() }
 
         fun create(
             restCallTimeoutMs: Long = REST_CALL_TIMEOUT_MS,
-            commandCallTimeoutMs: Long = COMMAND_CALL_TIMEOUT_MS
+            commandCallTimeoutMs: Long = COMMAND_CALL_TIMEOUT_MS,
+            sseSilenceTimeoutMs: Long = SSE_SILENCE_TIMEOUT_MS
         ): RelayHttpClients {
             val base = OkHttpClient.Builder()
                 .connectTimeout(CONNECT_TIMEOUT_MS, TimeUnit.MILLISECONDS)
@@ -57,7 +63,7 @@ class RelayHttpClients private constructor(
                 command = base.newBuilder().callTimeout(commandCallTimeoutMs, TimeUnit.MILLISECONDS).build(),
                 sse = base.newBuilder()
                     .connectTimeout(15, TimeUnit.SECONDS)
-                    .readTimeout(0, TimeUnit.MILLISECONDS)
+                    .readTimeout(sseSilenceTimeoutMs, TimeUnit.MILLISECONDS)
                     .retryOnConnectionFailure(true)
                     .build()
             )
