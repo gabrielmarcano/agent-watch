@@ -14,6 +14,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.wear.compose.material.*
+import com.gabriel.agentwatch.approval.permissionButtons
 import com.gabriel.agentwatch.model.AgentState
 import com.gabriel.agentwatch.ui.theme.BrightGreen
 import com.gabriel.agentwatch.ui.theme.BrightYellow
@@ -111,10 +112,10 @@ fun PromptCard(
                             )
                         }
                     } else {
-                        // Allow / Deny buttons
-                        val allowOpt = prompt.options.firstOrNull { it.role == "allow_once" }
-                            ?: prompt.options.firstOrNull { it.role == "allow_always" }
-                        val denyOpt = prompt.options.firstOrNull { it.role == "deny" }
+                        // Allow / Deny buttons, chosen by role (ALLOW is allow_once only)
+                        val buttons = permissionButtons(prompt)
+                        val allowOpt = buttons.allow
+                        val denyOpt = buttons.deny
 
                         Row(
                             modifier = Modifier.fillMaxWidth(),
@@ -144,8 +145,8 @@ fun PromptCard(
                             }
                         }
 
-                        // "More..." button if there are > 2 options or allow_always exists
-                        if (prompt.options.size > 2) {
+                        // "More..." whenever an option is not on ALLOW/DENY (e.g. allow_always)
+                        if (buttons.hasMore) {
                             Spacer(modifier = Modifier.height(2.dp))
                             Chip(
                                 onClick = { showAllOptions = true },
