@@ -212,7 +212,7 @@ Keep entries short, and use absolute dates (YYYY-MM-DD).
   - Done 2026-09-25: the app ignores a `blocked` push whose seq is ≤ the last `resolved` seq for its pane (`contracts.md` §4.1), a prerequisite for `AW_PUSH_RESOLVED`.
 
 ## Phase 4b — Wear OS UI redesign
-- Claimed by: —
+- Claimed by: claude (Opus 5.5), 2026-09-25
 - [ ] data-layer API adopted (the Phase 4 "UI-redesign session must" list)
 - [ ] review findings fixed or deferred with a reason (`docs/phases/4b-wearos-ui.md`)
 - [ ] unit tests + debug/release builds green
