@@ -562,6 +562,99 @@ func TestCommands_PromptStatusAllowlist(t *testing.T) {
 	}
 }
 
+// --- Bug 5: prompt_changed must refresh the published prompt ---
+
+// findOrWait returns the first message in seen matching pred, or waits for one.
+func findOrWait(h *testHarness, seen []any, timeout time.Duration, pred func(any) bool) any {
+	for _, m := range seen {
+		if pred(m) {
+			return m
+		}
+	}
+	msg, _ := waitMsg(h, timeout, pred)
+	return msg
+}
+
+func TestCommands_AnswerPromptChangedPublishesFreshPrompt(t *testing.T) {
+	h := newTestHarness(t)
+	bash := loadFixture(t, "claude", "permission-bash.txt")
+	edit := loadFixture(t, "claude", "permission-edit.txt")
+	oldFP := fingerprintOf(t, h, "claude", bash)
+	newFP := fingerprintOf(t, h, "claude", edit)
+
+	h.server.SetAgents([]map[string]any{agentRow("w1:p1", "claude", "blocked", 100)})
+	h.server.SetScreen("w1:p1", "visible", bash)
+	h.engine.OnHerdrOnline(true, herdr.Pong{Version: "0.9.1", Protocol: 22})
+	syncAndAwaitPrompt(t, h, "w1:p1", 100, oldFP)
+
+	// The menu on screen changes; herdr keeps the same seq.
+	h.server.SetScreen("w1:p1", "visible", edit)
+	before := len(h.server.Calls())
+	res, seen := runCmd(t, h, model.CommandMsg{
+		RequestID: "req-answer-stale", Action: "answer", PaneID: "w1:p1",
+		ExpectedSeq: 100, OptionID: "opt-1", Fingerprint: oldFP,
+	})
+	if res.OK || res.ErrorCode != "prompt_changed" {
+		t.Fatalf("answer to the old prompt: ok=%v code=%q, want prompt_changed", res.OK, res.ErrorCode)
+	}
+	if keys := sendKeysSince(h, before); len(keys) != 0 {
+		t.Fatalf("keys sent on prompt_changed: %v, want none", keys)
+	}
+	if findOrWait(h, seen, time.Second, isPromptUpdate("w1:p1", 100, newFP)) == nil {
+		t.Fatal("prompt_changed did not publish the prompt now on screen")
+	}
+
+	// The watch can now answer what is really on screen.
+	p, _ := h.registry.For("claude").ParsePrompt(edit)
+	before = len(h.server.Calls())
+	res, _ = runCmd(t, h, model.CommandMsg{
+		RequestID: "req-answer-fresh", Action: "answer", PaneID: "w1:p1",
+		ExpectedSeq: 100, OptionID: "opt-1", Fingerprint: newFP,
+	})
+	if !res.OK {
+		t.Fatalf("answer to the refreshed prompt: code=%q msg=%q, want ok", res.ErrorCode, res.Message)
+	}
+	keys := sendKeysSince(h, before)
+	if len(keys) != 1 || len(keys[0]) != len(p.Keys["opt-1"]) || keys[0][0] != p.Keys["opt-1"][0] {
+		t.Errorf("keys = %v, want [%v]", keys, p.Keys["opt-1"])
+	}
+}
+
+func TestCommands_CancelPromptChangedPublishesFreshPrompt(t *testing.T) {
+	h := newTestHarness(t)
+	edit := loadFixture(t, "agy", "permission-edit.txt")
+	bash := loadFixture(t, "agy", "permission-bash.txt")
+	bashFP := fingerprintOf(t, h, "agy", bash)
+
+	h.server.SetAgents([]map[string]any{agentRow("w1:p1", "agy", "blocked", 100)})
+	h.server.SetScreen("w1:p1", "visible", edit)
+	h.engine.OnHerdrOnline(true, herdr.Pong{Version: "0.9.1", Protocol: 22})
+	syncAndAwaitPrompt(t, h, "w1:p1", 100, fingerprintOf(t, h, "agy", edit))
+
+	h.server.SetScreen("w1:p1", "visible", bash)
+	res, seen := runCmd(t, h, model.CommandMsg{
+		RequestID: "req-cancel-stale", Action: "cancel", PaneID: "w1:p1", ExpectedSeq: 100,
+	})
+	if res.OK || res.ErrorCode != "prompt_changed" {
+		t.Fatalf("cancel of the old prompt: ok=%v code=%q, want prompt_changed", res.OK, res.ErrorCode)
+	}
+	if findOrWait(h, seen, time.Second, isPromptUpdate("w1:p1", 100, bashFP)) == nil {
+		t.Fatal("prompt_changed did not publish the prompt now on screen")
+	}
+
+	// Cancelling the refreshed bash prompt uses its own cancel key (esc), not "2".
+	before := len(h.server.Calls())
+	res, _ = runCmd(t, h, model.CommandMsg{
+		RequestID: "req-cancel-fresh", Action: "cancel", PaneID: "w1:p1", ExpectedSeq: 100,
+	})
+	if !res.OK {
+		t.Fatalf("cancel of the refreshed prompt: code=%q msg=%q, want ok", res.ErrorCode, res.Message)
+	}
+	if keys := sendKeysSince(h, before); len(keys) != 1 || len(keys[0]) != 1 || keys[0][0] != "esc" {
+		t.Errorf("cancel keys = %v, want [[esc]]", keys)
+	}
+}
+
 func TestRequestIDLogIsBounded(t *testing.T) {
 	var l requestIDLog
 	if l.observe("") {

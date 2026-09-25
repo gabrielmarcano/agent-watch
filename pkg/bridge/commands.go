@@ -201,6 +201,7 @@ func (e *Engine) executeCommand(cmd model.CommandMsg) {
 		}
 
 		if p.Public.Fingerprint != cmd.Fingerprint {
+			e.adoptPrompt(cmd.PaneID, info.StateChangeSeq, p)
 			reply(false, "prompt_changed", fmt.Sprintf("fingerprint mismatch: expected %s, got %s", cmd.Fingerprint, p.Public.Fingerprint), agentName)
 			return
 		}
@@ -241,10 +242,12 @@ func (e *Engine) executeCommand(cmd model.CommandMsg) {
 			expected = e.publishedFingerprint(cmd.PaneID, info.StateChangeSeq)
 		}
 		if expected == "" {
+			e.adoptPrompt(cmd.PaneID, info.StateChangeSeq, p)
 			reply(false, "prompt_changed", "no published prompt for this state", agentName)
 			return
 		}
 		if p.Public.Fingerprint != expected {
+			e.adoptPrompt(cmd.PaneID, info.StateChangeSeq, p)
 			reply(false, "prompt_changed", fmt.Sprintf("fingerprint mismatch: expected %s, got %s", expected, p.Public.Fingerprint), agentName)
 			return
 		}

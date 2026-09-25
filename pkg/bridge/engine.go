@@ -269,6 +269,35 @@ func (e *Engine) resolvePrompt(paneID string, seq uint64, agentName string) {
 	}
 }
 
+// adoptPrompt stores p, freshly parsed by a command, as the pane's prompt and
+// publishes it, so the watch stops showing a prompt it can never answer. It
+// only acts while the engine tracks the pane as blocked at seq; the seq stays
+// as herdr reported it.
+func (e *Engine) adoptPrompt(paneID string, seq uint64, p agents.Prompt) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	st, exists := e.states[paneID]
+	if !exists || st.info.StateChangeSeq != seq || st.public.Status != model.StatusBlocked {
+		return
+	}
+	if st.prompt != nil && st.prompt.Public.Fingerprint == p.Public.Fingerprint {
+		return
+	}
+
+	prompt := p
+	st.prompt = &prompt
+	st.public.Prompt = &prompt.Public
+	st.public.UpdatedAt = model.Now()
+
+	if e.Relay != nil {
+		e.Relay.Send(model.AgentUpdateMsg{
+			Type:  model.WireAgentUpdate,
+			Agent: st.public,
+		})
+	}
+}
+
 func (e *Engine) captureHistory(paneID, cwd, agent string, info herdr.AgentInfo) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
