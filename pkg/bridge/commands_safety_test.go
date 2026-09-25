@@ -516,6 +516,52 @@ func TestCommands_PromptAcceptedWithoutMenu(t *testing.T) {
 	}
 }
 
+// --- Bug 4: prompt uses an allowlist of herdr statuses ---
+
+func TestCommands_PromptStatusAllowlist(t *testing.T) {
+	h := newTestHarness(t)
+	cases := []struct {
+		pane, agent, status string
+		wantCode            string // "" = accepted
+	}{
+		{"w1:idle", "claude", "idle", ""},
+		{"w1:done", "claude", "done", ""},
+		{"w1:working-claude", "claude", "working", ""},
+		{"w1:working-generic", "codex", "working", "agent_busy"},
+		{"w1:blocked", "claude", "blocked", "agent_blocked"},
+		{"w1:unknown", "claude", "unknown", "agent_state_unknown"},
+		{"w1:empty", "claude", "", "agent_state_unknown"},
+		{"w1:unexpected", "claude", "paused", "agent_state_unknown"},
+	}
+	rows := make([]map[string]any, 0, len(cases))
+	for _, c := range cases {
+		rows = append(rows, agentRow(c.pane, c.agent, c.status, 7))
+	}
+	h.server.SetAgents(rows)
+	h.engine.OnHerdrOnline(true, herdr.Pong{Version: "0.9.1", Protocol: 22})
+
+	for _, c := range cases {
+		before := len(h.server.Calls())
+		res, _ := runCmd(t, h, model.CommandMsg{
+			RequestID: "req-status-" + c.pane, Action: "prompt", PaneID: c.pane,
+			ExpectedSeq: 7, Text: "hello",
+		})
+		prompts := callsSince(h, before, "agent.prompt")
+		if c.wantCode == "" {
+			if !res.OK || prompts != 1 {
+				t.Errorf("status %q: ok=%v code=%q prompts=%d, want accepted once", c.status, res.OK, res.ErrorCode, prompts)
+			}
+			continue
+		}
+		if res.OK || res.ErrorCode != c.wantCode {
+			t.Errorf("status %q: ok=%v code=%q, want %s", c.status, res.OK, res.ErrorCode, c.wantCode)
+		}
+		if prompts != 0 {
+			t.Errorf("status %q: agent.prompt called %d times, want 0", c.status, prompts)
+		}
+	}
+}
+
 func TestRequestIDLogIsBounded(t *testing.T) {
 	var l requestIDLog
 	if l.observe("") {

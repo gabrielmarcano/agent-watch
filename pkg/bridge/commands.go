@@ -137,18 +137,21 @@ func (e *Engine) executeCommand(cmd model.CommandMsg) {
 			return
 		}
 
+		// Allowlist: anything herdr reports that is not known to be safe
+		// (including "" or a future value) is refused.
 		switch status {
-		case model.StatusBlocked:
-			reply(false, "agent_blocked", "cannot prompt blocked agent; use answer or cancel", agentName)
-			return
-		case model.StatusUnknown:
-			reply(false, "agent_state_unknown", "agent state is unknown", agentName)
-			return
+		case model.StatusIdle, model.StatusDone:
 		case model.StatusWorking:
 			if !ad.PromptWhileWorking() {
 				reply(false, "agent_busy", "agent cannot queue prompts while working", agentName)
 				return
 			}
+		case model.StatusBlocked:
+			reply(false, "agent_blocked", "cannot prompt blocked agent; use answer or cancel", agentName)
+			return
+		default:
+			reply(false, "agent_state_unknown", fmt.Sprintf("agent state %q does not accept prompts", status), agentName)
+			return
 		}
 
 		// herdr can report a pane as done while a menu is open (Antigravity's
