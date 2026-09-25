@@ -16,10 +16,11 @@ import (
 )
 
 // commandTimeout bounds one command end to end, counted from its arrival:
-// waiting for the pane lock, list, read, send. It stays below the relay's
-// 10 s wait so the watch gets our answer, and so nothing runs after the relay
-// has already answered "timeout".
-const commandTimeout = 9 * time.Second
+// waiting for the pane lock, list, read, send. Timeouts nest from the inside
+// out: bridge 6 s < relay 7 s < watch 8 s. The layer that presses keys gives up
+// first, so when the relay or the watch reports "timeout" the bridge has
+// already stopped and no keystroke can land afterwards.
+const commandTimeout = 6 * time.Second
 
 // maxPromptChars is the contract limit for prompt text, in characters.
 const maxPromptChars = 4000

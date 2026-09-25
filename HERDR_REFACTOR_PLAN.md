@@ -320,7 +320,7 @@ type Prompt struct {
 
 - **Keepalive:** both sides ping the WebSocket every 30 s and expect the pong within 10 s (proxies such as Cloudflare drop idle connections at about 100 s). No pong: the bridge reconnects; the relay drops the host.
 - **Host offline:** the relay marks `host_online=false` and broadcasts it.
-- **Command timeout:** one 10 s budget for sending the command and waiting for its result → `timeout`. The bridge answers within 9 s of receiving it. A command sent while the host is offline fails immediately with `host_offline`, and so do in-flight commands the moment their host disconnects, misses a pong or is replaced.
+- **Command timeout:** one 7 s budget for sending the command and waiting for its result → `timeout`. The bridge answers within 6 s of receiving it. A command sent while the host is offline fails immediately with `host_offline`, and so do in-flight commands the moment their host disconnects, misses a pong or is replaced.
 - **Error codes:** `stale_state`, `prompt_changed`, `agent_busy`, `agent_blocked`, `agent_state_unknown`, `unknown_pane`, `host_offline`, `timeout`.
 
 ---

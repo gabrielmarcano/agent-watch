@@ -331,7 +331,7 @@ Every non-200 response carries an `ErrorResponse`.
 | `rate_limited` | 429 | Too many attempts | "Try again later" |
 | `host_offline` | 503 | Bridge not connected, or it disconnected (or was replaced) before answering a command | "Mac offline" |
 | `herdr_offline` | 503 | Bridge connected, herdr unreachable | "herdr stopped" |
-| `timeout` | 504 | Bridge did not answer within 10 s (one budget for sending the command and waiting for `command_result`) | "No answer from the Mac" |
+| `timeout` | 504 | Bridge did not answer within 7 s (one budget for sending the command and waiting for `command_result`). Timeouts nest from the inside out, bridge 6 s < relay 7 s < watch 8 s, so a `timeout` means the bridge has already given up | "No answer from the Mac" |
 | `internal` | 500 | Bug | "Something went wrong" |
 
 ---
@@ -409,7 +409,7 @@ type ResyncMsg struct {
 - **Bridge:** no pong → it reconnects.
 - **Relay:** no pong → it drops the host: closes the socket, broadcasts `host` with `host_online=false`, and fails the host's in-flight commands with `host_offline`.
 
-**In-flight commands** fail with `host_offline` as soon as their host disconnects, is dropped, or is replaced by a new connection, without waiting for the 10 s budget.
+**In-flight commands** fail with `host_offline` as soon as their host disconnects, is dropped, or is replaced by a new connection, without waiting for the 7 s budget.
 
 **Reconnect backoff** (bridge side): 1 s, 2 s, 4 s … up to 60 s, each ±20 % jitter. The backoff resets after 60 s of healthy connection.
 

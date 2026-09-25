@@ -134,7 +134,7 @@ func (h *Hub) Command(ctx context.Context, cmd model.CommandMsg) (model.CommandR
 
 **`Command`:**
 - If no host is connected → `host_offline`.
-- Otherwise generate a `request_id`, write the `CommandMsg`, then wait for the result. **Writing and waiting share one 10 s budget** → `timeout`. The host going away first → `host_offline` immediately. A result that arrives at the same instant as either still wins.
+- Otherwise generate a `request_id`, write the `CommandMsg`, then wait for the result. **Writing and waiting share one 7 s budget** (above the bridge's 6 s, below the watch's 8 s) → `timeout`. The host going away first → `host_offline` immediately. A result that arrives at the same instant as either still wins.
 - The write is bounded by the budget but not by the caller: a watch hanging up must not close the host's WebSocket mid-write.
 - A late result arriving after the timeout is logged (debug) and dropped.
 
@@ -219,7 +219,7 @@ Run `devices` as the service user or root, with the same `AW_DATA_DIR` as the se
 | Slow subscriber | A subscriber that never reads is dropped without blocking others |
 | Command round-trip | `POST …/answer` → the fake host receives `CommandMsg` with the right fields → replies ok → `200 {"ok":true}` |
 | Command errors | Host replies `stale_state` → `409`; host silent → `504 timeout`; host offline → `503 host_offline`; unknown pane → `404` |
-| Host drop | A missed pong drops the host; a host that disconnects or is replaced while a command waits → `host_offline` at once, not after 10 s |
+| Host drop | A missed pong drops the host; a host that disconnects or is replaced while a command waits → `host_offline` at once, not after 7 s |
 | Client IP | Forwarding headers ignored from untrusted peers; rightmost untrusted `X-Forwarded-For` hop from trusted ones |
 | Live revoke | `devices revoke` through `admin.sock` → the token gets `401` and its SSE stream closes |
 | Shutdown | With a watch on SSE and a host connected, `serve` stops quickly and returns nil |

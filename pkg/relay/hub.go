@@ -20,8 +20,11 @@ const (
 	wsCloseCodeReplaced     websocket.StatusCode = 4000
 	wsCloseCodeHelloTimeout websocket.StatusCode = 4001
 
-	helloTimeout   = 5 * time.Second
-	commandTimeout = 10 * time.Second
+	helloTimeout = 5 * time.Second
+	// commandTimeout sits between the bridge's 6 s command budget and the
+	// watch's 8 s call timeout: inner layers give up first, so a timeout
+	// reported to the watch means the bridge has already stopped.
+	commandTimeout = 7 * time.Second
 	pingInterval   = 30 * time.Second
 	pingTimeout    = 10 * time.Second
 )
@@ -101,7 +104,7 @@ func NewHub(auth *AuthManager, state *State, store *Store, notifier Notifier) *H
 	}
 }
 
-// SetCommandTimeout overrides the 10-second budget for a command round trip
+// SetCommandTimeout overrides the 7-second budget for a command round trip
 // (useful for tests).
 func (h *Hub) SetCommandTimeout(d time.Duration) {
 	h.mu.Lock()
@@ -353,7 +356,7 @@ func commandFailure(reqID string, code model.ErrorCode, msg string) model.Comman
 }
 
 // Command sends a command to the host and waits for its result. Writing the
-// command and waiting for the answer share one budget (10 s by default).
+// command and waiting for the answer share one budget (7 s by default).
 //
 // It returns host_offline when no host is connected or the host goes away
 // before answering (at once, not after the budget), and timeout when the

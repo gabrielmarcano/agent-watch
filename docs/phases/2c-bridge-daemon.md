@@ -125,7 +125,7 @@ func (e *Engine) Status() StatusFile                         // for the status f
 
 `HandleRelayMessage` receives `model.CommandMsg` (ignore `ResyncMsg` except to re-send `ConnectMessages`). Execute each command in its own goroutine, holding a **per-pane mutex**, so two taps on the same agent never interleave. Always reply with exactly one `CommandResultMsg`.
 
-**Budget:** one 9 s context per command, started **on arrival** (so waiting for the pane lock counts). It stays under the relay's 10 s wait, so nothing runs after the relay has already answered `timeout`. Each herdr call gets a 3 s slice of it.
+**Budget:** one 6 s context per command, started **on arrival** (so waiting for the pane lock counts). Timeouts nest from the inside out (bridge 6 s < relay 7 s < watch 8 s), so nothing runs after the relay or the watch has already reported `timeout`. Each herdr call gets a 3 s slice of it.
 
 ```
 execute(cmd):                             // ctx = 9 s from arrival

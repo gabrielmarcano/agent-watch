@@ -18,7 +18,7 @@ The relay can make agents on the owner's Mac type and approve things, so treat i
 
 ## Behaviour
 - **Exactly one host connection;** a new one replaces the old (close code 4000).
-- **Commands** get one 10 s budget for sending and waiting (`timeout`). With no host they fail immediately (`host_offline`), and in-flight ones fail the moment their host disconnects, misses a ping or is replaced.
+- **Commands** get one 7 s budget for sending and waiting (`timeout`), between the bridge's 6 s and the watch's 8 s: inner layers always time out first. With no host they fail immediately (`host_offline`), and in-flight ones fail the moment their host disconnects, misses a ping or is replaced.
 - **Host keepalive:** ping the host every 30 s; no pong within 10 s → drop it.
 - **HTTP server:** no `ReadTimeout` or `WriteTimeout` (they kill SSE and WebSocket). Keep `ReadHeaderTimeout: 10s` and `IdleTimeout: 120s`. Shutdown cancels every request context, so open streams end at once.
 - **SSE:**
