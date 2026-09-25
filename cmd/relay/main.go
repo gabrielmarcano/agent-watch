@@ -70,6 +70,14 @@ Environment variables:
   AW_CLIENT_IP_HEADER
                    Optional single-IP header (e.g. CF-Connecting-IP) honored from
                    a trusted proxy before X-Forwarded-For. Needs AW_TRUSTED_PROXIES
+  AW_FCM_CREDENTIALS
+                   Path to the Firebase service-account JSON. Unset: no FCM push
+  AW_PUSH_RESOLVED Boolean (default false). Sends the FCM "resolved" push that
+                   withdraws an answered approval. Enable only once the installed
+                   Wear OS app handles "resolved"
+  AW_NTFY_URL      ntfy server, e.g. https://ntfy.sh. Unset: no ntfy push
+  AW_NTFY_TOPIC    Random, unguessable ntfy topic (required with AW_NTFY_URL)
+  AW_NTFY_TOKEN    Optional ntfy access token
 
 "devices list|revoke" work whether the relay is running or not. While it runs,
 they go through its local admin socket ($AW_DATA_DIR/admin.sock): a revoked
