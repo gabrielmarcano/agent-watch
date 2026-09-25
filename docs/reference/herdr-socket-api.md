@@ -93,12 +93,21 @@ func (c *Client) Call(ctx context.Context, method string, params any, out any) e
 
 > ⚠️ The **socket** uses `recent_unwrapped` (underscore). The **CLI** flag spells it `recent-unwrapped` (hyphen). Sending the hyphen form to the socket fails with `invalid_request: unknown variant`. Verified.
 
-`format` ∈ `text` | `ansi`, default `text`. Always use `text`: it is plain text without ANSI escape codes.
+`format` ∈ `text` | `ansi`, default `text`. The result echoes it in `read.format`.
+
+- **`text`** is plain text without escape codes, one line per row, trailing blanks trimmed. Everything that parses a screen uses it: `Client.Read`.
+- **`ansi`** is the same screen with its styling, and only the OpenCode focus check uses it (`Client.ReadANSI`; agents.md §5.1). A text screen cannot show which button has focus; colours can.
+  - Every styled span starts with `ESC[0m`, then one SGR sequence per attribute: flags (`ESC[1m`, `ESC[7m` …), then `ESC[38;…m` (fg), `ESC[48;…m` (bg), `ESC[58;…m` (underline colour). A colour is `2;r;g;b` (truecolor) or `5;n` (palette index).
+  - Rows end with `\r\n`, not `\n`, and keep their styled trailing blanks.
+  - No cursor moves, OSC or other sequences with the default formatter (libghostty-vt's VT formatter, herdr 0.9.1 source).
+  - `strip_ansi` is ignored by `agent.read` (in the 0.9.1 source only output waits and output subscriptions read it). `ReadANSI` still sends `false`, exactly what `herdr agent read --format ansi` sends.
+  - `ReadANSI` rejects a result whose `read.format` is not `ansi`: plain text there would read as a screen with no colours.
 
 | Use | Params |
 |---|---|
 | Parse a blocked menu | `{"target": pane, "source": "visible", "format": "text"}` |
 | Screen-capture history fallback | `{"target": pane, "source": "recent_unwrapped", "lines": 200, "format": "text"}` |
+| Check which button has focus (OpenCode answers) | `{"target": pane, "source": "visible", "format": "ansi", "strip_ansi": false}` |
 
 ---
 

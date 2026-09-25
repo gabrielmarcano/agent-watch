@@ -65,6 +65,7 @@ type Server struct {
 	agents       []map[string]any
 	workspaces   []map[string]any
 	screens      map[string]map[string]string // paneID -> source -> text
+	ansiScreens  map[string]map[string]string // paneID -> source -> styled text (format "ansi")
 	calls        []Call
 	failNext     map[string]failEntry
 	holds        map[string]*Hold
@@ -90,12 +91,13 @@ func New(t testing.TB) *Server {
 
 	sockPath := filepath.Join(dir, "herdr.sock")
 	s := &Server{
-		SocketPath: sockPath,
-		dir:        dir,
-		t:          t,
-		screens:    make(map[string]map[string]string),
-		failNext:   make(map[string]failEntry),
-		holds:      make(map[string]*Hold),
+		SocketPath:  sockPath,
+		dir:         dir,
+		t:           t,
+		screens:     make(map[string]map[string]string),
+		ansiScreens: make(map[string]map[string]string),
+		failNext:    make(map[string]failEntry),
+		holds:       make(map[string]*Hold),
 	}
 
 	s.Start()
@@ -201,6 +203,18 @@ func (s *Server) SetScreen(paneID, source, text string) {
 		s.screens[paneID] = make(map[string]string)
 	}
 	s.screens[paneID][source] = text
+}
+
+// SetANSIScreen sets the text returned by agent.read with format "ansi" for a
+// pane and source: the styled screen, with its SGR escape sequences. It is
+// independent of SetScreen, so a test states both forms of the same screen.
+func (s *Server) SetANSIScreen(paneID, source, text string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.ansiScreens[paneID] == nil {
+		s.ansiScreens[paneID] = make(map[string]string)
+	}
+	s.ansiScreens[paneID][source] = text
 }
 
 // FailNext configures the next call to method to return code and message.
@@ -456,10 +470,24 @@ func (s *Server) respond(id, method string, params map[string]any) map[string]an
 			return errorResp(id, "invalid_request", fmt.Sprintf("unknown variant of enum Source: %q", source))
 		}
 
+		// format is "text" (herdr's default) or "ansi"; herdr ignores
+		// strip_ansi for agent.read.
+		format := "text"
+		if f, ok := params["format"]; ok {
+			format, _ = f.(string)
+		}
+		if format != "text" && format != "ansi" {
+			return errorResp(id, "invalid_request", fmt.Sprintf("unknown variant of enum ReadFormat: %q", format))
+		}
+
 		s.mu.Lock()
+		screens := s.screens
+		if format == "ansi" {
+			screens = s.ansiScreens
+		}
 		text := ""
-		if s.screens[target] != nil {
-			text = s.screens[target][source]
+		if screens[target] != nil {
+			text = screens[target][source]
 		}
 		s.mu.Unlock()
 
@@ -471,7 +499,7 @@ func (s *Server) respond(id, method string, params map[string]any) map[string]an
 				"truncated":    false,
 				"revision":     0,
 				"source":       source,
-				"format":       "text",
+				"format":       format,
 				"workspace_id": "w1",
 				"tab_id":       "t1",
 			},

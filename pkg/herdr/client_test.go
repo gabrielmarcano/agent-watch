@@ -74,6 +74,48 @@ func TestReadUsesUnderscoreSource(t *testing.T) {
 	}
 }
 
+// ReadANSI asks herdr for the styled screen, as `herdr agent read --format
+// ansi` does (format "ansi", strip_ansi false); Read keeps asking for text.
+func TestReadANSIAsksForANSIFormat(t *testing.T) {
+	srv := herdrtest.New(t)
+	client := herdr.NewClient(srv.SocketPath)
+
+	const styled = "\x1b[0m\x1b[38;2;245;167;66m\x1b[48;2;20;20;20m┃\x1b[0m Allow once\r\n"
+	srv.SetScreen("w1:p1", "visible", "┃ Allow once")
+	srv.SetANSIScreen("w1:p1", "visible", styled)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	got, err := client.ReadANSI(ctx, "w1:p1", herdr.SourceVisible, 0)
+	if err != nil {
+		t.Fatalf("ReadANSI failed: %v", err)
+	}
+	if got != styled {
+		t.Errorf("ReadANSI got %q, want %q", got, styled)
+	}
+	calls := srv.Calls()
+	p := calls[len(calls)-1].Params
+	if p["format"] != "ansi" || p["strip_ansi"] != false || p["source"] != "visible" || p["target"] != "w1:p1" {
+		t.Errorf("ReadANSI params = %v, want target w1:p1, source visible, format ansi, strip_ansi false", p)
+	}
+	if _, ok := p["lines"]; ok {
+		t.Errorf("ReadANSI sent lines=%v for lines=0", p["lines"])
+	}
+
+	text, err := client.Read(ctx, "w1:p1", herdr.SourceVisible, 0)
+	if err != nil {
+		t.Fatalf("Read failed: %v", err)
+	}
+	if text != "┃ Allow once" {
+		t.Errorf("Read got %q, want the text screen", text)
+	}
+	calls = srv.Calls()
+	if f := calls[len(calls)-1].Params["format"]; f != "text" {
+		t.Errorf("Read sent format %v, want text", f)
+	}
+}
+
 func TestPromptOmitsWait(t *testing.T) {
 	srv := herdrtest.New(t)
 	client := herdr.NewClient(srv.SocketPath)

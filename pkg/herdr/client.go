@@ -230,10 +230,27 @@ func (c *Client) ListAgents(ctx context.Context) ([]AgentInfo, error) {
 
 // Read extracts text from a pane's screen buffer.
 func (c *Client) Read(ctx context.Context, paneID string, src ReadSource, lines int) (string, error) {
+	return c.read(ctx, paneID, src, lines, "text")
+}
+
+// ReadANSI reads a pane's screen buffer with its styling: herdr's "ansi"
+// format, where every styled span starts with ESC[0m followed by one SGR
+// sequence per attribute (e.g. ESC[38;2;r;g;bm, ESC[48;5;nm) and rows end
+// with "\r\n". It asks exactly what `herdr agent read --format ansi` asks
+// (strip_ansi false; agent.read ignores it). A result in any other format is
+// an error, never silently plain text.
+func (c *Client) ReadANSI(ctx context.Context, paneID string, src ReadSource, lines int) (string, error) {
+	return c.read(ctx, paneID, src, lines, "ansi")
+}
+
+func (c *Client) read(ctx context.Context, paneID string, src ReadSource, lines int, format string) (string, error) {
 	params := map[string]any{
 		"target": paneID,
 		"source": string(src),
-		"format": "text",
+		"format": format,
+	}
+	if format == "ansi" {
+		params["strip_ansi"] = false
 	}
 	if lines > 0 {
 		params["lines"] = lines
@@ -241,7 +258,8 @@ func (c *Client) Read(ctx context.Context, paneID string, src ReadSource, lines 
 
 	var res struct {
 		Read *struct {
-			Text string `json:"text"`
+			Text   string `json:"text"`
+			Format string `json:"format"`
 		} `json:"read"`
 	}
 	if err := c.callResult(ctx, "agent.read", params, "pane_read", &res); err != nil {
@@ -249,6 +267,9 @@ func (c *Client) Read(ctx context.Context, paneID string, src ReadSource, lines 
 	}
 	if res.Read == nil {
 		return "", fmt.Errorf("herdr agent.read: result has no read")
+	}
+	if format == "ansi" && res.Read.Format != format {
+		return "", fmt.Errorf("herdr agent.read: result format %q, want %q", res.Read.Format, format)
 	}
 	return res.Read.Text, nil
 }

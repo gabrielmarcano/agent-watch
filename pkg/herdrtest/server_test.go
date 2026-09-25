@@ -251,6 +251,58 @@ func TestAgentRead(t *testing.T) {
 	}
 }
 
+// agent.read answers in the format asked for, like herdr: "text" (the
+// default) from SetScreen, "ansi" from SetANSIScreen. The two never leak into
+// each other, and an unknown format is refused.
+func TestAgentReadFormats(t *testing.T) {
+	srv := herdrtest.New(t)
+	const styled = "\x1b[0m\x1b[38;2;245;167;66m┃\x1b[0m Allow once"
+	srv.SetScreen("w1:p1", "visible", "┃ Allow once")
+	srv.SetANSIScreen("w1:p1", "visible", styled)
+
+	read := func(id string, params map[string]any) map[string]any {
+		t.Helper()
+		resp := sendRaw(t, srv.SocketPath, map[string]any{"id": id, "method": "agent.read", "params": params})
+		res, ok := resp["result"].(map[string]any)
+		if !ok {
+			t.Fatalf("%s: no result in %v", id, resp)
+		}
+		return res["read"].(map[string]any)
+	}
+
+	for _, tc := range []struct {
+		id         string
+		params     map[string]any
+		wantText   string
+		wantFormat string
+	}{
+		{"default", map[string]any{"target": "w1:p1", "source": "visible"}, "┃ Allow once", "text"},
+		{"text", map[string]any{"target": "w1:p1", "source": "visible", "format": "text"}, "┃ Allow once", "text"},
+		{"ansi", map[string]any{"target": "w1:p1", "source": "visible", "format": "ansi", "strip_ansi": false}, styled, "ansi"},
+		{"ansi unset", map[string]any{"target": "w1:p2", "source": "visible", "format": "ansi"}, "", "ansi"},
+	} {
+		r := read(tc.id, tc.params)
+		if r["text"] != tc.wantText || r["format"] != tc.wantFormat {
+			t.Errorf("%s: text=%q format=%v, want text=%q format=%s", tc.id, r["text"], r["format"], tc.wantText, tc.wantFormat)
+		}
+	}
+
+	// A text screen set for another source is not served as ansi either.
+	srv.SetScreen("w1:p3", "visible", "plain only")
+	if r := read("ansi-no-leak", map[string]any{"target": "w1:p3", "source": "visible", "format": "ansi"}); r["text"] != "" {
+		t.Errorf("ansi read of a pane with only a text screen = %q, want empty", r["text"])
+	}
+
+	resp := sendRaw(t, srv.SocketPath, map[string]any{
+		"id":     "bogus",
+		"method": "agent.read",
+		"params": map[string]any{"target": "w1:p1", "source": "visible", "format": "html"},
+	})
+	if e, _ := resp["error"].(map[string]any); e == nil || e["code"] != "invalid_request" {
+		t.Errorf("format html: got %v, want invalid_request", resp)
+	}
+}
+
 func TestAgentSendKeysAndPrompt(t *testing.T) {
 	srv := herdrtest.New(t)
 

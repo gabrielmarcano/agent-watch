@@ -184,6 +184,33 @@ func TestReadChecksResult(t *testing.T) {
 	}
 }
 
+// A styled read must come back styled: text handed back for an ansi request
+// (an older herdr, or a bug) would read as a screen with no colours.
+func TestReadANSIChecksResult(t *testing.T) {
+	for _, tc := range []struct {
+		name, reply, want string
+	}{
+		{"wrong type", `{"id":%q,"result":{"type":"agent_list","agents":[]}}`, `"agent_list"`},
+		{"read missing", `{"id":%q,"result":{"type":"pane_read"}}`, "read"},
+		{"text format", `{"id":%q,"result":{"type":"pane_read","read":{"text":"x","format":"text"}}}`, `format "text"`},
+		{"format missing", `{"id":%q,"result":{"type":"pane_read","read":{"text":"x"}}}`, `format ""`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			text, err := rawClient(t, echoID(tc.reply)).ReadANSI(context.Background(), "w1:p1", herdr.SourceVisible, 0)
+			requireProtocolError(t, err, tc.want)
+			if text != "" {
+				t.Errorf("returned text %q alongside an error", text)
+			}
+		})
+	}
+
+	text, err := rawClient(t, echoID(`{"id":%q,"result":{"type":"pane_read","read":{"text":"\u001b[0mx","format":"ansi"}}}`)).
+		ReadANSI(context.Background(), "w1:p1", herdr.SourceVisible, 0)
+	if err != nil || text != "\x1b[0mx" {
+		t.Errorf("ReadANSI = %q, %v; want the styled text and no error", text, err)
+	}
+}
+
 func TestPingChecksResultType(t *testing.T) {
 	_, err := rawClient(t, echoID(`{"id":%q,"result":{"type":"agent_list","agents":[]}}`)).Ping(context.Background())
 	requireProtocolError(t, err, `"agent_list"`)
