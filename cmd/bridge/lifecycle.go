@@ -29,10 +29,13 @@ func (a *app) flagSet(name string) *flag.FlagSet {
 
 // cmdConfigure writes config.toml. Without --config it targets the config
 // herdr's environment names, else the installed service's, else the default.
+// --env-file supplies the relay URL and host token that no flag gives, so the
+// token never has to appear on a command line.
 func (a *app) cmdConfigure(args []string) error {
 	fs := a.flagSet("configure")
 	relayURL := fs.String("relay-url", "", "Relay WebSocket URL (wss://...)")
 	hostToken := fs.String("host-token", "", "64-character hex host token")
+	envFile := fs.String("env-file", "", "agent-watch.env to read AW_RELAY_DOMAIN and AW_HOST_TOKEN from (a flag overrides it)")
 	hostName := fs.String("host-name", "", "Optional host name override")
 	configPath := fs.String("config", "", "Config file path")
 	var claudeDirs stringSlice
@@ -41,9 +44,16 @@ func (a *app) cmdConfigure(args []string) error {
 		return err
 	}
 
+	url, token := *relayURL, *hostToken
+	if *envFile != "" {
+		var err error
+		if url, token, err = a.relayFromEnvFile(*envFile, url, token); err != nil {
+			return err
+		}
+	}
 	cfg := &bridge.Config{
-		RelayURL:         bridge.NormalizeRelayURL(*relayURL),
-		HostToken:        *hostToken,
+		RelayURL:         bridge.NormalizeRelayURL(url),
+		HostToken:        token,
 		HostName:         *hostName,
 		ClaudeConfigDirs: claudeDirs,
 	}
@@ -53,14 +63,30 @@ func (a *app) cmdConfigure(args []string) error {
 
 	r := a.resolveForStart(ServiceSpec{ConfigPath: *configPath})
 	target := r.spec.ConfigPath
+	old, _ := bridge.LoadConfig(target) // only to say what the rewrite drops
 	if err := bridge.SaveConfig(target, cfg); err != nil {
 		return err
 	}
 	fmt.Fprintln(a.stdout, target)
+	a.noteDropped(old, cfg)
 	if r.installed != nil && absPath(r.installed.ConfigPath) == target {
 		fmt.Fprintln(a.stderr, "The bridge service uses this config: run `agent-watch-bridge restart` to apply it.")
 	}
 	return nil
+}
+
+// noteDropped says which optional settings of the previous config a
+// configure call did not give again: it rewrites the whole file.
+func (a *app) noteDropped(old, cur *bridge.Config) {
+	if old == nil {
+		return
+	}
+	if old.HostName != "" && cur.HostName == "" {
+		fmt.Fprintf(a.stderr, "note: dropped host_name %q from the previous config; pass --host-name to keep it\n", old.HostName)
+	}
+	if len(old.ClaudeConfigDirs) > 0 && len(cur.ClaudeConfigDirs) == 0 {
+		fmt.Fprintf(a.stderr, "note: dropped claude_config_dirs %q from the previous config; pass --claude-config-dir once per directory to keep them\n", old.ClaudeConfigDirs)
+	}
 }
 
 func (a *app) specFlags(fs *flag.FlagSet) *ServiceSpec {

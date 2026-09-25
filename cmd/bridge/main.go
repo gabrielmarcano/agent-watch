@@ -83,6 +83,7 @@ func printUsage() {
 	fmt.Fprintf(os.Stderr, `agent-watch-bridge %s
 
 Usage:
+  agent-watch-bridge configure --env-file agent-watch.env [--host-name N] [--claude-config-dir D]... [--config PATH]
   agent-watch-bridge configure --relay-url URL --host-token TOKEN [--host-name N] [--claude-config-dir D]... [--config PATH]
   agent-watch-bridge run [--config PATH]
   agent-watch-bridge start [--binary P] [--config P] [--socket P] [--state-dir D] [--log P]
@@ -92,6 +93,9 @@ Usage:
   agent-watch-bridge pair [--json] [--config PATH]
   agent-watch-bridge version
 
+configure --env-file takes AW_RELAY_DOMAIN and AW_HOST_TOKEN from the shared
+agent-watch.env (see agent-watch.env.example), so the token never appears on
+a command line; --relay-url and --host-token override it.
 start installs the service (LaunchAgent on macOS, systemd --user unit on
 Linux) and (re)loads it. A value not given as a flag or by herdr's plugin
 environment is kept from the installed service definition.
