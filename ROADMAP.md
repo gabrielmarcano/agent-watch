@@ -1,38 +1,57 @@
 # Agent Watch Roadmap
 
-This document outlines the milestones we've achieved so far and our vision for the future of Agent Watch.
-
-## Milestones Achieved
-
-### Backend & Infrastructure
-* **Native Push Notifications:** Migrated entirely from third-party services (Pushover) to Firebase Cloud Messaging (FCM V1 API) for instant, secure, and direct watch notifications.
-* **Robust Log Tracking:** Replaced flaky Unix `tail` pipes with a robust polling system (`fs.watchFile` & `fs.statSync`) in the Sidecar to parse JSON lines accurately without corruption.
-* **Multi-Agent State Isolation:** Fixed cross-pollination bugs on the bridge server, ensuring that prompts and responses from different LLM sessions (e.g., AGY vs Claude) don't bleed into each other.
-* **History Management:** Increased the bridge server capacity to buffer the 10 most recent interactions seamlessly.
-
-### Wear OS App
-* **Conversation History:** Implemented a dedicated "History" screen allowing users to browse their past interactions.
-* **Native Rotary Physics:** Upgraded Wear Compose to `1.4.0` and implemented the `rotaryScrollable` modifier to bring buttery-smooth, native kinetic scrolling with inertia to the digital crown.
-* **Obfuscation Fixes:** Implemented `@Keep` annotations on data models to ensure Gson serialization survives R8 release obfuscation on the smartwatch.
-* **Polished UI/UX:** Built a dedicated full-screen `ResponseReaderScreen` with infinite scroll for deep-reading long AI outputs, along with clean thematic styling (LightBlue highlights, removed boilerplate branding).
+This document outlines the milestones achieved in the Herdr-native architecture and the planned future enhancements.
 
 ---
 
-## Future Plans & Ideas
+## Milestones Achieved (v0.2.0 — Release Gate)
 
-### 1. Two-Way Communication (Voice to Terminal)
-Currently, Agent Watch is read-only (observing the terminal). The ultimate goal is to allow the user to **tap the microphone on the watch**, dictate a prompt, and send it directly back to the terminal agent to execute, creating a seamless remote pair-programming loop.
+### Core Architecture & Host Bridge
+- **Herdr-Native Control Plane:** Built host daemon `agent-watch-bridge` in Go 1.22+, directly interfacing with the Herdr UNIX socket API (`events.subscribe`, `agent.list`, `agent.prompt`, `agent.send_keys`).
+- **Zero Inbound Ports:** Switched from local listeners to an outbound TLS WebSocket client connecting to the cloud relay.
+- **Strict Safety Verification:** Implemented pre-action verification (validates `pane_id`, `agent`, `expected_seq`, and `fingerprint` before sending keystrokes).
+- **Herdr Plugin Integration:** Packaged bridge control (`start`, `stop`, `status`, `configure`, `pair`) as a standard Herdr plugin (`herdr-plugin.toml`).
+- **Daemon Lifecycle:** Supervised by `launchd` on macOS and `systemd --user` on Linux.
 
-### 2. Rich Markdown Rendering
-The current `ResponseReaderScreen` shows raw text. We plan to integrate a Wear OS-compatible Markdown parser to properly render:
-* **Bold and Italics**
-* `Inline code`
-* Formatted lists
-* Structured tables (if screen size permits)
+### Cloud Relay & Security
+- **Cloud Relay Server:** Built static Go binary `agent-watch-relay` supporting SSE broadcast, in-memory state aggregation, and SQLite history persistence.
+- **Cryptographic Device Pairing:** 6-digit short-lived pairing flow storing salted SHA-256 device token hashes.
+- **Bearer Token Auth:** Constant-time token verification on all protected endpoints with 401 rejection for unauthenticated requests and query-string tokens.
+- **Push Dispatch:** Direct FCM HTTP v1 notifications for Wear OS and ntfy dispatch for watchOS.
 
-### 3. Agent Agnostic Integrations
-Standardize the webhook payload format so that **any** CLI agent (not just Claude or AGY) can easily send updates to the watch with zero configuration.
+### Agent Adapters (`pkg/agents`)
+- **First-Class Agent Support:** Specialized adapters for Claude Code (`claude`), OpenCode (`opencode`), and Antigravity CLI (`agy`).
+- **Dynamic Option Parsing:** Option roles (`allow_once`, `allow_always`, `deny`, `choice`) derived semantically from labels, never by rigid position.
+- **Interactive Question Menus:** Full multiple-choice question dialog parsing with individual option chips on wrist.
+- **Transcript History Readers:** Deep turn-based history extraction (Claude JSONL tail reader, OpenCode SQLite WAL reader, and screen capture fallback).
 
-### 4. Background Sync & Complications
-* **Watch Face Complications:** Show the current status of the agent (e.g., "Idle", "Thinking", "Error") directly on the main watch face.
-* **Offline queueing:** If the watch temporarily loses connection, queue the notifications on the bridge and sync them down silently in the background when it reconnects.
+### Smartwatch Clients
+- **Wear OS Application (Primary Client):**
+  - Built with Jetpack Compose for Wear OS, featuring rotary crown inertia navigation.
+  - Interactive approval prompts with Allow, Deny, and More Options dialogs.
+  - Deep linking from push notifications directly into blocked agent prompts.
+  - Voice dictation via Android speech recognizer to pinned agents.
+  - Response reader with markdown formatting and history inspection.
+  - Offline indicators ("Mac is offline", "herdr stopped") with automatic reconnection.
+- **watchOS Application (Best Effort):**
+  - Native SwiftUI application conforming to `/v1` REST + SSE contracts.
+
+---
+
+## Future Enhancements & Next Steps
+
+### 1. UI & Ergonomic Refinement (Wear OS)
+- **Design Overhaul:** Transition Wear OS UI from functional alpha state to an ergonomic, glanceable design following Wear OS Design Guidelines.
+- **Compact Cards & Glanceable Badges:** Refine list spacing, typography hierarchy, and active agent badges for round screens.
+- **Haptic Feedback:** Distinct vibration patterns for approvals, denials, and incoming questions.
+
+### 2. Multi-Channel Notifiers
+- **Telegram Bot Notifier:** Optional Telegram notifications with inline approval buttons as a fallback when watch is charging or out of reach.
+- **Discord Webhook Alerts:** Configurable relay webhook to post agent milestone summaries to private channels.
+
+### 3. Extended Agent Adapters
+- **Codex & Pi Adapters:** Dedicated adapters for emerging CLI tools (OpenAI Codex, Pi, Amp) in `pkg/agents`.
+- **PreToolUse Hook for Antigravity CLI:** Custom lifecycle hook to report `blocked` status dynamically to Herdr.
+
+### 4. Phone Companion App (Optional)
+- Companion phone app for easier initial pairing and Bluetooth BLE proxy tethering when Wi-Fi is unavailable on the watch.

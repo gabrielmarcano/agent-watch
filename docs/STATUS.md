@@ -175,10 +175,19 @@ Keep entries short, and use absolute dates (YYYY-MM-DD).
 
 ## Phase 5 — End-to-end + docs (release gate)
 - Claimed by: agy, 2026-09-24
-- [ ] `docs/e2e-report.md` complete for claude / agy / opencode
-- [ ] security spot checks
-- [ ] README + ROADMAP rewritten
+- [x] `docs/e2e-report.md` complete for claude / agy / opencode
+- [x] security spot checks
+- [x] README + ROADMAP rewritten
 - Notes:
+  - Verified end-to-end on a physical Google Pixel Watch 2 connected over Wi-Fi against the production relay (`relay.example.com`) and live host bridge supervised by launchd.
+  - Claude Code (`claude`): Verified Allow action from watch notification, Deny action (re-running command prompted again, confirming true denial), stale tap rejection (409 on second approval attempt with no keystrokes typed), and multiple-choice question picker (asked color choice, user selected Verde on watch, answer submitted to Claude).
+  - OpenCode (`opencode`): Prompted external directory read (`/etc/*`), OpenCode blocked with `△ Permission required`, rendered yellow badge on watch, user entered detail screen and tapped ALLOW; bridge dispatched `Allow once` (`Enter`), OpenCode unblocked and completed turn.
+  - Antigravity CLI (`agy`): Running in sandbox; detected and listed cleanly. Documented Herdr 0.9.1 quirk where agy's quiescent prompt state is classified by Herdr's screen detector as `done` rather than `blocked` (session-only hook in Herdr 0.9.1).
+  - Transcript readers: Verified SQLite reader for OpenCode (`source=transcript`) and screen capture readers for Claude and AGY.
+  - Resilience: Stopped bridge; relay detected offline within 5 s and watch rendered amber `"⚠ Mac is offline"` banner. Restarted bridge; relay reconnected, banner cleared, and live state restored without re-pairing.
+  - Wear OS app live fixes applied and verified: resolved notification deep link black screen bug by anchoring navigation to `agents` root, corrected Deny toast notification feedback, and refined non-permission prompt action labels.
+  - Security spot-checks: Confirmed 401 Unauthorized on unauthenticated requests and query-parameter tokens; confirmed zero prompt text and zero credentials in bridge logs and VPS systemd journal.
+  - Documentation: Created `docs/e2e-report.md`; rewritten `README.md` and `ROADMAP.md` (passes `git grep -nE 'Warp|osascript|Pushover|sidecar|8420|Tailscale'`). Sandbox workspace `wC` (`aw-sandbox`) closed and cleaned up.
 
 ## Phase 6 — watchOS (best-effort, simulator)
 - Claimed by: —
