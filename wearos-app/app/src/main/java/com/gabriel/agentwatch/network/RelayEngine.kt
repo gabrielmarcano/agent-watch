@@ -195,13 +195,13 @@ class RelayEngine(
 
             override fun onFailure(eventSource: EventSource, t: Throwable?, response: Response?) {
                 onStream(generation) {
-                val statusCode = response?.code ?: 0
-                val reason = when {
-                    t is SocketTimeoutException -> "No data from the relay"
-                    t != null -> t.message ?: t.javaClass.simpleName
-                    else -> "HTTP $statusCode"
-                }
-                log("SSE onFailure: $reason (code: $statusCode)")
+                    val statusCode = response?.code ?: 0
+                    val reason = when {
+                        t is SocketTimeoutException -> "No data from the relay"
+                        t != null -> t.message ?: t.javaClass.simpleName
+                        else -> "HTTP $statusCode"
+                    }
+                    log("SSE onFailure: $reason (code: $statusCode)")
                     // A 401 was already reported by RelayClient.events → onUnauthorized; never retry with that token.
                     if (statusCode == 401) return@onStream
                     scheduleReconnectLocked(reason)
