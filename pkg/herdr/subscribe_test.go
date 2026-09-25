@@ -3,6 +3,7 @@ package herdr_test
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"errors"
 	"net"
 	"os"
@@ -19,6 +20,12 @@ import (
 // request line with reply, verbatim, and then keeps the connection open until
 // the test ends. It covers byte-level cases herdrtest cannot express.
 func rawServer(t *testing.T, reply string) string {
+	t.Helper()
+	return rawServerFunc(t, func(string) string { return reply })
+}
+
+// rawServerFunc is rawServer with a reply built from the request's id.
+func rawServerFunc(t *testing.T, reply func(reqID string) string) string {
 	t.Helper()
 	dir, err := os.MkdirTemp("", "hr") // short path: unix socket paths are limited
 	if err != nil {
@@ -38,10 +45,15 @@ func rawServer(t *testing.T, reply string) string {
 			return
 		}
 		defer conn.Close()
-		if _, err := bufio.NewReader(conn).ReadBytes('\n'); err != nil {
+		line, err := bufio.NewReader(conn).ReadBytes('\n')
+		if err != nil {
 			return
 		}
-		_, _ = conn.Write([]byte(reply))
+		var req struct {
+			ID string `json:"id"`
+		}
+		_ = json.Unmarshal(line, &req)
+		_, _ = conn.Write([]byte(reply(req.ID)))
 		<-done
 	}()
 	return sock

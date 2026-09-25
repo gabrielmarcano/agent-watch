@@ -7,6 +7,7 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	mrand "math/rand/v2"
 	"net"
@@ -64,7 +65,10 @@ func NewClient(socketPath string) *Client {
 }
 
 // Call executes a single JSON-RPC method call on the herdr socket.
-// Follows the one-connection-per-call contract.
+// Follows the one-connection-per-call contract. It is bounded by ctx's
+// deadline, or by Timeout when ctx has none, and cancelling ctx abandons the
+// call at once; either way the error wraps ctx's error (context.Canceled or
+// context.DeadlineExceeded), never ErrUnavailable.
 func (c *Client) Call(ctx context.Context, method string, params, out any) error {
 	timeout := c.Timeout
 	if timeout <= 0 {
@@ -77,13 +81,43 @@ func (c *Client) Call(ctx context.Context, method string, params, out any) error
 		callCtx, cancel = context.WithTimeout(ctx, timeout)
 		defer cancel()
 	}
+	if err := callCtx.Err(); err != nil {
+		return fmt.Errorf("herdr %s: %w", method, err)
+	}
 
 	var d net.Dialer
 	conn, err := d.DialContext(callCtx, "unix", c.SocketPath)
 	if err != nil {
+		if ctxErr := callCtx.Err(); ctxErr != nil {
+			return fmt.Errorf("herdr %s: %w", method, ctxErr)
+		}
 		return fmt.Errorf("%w: dial %s: %w", ErrUnavailable, c.SocketPath, err)
 	}
 	defer conn.Close()
+
+	// Closing the connection is what unblocks a pending write or read when
+	// ctx is cancelled before its deadline.
+	stop := make(chan struct{})
+	defer close(stop)
+	go func() {
+		select {
+		case <-callCtx.Done():
+			_ = conn.Close()
+		case <-stop:
+		}
+	}()
+	// ioErr maps an I/O failure to ctx's error when ctx caused it. The
+	// connection deadline equals callCtx's, and can fire an instant before
+	// callCtx notices its own.
+	ioErr := func(op string, err error) error {
+		if ctxErr := callCtx.Err(); ctxErr != nil {
+			return fmt.Errorf("herdr %s %s: %w", method, op, ctxErr)
+		}
+		if errors.Is(err, os.ErrDeadlineExceeded) {
+			return fmt.Errorf("herdr %s %s: %w: %w", method, op, context.DeadlineExceeded, err)
+		}
+		return fmt.Errorf("herdr %s: %w", op, err)
+	}
 
 	if dl, ok := callCtx.Deadline(); ok {
 		_ = conn.SetDeadline(dl)
@@ -101,12 +135,12 @@ func (c *Client) Call(ctx context.Context, method string, params, out any) error
 	}
 
 	if err := json.NewEncoder(conn).Encode(req); err != nil {
-		return fmt.Errorf("herdr write: %w", err)
+		return ioErr("write", err)
 	}
 
 	line, err := bufio.NewReader(conn).ReadBytes('\n')
 	if err != nil && len(line) == 0 {
-		return fmt.Errorf("herdr read: %w", err)
+		return ioErr("read", err)
 	}
 
 	var resp struct {
