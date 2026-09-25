@@ -318,8 +318,10 @@ func (h *Hub) handleWireMessage(msg any) {
 	case model.AgentRemovedMsg:
 		h.state.Remove(m.PaneID)
 	case model.HistoryItemMsg:
-		h.store.AddHistory(m.Item)
-		h.state.BroadcastHistory(m.Item)
+		// Duplicates (the bridge resends after a reconnect) are not news.
+		if h.store.AddHistory(m.Item) {
+			h.state.BroadcastHistory(m.Item)
+		}
 	case model.HerdrStatusMsg:
 		h.state.SetHost(true, m.HerdrOnline)
 	case model.CommandResultMsg:

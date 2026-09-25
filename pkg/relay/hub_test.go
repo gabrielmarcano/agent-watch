@@ -3,6 +3,7 @@ package relay
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -231,6 +232,62 @@ func TestHub_CommandRoundTrip(t *testing.T) {
 	}
 	if !res.OK {
 		t.Fatalf("expected command result OK=true, got %+v", res)
+	}
+}
+
+// drainEvents returns the names of the events already queued on ch.
+func drainEvents(ch <-chan sseEvent) []string {
+	var names []string
+	for {
+		select {
+		case ev := <-ch:
+			names = append(names, ev.Name)
+		default:
+			return names
+		}
+	}
+}
+
+// Watches get a history event only for items the relay actually stored: a
+// resent duplicate, or an item older than everything kept, is not news.
+func TestHub_HistoryBroadcastOnlyWhenStored(t *testing.T) {
+	store, err := NewStore(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	defer store.Close()
+	state := NewState()
+	hub := NewHub(NewAuthManager("valid-host-token", store, ClientIPPolicy{}), state, store, nil)
+	sub, ch := state.Subscribe()
+	defer state.Unsubscribe(sub)
+
+	// Relative to now: items older than 7 days are pruned on every add.
+	base := time.Now().UTC().Add(-time.Hour)
+	at := func(d time.Duration) string { return base.Add(d).Format(time.RFC3339) }
+
+	item := model.HistoryItem{ID: "h-1", PaneID: "w1:p1", CompletedAt: at(0)}
+	hub.handleWireMessage(model.HistoryItemMsg{Type: model.WireHistoryItem, Item: item})
+	hub.handleWireMessage(model.HistoryItemMsg{Type: model.WireHistoryItem, Item: item}) // bridge resend
+	if got := drainEvents(ch); len(got) != 1 || got[0] != "history" {
+		t.Fatalf("events after an item and its duplicate = %v, want one history", got)
+	}
+
+	// Fill the 200-item cap with newer items, then send an older one: it is
+	// trimmed on arrival, so nobody should be told about it.
+	for i := 0; i < maxHistoryTotal; i++ {
+		store.AddHistory(model.HistoryItem{
+			ID:          fmt.Sprintf("new-%d", i),
+			PaneID:      fmt.Sprintf("pane-%d", i/maxHistoryPane),
+			CompletedAt: at(time.Duration(i+1) * time.Second),
+		})
+	}
+	old := model.HistoryItem{ID: "too-old", PaneID: "w9:p9", CompletedAt: at(-time.Hour)}
+	hub.handleWireMessage(model.HistoryItemMsg{Type: model.WireHistoryItem, Item: old})
+	if got := drainEvents(ch); len(got) != 0 {
+		t.Fatalf("events after an item trimmed on arrival = %v, want none", got)
+	}
+	if items := store.GetHistory("w9:p9", 10); len(items) != 0 {
+		t.Fatalf("trimmed item is stored: %v", items)
 	}
 }
 

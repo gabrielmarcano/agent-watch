@@ -255,8 +255,10 @@ func (s *Store) RevokeDevice(deviceID string) (removed Device, ok bool) {
 	return removed, true
 }
 
-// AddHistory appends a history item for a pane, enforcing dedup and size limits.
-func (s *Store) AddHistory(item model.HistoryItem) {
+// AddHistory appends a history item for a pane, enforcing dedup and size
+// limits. It reports whether the item is now stored: false for a duplicate,
+// and for an item so old that the size limits dropped it at once.
+func (s *Store) AddHistory(item model.HistoryItem) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -266,7 +268,7 @@ func (s *Store) AddHistory(item model.HistoryItem) {
 	for _, existing := range items {
 		if existing.ID == item.ID {
 			// Duplicate item already stored for this pane
-			return
+			return false
 		}
 	}
 
@@ -281,6 +283,13 @@ func (s *Store) AddHistory(item model.HistoryItem) {
 	s.enforceTotalLimitLocked()
 
 	s.scheduleSaveLocked()
+
+	for _, kept := range s.history[item.PaneID] {
+		if kept.ID == item.ID {
+			return true
+		}
+	}
+	return false
 }
 
 // GetHistory retrieves history items matching the filter, newest first.

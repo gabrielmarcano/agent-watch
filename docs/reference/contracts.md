@@ -303,7 +303,7 @@ Every 15 s the relay writes the comment line `:` followed by a blank line, as a 
 | `agent` | `AgentState` | An agent was added or changed |
 | `agent_removed` | `{"pane_id": "..."}` | A pane closed or lost its agent |
 | `host` | `{"host_online": bool, "herdr_online": bool}` | Either flag changed |
-| `history` | `HistoryItem` | A new history item was stored |
+| `history` | `HistoryItem` | A new history item was stored (never for a resent duplicate, same `id`) |
 
 **Client rule:** on any disconnect, reconnect with backoff (1 s, 2 s, 4 s … max 30 s) and **replace** local state with the next `snapshot`.
 
