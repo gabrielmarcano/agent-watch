@@ -3,7 +3,10 @@ package herdrtest_test
 import (
 	"bufio"
 	"encoding/json"
+	"errors"
+	"io"
 	"net"
+	"strings"
 	"testing"
 	"time"
 
@@ -513,5 +516,240 @@ func TestSessionSnapshot(t *testing.T) {
 	res := resp["result"].(map[string]any)
 	if res["type"] != "session_snapshot" {
 		t.Errorf("expected session_snapshot, got %v", res["type"])
+	}
+}
+
+// dialSubscribe opens an events.subscribe stream for the given subscriptions
+// and returns the connection and its reader, without reading the ack.
+func dialSubscribe(t *testing.T, sockPath string, subs []map[string]any) (net.Conn, *bufio.Reader) {
+	t.Helper()
+	conn, err := net.Dial("unix", sockPath)
+	if err != nil {
+		t.Fatalf("dial failed: %v", err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+	data, _ := json.Marshal(map[string]any{
+		"id":     "sub-1",
+		"method": "events.subscribe",
+		"params": map[string]any{"subscriptions": subs},
+	})
+	if _, err := conn.Write(append(data, '\n')); err != nil {
+		t.Fatalf("write subscribe failed: %v", err)
+	}
+	_ = conn.SetReadDeadline(time.Now().Add(2 * time.Second)) // never hang the test
+	return conn, bufio.NewReader(conn)
+}
+
+// expectClosed asserts the server closed the connection (EOF), as opposed to
+// merely staying silent until the read deadline.
+func expectClosed(t *testing.T, reader *bufio.Reader, what string) {
+	t.Helper()
+	line, err := reader.ReadBytes('\n')
+	if !errors.Is(err, io.EOF) {
+		t.Fatalf("expected %s to be closed (EOF), got %q, %v", what, line, err)
+	}
+}
+
+// tryRaw is sendRaw for goroutines: it returns failures instead of calling t.Fatal.
+func tryRaw(sockPath string, req map[string]any) (map[string]any, error) {
+	conn, err := net.Dial("unix", sockPath)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+	data, _ := json.Marshal(req)
+	if _, err := conn.Write(append(data, '\n')); err != nil {
+		return nil, err
+	}
+	line, err := bufio.NewReader(conn).ReadBytes('\n')
+	if err != nil {
+		return nil, err
+	}
+	var resp map[string]any
+	if err := json.Unmarshal(line, &resp); err != nil {
+		return nil, err
+	}
+	return resp, nil
+}
+
+func TestCallsRecordRequestID(t *testing.T) {
+	srv := herdrtest.New(t)
+
+	sendRaw(t, srv.SocketPath, map[string]any{"id": "abc-7", "method": "ping", "params": map[string]any{}})
+
+	calls := srv.Calls()
+	if len(calls) != 1 {
+		t.Fatalf("expected 1 recorded call, got %d", len(calls))
+	}
+	if calls[0].ID != "abc-7" {
+		t.Errorf("recorded id = %q, want %q", calls[0].ID, "abc-7")
+	}
+}
+
+func TestUnknownTargetRejectedWithoutAgents(t *testing.T) {
+	srv := herdrtest.New(t)
+	// No SetAgents: herdr has no agents, so every target is unknown.
+
+	for _, tc := range []struct {
+		method string
+		params map[string]any
+	}{
+		{"agent.send_keys", map[string]any{"target": "w1:ghost", "keys": []string{"1"}}},
+		{"agent.prompt", map[string]any{"target": "w1:ghost", "text": "hi"}},
+	} {
+		resp := sendRaw(t, srv.SocketPath, map[string]any{"id": "x", "method": tc.method, "params": tc.params})
+		errObj, ok := resp["error"].(map[string]any)
+		if !ok {
+			t.Errorf("%s to an unknown target with no agents: got %v, want agent_not_found", tc.method, resp)
+			continue
+		}
+		if errObj["code"] != "agent_not_found" {
+			t.Errorf("%s: code = %v, want agent_not_found", tc.method, errObj["code"])
+		}
+	}
+}
+
+// TestInputCallsReadAgentsUnderLock only fails under -race: send_keys and
+// prompt must not read the agent list while SetAgents replaces it.
+func TestInputCallsReadAgentsUnderLock(t *testing.T) {
+	srv := herdrtest.New(t)
+	agents := []map[string]any{{"pane_id": "w1:p1", "agent_status": "idle"}}
+	srv.SetAgents(agents)
+
+	stop := make(chan struct{})
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+				srv.SetAgents(agents)
+			}
+		}
+	}()
+
+	for i := 0; i < 30; i++ {
+		sendRaw(t, srv.SocketPath, map[string]any{"id": "k", "method": "agent.send_keys",
+			"params": map[string]any{"target": "w1:ghost", "keys": []string{"1"}}})
+		sendRaw(t, srv.SocketPath, map[string]any{"id": "p", "method": "agent.prompt",
+			"params": map[string]any{"target": "w1:ghost", "text": "hi"}})
+	}
+	close(stop)
+	<-done
+}
+
+func TestHoldNextAnswersWithStateAtArrival(t *testing.T) {
+	srv := herdrtest.New(t)
+	srv.SetAgents([]map[string]any{{"pane_id": "w1:p1", "agent": "claude", "agent_status": "blocked"}})
+
+	hold := srv.HoldNext("agent.list")
+	type result struct {
+		resp map[string]any
+		err  error
+	}
+	got := make(chan result, 1)
+	go func() {
+		resp, err := tryRaw(srv.SocketPath, map[string]any{"id": "l1", "method": "agent.list", "params": map[string]any{}})
+		got <- result{resp, err}
+	}()
+
+	select {
+	case <-hold.Received():
+	case <-time.After(2 * time.Second):
+		t.Fatal("held call never arrived")
+	}
+
+	// herdr moves on while the answer is still in flight.
+	srv.SetAgents([]map[string]any{{"pane_id": "w1:p1", "agent": "claude", "agent_status": "working"}})
+
+	select {
+	case r := <-got:
+		t.Fatalf("held call answered before Release: %v %v", r.resp, r.err)
+	default:
+	}
+
+	hold.Release()
+
+	var r result
+	select {
+	case r = <-got:
+	case <-time.After(2 * time.Second):
+		t.Fatal("held call not answered after Release")
+	}
+	if r.err != nil {
+		t.Fatalf("held call failed: %v", r.err)
+	}
+	agents := r.resp["result"].(map[string]any)["agents"].([]any)
+	if status := agents[0].(map[string]any)["agent_status"]; status != "blocked" {
+		t.Errorf("held answer status = %v, want the state at arrival (blocked)", status)
+	}
+
+	// Only the next call is held.
+	if _, err := tryRaw(srv.SocketPath, map[string]any{"id": "l2", "method": "agent.list", "params": map[string]any{}}); err != nil {
+		t.Errorf("second agent.list failed: %v", err)
+	}
+}
+
+func TestHoldNextNeverReleasedEndsOnStop(t *testing.T) {
+	srv := herdrtest.New(t)
+	hold := srv.HoldNext("events.subscribe")
+
+	conn, reader := dialSubscribe(t, srv.SocketPath, []map[string]any{{"type": "pane.created"}})
+	select {
+	case <-hold.Received():
+	case <-time.After(2 * time.Second):
+		t.Fatal("held subscribe never arrived")
+	}
+
+	srv.Stop()
+
+	_ = conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	expectClosed(t, reader, "the held connection on Stop")
+}
+
+func TestDropStreamsKeepsServerUp(t *testing.T) {
+	srv := herdrtest.New(t)
+
+	conn, reader := dialSubscribe(t, srv.SocketPath, []map[string]any{{"type": "pane.created"}})
+	if _, err := reader.ReadBytes('\n'); err != nil {
+		t.Fatalf("read ack: %v", err)
+	}
+
+	srv.DropStreams()
+
+	_ = conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	expectClosed(t, reader, "the stream after DropStreams")
+	resp := sendRaw(t, srv.SocketPath, map[string]any{"id": "p", "method": "ping", "params": map[string]any{}})
+	if resp["result"] == nil {
+		t.Errorf("ping after DropStreams: %v", resp)
+	}
+}
+
+func TestDropStreamsAfterAck(t *testing.T) {
+	srv := herdrtest.New(t)
+	srv.SetDropStreamsAfterAck(true)
+
+	conn, reader := dialSubscribe(t, srv.SocketPath, []map[string]any{{"type": "pane.created"}})
+	_ = conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	ack, err := reader.ReadBytes('\n')
+	if err != nil {
+		t.Fatalf("read ack: %v", err)
+	}
+	if !strings.Contains(string(ack), "subscription_started") {
+		t.Fatalf("ack = %s", ack)
+	}
+	expectClosed(t, reader, "the stream right after the ack")
+
+	srv.SetDropStreamsAfterAck(false)
+	conn2, reader2 := dialSubscribe(t, srv.SocketPath, []map[string]any{{"type": "pane.created"}})
+	if _, err := reader2.ReadBytes('\n'); err != nil {
+		t.Fatalf("read ack: %v", err)
+	}
+	srv.EmitGlobal("pane.created", map[string]any{"pane_id": "w1:p9"})
+	_ = conn2.SetReadDeadline(time.Now().Add(2 * time.Second))
+	if _, err := reader2.ReadBytes('\n'); err != nil {
+		t.Errorf("stream should stay open once the knob is off: %v", err)
 	}
 }

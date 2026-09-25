@@ -14,6 +14,7 @@ import (
 
 // Call records an incoming JSON-RPC request to the fake server.
 type Call struct {
+	ID     string // the request id, as sent by the client
 	Method string
 	Params map[string]any
 }
@@ -23,28 +24,58 @@ type failEntry struct {
 	message string
 }
 
+// Hold pauses one call until it is released. See Server.HoldNext.
+type Hold struct {
+	received chan struct{}
+	release  chan struct{}
+	once     sync.Once
+}
+
+// Received is closed once the held call has reached the server.
+func (h *Hold) Received() <-chan struct{} { return h.received }
+
+// Release lets the held call be answered. Calling it more than once is safe.
+func (h *Hold) Release() { h.once.Do(func() { close(h.release) }) }
+
+// wait blocks until the hold is released (true) or the server stops (false).
+func (h *Hold) wait(stopped <-chan struct{}) bool {
+	select {
+	case <-h.release:
+		return true
+	case <-stopped:
+		return false
+	}
+}
+
 type subscriber struct {
 	conn       net.Conn
-	paneIDs    map[string]bool
-	eventTypes map[string]bool
-	mu         sync.Mutex
+	paneIDs    map[string]bool // immutable after creation
+	eventTypes map[string]bool // immutable after creation
+	mu         sync.Mutex      // serializes writes to conn
 }
 
 // Server is an in-process fake herdr socket server.
 type Server struct {
-	SocketPath  string
-	dir         string
-	t           testing.TB
-	listener    net.Listener
-	mu          sync.Mutex
-	agents      []map[string]any
-	workspaces  []map[string]any
-	screens     map[string]map[string]string // paneID -> source -> text
-	calls       []Call
-	failNext    map[string]failEntry
-	subscribers []*subscriber
-	running     bool
-	closed      bool
+	SocketPath   string
+	dir          string
+	t            testing.TB
+	listener     net.Listener
+	mu           sync.Mutex
+	agents       []map[string]any
+	workspaces   []map[string]any
+	screens      map[string]map[string]string // paneID -> source -> text
+	calls        []Call
+	failNext     map[string]failEntry
+	holds        map[string]*Hold
+	dropAfterAck bool
+	subscribers  []*subscriber
+	stopped      chan struct{} // closed by Stop; a new one per Start
+	running      bool
+	closed       bool
+
+	// Test hooks for the subscribe handshake (internal tests only).
+	testHookBeforeRegister func()
+	testHookAfterAck       func()
 }
 
 // New creates and starts a new in-process fake herdr socket server.
@@ -62,6 +93,7 @@ func New(t testing.TB) *Server {
 		t:          t,
 		screens:    make(map[string]map[string]string),
 		failNext:   make(map[string]failEntry),
+		holds:      make(map[string]*Hold),
 	}
 
 	s.Start()
@@ -93,12 +125,13 @@ func (s *Server) Start() {
 	}
 
 	s.listener = l
+	s.stopped = make(chan struct{})
 	s.running = true
 	go s.serve(l)
 }
 
-// Stop closes the active listener and terminates all subscriber streams,
-// simulating herdr going offline.
+// Stop closes the active listener, terminates all subscriber streams and
+// abandons held calls, simulating herdr going offline.
 func (s *Server) Stop() {
 	s.mu.Lock()
 	if !s.running {
@@ -106,6 +139,7 @@ func (s *Server) Stop() {
 		return
 	}
 	s.running = false
+	close(s.stopped)
 	l := s.listener
 	s.listener = nil
 
@@ -172,6 +206,39 @@ func (s *Server) FailNext(method, code, message string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.failNext[method] = failEntry{code: code, message: message}
+}
+
+// HoldNext makes the next call to method wait before it is answered, to
+// simulate a slow or hung herdr. The answer is computed when the request
+// arrives, so it reflects the state at that moment, and is written only after
+// Release. For events.subscribe the ack (and the stream) start only after
+// Release. A call that is never released is dropped when the server stops.
+func (s *Server) HoldNext(method string) *Hold {
+	h := &Hold{received: make(chan struct{}), release: make(chan struct{})}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.holds[method] = h
+	return h
+}
+
+// DropStreams closes every open events.subscribe stream while the server
+// keeps answering, simulating a stream drop with herdr still up.
+func (s *Server) DropStreams() {
+	s.mu.Lock()
+	subs := s.subscribers
+	s.subscribers = nil
+	s.mu.Unlock()
+	for _, sub := range subs {
+		_ = sub.conn.Close()
+	}
+}
+
+// SetDropStreamsAfterAck makes every events.subscribe close its connection
+// right after the ack (on), or stream normally again (off).
+func (s *Server) SetDropStreamsAfterAck(on bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.dropAfterAck = on
 }
 
 // Calls returns a copy of all requests received so far.
@@ -276,16 +343,16 @@ func (s *Server) handleConn(conn net.Conn) {
 
 	var raw map[string]any
 	if err := json.Unmarshal(line, &raw); err != nil {
-		s.writeError(conn, "", "invalid_request", "malformed json")
+		s.writeJSON(conn, errorResp("", "invalid_request", "malformed json"))
 		_ = conn.Close()
 		return
 	}
 
-	// 2. Reject numeric id or non-string id
+	// Reject numeric or missing ids, like herdr does.
 	idRaw, hasID := raw["id"]
 	idStr, isStr := idRaw.(string)
 	if !hasID || !isStr {
-		s.writeError(conn, "", "invalid_request", "invalid id: expected string")
+		s.writeJSON(conn, errorResp("", "invalid_request", "invalid id: expected string"))
 		_ = conn.Close()
 		return
 	}
@@ -297,82 +364,72 @@ func (s *Server) handleConn(conn net.Conn) {
 	}
 
 	s.mu.Lock()
-	s.calls = append(s.calls, Call{Method: method, Params: params})
-
-	// Check FailNext
-	if fail, ok := s.failNext[method]; ok {
+	s.calls = append(s.calls, Call{ID: idStr, Method: method, Params: params})
+	stopped := s.stopped
+	hold := s.holds[method]
+	delete(s.holds, method)
+	fail, failing := s.failNext[method]
+	if failing {
 		delete(s.failNext, method)
-		s.mu.Unlock()
-		s.writeError(conn, idStr, fail.code, fail.message)
-		_ = conn.Close()
-		return
 	}
 	s.mu.Unlock()
 
+	if hold != nil {
+		close(hold.received)
+	}
+
+	switch {
+	case failing:
+		s.answer(conn, errorResp(idStr, fail.code, fail.message), hold, stopped)
+	case method == "events.subscribe":
+		s.handleSubscribe(conn, idStr, params, hold, stopped)
+	default:
+		s.answer(conn, s.respond(idStr, method, params), hold, stopped)
+	}
+}
+
+// answer writes resp once the hold (if any) is released, then closes conn:
+// one request per connection.
+func (s *Server) answer(conn net.Conn, resp map[string]any, hold *Hold, stopped <-chan struct{}) {
+	defer conn.Close()
+	if hold != nil && !hold.wait(stopped) {
+		return
+	}
+	s.writeJSON(conn, resp)
+}
+
+// respond computes the answer to a one-shot method from the current state.
+func (s *Server) respond(id, method string, params map[string]any) map[string]any {
 	switch method {
 	case "ping":
-		resp := map[string]any{
-			"id": idStr,
-			"result": map[string]any{
-				"type":         "pong",
-				"version":      "0.9.1",
-				"protocol":     22,
-				"capabilities": map[string]any{},
-			},
-		}
-		s.writeJSON(conn, resp)
-		_ = conn.Close()
+		return resultResp(id, map[string]any{
+			"type":         "pong",
+			"version":      "0.9.1",
+			"protocol":     22,
+			"capabilities": map[string]any{},
+		})
 
 	case "agent.list":
 		s.mu.Lock()
 		agentsCopy := make([]map[string]any, len(s.agents))
 		copy(agentsCopy, s.agents)
 		s.mu.Unlock()
-
-		resp := map[string]any{
-			"id": idStr,
-			"result": map[string]any{
-				"type":   "agent_list",
-				"agents": agentsCopy,
-			},
-		}
-		s.writeJSON(conn, resp)
-		_ = conn.Close()
+		return resultResp(id, map[string]any{"type": "agent_list", "agents": agentsCopy})
 
 	case "workspace.list":
 		s.mu.Lock()
 		workspacesCopy := make([]map[string]any, len(s.workspaces))
 		copy(workspacesCopy, s.workspaces)
 		s.mu.Unlock()
-
-		resp := map[string]any{
-			"id": idStr,
-			"result": map[string]any{
-				"type":       "workspace_list",
-				"workspaces": workspacesCopy,
-			},
-		}
-		s.writeJSON(conn, resp)
-		_ = conn.Close()
+		return resultResp(id, map[string]any{"type": "workspace_list", "workspaces": workspacesCopy})
 
 	case "agent.get":
 		target, _ := params["target"].(string)
-		s.mu.Lock()
-		var found map[string]any
-		for _, a := range s.agents {
-			if a["pane_id"] == target || a["name"] == target {
-				found = a
-				break
-			}
+		found := s.findAgent(target)
+		if found == nil {
+			return notFound(id, target)
 		}
-		s.mu.Unlock()
-
-		if found != nil {
-			s.writeJSON(conn, map[string]any{"id": idStr, "result": found})
-		} else {
-			s.writeError(conn, idStr, "agent_not_found", fmt.Sprintf("agent target %s not found", target))
-		}
-		_ = conn.Close()
+		return resultResp(id, found)
 
 	case "agent.read":
 		target, _ := params["target"].(string)
@@ -380,9 +437,7 @@ func (s *Server) handleConn(conn net.Conn) {
 
 		// Must be visible, recent, recent_unwrapped or detection (underscore, not hyphen)
 		if source != "visible" && source != "recent" && source != "recent_unwrapped" && source != "detection" {
-			s.writeError(conn, idStr, "invalid_request", fmt.Sprintf("unknown variant of enum Source: %q", source))
-			_ = conn.Close()
-			return
+			return errorResp(id, "invalid_request", fmt.Sprintf("unknown variant of enum Source: %q", source))
 		}
 
 		s.mu.Lock()
@@ -392,149 +447,144 @@ func (s *Server) handleConn(conn net.Conn) {
 		}
 		s.mu.Unlock()
 
-		resp := map[string]any{
-			"id": idStr,
-			"result": map[string]any{
-				"type": "pane_read",
-				"read": map[string]any{
-					"pane_id":      target,
-					"text":         text,
-					"truncated":    false,
-					"revision":     0,
-					"source":       source,
-					"format":       "text",
-					"workspace_id": "w1",
-					"tab_id":       "t1",
-				},
+		return resultResp(id, map[string]any{
+			"type": "pane_read",
+			"read": map[string]any{
+				"pane_id":      target,
+				"text":         text,
+				"truncated":    false,
+				"revision":     0,
+				"source":       source,
+				"format":       "text",
+				"workspace_id": "w1",
+				"tab_id":       "t1",
 			},
-		}
-		s.writeJSON(conn, resp)
-		_ = conn.Close()
+		})
 
 	case "agent.send_keys":
 		target, _ := params["target"].(string)
-		s.mu.Lock()
-		exists := false
-		for _, a := range s.agents {
-			if a["pane_id"] == target || a["name"] == target {
-				exists = true
-				break
-			}
+		if s.findAgent(target) == nil {
+			return notFound(id, target)
 		}
-		s.mu.Unlock()
-
-		if !exists && len(s.agents) > 0 {
-			s.writeError(conn, idStr, "agent_not_found", fmt.Sprintf("agent target %s not found", target))
-			_ = conn.Close()
-			return
-		}
-
-		s.writeJSON(conn, map[string]any{"id": idStr, "result": map[string]any{"type": "ok"}})
-		_ = conn.Close()
+		return resultResp(id, map[string]any{"type": "ok"})
 
 	case "agent.prompt":
 		target, _ := params["target"].(string)
-		s.mu.Lock()
-		var targetAgent map[string]any
-		for _, a := range s.agents {
-			if a["pane_id"] == target || a["name"] == target {
-				targetAgent = a
-				break
-			}
+		targetAgent := s.findAgent(target)
+		if targetAgent == nil {
+			return notFound(id, target)
 		}
-		s.mu.Unlock()
-
-		if targetAgent == nil && len(s.agents) > 0 {
-			s.writeError(conn, idStr, "agent_not_found", fmt.Sprintf("agent target %s not found", target))
-			_ = conn.Close()
-			return
+		if targetAgent["agent_status"] == "blocked" {
+			return errorResp(id, "agent_blocked", "agent is currently blocked")
 		}
-
-		if targetAgent != nil && targetAgent["agent_status"] == "blocked" {
-			s.writeError(conn, idStr, "agent_blocked", "agent is currently blocked")
-			_ = conn.Close()
-			return
-		}
-
-		s.writeJSON(conn, map[string]any{"id": idStr, "result": map[string]any{"type": "ok"}})
-		_ = conn.Close()
+		return resultResp(id, map[string]any{"type": "ok"})
 
 	case "session.snapshot":
 		s.mu.Lock()
 		agentsCopy := make([]map[string]any, len(s.agents))
 		copy(agentsCopy, s.agents)
 		s.mu.Unlock()
-
-		resp := map[string]any{
-			"id": idStr,
-			"result": map[string]any{
-				"type":       "session_snapshot",
-				"workspaces": []any{},
-				"agents":     agentsCopy,
-			},
-		}
-		s.writeJSON(conn, resp)
-		_ = conn.Close()
-
-	case "events.subscribe":
-		subsRaw, _ := params["subscriptions"].([]any)
-		paneIDs := make(map[string]bool)
-		eventTypes := make(map[string]bool)
-
-		for _, subItem := range subsRaw {
-			subMap, ok := subItem.(map[string]any)
-			if !ok {
-				continue
-			}
-			t, _ := subMap["type"].(string)
-			eventTypes[t] = true
-			if t == "pane.agent_status_changed" {
-				paneID, _ := subMap["pane_id"].(string)
-				if paneID == "" {
-					s.writeError(conn, idStr, "invalid_request", "missing field `pane_id`")
-					_ = conn.Close()
-					return
-				}
-				paneIDs[paneID] = true
-			}
-		}
-
-		// Acknowledge subscription
-		ack := map[string]any{
-			"id": idStr,
-			"result": map[string]any{
-				"type": "subscription_started",
-			},
-		}
-		s.writeJSON(conn, ack)
-
-		// Keep connection open for event streaming
-		sub := &subscriber{
-			conn:       conn,
-			paneIDs:    paneIDs,
-			eventTypes: eventTypes,
-		}
-
-		s.mu.Lock()
-		s.subscribers = append(s.subscribers, sub)
-		s.mu.Unlock()
-
-		// Read loop to detect disconnect
-		go func() {
-			buf := make([]byte, 128)
-			for {
-				_, err := conn.Read(buf)
-				if err != nil {
-					s.removeSubscriber(sub)
-					return
-				}
-			}
-		}()
+		return resultResp(id, map[string]any{
+			"type":       "session_snapshot",
+			"workspaces": []any{},
+			"agents":     agentsCopy,
+		})
 
 	default:
-		s.writeError(conn, idStr, "invalid_request", fmt.Sprintf("unknown method: %s", method))
-		_ = conn.Close()
+		return errorResp(id, "invalid_request", fmt.Sprintf("unknown method: %s", method))
 	}
+}
+
+// findAgent returns the agent whose pane_id or name is target, or nil. It
+// reads the agent list under the lock.
+func (s *Server) findAgent(target string) map[string]any {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, a := range s.agents {
+		if a["pane_id"] == target || a["name"] == target {
+			return a
+		}
+	}
+	return nil
+}
+
+func (s *Server) handleSubscribe(conn net.Conn, id string, params map[string]any, hold *Hold, stopped <-chan struct{}) {
+	subsRaw, _ := params["subscriptions"].([]any)
+	paneIDs := make(map[string]bool)
+	eventTypes := make(map[string]bool)
+
+	for _, subItem := range subsRaw {
+		subMap, ok := subItem.(map[string]any)
+		if !ok {
+			continue
+		}
+		t, _ := subMap["type"].(string)
+		eventTypes[t] = true
+		if t == "pane.agent_status_changed" {
+			paneID, _ := subMap["pane_id"].(string)
+			if paneID == "" {
+				s.answer(conn, errorResp(id, "invalid_request", "missing field `pane_id`"), hold, stopped)
+				return
+			}
+			paneIDs[paneID] = true
+		}
+	}
+
+	if hold != nil && !hold.wait(stopped) {
+		_ = conn.Close()
+		return
+	}
+
+	s.mu.Lock()
+	dropAfterAck := s.dropAfterAck
+	beforeRegister, afterAck := s.testHookBeforeRegister, s.testHookAfterAck
+	s.mu.Unlock()
+
+	ack := resultResp(id, map[string]any{"type": "subscription_started"})
+	if dropAfterAck {
+		s.writeJSON(conn, ack)
+		_ = conn.Close()
+		return
+	}
+
+	if beforeRegister != nil {
+		beforeRegister()
+	}
+
+	// Register before writing the ack, and keep sub.mu until the ack is out:
+	// an event emitted as soon as the client sees the ack is then neither lost
+	// nor written ahead of the ack.
+	sub := &subscriber{conn: conn, paneIDs: paneIDs, eventTypes: eventTypes}
+	sub.mu.Lock()
+	s.mu.Lock()
+	select {
+	case <-stopped:
+		// The server stopped while this call was in flight: herdr is gone.
+		s.mu.Unlock()
+		sub.mu.Unlock()
+		_ = conn.Close()
+		return
+	default:
+	}
+	s.subscribers = append(s.subscribers, sub)
+	s.mu.Unlock()
+	s.writeJSON(conn, ack)
+	sub.mu.Unlock()
+
+	if afterAck != nil {
+		afterAck()
+	}
+
+	// Read loop to detect disconnect
+	go func() {
+		buf := make([]byte, 128)
+		for {
+			if _, err := conn.Read(buf); err != nil {
+				s.removeSubscriber(sub)
+				return
+			}
+		}
+	}()
 }
 
 func (s *Server) writeJSON(conn net.Conn, v any) {
@@ -543,13 +593,20 @@ func (s *Server) writeJSON(conn net.Conn, v any) {
 	_, _ = conn.Write(data)
 }
 
-func (s *Server) writeError(conn net.Conn, id, code, message string) {
-	resp := map[string]any{
+func resultResp(id string, result map[string]any) map[string]any {
+	return map[string]any{"id": id, "result": result}
+}
+
+func errorResp(id, code, message string) map[string]any {
+	return map[string]any{
 		"id": id,
 		"error": map[string]any{
 			"code":    code,
 			"message": message,
 		},
 	}
-	s.writeJSON(conn, resp)
+}
+
+func notFound(id, target string) map[string]any {
+	return errorResp(id, "agent_not_found", fmt.Sprintf("agent target %s not found", target))
 }
