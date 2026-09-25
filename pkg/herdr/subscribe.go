@@ -4,8 +4,10 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
+	"os"
 	"time"
 )
 
@@ -35,17 +37,23 @@ func (c *Client) Subscribe(ctx context.Context, subs []Subscription) (<-chan Eve
 		timeout = 5 * time.Second
 	}
 	handshakeDeadline := time.Now().Add(timeout)
+	deadlineFromCtx := false
 	if dl, ok := ctx.Deadline(); ok && dl.Before(handshakeDeadline) {
 		handshakeDeadline = dl
+		deadlineFromCtx = true
 	}
 
 	var d net.Dialer
 	dialCtx, cancelDial := context.WithDeadline(ctx, handshakeDeadline)
 	conn, err := d.DialContext(dialCtx, "unix", c.SocketPath)
+	dialExpired := dialCtx.Err() != nil
 	cancelDial()
 	if err != nil {
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return nil, fmt.Errorf("herdr subscribe: %w", ctxErr)
+		}
+		if deadlineFromCtx && dialExpired {
+			return nil, fmt.Errorf("herdr subscribe: %w", context.DeadlineExceeded)
 		}
 		return nil, fmt.Errorf("%w: dial %s: %w", ErrUnavailable, c.SocketPath, err)
 	}
@@ -65,6 +73,11 @@ func (c *Client) Subscribe(ctx context.Context, subs []Subscription) (<-chan Eve
 		_ = conn.Close()
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return nil, fmt.Errorf("herdr subscribe: %w", ctxErr)
+		}
+		// The connection deadline can fire an instant before ctx notices
+		// its own, identical deadline.
+		if deadlineFromCtx && errors.Is(err, os.ErrDeadlineExceeded) {
+			return nil, fmt.Errorf("herdr subscribe: %w: %w", context.DeadlineExceeded, err)
 		}
 		return nil, err
 	}
