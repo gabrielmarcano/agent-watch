@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
@@ -182,12 +183,15 @@ func TestFCM_InvalidTokens(t *testing.T) {
 	defer server.Close()
 
 	tokens := []string{"token-404", "token-bare-404", "token-unregistered", "token-valid"}
+	var mu sync.Mutex // tokens are sent concurrently
 	fcm := &FCM{
 		ProjectID: "test-proj",
 		Endpoint:  server.URL,
 		Tokens:    func() []string { return tokens },
 		Client:    server.Client(),
 		OnInvalidToken: func(token string) {
+			mu.Lock()
+			defer mu.Unlock()
 			deadTokens = append(deadTokens, token)
 		},
 	}
@@ -195,6 +199,7 @@ func TestFCM_InvalidTokens(t *testing.T) {
 	msg := Message{Event: EventDone, Title: "test"}
 	_ = fcm.Send(context.Background(), msg)
 
+	sort.Strings(deadTokens)
 	if len(deadTokens) != 2 {
 		t.Fatalf("expected 2 dead tokens, got %d: %v", len(deadTokens), deadTokens)
 	}
@@ -314,14 +319,19 @@ func TestFCM_DeadTokenDetection(t *testing.T) {
 			}))
 			defer server.Close()
 
+			var mu sync.Mutex // tokens are sent concurrently
 			var dead []string
 			fcm := &FCM{
-				ProjectID:      "test-proj",
-				Endpoint:       server.URL,
-				Tokens:         func() []string { return []string{"tok-a", "tok-b"} },
-				Client:         server.Client(),
-				OnInvalidToken: func(token string) { dead = append(dead, token) },
-				RetryDelay:     time.Millisecond, // the 5xx case retries
+				ProjectID: "test-proj",
+				Endpoint:  server.URL,
+				Tokens:    func() []string { return []string{"tok-a", "tok-b"} },
+				Client:    server.Client(),
+				OnInvalidToken: func(token string) {
+					mu.Lock()
+					defer mu.Unlock()
+					dead = append(dead, token)
+				},
+				RetryDelay: time.Millisecond, // the 5xx case retries
 			}
 
 			if err := fcm.Send(context.Background(), Message{Event: EventDone, Title: "t"}); err == nil {
@@ -335,5 +345,113 @@ func TestFCM_DeadTokenDetection(t *testing.T) {
 				t.Fatalf("a %d that is not about the token must not unregister tokens, got %v", tt.status, dead)
 			}
 		})
+	}
+}
+
+// testDeadline bounds a wait that must succeed long before it expires. It is a
+// guard against hanging, never a timing assertion.
+const testDeadline = 5 * time.Second
+
+// hangingFCM is a fake FCM endpoint where token "tok-hang" never answers until
+// the client gives up or the test ends; every other token gets a 200.
+type hangingFCM struct {
+	server    *httptest.Server
+	release   chan struct{}
+	delivered chan string
+}
+
+func newHangingFCM(t *testing.T) *hangingFCM {
+	t.Helper()
+	h := &hangingFCM{release: make(chan struct{}), delivered: make(chan string, 16)}
+	h.server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var p fcmMessagePayload
+		_ = json.NewDecoder(r.Body).Decode(&p)
+		if p.Message.Token == "tok-hang" {
+			select {
+			case <-r.Context().Done(): // the client gave up on this token
+			case <-h.release:
+			}
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		h.delivered <- p.Message.Token
+	}))
+	t.Cleanup(func() {
+		close(h.release)
+		h.server.Close()
+	})
+	return h
+}
+
+// A token that never answers must not hold back the other tokens: each one
+// is sent on its own, not after the hanging one.
+func TestFCM_HangingTokenDoesNotStarveOthers(t *testing.T) {
+	h := newHangingFCM(t)
+	fcm := &FCM{
+		ProjectID: "test-proj",
+		Endpoint:  h.server.URL,
+		Tokens:    func() []string { return []string{"tok-hang", "tok-good-1", "tok-good-2"} },
+		Client:    h.server.Client(),
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	sendDone := make(chan error, 1)
+	go func() { sendDone <- fcm.Send(ctx, Message{Event: EventBlocked, PaneID: "p1"}) }()
+
+	got := map[string]bool{}
+	for len(got) < 2 {
+		select {
+		case tok := <-h.delivered:
+			got[tok] = true
+		case <-time.After(testDeadline):
+			t.Fatalf("healthy tokens starved behind a hanging one; delivered so far: %v", got)
+		}
+	}
+	if !got["tok-good-1"] || !got["tok-good-2"] {
+		t.Fatalf("delivered = %v, want tok-good-1 and tok-good-2", got)
+	}
+
+	cancel() // end the hanging token
+	select {
+	case err := <-sendDone:
+		if err == nil || !strings.Contains(err.Error(), "fcm post") {
+			t.Fatalf("Send error = %v, want the hanging token's failure", err)
+		}
+	case <-time.After(testDeadline):
+		t.Fatalf("Send did not return after its context was canceled")
+	}
+}
+
+// Each token has its own timeout, so a hanging token ends even when the
+// caller's context has no deadline.
+func TestFCM_TokenTimeoutEndsAHangingToken(t *testing.T) {
+	h := newHangingFCM(t)
+	fcm := &FCM{
+		ProjectID:    "test-proj",
+		Endpoint:     h.server.URL,
+		Tokens:       func() []string { return []string{"tok-hang", "tok-good-1"} },
+		Client:       h.server.Client(),
+		TokenTimeout: 20 * time.Millisecond,
+	}
+
+	sendDone := make(chan error, 1)
+	go func() { sendDone <- fcm.Send(context.Background(), Message{Event: EventBlocked, PaneID: "p1"}) }()
+
+	select {
+	case err := <-sendDone:
+		if err == nil || !strings.Contains(err.Error(), "deadline exceeded") {
+			t.Fatalf("Send error = %v, want the hanging token's timeout", err)
+		}
+	case <-time.After(testDeadline):
+		t.Fatalf("Send never returned: the hanging token has no timeout of its own")
+	}
+	select {
+	case tok := <-h.delivered:
+		if tok != "tok-good-1" {
+			t.Fatalf("delivered %q, want tok-good-1", tok)
+		}
+	default:
+		t.Fatalf("tok-good-1 was not delivered")
 	}
 }

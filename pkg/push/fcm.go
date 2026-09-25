@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"golang.org/x/oauth2"
@@ -18,21 +19,27 @@ import (
 )
 
 const (
-	defaultFCMEndpoint   = "https://fcm.googleapis.com"
-	defaultFCMRetryDelay = time.Second
+	defaultFCMEndpoint     = "https://fcm.googleapis.com"
+	defaultFCMRetryDelay   = time.Second
+	defaultFCMTokenTimeout = 10 * time.Second
 )
 
 // FCM implements Sender for Wear OS via Firebase Cloud Messaging HTTP v1.
 type FCM struct {
-	ProjectID      string
-	Client         *http.Client
-	Tokens         func() []string
-	Endpoint       string
+	ProjectID string
+	Client    *http.Client
+	Tokens    func() []string
+	Endpoint  string
+	// OnInvalidToken is called for each token FCM reports dead. Tokens are
+	// sent concurrently, so it may be called from several goroutines at once.
 	OnInvalidToken func(token string)
 	Logger         *slog.Logger
 	// RetryDelay is the pause before retrying a token after a transient
 	// failure. Zero means 1s.
 	RetryDelay time.Duration
+	// TokenTimeout bounds the delivery to one token, retry included. Zero
+	// means 10s. The caller's deadline still applies.
+	TokenTimeout time.Duration
 }
 
 // NewFCMFromCredentials parses Firebase service account credentials and initializes FCM.
@@ -114,8 +121,16 @@ func (f *FCM) Send(ctx context.Context, m Message) error {
 		client = http.DefaultClient
 	}
 
-	var sendErrors []error
-	for _, token := range tokens {
+	timeout := f.TokenTimeout
+	if timeout <= 0 {
+		timeout = defaultFCMTokenTimeout
+	}
+
+	// Every token is sent on its own, with its own timeout: one device that
+	// never answers must not use up the budget of the others.
+	sendErrors := make([]error, len(tokens))
+	var wg sync.WaitGroup
+	for i, token := range tokens {
 		payload := fcmMessagePayload{
 			Message: fcmMessage{
 				Token: token,
@@ -126,10 +141,15 @@ func (f *FCM) Send(ctx context.Context, m Message) error {
 				},
 			},
 		}
-		if err := f.sendToken(ctx, client, url, payload); err != nil {
-			sendErrors = append(sendErrors, err)
-		}
+		wg.Add(1)
+		go func(i int, payload fcmMessagePayload) {
+			defer wg.Done()
+			tokenCtx, cancel := context.WithTimeout(ctx, timeout)
+			defer cancel()
+			sendErrors[i] = f.sendToken(tokenCtx, client, url, payload)
+		}(i, payload)
 	}
+	wg.Wait()
 
 	// Each token was already retried as needed: the dispatcher must not
 	// retry the whole Send, or the tokens that succeeded get it twice.
