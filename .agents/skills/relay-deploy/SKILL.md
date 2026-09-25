@@ -27,15 +27,18 @@ file bin/agent-watch-relay-linux-amd64    # must say "statically linked"
 ## 2. Ship (needs SSH access; ask the owner if you lack it)
 
 ```bash
+make deploy-relay                     # target and options from the owner's agent-watch.env
 deploy/relay/deploy.sh <vps>
 SSH_OPTS="-i <key> -o Port=<port>" deploy/relay/deploy.sh <vps>   # extra ssh/scp options
 ```
+
+- **Never read, print or edit `agent-watch.env`** (the guards refuse writes to it). `make deploy-relay` reads it itself.
 
 - **Clean tree only:** it refuses to run with uncommitted or untracked changes, so the binary always matches a commit. Commit first.
 - **Version stamp:** `<Makefile VERSION>-<short sha>`; check it with `agent-watch-relay version` on the box.
 - **`SSH_OPTS`** goes to both `ssh` and `scp`. Use `-o Port=…`, never `-p` (`scp` spells it `-P`).
 - It keeps the replaced binary as `/usr/local/bin/agent-watch-relay.prev`, installs the new one, restarts the unit, and curls `/v1/healthz` on the `AW_LISTEN` address for up to 15 s. **If the new binary never answers, it prints the last journal lines, restores `.prev`, restarts, and exits non-zero.**
-- It never touches `/etc/agent-watch-relay/env`. Needs root over SSH and `curl` on the box.
+- It never touches `/etc/agent-watch-relay/env`, except with **`--sync-env`** (`make deploy-relay ARGS=--sync-env`), which updates it key by key from `agent-watch.env`, keeps `env.bak-<time>`, and rolls it back with the binary. **Only when the owner asks for it:** it changes live secrets. Needs root over SSH and `curl` on the box.
 
 ## 3. Check
 

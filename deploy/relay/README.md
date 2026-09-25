@@ -5,15 +5,30 @@ Setup and deployment are in [`docs/phases/3c-relay-deploy.md`](../../docs/phases
 ## Deploy a new build
 
 ```bash
-deploy/relay/deploy.sh root@<vps>
-SSH_OPTS="-i ~/.ssh/relay_ed25519 -o Port=2222" deploy/relay/deploy.sh root@<vps>
+make deploy-relay                     # target and options from agent-watch.env (AW_RELAY_SSH, AW_RELAY_SSH_OPTS)
+make deploy-relay ARGS=--sync-env     # also update /etc/agent-watch-relay/env from agent-watch.env
+
+deploy/relay/deploy.sh root@<vps>     # without agent-watch.env
+SSH_OPTS="-i ~/.ssh/<key> -o Port=2222" deploy/relay/deploy.sh root@<vps>
 ```
 
-- **Clean tree only.** It refuses to run with uncommitted or untracked changes, so the binary always matches a commit.
+- **Clean tree only.** It refuses to run with uncommitted or untracked changes, so the binary always matches a commit. (`agent-watch.env` is git-ignored and does not count.)
 - **Version stamp:** `<Makefile VERSION>-<short sha>`, e.g. `0.2.0-d5b8e33`. Check it with `agent-watch-relay version`.
-- **`SSH_OPTS`** goes to both `ssh` and `scp`. Use `-o Port=…`, not `-p`: `scp` spells the port `-P`.
-- **Rollback:** the replaced binary is kept as `/usr/local/bin/agent-watch-relay.prev`. After the restart the box curls `/v1/healthz` on the address in `AW_LISTEN` (from `/etc/agent-watch-relay/env`) for up to 15 s. If it never answers, the script prints the last journal lines, restores `.prev`, restarts, and exits non-zero.
-- **Needs on the box:** root over SSH (it writes `/usr/local/bin` and runs `systemctl`) and `curl`.
+- **Target:** an explicit `<ssh-target>` wins and uses `SSH_OPTS` only. Without one, `deploy.sh` reads `AW_RELAY_SSH` and `AW_RELAY_SSH_OPTS` from `agent-watch.env` (`AW_ENV_FILE=<path>` for another file); `SSH_OPTS`, if set, still overrides the file's options.
+- **`SSH_OPTS` / `AW_RELAY_SSH_OPTS`** go to both `ssh` and `scp`. Use `-o Port=…`, not `-p`: `scp` spells the port `-P`.
+- **Rollback:** the replaced binary is kept as `/usr/local/bin/agent-watch-relay.prev`. After the restart the box curls `/v1/healthz` on the address in `AW_LISTEN` (from `/etc/agent-watch-relay/env`) for up to 15 s. If it never answers, the script prints the last journal lines, restores `.prev` (and the env file, after `--sync-env`), restarts, and exits non-zero.
+- **Needs on the box:** root over SSH (it writes `/usr/local/bin` and `/etc/agent-watch-relay`, and runs `systemctl`) and `curl`.
+
+### `--sync-env`: the server's env file from `agent-watch.env`
+
+Opt-in. It never runs on a plain deploy.
+
+- **What is synced:** the relay keys `agent-watch.env` sets on an uncommented line, even an empty one: `AW_HOST_TOKEN`, `AW_LISTEN`, `AW_TRUSTED_PROXIES`, `AW_CLIENT_IP_HEADER`, `AW_PUSH_RESOLVED`, `AW_FCM_CREDENTIALS`, `AW_NTFY_URL`, `AW_NTFY_TOPIC`, `AW_NTFY_TOKEN`. A commented-out key leaves the server's line alone. `AW_DATA_DIR` is never synced (a new one also needs a `ReadWritePaths=` drop-in).
+- **Checked on the Mac, before the build:** `AW_HOST_TOKEN` must be 64 hex characters (an empty token is never sent), and values with a quote, a backslash or `$` are refused.
+- **On the server:** each key replaces its line in `/etc/agent-watch-relay/env` in place; other keys, comments and blank lines stay, and missing keys are appended at the end. The file keeps its owner and mode (`root:agentwatch`, `0640`). The server file must exist already (first-time setup: [`docs/phases/3c-relay-deploy.md`](../../docs/phases/3c-relay-deploy.md)).
+- **Backup:** when anything changed, the previous file is kept as `/etc/agent-watch-relay/env.bak-<UTC time>`. Backups hold the old secrets with the same mode; delete old ones by hand.
+- **Secrets:** the values travel in a `0600` temp file over `scp` and are deleted after the run. Nothing is printed but key names: `env: changed: …; added: …; unchanged: …`.
+- **The Firebase JSON** is not in `agent-watch.env`: copy it to the server yourself and put its server path in `AW_FCM_CREDENTIALS`.
 
 ## Client IP and the pairing rate limit
 
@@ -124,7 +139,7 @@ sudo agent-watch-relay devices revoke <device_id>
 
 1. `sudo agent-watch-relay devices list`, then find the device by name and last-seen time.
 2. `sudo agent-watch-relay devices revoke <device_id>`.
-3. **Apple Watch (ntfy):** revoking does not stop ntfy notifications, because every watchOS device shares the topic. Put a new random `AW_NTFY_TOPIC` in `/etc/agent-watch-relay/env`, run `sudo systemctl restart agent-watch-relay`, and subscribe the remaining devices to the new topic.
+3. **Apple Watch (ntfy):** revoking does not stop ntfy notifications, because every watchOS device shares the topic. Put a new random `AW_NTFY_TOPIC` in `/etc/agent-watch-relay/env` and run `sudo systemctl restart agent-watch-relay` (or, if `agent-watch.env` manages it, change it there and run `make deploy-relay ARGS=--sync-env`), then subscribe the remaining devices to the new topic.
 
 ## Files in `/var/lib/agent-watch-relay`
 

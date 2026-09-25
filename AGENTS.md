@@ -111,7 +111,8 @@ This document defines the development rules, architectural boundaries, and codin
 
 ```
 agent-monitor/
-├── go.mod · go.sum · Makefile
+├── go.mod · go.sum · Makefile    # make config / configure-bridge / deploy-relay / watchos-config read agent-watch.env
+├── agent-watch.env.example       # the one deployment config file, documented; the real agent-watch.env is git-ignored (secret)
 ├── herdr-plugin.toml             # herdr-agent-watch plugin manifest
 ├── cmd/
 │   ├── bridge/                   # host daemon + CLI (configure/run/start/restart/stop/status/pair)
@@ -128,6 +129,7 @@ agent-monitor/
 │   ├── launchd/                  # LaunchAgent template
 │   └── relay/                    # systemd unit, env/proxy examples, deploy.sh, Dockerfile, README.md (operations)
 ├── macos-bar/                    # macOS menu bar app over the bridge CLI (make bar, make bar-test)
+├── tools/config/                 # awenv.sh: agent-watch.env reader for the Makefile and deploy.sh (+ test_awenv.sh)
 ├── tools/guards/                 # guard implementation (hooks, pre-commit)
 ├── tools/herdr-overrides/        # TEMPORARY herdr detection overrides (agy, claude); remove when upstream fixes them
 ├── wearos-app/                   # Wear OS client (Kotlin, Jetpack Compose)
@@ -144,6 +146,8 @@ agent-monitor/
   - ntfy topics/tokens
   - Cloudflare tokens, SSH keys
   - `.env` files and the bridge `config.toml`
+  - `agent-watch.env` (the host token and relay secrets; only `agent-watch.env.example` is committed)
+- **Never read, print or write `agent-watch.env`.** The owner creates it with `make config`; the guards refuse writes and commits. Tools take secrets from it directly (`configure --env-file`, `deploy.sh --sync-env`), never through argv, logs or output.
 - All traffic across public networks uses TLS (HTTPS / WSS).
 - **Tokens travel in `Authorization` headers**, never in query strings (they end up in proxy logs).
 - The relay stores only **hashes** of device tokens. Pairing codes are short-lived and rate-limited.

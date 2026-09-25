@@ -513,6 +513,8 @@ ntfy never gets `resolved`: it cannot withdraw a notification it already deliver
 
 ## 5. Relay configuration (environment variables)
 
+The relay reads them from `/etc/agent-watch-relay/env` (systemd `EnvironmentFile=`). `deploy.sh --sync-env` can copy the ones set in `agent-watch.env` there, key by key (§7).
+
 | Variable | Required | Default | Meaning |
 |---|---|---|---|
 | `AW_LISTEN` | no | `:8080` | Listen address. Bind it to the address the reverse proxy reaches (e.g. `127.0.0.1:8080`, or the docker bridge `172.17.0.1:8080`), never to a public interface |
@@ -558,6 +560,8 @@ ntfy never gets `resolved`: it cannot withdraw a notification it already deliver
 - **Location:** `$HERDR_PLUGIN_CONFIG_DIR/config.toml`. For the plugin id `herdr-agent-watch` this is `~/.config/herdr/plugins/config/herdr-agent-watch/config.toml`.
 - **Mode:** `0600`, in a `0700` directory. Both are enforced on every write, also for a file that already exists.
 - **Written by:** `agent-watch-bridge configure` (atomically). Without `--config` it writes the config herdr's environment names, else the one the installed service uses, else the default above.
+  - `--env-file <agent-watch.env>` (what `make configure-bridge` runs) takes `relay_url = wss://<AW_RELAY_DOMAIN>/v1/host` and `host_token = AW_HOST_TOKEN` from the file (§7), so the token never appears in argv. `--relay-url` / `--host-token` override it value by value.
+  - It rewrites the whole file. When that drops a previous `host_name` or `claude_config_dirs`, it prints a `note:` on stderr; pass `--host-name` / `--claude-config-dir` again to keep them.
 - **`relay_url`:** `wss://` (`ws://` only for `localhost` / `127.0.0.1`). A URL without a path gets `/v1/host` appended.
 
 ```toml
@@ -630,3 +634,35 @@ A reader must not trust `pid` alone: a file left by a crash names a dead pid. `s
 ```
 
 `expires_at` is the relay's `PairCodeResponse.expires_at`; `expires_in_seconds` is computed from it (`0` if it cannot be parsed or has passed). `pair` needs only the config and the relay, not a running bridge.
+
+---
+
+## 7. Shared configuration file (`agent-watch.env`)
+
+One file at the repo root holds everything a deployment needs. `agent-watch.env.example` is committed and documents every key; `agent-watch.env` is git-ignored, mode `0600`, refused by the guards, and created by `make config` (which also generates `AW_HOST_TOKEN`).
+
+**Syntax** (the Makefile `-include`s the file, so these are make's rules, and every reader applies them):
+
+- `KEY=value`, one per line; no `export`, no quotes (the value is the rest of the line, trimmed, taken literally).
+- `#` starts a comment anywhere on a line, so a value cannot contain `#`.
+- The last assignment of a key wins.
+
+| Key | Read by | Meaning |
+|---|---|---|
+| `AW_RELAY_DOMAIN` | bridge `configure --env-file`, Wear OS build, `make watchos-config` | Relay host (`host[:port]`, no scheme or path). Derived: `wss://<domain>/v1/host` (bridge), `https://<domain>` (watch pairing default) |
+| `AW_HOST_TOKEN` | bridge `configure --env-file`, `deploy.sh --sync-env` | 64 hex chars shared by the relay (§5) and the bridge (§6). `make config` fills it when empty and never prints it |
+| `AW_RELAY_SSH` | `make deploy-relay` / `deploy.sh` without a target | SSH target of the VPS (root) |
+| `AW_RELAY_SSH_OPTS` | same | Extra `ssh`/`scp` options, word-split (`-i <key> -o Port=<n>`). `SSH_OPTS` in the environment overrides it |
+| `AW_LISTEN`, `AW_TRUSTED_PROXIES`, `AW_CLIENT_IP_HEADER`, `AW_PUSH_RESOLVED`, `AW_FCM_CREDENTIALS`, `AW_NTFY_URL`, `AW_NTFY_TOPIC`, `AW_NTFY_TOKEN` | `deploy.sh --sync-env` only | Relay variables (§5). Commented out in the example; `AW_FCM_CREDENTIALS` is a path **on the server** |
+| `AW_WATCHOS_BUNDLE_ID` | `make watchos-config` | Bundle id for the Phase 6 watchOS project. Empty: the project's own |
+
+**`deploy.sh --sync-env`** (opt-in; `make deploy-relay ARGS=--sync-env`):
+
+- A relay key counts when the file has an uncommented line for it, even with an empty value; a commented-out key leaves the server's line alone. `AW_HOST_TOKEN` must be 64 hex. Values with a quote, a backslash or `$` are refused (systemd would not read them literally).
+- On the server, each synced key replaces its line in `/etc/agent-watch-relay/env`; other lines, other keys and comments stay, and missing keys are appended. The file keeps its owner and mode. When anything changed, the previous file is kept as `env.bak-<UTC time>` next to it.
+- The values travel in a `0600` file over `scp` and are never printed: the output lists key names only (`changed`, `added`, `unchanged`).
+- If the relay is not healthy after the restart, both the binary and the env file are rolled back.
+
+**Wear OS:** `BuildConfig.DEFAULT_RELAY_URL` is `"https://<AW_RELAY_DOMAIN>"`, or `""` without the file or the key. A malformed domain fails the build. The application id stays `com.gabriel.agentwatch`.
+
+**watchOS:** `make watchos-config` writes the git-ignored `watchos-app/Config.generated.xcconfig` (`AW_RELAY_DOMAIN`, `AW_RELAY_URL`, `PRODUCT_BUNDLE_IDENTIFIER` when set). The legacy Xcode project does not use it; the Phase 6 project takes it as its base configuration.

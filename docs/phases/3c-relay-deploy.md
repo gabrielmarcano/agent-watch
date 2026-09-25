@@ -32,7 +32,7 @@ The files are the source of truth; this table says what each one must keep. **No
 | `env.example` | Every variable of `contracts.md` §5 with safe defaults: `AW_LISTEN=127.0.0.1:8080`, `AW_HOST_TOKEN` placeholder, `AW_DATA_DIR`, and commented `AW_FCM_CREDENTIALS`, `AW_NTFY_*`, `AW_PUSH_RESOLVED`, `AW_TRUSTED_PROXIES`, `AW_CLIENT_IP_HEADER` |
 | `nginx.conf.example` | A full `server` block: TLS, WebSocket upgrade (`map $http_upgrade $connection_upgrade`), `X-Forwarded-For` / `X-Real-IP`, `proxy_buffering off` and `proxy_cache off` for SSE, `proxy_read_timeout`/`proxy_send_timeout 90s`. Relay env: `AW_TRUSTED_PROXIES=127.0.0.1/32` |
 | `Caddyfile.example` | Caddy with a Cloudflare Origin Certificate and `flush_interval -1` for SSE. Relay env: `AW_TRUSTED_PROXIES=127.0.0.1/32` |
-| `deploy.sh` | Builds and ships the binary (below). Never touches secrets |
+| `deploy.sh` | Builds and ships the binary (below). Touches secrets only with `--sync-env`, which updates the server's env file from `agent-watch.env` (`deploy/relay/README.md`) |
 | `Dockerfile` | Optional container: distroless `nonroot`, a `0700` data dir owned by uid 65532, `VOLUME /var/lib/agent-watch-relay`. Build it from the repo root after `make relay-linux` |
 | `README.md` | Operations: deploys, client IP per topology, Nginx Proxy Manager in docker, firewall, hardening, devices, lost watch |
 
@@ -51,8 +51,9 @@ Needs root over SSH (it writes `/usr/local/bin` and runs `systemctl`) and `curl`
 ssh <vps>
 useradd --system --home /var/lib/agent-watch-relay --shell /usr/sbin/nologin agentwatch
 mkdir -p /etc/agent-watch-relay && chmod 0750 /etc/agent-watch-relay
-openssl rand -hex 32            # → AW_HOST_TOKEN (also goes into the bridge `configure`)
-# create /etc/agent-watch-relay/env from env.example with the real values
+# create /etc/agent-watch-relay/env from env.example; with agent-watch.env on the Mac, keep the
+# AW_HOST_TOKEN placeholder: `make deploy-relay ARGS=--sync-env` writes the token `make config` generated.
+# Without agent-watch.env: AW_HOST_TOKEN=$(openssl rand -hex 32), also given to the bridge `configure`.
 chown root:agentwatch /etc/agent-watch-relay/env && chmod 0640 /etc/agent-watch-relay/env
 # copy the unit
 cp agent-watch-relay.service /etc/systemd/system/   # scp it first
@@ -63,7 +64,7 @@ systemctl daemon-reload && systemctl enable agent-watch-relay
 - **`AW_TRUSTED_PROXIES`:** your proxy's address or network, so the pairing rate limit sees the real client (`deploy/relay/README.md` has the table per topology).
 - **A custom `AW_DATA_DIR`** must be added to `ReadWritePaths=` in a drop-in.
 
-Then run `deploy/relay/deploy.sh <vps>` from the Mac.
+Then, from the Mac: `make deploy-relay ARGS=--sync-env` (target, options and relay keys from `agent-watch.env`), or `deploy/relay/deploy.sh <vps>` without it.
 
 ### 3. TLS in front of the relay (owner)
 
@@ -93,7 +94,7 @@ curl -fsS -H "Authorization: Bearer $AW_HOST_TOKEN" https://relay.<domain>/v1/ho
 Then point the bridge at it and start the service:
 
 ```bash
-./bin/agent-watch-bridge configure --relay-url wss://relay.<domain> --host-token "$AW_HOST_TOKEN"
+make configure-bridge            # relay URL + token from agent-watch.env; token never in argv
 herdr plugin action invoke --plugin herdr-agent-watch start
 herdr plugin action invoke --plugin herdr-agent-watch status   # "relay: connected to relay.<domain>"; the relay api line shows "host_online":true
 ```

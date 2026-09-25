@@ -31,6 +31,7 @@
 | `Views/HistoryListView.swift`, `Views/ReaderDetailView.swift` | Adapt to the new `HistoryItem` |
 | `Utilities/*` | Keep |
 | `project.yml` | `SWIFT_VERSION: 5.9`; `deploymentTarget.watchOS: "10.0"` (needed for `NavigationStack` niceties; confirm the simulator runtime exists) |
+| `Config.generated.xcconfig` (git-ignored, from `make watchos-config`) | **Wire it in** as the target's base configuration (`configFiles` in `project.yml`, optional so the project builds without it). It sets `AW_RELAY_URL` (`https://<AW_RELAY_DOMAIN>`) and, when `AW_WATCHOS_BUNDLE_ID` is set, `PRODUCT_BUNDLE_IDENTIFIER`. Expose `AW_RELAY_URL` through an `Info.plist` key as `PairingView`'s default (empty when unset); drop any hard-coded domain. Reference: `contracts.md` §7 |
 
 ---
 

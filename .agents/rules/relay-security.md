@@ -36,5 +36,6 @@ The relay can make agents on the owner's Mac type and approve things, so treat i
 - **APNs is out of scope.** watchOS gets alerts through ntfy.
 
 ## Deploy
-- **Real secrets never enter the repo:** `/etc/agent-watch-relay/env`, the Firebase JSON, the ntfy topic and tokens. Only `*.example` files are committed.
+- **Real secrets never enter the repo:** `/etc/agent-watch-relay/env`, `agent-watch.env`, the Firebase JSON, the ntfy topic and tokens. Only `*.example` files are committed.
+- **Secrets never go on a command line or into output:** tools read them from `agent-watch.env` or the env file and print key names only (`configure --env-file`, `deploy.sh --sync-env`).
 - **Commands that need VPS or Cloudflare credentials are handed to the owner,** not run by agents.
