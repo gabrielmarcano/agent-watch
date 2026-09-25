@@ -43,7 +43,7 @@ func TestAuth_PairingCodes(t *testing.T) {
 	}
 	defer store.Close()
 
-	auth := NewAuthManager("test-host-token", store, true)
+	auth := NewAuthManager("test-host-token", store, ClientIPPolicy{})
 
 	// Generate 3 codes
 	c1, _, err := auth.GeneratePairCode()
@@ -96,7 +96,7 @@ func TestAuth_RateLimiting(t *testing.T) {
 	}
 	defer store.Close()
 
-	auth := NewAuthManager("test-host-token", store, true)
+	auth := NewAuthManager("test-host-token", store, ClientIPPolicy{})
 
 	// Test 5 attempts per IP limit
 	ip := "192.168.1.100"
@@ -139,19 +139,22 @@ func TestAuth_ClientIP(t *testing.T) {
 	}
 	defer store.Close()
 
-	authTrusted := NewAuthManager("test-host-token", store, true)
-	authUntrusted := NewAuthManager("test-host-token", store, false)
+	authTrusted := NewAuthManager("test-host-token", store, ClientIPPolicy{
+		TrustedProxies: mustPrefixes(t, "10.0.0.0/8"),
+		Header:         "Cf-Connecting-Ip",
+	})
+	authDefault := NewAuthManager("test-host-token", store, ClientIPPolicy{})
 
 	req, _ := http.NewRequest("POST", "/v1/pair", nil)
 	req.RemoteAddr = "10.0.0.1:12345"
 	req.Header.Set("CF-Connecting-IP", "203.0.113.195")
 
 	if ip := authTrusted.ClientIP(req); ip != "203.0.113.195" {
-		t.Fatalf("expected CF-Connecting-IP with trustCFIP=true, got %q", ip)
+		t.Fatalf("expected CF-Connecting-IP from a trusted peer with the header opt-in, got %q", ip)
 	}
 
-	if ip := authUntrusted.ClientIP(req); ip != "10.0.0.1" {
-		t.Fatalf("expected RemoteAddr host with trustCFIP=false, got %q", ip)
+	if ip := authDefault.ClientIP(req); ip != "10.0.0.1" {
+		t.Fatalf("expected RemoteAddr host with the default policy, got %q", ip)
 	}
 }
 
@@ -162,7 +165,7 @@ func TestAuth_PairCodeExpiry(t *testing.T) {
 	}
 	defer store.Close()
 
-	auth := NewAuthManager("test-host-token", store, true)
+	auth := NewAuthManager("test-host-token", store, ClientIPPolicy{})
 
 	auth.mu.Lock()
 	// Manually insert an expired code

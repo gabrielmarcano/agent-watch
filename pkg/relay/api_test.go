@@ -21,12 +21,20 @@ const testHostToken = "1111222233334444555566667777888899990000aaaabbbbccccdddde
 
 func setupTestServer(t *testing.T) (*Server, *httptest.Server) {
 	t.Helper()
+	return setupTestServerWith(t, nil)
+}
+
+// setupTestServerWith is setupTestServer with a hook to adjust the config.
+func setupTestServerWith(t *testing.T, configure func(*Config)) (*Server, *httptest.Server) {
+	t.Helper()
 	dir := t.TempDir()
 	cfg := &Config{
 		ListenAddr: ":0",
 		HostToken:  testHostToken,
 		DataDir:    dir,
-		TrustCFIP:  true,
+	}
+	if configure != nil {
+		configure(cfg)
 	}
 
 	server, err := NewServer(cfg)
@@ -127,17 +135,21 @@ func TestAPI_PairingFailures(t *testing.T) {
 		t.Fatalf("expected code pair_code_invalid, got %s", errResp.Error.Code)
 	}
 
-	// 2. Exhaust attempts (5 attempts per IP)
-	for i := 0; i < 5; i++ {
+	// 2. Exhaust attempts (5 attempts per IP; the one above already counted)
+	for i := 0; i < 4; i++ {
 		req, _ := http.NewRequest("POST", ts.URL+"/v1/pair", bytes.NewReader(pairBody))
-		req.Header.Set("CF-Connecting-IP", "1.2.3.4")
-		r, _ := http.DefaultClient.Do(req)
+		r, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("POST pair: %v", err)
+		}
 		r.Body.Close()
+		if r.StatusCode != http.StatusForbidden {
+			t.Fatalf("attempt %d: expected 403, got %d", i+2, r.StatusCode)
+		}
 	}
 
-	// 6th attempt from 1.2.3.4 should be 429
+	// 6th attempt from the same client IP should be 429
 	req, _ = http.NewRequest("POST", ts.URL+"/v1/pair", bytes.NewReader(pairBody))
-	req.Header.Set("CF-Connecting-IP", "1.2.3.4")
 	resp, err = http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("POST pair: %v", err)
@@ -414,5 +426,49 @@ func TestAPI_HistoryQuery(t *testing.T) {
 	// Newest first -> item-9
 	if histResp.Items[0].ID != "item-9" {
 		t.Fatalf("expected newest item item-9 first, got %s", histResp.Items[0].ID)
+	}
+}
+
+// pairAttempt posts a wrong pairing code with the given extra headers and
+// returns the status code.
+func pairAttempt(t *testing.T, ts *httptest.Server, headers map[string]string) int {
+	t.Helper()
+	body, _ := json.Marshal(model.PairRequest{Code: "000000", DeviceName: "Watch"})
+	req, _ := http.NewRequest("POST", ts.URL+"/v1/pair", bytes.NewReader(body))
+	for k, v := range headers {
+		req.Header.Set(k, v)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("POST pair: %v", err)
+	}
+	_, _ = io.Copy(io.Discard, resp.Body)
+	resp.Body.Close()
+	return resp.StatusCode
+}
+
+// A client talking to the relay directly (no trusted proxy in between) must
+// not escape the per-IP limit by inventing a new client IP in a header.
+func TestAPI_PairRateLimitIgnoresSpoofedHeaders(t *testing.T) {
+	_, ts := setupTestServer(t)
+
+	for i := 0; i < 5; i++ {
+		spoofed := fmt.Sprintf("203.0.113.%d", i+1)
+		code := pairAttempt(t, ts, map[string]string{
+			"CF-Connecting-IP": spoofed,
+			"X-Forwarded-For":  spoofed,
+			"X-Real-IP":        spoofed,
+		})
+		if code != http.StatusForbidden {
+			t.Fatalf("attempt %d: status %d, want 403", i+1, code)
+		}
+	}
+	code := pairAttempt(t, ts, map[string]string{
+		"CF-Connecting-IP": "203.0.113.99",
+		"X-Forwarded-For":  "203.0.113.99",
+		"X-Real-IP":        "203.0.113.99",
+	})
+	if code != http.StatusTooManyRequests {
+		t.Fatalf("6th attempt from the same peer with a spoofed IP header: status %d, want 429", code)
 	}
 }

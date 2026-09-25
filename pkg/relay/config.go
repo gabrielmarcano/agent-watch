@@ -4,6 +4,9 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"log/slog"
+	"net/http"
+	"net/netip"
 	"os"
 	"strings"
 )
@@ -23,7 +26,18 @@ type Config struct {
 	NtfyURL        string
 	NtfyTopic      string
 	NtfyToken      string
-	TrustCFIP      bool
+
+	// TrustedProxies (AW_TRUSTED_PROXIES) are the reverse proxies whose
+	// forwarding headers identify the client. Empty: use RemoteAddr only.
+	TrustedProxies []netip.Prefix
+	// ClientIPHeader (AW_CLIENT_IP_HEADER) is an optional single-IP header,
+	// e.g. CF-Connecting-IP, honored only from a trusted proxy.
+	ClientIPHeader string
+}
+
+// ClientIPPolicy returns the policy the rate limiter uses to identify clients.
+func (c *Config) ClientIPPolicy() ClientIPPolicy {
+	return ClientIPPolicy{TrustedProxies: c.TrustedProxies, Header: c.ClientIPHeader}
 }
 
 // LoadConfig loads and validates configuration from environment variables.
@@ -49,12 +63,22 @@ func LoadConfig() (*Config, error) {
 		dataDir = DefaultDataDir
 	}
 
-	trustCF := true
-	if val := os.Getenv("AW_TRUST_CF_IP"); val != "" {
-		lower := strings.ToLower(strings.TrimSpace(val))
-		if lower == "false" || lower == "0" || lower == "no" {
-			trustCF = false
+	trustedProxies, err := ParseTrustedProxies(os.Getenv("AW_TRUSTED_PROXIES"))
+	if err != nil {
+		return nil, fmt.Errorf("AW_TRUSTED_PROXIES: %w", err)
+	}
+	clientIPHeader := strings.TrimSpace(os.Getenv("AW_CLIENT_IP_HEADER"))
+	if clientIPHeader != "" {
+		clientIPHeader = http.CanonicalHeaderKey(clientIPHeader)
+		if len(trustedProxies) == 0 {
+			return nil, fmt.Errorf("AW_CLIENT_IP_HEADER=%s is only honored from a trusted proxy: set AW_TRUSTED_PROXIES too", clientIPHeader)
 		}
+	}
+
+	if _, set := os.LookupEnv("AW_TRUST_CF_IP"); set {
+		slog.Warn("AW_TRUST_CF_IP is no longer supported and is ignored; " +
+			"set AW_TRUSTED_PROXIES to your reverse proxy's CIDRs (the client IP then comes from X-Forwarded-For), " +
+			"and AW_CLIENT_IP_HEADER=CF-Connecting-IP only if the origin accepts traffic from Cloudflare alone")
 	}
 
 	cfg := &Config{
@@ -65,7 +89,8 @@ func LoadConfig() (*Config, error) {
 		NtfyURL:        os.Getenv("AW_NTFY_URL"),
 		NtfyTopic:      os.Getenv("AW_NTFY_TOPIC"),
 		NtfyToken:      os.Getenv("AW_NTFY_TOKEN"),
-		TrustCFIP:      trustCF,
+		TrustedProxies: trustedProxies,
+		ClientIPHeader: clientIPHeader,
 	}
 
 	return cfg, nil

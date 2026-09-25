@@ -17,7 +17,7 @@ func TestHub_Unauthorized(t *testing.T) {
 	store, _ := NewStore(t.TempDir())
 	defer store.Close()
 	state := NewState()
-	auth := NewAuthManager("valid-host-token", store, true)
+	auth := NewAuthManager("valid-host-token", store, ClientIPPolicy{})
 	hub := NewHub(auth, state, store, nil)
 
 	s := httptest.NewServer(http.HandlerFunc(hub.ServeHost))
@@ -38,7 +38,7 @@ func TestHub_HelloTimeout(t *testing.T) {
 	store, _ := NewStore(t.TempDir())
 	defer store.Close()
 	state := NewState()
-	auth := NewAuthManager("valid-host-token", store, true)
+	auth := NewAuthManager("valid-host-token", store, ClientIPPolicy{})
 	hub := NewHub(auth, state, store, nil)
 	hub.SetHelloTimeout(50 * time.Millisecond)
 
@@ -75,7 +75,7 @@ func TestHub_ConnectAndReplace(t *testing.T) {
 	store, _ := NewStore(t.TempDir())
 	defer store.Close()
 	state := NewState()
-	auth := NewAuthManager("valid-host-token", store, true)
+	auth := NewAuthManager("valid-host-token", store, ClientIPPolicy{})
 	hub := NewHub(auth, state, store, nil)
 
 	s := httptest.NewServer(http.HandlerFunc(hub.ServeHost))
@@ -159,7 +159,7 @@ func TestHub_CommandRoundTrip(t *testing.T) {
 	store, _ := NewStore(t.TempDir())
 	defer store.Close()
 	state := NewState()
-	auth := NewAuthManager("valid-host-token", store, true)
+	auth := NewAuthManager("valid-host-token", store, ClientIPPolicy{})
 	hub := NewHub(auth, state, store, nil)
 
 	s := httptest.NewServer(http.HandlerFunc(hub.ServeHost))

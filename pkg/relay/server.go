@@ -50,7 +50,7 @@ func NewServer(cfg *Config) (_ *Server, err error) {
 	}()
 
 	state := NewState()
-	auth := NewAuthManager(cfg.HostToken, store, cfg.TrustCFIP)
+	auth := NewAuthManager(cfg.HostToken, store, cfg.ClientIPPolicy())
 
 	var senders []push.Sender
 	if cfg.FCMCredentials != "" {

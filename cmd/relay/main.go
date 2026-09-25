@@ -63,7 +63,13 @@ Environment variables:
   AW_HOST_TOKEN    64-character hex token shared with the bridge (required)
   AW_DATA_DIR      Directory holding store.json, relay.lock and admin.sock
                    (default "/var/lib/agent-watch-relay")
-  AW_TRUST_CF_IP   Trust CF-Connecting-IP header for rate limiting (default "true")
+  AW_TRUSTED_PROXIES
+                   Comma-separated CIDRs of the reverse proxies allowed to report
+                   the client IP (X-Forwarded-For, then X-Real-IP). Default empty:
+                   the TCP peer address is the client IP
+  AW_CLIENT_IP_HEADER
+                   Optional single-IP header (e.g. CF-Connecting-IP) honored from
+                   a trusted proxy before X-Forwarded-For. Needs AW_TRUSTED_PROXIES
 
 "devices list|revoke" work whether the relay is running or not. While it runs,
 they go through its local admin socket ($AW_DATA_DIR/admin.sock): a revoked

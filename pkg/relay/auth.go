@@ -8,7 +8,6 @@ import (
 	"encoding/hex"
 	"fmt"
 	"math/big"
-	"net"
 	"net/http"
 	"strings"
 	"sync"
@@ -53,7 +52,7 @@ type pairCodeEntry struct {
 type AuthManager struct {
 	hostToken string
 	store     *Store
-	trustCFIP bool
+	ipPolicy  ClientIPPolicy
 
 	mu             sync.Mutex
 	pairCodes      []pairCodeEntry
@@ -69,12 +68,13 @@ type deviceSession struct {
 	cancel context.CancelFunc
 }
 
-// NewAuthManager initializes an AuthManager.
-func NewAuthManager(hostToken string, store *Store, trustCFIP bool) *AuthManager {
+// NewAuthManager initializes an AuthManager. ipPolicy decides which address
+// the pairing rate limiter counts attempts against.
+func NewAuthManager(hostToken string, store *Store, ipPolicy ClientIPPolicy) *AuthManager {
 	return &AuthManager{
 		hostToken:  hostToken,
 		store:      store,
-		trustCFIP:  trustCFIP,
+		ipPolicy:   ipPolicy,
 		ipAttempts: make(map[string][]time.Time),
 		sessions:   make(map[string]map[*deviceSession]struct{}),
 	}
@@ -247,20 +247,9 @@ func (a *AuthManager) pruneExpiredCodesLocked() {
 	a.pairCodes = active
 }
 
-// ClientIP extracts the client IP for rate limiting.
+// ClientIP extracts the client IP for rate limiting (see ClientIPPolicy).
 func (a *AuthManager) ClientIP(r *http.Request) string {
-	if a.trustCFIP {
-		cfIP := strings.TrimSpace(r.Header.Get("CF-Connecting-IP"))
-		if cfIP != "" {
-			return cfIP
-		}
-	}
-
-	host, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err == nil {
-		return host
-	}
-	return strings.TrimSpace(r.RemoteAddr)
+	return a.ipPolicy.ClientIP(r)
 }
 
 // CheckAndRecordAttempt checks if an attempt from clientIP is within limits,

@@ -491,14 +491,26 @@ ntfy never gets `resolved`: it cannot withdraw a notification it already deliver
 
 | Variable | Required | Default | Meaning |
 |---|---|---|---|
-| `AW_LISTEN` | no | `:8080` | Listen address (Cloudflare → origin) |
+| `AW_LISTEN` | no | `:8080` | Listen address. Bind it to the address the reverse proxy reaches (e.g. `127.0.0.1:8080`, or the docker bridge `172.17.0.1:8080`), never to a public interface |
 | `AW_HOST_TOKEN` | **yes** | — | 64 hex chars; the same value goes in the bridge config |
 | `AW_DATA_DIR` | no | `/var/lib/agent-watch-relay` | Holds `store.json`, `relay.lock` and `admin.sock` (see below) |
 | `AW_FCM_CREDENTIALS` | no | — | Path to the Firebase service-account JSON. FCM is disabled if unset |
 | `AW_NTFY_URL` | no | — | e.g. `https://ntfy.sh`. ntfy is disabled if unset |
 | `AW_NTFY_TOPIC` | with ntfy | — | Random, unguessable topic name |
 | `AW_NTFY_TOKEN` | no | — | ntfy access token |
-| `AW_TRUST_CF_IP` | no | `true` | Use `CF-Connecting-IP` as the client IP for rate limiting |
+| `AW_TRUSTED_PROXIES` | no | empty | Comma-separated CIDRs (a bare IP counts as one host) of the reverse proxies allowed to report the client IP. Empty: the TCP peer address is the client IP and every forwarding header is ignored |
+| `AW_CLIENT_IP_HEADER` | no | empty | A single-IP header, e.g. `CF-Connecting-IP`, honored from a trusted proxy before `X-Forwarded-For`. Requires `AW_TRUSTED_PROXIES`. Set it only when nothing but that CDN can reach the proxy, or clients can spoof it |
+
+**Client IP** (used by the `POST /v1/pair` rate limiter):
+
+1. The TCP peer is not in `AW_TRUSTED_PROXIES` → the peer address. Headers are ignored.
+2. The peer is trusted → the first usable of:
+   - `AW_CLIENT_IP_HEADER`, when set and a valid IP;
+   - the rightmost `X-Forwarded-For` entry that is not itself a trusted proxy (entries left of it are client-supplied and never used; a malformed entry stops the walk);
+   - `X-Real-IP`;
+   - the peer address.
+
+`AW_TRUST_CF_IP` was removed. If it is still set, the relay ignores it and logs one warning at startup.
 
 **Files in `AW_DATA_DIR`** (the directory is `0700`):
 
