@@ -3,7 +3,9 @@ package com.gabriel.agentwatch.network
 import android.content.Context
 import android.util.Log
 import com.gabriel.agentwatch.approval.commandErrorFeedback
+import com.gabriel.agentwatch.data.AgentStore
 import com.gabriel.agentwatch.data.Prefs
+import com.gabriel.agentwatch.data.mergeHistory
 import com.gabriel.agentwatch.model.*
 import com.google.gson.Gson
 import kotlinx.coroutines.*
@@ -135,6 +137,7 @@ object RelayRepository {
                     prefs?.clearAuth()
                     resetClient()
                     stop()
+                    synchronized(storeLock) { store.clear() }
                     _state.update { UiState(connection = Connection.Offline("Authentication revoked")) }
                     return
                 }
@@ -160,58 +163,51 @@ object RelayRepository {
         }
     }
 
+    /** Guards [store]; every state change goes through it and is then published to [_state]. */
+    private val storeLock = Any()
+    private val store = AgentStore()
+
+    private fun publishAgents() {
+        val agents = store.agents()
+        val hostOnline = store.hostOnline
+        val herdrOnline = store.herdrOnline
+        _state.update { it.copy(agents = agents, hostOnline = hostOnline, herdrOnline = herdrOnline) }
+    }
+
     private fun handleEvent(type: String, data: String) {
         try {
             when (type) {
                 "snapshot" -> {
                     val snapshot = gson.fromJson(data, AgentsSnapshot::class.java)
-                    val sorted = snapshot.agents.sortedWith(
-                        compareByDescending<AgentState> { it.severity() }
-                            .thenBy { it.label.lowercase() }
-                    )
-                    _state.update {
-                        it.copy(
-                            connection = Connection.Live,
-                            hostOnline = snapshot.host_online,
-                            herdrOnline = snapshot.herdr_online,
-                            agents = sorted
-                        )
+                    synchronized(storeLock) {
+                        store.applySnapshot(snapshot)
+                        publishAgents()
                     }
+                    _state.update { it.copy(connection = Connection.Live) }
                 }
                 "agent" -> {
                     val agent = gson.fromJson(data, AgentState::class.java)
-                    _state.update { current ->
-                        val updated = current.agents.filterNot { it.pane_id == agent.pane_id }.toMutableList()
-                        updated.add(agent)
-                        val sorted = updated.sortedWith(
-                            compareByDescending<AgentState> { it.severity() }
-                                .thenBy { it.label.lowercase() }
-                        )
-                        current.copy(agents = sorted)
+                    synchronized(storeLock) {
+                        if (store.applyAgent(agent)) publishAgents()
                     }
                 }
                 "agent_removed" -> {
                     val ref = gson.fromJson(data, PaneRef::class.java)
-                    _state.update { current ->
-                        current.copy(agents = current.agents.filterNot { it.pane_id == ref.pane_id })
+                    synchronized(storeLock) {
+                        store.applyRemoved(ref.pane_id)
+                        publishAgents()
                     }
                 }
                 "host" -> {
                     val host = gson.fromJson(data, HostEvent::class.java)
-                    _state.update {
-                        it.copy(
-                            hostOnline = host.host_online,
-                            herdrOnline = host.herdr_online
-                        )
+                    synchronized(storeLock) {
+                        store.applyHost(host)
+                        publishAgents()
                     }
                 }
                 "history" -> {
                     val item = gson.fromJson(data, HistoryItem::class.java)
-                    _state.update { current ->
-                        val filtered = current.history.filterNot { it.id == item.id }
-                        val combined = (listOf(item) + filtered).take(200)
-                        current.copy(history = combined)
-                    }
+                    _state.update { it.copy(history = mergeHistory(it.history, listOf(item))) }
                 }
             }
         } catch (e: Exception) {
@@ -223,25 +219,17 @@ object RelayRepository {
         val currentClient = getClient() ?: return
         coroutineScope {
             launch {
-                val snapRes = currentClient.agents()
-                snapRes.onSuccess { snapshot ->
-                    val sorted = snapshot.agents.sortedWith(
-                        compareByDescending<AgentState> { it.severity() }
-                            .thenBy { it.label.lowercase() }
-                    )
-                    _state.update {
-                        it.copy(
-                            hostOnline = snapshot.host_online,
-                            herdrOnline = snapshot.herdr_online,
-                            agents = sorted
-                        )
+                val since = synchronized(storeLock) { store.beginFetch() }
+                currentClient.agents().onSuccess { snapshot ->
+                    synchronized(storeLock) {
+                        store.applyFetched(snapshot, since)
+                        publishAgents()
                     }
                 }
             }
             launch {
-                val histRes = currentClient.history()
-                histRes.onSuccess { items ->
-                    _state.update { it.copy(history = items.take(200)) }
+                currentClient.history().onSuccess { items ->
+                    _state.update { it.copy(history = mergeHistory(it.history, items)) }
                 }
             }
         }
