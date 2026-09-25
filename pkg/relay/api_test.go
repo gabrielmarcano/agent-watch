@@ -620,6 +620,38 @@ func TestAPI_SSEHostOnlineAndOffline(t *testing.T) {
 	wantHost(false)
 }
 
+// The access log names the authenticated device, and nothing for requests
+// that never authenticated.
+func TestAPI_AccessLogIncludesDeviceID(t *testing.T) {
+	server, _ := setupTestServer(t)
+	devToken, _ := GenerateDeviceToken()
+	dev, _ := server.Store().AddDevice("Watch", Sha256Hex(devToken))
+	logs := captureLogs(t)
+
+	// ServeHTTP is synchronous, so the access log line is written on return.
+	req := httptest.NewRequest("GET", "/v1/agents", nil)
+	req.Header.Set("Authorization", "Bearer "+devToken)
+	rec := httptest.NewRecorder()
+	server.Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /v1/agents = %d, want 200", rec.Code)
+	}
+	if !strings.Contains(logs.String(), "device_id="+dev.ID) {
+		t.Fatalf("access log lacks device_id=%s: %q", dev.ID, logs.String())
+	}
+
+	logs.Reset()
+	req = httptest.NewRequest("GET", "/v1/agents", nil)
+	req.Header.Set("Authorization", "Bearer "+strings.Repeat("0", 64))
+	server.Handler().ServeHTTP(httptest.NewRecorder(), req)
+	if !strings.Contains(logs.String(), `device_id=""`) {
+		t.Fatalf("unauthenticated request should log an empty device_id: %q", logs.String())
+	}
+	if strings.Contains(logs.String(), devToken) {
+		t.Fatalf("access log leaks the device token")
+	}
+}
+
 // pairAttempt posts a wrong pairing code with the given extra headers and
 // returns the status code.
 func pairAttempt(t *testing.T, ts *httptest.Server, headers map[string]string) int {

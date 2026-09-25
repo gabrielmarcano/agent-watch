@@ -19,7 +19,8 @@ import (
 type contextKey string
 
 const (
-	deviceCtxKey contextKey = "device"
+	deviceCtxKey    contextKey = "device"
+	accessLogCtxKey contextKey = "access_log"
 
 	pairCodeTTL       = 5 * time.Minute
 	maxActiveCodes    = 3
@@ -180,6 +181,7 @@ func (a *AuthManager) DeviceAuthMiddleware(next http.Handler) http.Handler {
 		}
 
 		a.store.TouchDevice(dev.ID)
+		noteAccessLogDevice(ctx, dev.ID)
 		ctx = context.WithValue(ctx, deviceCtxKey, dev)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})

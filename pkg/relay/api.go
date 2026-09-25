@@ -2,6 +2,7 @@ package relay
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"errors"
 	"log/slog"
@@ -88,22 +89,33 @@ func (s *Server) routes() http.Handler {
 			status:         http.StatusOK,
 		}
 
-		mux.ServeHTTP(lrw, r)
+		// The device middleware authenticates on a derived request, so it
+		// reports the device back through this entry.
+		entry := &accessLogEntry{}
+		mux.ServeHTTP(lrw, r.WithContext(context.WithValue(r.Context(), accessLogCtxKey, entry)))
 
 		dur := time.Since(start)
-		deviceID := ""
-		if dev, ok := DeviceFromContext(r.Context()); ok {
-			deviceID = dev.ID
-		}
-
 		slog.Info("http request",
 			"method", r.Method,
 			"path", r.URL.Path,
 			"status", lrw.status,
 			"duration_ms", dur.Milliseconds(),
-			"device_id", deviceID,
+			"device_id", entry.deviceID,
 		)
 	})
+}
+
+// accessLogEntry collects what inner handlers know for the access log line.
+// It is only touched by the request's own goroutine.
+type accessLogEntry struct {
+	deviceID string
+}
+
+// noteAccessLogDevice records the authenticated device for the access log.
+func noteAccessLogDevice(ctx context.Context, deviceID string) {
+	if entry, ok := ctx.Value(accessLogCtxKey).(*accessLogEntry); ok {
+		entry.deviceID = deviceID
+	}
 }
 
 // GET /v1/healthz
