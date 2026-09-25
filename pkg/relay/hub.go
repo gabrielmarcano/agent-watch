@@ -177,12 +177,15 @@ func (h *Hub) ServeHost(w http.ResponseWriter, r *http.Request) {
 	if helloWait <= 0 {
 		helloWait = helloTimeout
 	}
-	helloCtx, helloCancel := context.WithTimeout(r.Context(), helloWait)
-	_, helloData, err := conn.Read(helloCtx)
-	helloCancel()
-	if err != nil {
+	// Close from a timer rather than with a read deadline: an expiring read
+	// context makes the websocket library drop the TCP connection at once,
+	// and the bridge would never see the 4001 close frame.
+	helloTimer := time.AfterFunc(helloWait, func() {
 		_ = conn.Close(wsCloseCodeHelloTimeout, "hello timeout")
-		return
+	})
+	_, helloData, err := conn.Read(r.Context())
+	if !helloTimer.Stop() || err != nil {
+		return // timed out (the timer is closing with 4001) or the read failed
 	}
 
 	decodedHello, err := model.DecodeWire(helloData)

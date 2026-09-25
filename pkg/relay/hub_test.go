@@ -64,11 +64,9 @@ func TestHub_HelloTimeout(t *testing.T) {
 		t.Fatalf("expected connection to be closed by server")
 	}
 
-	var closeErr websocket.CloseError
-	if websocket.CloseStatus(err) != 4001 {
-		t.Logf("got close err: %v (status %d)", err, websocket.CloseStatus(err))
+	if status := websocket.CloseStatus(err); status != 4001 {
+		t.Fatalf("got close err: %v (status %d), want close status 4001", err, status)
 	}
-	_ = closeErr
 }
 
 func TestHub_ConnectAndReplace(t *testing.T) {
