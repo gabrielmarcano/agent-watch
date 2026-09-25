@@ -156,7 +156,7 @@ func TestEngine_AgentStateMapping(t *testing.T) {
 
 	e := &Engine{}
 
-	// 1. Name is preferred as label
+	// 1. Task title is preferred as label, and Name is populated
 	st1, resolvedCwd := e.buildAgentState(herdr.AgentInfo{
 		PaneID:                "w1:p1",
 		Agent:                 &agent,
@@ -167,23 +167,26 @@ func TestEngine_AgentStateMapping(t *testing.T) {
 		AgentStatus:           "idle",
 		StateChangeSeq:        10,
 	})
-	if st1.Label != "custom-name" {
-		t.Errorf("label = %q, want custom-name", st1.Label)
+	if st1.Label != "stripped-title" {
+		t.Errorf("label = %q, want stripped-title", st1.Label)
+	}
+	if st1.Name != "custom-name" {
+		t.Errorf("name = %q, want custom-name", st1.Name)
 	}
 	if resolvedCwd != "/Users/test/Code/repo/subdir" || st1.CWD != "/Users/test/Code/repo/subdir" {
 		t.Errorf("cwd = %q, want /Users/test/Code/repo/subdir (foreground preference)", st1.CWD)
 	}
 
-	// 2. TerminalTitleStripped fallback when Name is nil
+	// 2. Name fallback when TerminalTitleStripped is nil
 	st2, _ := e.buildAgentState(herdr.AgentInfo{
-		PaneID:                "w1:p2",
-		Agent:                 &agent,
-		TerminalTitleStripped: &title,
-		CWD:                   &cwd,
-		AgentStatus:           "working",
+		PaneID:      "w1:p2",
+		Agent:       &agent,
+		Name:        &name,
+		CWD:         &cwd,
+		AgentStatus: "working",
 	})
-	if st2.Label != "stripped-title" {
-		t.Errorf("label = %q, want stripped-title", st2.Label)
+	if st2.Label != "custom-name" {
+		t.Errorf("label = %q, want custom-name", st2.Label)
 	}
 
 	// 3. Basename of CWD fallback when both name and title are nil

@@ -38,6 +38,7 @@ type Server struct {
 	listener    net.Listener
 	mu          sync.Mutex
 	agents      []map[string]any
+	workspaces  []map[string]any
 	screens     map[string]map[string]string // paneID -> source -> text
 	calls       []Call
 	failNext    map[string]failEntry
@@ -146,6 +147,14 @@ func (s *Server) SetAgents(agents []map[string]any) {
 	defer s.mu.Unlock()
 	s.agents = make([]map[string]any, len(agents))
 	copy(s.agents, agents)
+}
+
+// SetWorkspaces replaces the workspace.list payload.
+func (s *Server) SetWorkspaces(workspaces []map[string]any) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.workspaces = make([]map[string]any, len(workspaces))
+	copy(s.workspaces, workspaces)
 }
 
 // SetScreen sets the text returned by agent.read for a pane and source.
@@ -325,6 +334,22 @@ func (s *Server) handleConn(conn net.Conn) {
 			"result": map[string]any{
 				"type":   "agent_list",
 				"agents": agentsCopy,
+			},
+		}
+		s.writeJSON(conn, resp)
+		_ = conn.Close()
+
+	case "workspace.list":
+		s.mu.Lock()
+		workspacesCopy := make([]map[string]any, len(s.workspaces))
+		copy(workspacesCopy, s.workspaces)
+		s.mu.Unlock()
+
+		resp := map[string]any{
+			"id": idStr,
+			"result": map[string]any{
+				"type":       "workspace_list",
+				"workspaces": workspacesCopy,
 			},
 		}
 		s.writeJSON(conn, resp)

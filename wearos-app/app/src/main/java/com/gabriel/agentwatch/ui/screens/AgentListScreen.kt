@@ -1,9 +1,11 @@
 package com.gabriel.agentwatch.ui.screens
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -13,8 +15,12 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.rotary.onRotaryScrollEvent
 import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.Lifecycle
@@ -44,6 +50,10 @@ fun AgentListScreen(
     val focusRequester = remember { FocusRequester() }
     val coroutineScope = rememberCoroutineScope()
     val lifecycleOwner = LocalLifecycleOwner.current
+
+    val groupedAgents = remember(uiState.agents) {
+        uiState.agents.groupBy { it.workspace?.ifBlank { null } ?: it.workspace_id }
+    }
 
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
@@ -128,7 +138,7 @@ fun AgentListScreen(
                 }
             }
 
-            // Agent Chips
+            // Agent Chips grouped by workspace
             if (uiState.agents.isEmpty()) {
                 item {
                     Text(
@@ -139,11 +149,35 @@ fun AgentListScreen(
                     )
                 }
             } else {
-                items(uiState.agents, key = { it.pane_id }) { agent ->
-                    AgentChip(
-                        agent = agent,
-                        onClick = { onAgentClick(agent.pane_id) }
-                    )
+                groupedAgents.forEach { (workspaceName, agentsInWorkspace) ->
+                    item(key = "ws_$workspaceName") {
+                        ListHeader(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(top = 8.dp, bottom = 2.dp)
+                        ) {
+                            Text(
+                                text = workspaceName.uppercase(),
+                                style = MaterialTheme.typography.caption2.copy(
+                                    fontWeight = FontWeight.Bold,
+                                    letterSpacing = 0.8.sp
+                                ),
+                                color = Color.White.copy(alpha = 0.65f),
+                                textAlign = TextAlign.Start,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 4.dp)
+                            )
+                        }
+                    }
+                    items(agentsInWorkspace, key = { it.pane_id }) { agent ->
+                        AgentChip(
+                            agent = agent,
+                            onClick = { onAgentClick(agent.pane_id) }
+                        )
+                    }
                 }
             }
 
@@ -194,42 +228,73 @@ private fun AgentChip(
     val isBlocked = agent.status == "blocked"
     val color = statusColor(agent.status)
 
+    // Status-specific background and border tint
+    val (backgroundColor, borderColor) = when (agent.status) {
+        "blocked" -> Pair(BrightYellow.copy(alpha = 0.2f), BrightYellow.copy(alpha = 0.7f))
+        "working" -> Pair(LightBlue.copy(alpha = 0.15f), LightBlue.copy(alpha = 0.5f))
+        "done" -> Pair(BrightGreen.copy(alpha = 0.12f), BrightGreen.copy(alpha = 0.4f))
+        else -> Pair(Color(0x22FFFFFF), Color.Transparent)
+    }
+
     Chip(
         onClick = onClick,
-        label = {
-            Row(verticalAlignment = Alignment.CenterVertically) {
+        icon = {
+            Box(
+                modifier = Modifier.size(16.dp),
+                contentAlignment = Alignment.Center
+            ) {
                 if (isBlocked) {
                     Text(
-                        text = "⚠ ",
+                        text = "⚠",
                         color = BrightYellow,
-                        fontSize = 12.sp,
+                        fontSize = 13.sp,
                         fontWeight = FontWeight.Bold
                     )
+                } else {
+                    Box(
+                        modifier = Modifier
+                            .size(7.dp)
+                            .background(color, CircleShape)
+                    )
                 }
-                Text(
-                    text = agent.label.ifBlank { agent.pane_id },
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 12.sp,
-                    maxLines = 1
-                )
             }
         },
-        secondaryLabel = {
+        label = {
             Text(
-                text = "${agent.agent} · ${agent.status.uppercase()}",
-                fontSize = 9.sp,
-                color = color
+                text = agent.label.ifBlank { agent.name ?: agent.pane_id },
+                fontWeight = FontWeight.Bold,
+                fontSize = 12.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        },
+        secondaryLabel = {
+            val secondaryText = buildAnnotatedString {
+                if (!agent.name.isNullOrBlank() && agent.name != agent.label) {
+                    append("${agent.name} · ")
+                }
+                append("${agent.agent} · ")
+                withStyle(SpanStyle(color = color, fontWeight = FontWeight.Bold)) {
+                    append(agent.status.uppercase())
+                }
+            }
+            Text(
+                text = secondaryText,
+                fontSize = 9.5.sp,
+                color = Color.White.copy(alpha = 0.65f),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
             )
         },
         colors = ChipDefaults.chipColors(
-            backgroundColor = if (isBlocked) BrightYellow.copy(alpha = 0.2f) else Color(0x26FFFFFF)
+            backgroundColor = backgroundColor
         ),
         modifier = Modifier
             .fillMaxWidth()
             .padding(vertical = 2.dp)
             .then(
-                if (isBlocked) {
-                    Modifier.border(1.dp, BrightYellow.copy(alpha = 0.6f), RoundedCornerShape(18.dp))
+                if (borderColor != Color.Transparent) {
+                    Modifier.border(1.dp, borderColor, RoundedCornerShape(18.dp))
                 } else {
                     Modifier
                 }

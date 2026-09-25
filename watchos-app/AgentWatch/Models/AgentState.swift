@@ -51,6 +51,8 @@ struct AnyCodable: Codable {
 struct AgentState: Codable {
     var status: String = "idle" // "idle" | "thinking" | "waiting_for_permission" | "done"
     var session_id: String?
+    var name: String?
+    var workspace: String?
     var cwd: String?
     var last_query: String?
     var last_response: String?

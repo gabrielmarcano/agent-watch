@@ -171,3 +171,15 @@ func (c *Client) Prompt(ctx context.Context, paneID, text string) error {
 	}
 	return c.Call(ctx, "agent.prompt", params, nil)
 }
+
+// ListWorkspaces retrieves the list of workspaces from herdr.
+func (c *Client) ListWorkspaces(ctx context.Context) ([]WorkspaceInfo, error) {
+	var res struct {
+		Type       string          `json:"type"`
+		Workspaces []WorkspaceInfo `json:"workspaces"`
+	}
+	if err := c.Call(ctx, "workspace.list", nil, &res); err != nil {
+		return nil, err
+	}
+	return res.Workspaces, nil
+}

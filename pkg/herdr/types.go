@@ -43,6 +43,13 @@ func (a AgentInfo) TrustedSession() *AgentSession {
 	return a.AgentSession
 }
 
+// WorkspaceInfo represents a workspace returned by workspace.list.
+type WorkspaceInfo struct {
+	WorkspaceID string `json:"workspace_id"`
+	Number      int    `json:"number"`
+	Label       string `json:"label"`
+}
+
 // Pong is the response payload from herdr's "ping" method.
 type Pong struct {
 	Version  string `json:"version"`

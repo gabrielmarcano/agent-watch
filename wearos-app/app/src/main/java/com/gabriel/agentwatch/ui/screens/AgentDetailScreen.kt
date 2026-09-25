@@ -126,6 +126,23 @@ fun AgentDetailScreen(
                         color = Color.White,
                         textAlign = TextAlign.Center
                     )
+                    val contextLine = buildString {
+                        if (!agent.workspace.isNullOrBlank()) {
+                            append(agent.workspace)
+                        }
+                        if (!agent.name.isNullOrBlank() && agent.name != agent.label) {
+                            if (isNotEmpty()) append(" · ")
+                            append(agent.name)
+                        }
+                    }
+                    if (contextLine.isNotBlank()) {
+                        Text(
+                            text = contextLine,
+                            style = MaterialTheme.typography.caption2.copy(fontSize = 9.sp, fontWeight = FontWeight.SemiBold),
+                            color = Color.White.copy(alpha = 0.6f),
+                            textAlign = TextAlign.Center
+                        )
+                    }
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(
                             text = "● ",

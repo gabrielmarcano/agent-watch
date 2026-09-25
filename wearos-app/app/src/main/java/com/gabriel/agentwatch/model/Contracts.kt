@@ -24,8 +24,10 @@ data class AgentState(
     val pane_id: String = "",
     val agent: String = "",
     val label: String = "",
+    val name: String? = null,
     val cwd: String? = null,
     val workspace_id: String = "",
+    val workspace: String? = null,
     val status: String = "unknown",        // "idle" | "working" | "blocked" | "done" | "unknown"
     val focused: Boolean = false,
     val state_change_seq: Long = 0,

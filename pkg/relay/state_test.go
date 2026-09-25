@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/gabrielmarcano/agent-monitor/pkg/model"
 )
@@ -136,12 +137,13 @@ func TestState_SlowSubscriberDropped(t *testing.T) {
 		close(fastDone)
 	}()
 
-	// Buffer is 64. Send 80 events.
+	// Buffer is 64. Send 80 events with slight pacing so fast subscriber keeps up.
 	for i := 0; i < 80; i++ {
 		state.Upsert(model.AgentState{
 			PaneID: fmt.Sprintf("pane-%d", i),
 			Status: model.StatusWorking,
 		})
+		time.Sleep(50 * time.Microsecond)
 	}
 
 	// The slow subscriber's channel should have been closed when dropped

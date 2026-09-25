@@ -44,8 +44,10 @@ type AgentState struct {
     PaneID         string         `json:"pane_id"`
     Agent          string         `json:"agent"`
     Label          string         `json:"label"`
+    Name           string         `json:"name,omitempty"`
     CWD            string         `json:"cwd,omitempty"`
     WorkspaceID    string         `json:"workspace_id"`
+    Workspace      string         `json:"workspace,omitempty"`
     Status         AgentStatus    `json:"status"`
     Focused        bool           `json:"focused"`
     StateChangeSeq uint64         `json:"state_change_seq"`
@@ -58,9 +60,11 @@ type AgentState struct {
 |---|---|---|
 | `pane_id` | herdr `pane_id` | Primary key everywhere. Contains `:` (e.g. `w5:pAW`) |
 | `agent` | herdr `agent` | Lowercase herdr id: `claude`, `agy`, `opencode`, `codex`, … Empty string if herdr reports null |
-| `label` | computed | First non-empty of: herdr `name`, `terminal_title_stripped`, `basename(cwd)`, `pane_id` |
+| `label` | computed | First non-empty of: descriptive task `terminal_title_stripped`, herdr `name`, `basename(cwd)`, `pane_id` |
+| `name` | herdr `name` | Explicit pane name or slug if set, otherwise omitted |
 | `cwd` | herdr `foreground_cwd`, else `cwd` | Omit if both are null |
-| `workspace_id` | herdr `workspace_id` | |
+| `workspace_id` | herdr `workspace_id` | Internal workspace ID |
+| `workspace` | herdr workspace label | Human workspace name (e.g. `my-project`), otherwise omitted |
 | `status` | herdr `agent_status` | |
 | `focused` | herdr `focused` | |
 | `state_change_seq` | herdr `state_change_seq` | Used as the optimistic-concurrency token for commands |
@@ -74,8 +78,10 @@ type AgentState struct {
   "pane_id": "w5:pAE",
   "agent": "claude",
   "label": "bizum",
+  "name": "bizum",
   "cwd": "/Users/me/Code/app",
   "workspace_id": "w5",
+  "workspace": "bizum-app",
   "status": "blocked",
   "focused": false,
   "state_change_seq": 334,

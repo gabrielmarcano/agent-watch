@@ -78,8 +78,10 @@ type AgentState struct {
 	PaneID         string         `json:"pane_id"`
 	Agent          string         `json:"agent"`
 	Label          string         `json:"label"`
+	Name           string         `json:"name,omitempty"`
 	CWD            string         `json:"cwd,omitempty"`
 	WorkspaceID    string         `json:"workspace_id"`
+	Workspace      string         `json:"workspace,omitempty"`
 	Status         AgentStatus    `json:"status"`
 	Focused        bool           `json:"focused"`
 	StateChangeSeq uint64         `json:"state_change_seq"`

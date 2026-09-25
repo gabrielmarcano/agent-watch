@@ -37,6 +37,7 @@ type Engine struct {
 
 	mu          sync.RWMutex
 	states      map[string]*paneState
+	workspaces  map[string]string // workspace_id -> label
 	herdrOnline bool
 	pong        herdr.Pong
 	lastError   string
@@ -70,6 +71,7 @@ func NewEngine(
 		RetryDelay:   300 * time.Millisecond,
 		HistoryDelay: 500 * time.Millisecond,
 		states:       make(map[string]*paneState),
+		workspaces:   make(map[string]string),
 	}
 }
 
@@ -79,6 +81,10 @@ func (e *Engine) OnHerdrOnline(online bool, pong herdr.Pong) {
 	e.herdrOnline = online
 	e.pong = pong
 	e.mu.Unlock()
+
+	if online {
+		go e.refreshWorkspaces(context.Background())
+	}
 
 	if e.Relay != nil {
 		e.Relay.Send(model.HerdrStatusMsg{
@@ -92,6 +98,19 @@ func (e *Engine) OnHerdrOnline(online bool, pong herdr.Pong) {
 func (e *Engine) OnChanges(changes []herdr.Change) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
+
+	needRefresh := false
+	for _, ch := range changes {
+		if ch.Kind == herdr.Added || ch.Kind == herdr.Updated {
+			if _, ok := e.workspaces[ch.Agent.WorkspaceID]; !ok {
+				needRefresh = true
+				break
+			}
+		}
+	}
+	if needRefresh {
+		go e.refreshWorkspaces(context.Background())
+	}
 
 	for _, ch := range changes {
 		paneID := ch.Agent.PaneID
@@ -311,6 +330,50 @@ func (e *Engine) captureHistory(paneID, cwd, agent string, info herdr.AgentInfo)
 	}
 }
 
+func (e *Engine) refreshWorkspaces(ctx context.Context) {
+	if e.Herdr == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+
+	wsList, err := e.Herdr.ListWorkspaces(ctx)
+	if err != nil {
+		if e.Logger != nil {
+			e.Logger.Error("refresh workspaces failed", "err", err)
+		}
+		return
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	changed := false
+	for _, ws := range wsList {
+		if ws.Label != "" && e.workspaces[ws.WorkspaceID] != ws.Label {
+			e.workspaces[ws.WorkspaceID] = ws.Label
+			changed = true
+		}
+	}
+
+	if e.Logger != nil {
+		e.Logger.Info("refreshed workspaces", "count", len(wsList), "workspaces", e.workspaces, "changed", changed)
+	}
+
+	if changed {
+		for _, st := range e.states {
+			if wsLabel, ok := e.workspaces[st.info.WorkspaceID]; ok && st.public.Workspace != wsLabel {
+				st.public.Workspace = wsLabel
+				if e.Relay != nil {
+					e.Relay.Send(model.AgentUpdateMsg{
+						Type:  model.WireAgentUpdate,
+						Agent: st.public,
+					})
+				}
+			}
+		}
+	}
+}
+
 func (e *Engine) buildAgentState(info herdr.AgentInfo) (model.AgentState, string) {
 	agentName := ""
 	if info.Agent != nil {
@@ -324,23 +387,43 @@ func (e *Engine) buildAgentState(info herdr.AgentInfo) (model.AgentState, string
 		cwd = *info.CWD
 	}
 
-	label := ""
+	taskTitle := ""
+	if info.TerminalTitleStripped != nil {
+		t := strings.TrimSpace(*info.TerminalTitleStripped)
+		if t != "" && !strings.HasPrefix(t, "agy --conversation") && t != "OpenCode" {
+			taskTitle = t
+		}
+	}
+
+	paneName := ""
 	if info.Name != nil && strings.TrimSpace(*info.Name) != "" {
-		label = strings.TrimSpace(*info.Name)
-	} else if info.TerminalTitleStripped != nil && strings.TrimSpace(*info.TerminalTitleStripped) != "" {
-		label = strings.TrimSpace(*info.TerminalTitleStripped)
+		paneName = strings.TrimSpace(*info.Name)
+	}
+
+	label := ""
+	if taskTitle != "" {
+		label = taskTitle
+	} else if paneName != "" {
+		label = paneName
 	} else if cwd != "" && filepath.Base(cwd) != "/" && filepath.Base(cwd) != "." {
 		label = filepath.Base(cwd)
 	} else {
 		label = info.PaneID
 	}
 
+	wsLabel := ""
+	if e.workspaces != nil {
+		wsLabel = e.workspaces[info.WorkspaceID]
+	}
+
 	return model.AgentState{
 		PaneID:         info.PaneID,
 		Agent:          agentName,
 		Label:          label,
+		Name:           paneName,
 		CWD:            cwd,
 		WorkspaceID:    info.WorkspaceID,
+		Workspace:      wsLabel,
 		Status:         model.AgentStatus(info.AgentStatus),
 		Focused:        info.Focused,
 		StateChangeSeq: info.StateChangeSeq,
