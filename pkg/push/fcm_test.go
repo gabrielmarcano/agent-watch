@@ -161,9 +161,15 @@ func TestFCM_InvalidTokens(t *testing.T) {
 		var payload fcmMessagePayload
 		_ = json.NewDecoder(r.Body).Decode(&payload)
 
+		if strings.Contains(payload.Message.Token, "bare-404") {
+			// A 404 without FCM's error code: e.g. a wrong project id.
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write([]byte(fcmErrBare404))
+			return
+		}
 		if strings.Contains(payload.Message.Token, "404") {
 			w.WriteHeader(http.StatusNotFound)
-			_, _ = w.Write([]byte(`{"error":{"code":404,"message":"Requested entity was not found"}}`))
+			_, _ = w.Write([]byte(fcmErrUnregistered))
 			return
 		}
 		if strings.Contains(payload.Message.Token, "unregistered") {
@@ -175,7 +181,7 @@ func TestFCM_InvalidTokens(t *testing.T) {
 	}))
 	defer server.Close()
 
-	tokens := []string{"token-404", "token-unregistered", "token-valid"}
+	tokens := []string{"token-404", "token-bare-404", "token-unregistered", "token-valid"}
 	fcm := &FCM{
 		ProjectID: "test-proj",
 		Endpoint:  server.URL,
@@ -206,6 +212,11 @@ const (
 	fcmErrUnregistered    = `{"error":{"code":404,"message":"Requested entity was not found.","status":"NOT_FOUND","details":[{"@type":"type.googleapis.com/google.firebase.fcm.v1.FcmError","errorCode":"UNREGISTERED"}]}}`
 	fcmErrUnregistered400 = `{"error":{"code":400,"message":"Requested entity was not found.","status":"INVALID_ARGUMENT","details":[{"@type":"type.googleapis.com/google.firebase.fcm.v1.FcmError","errorCode":"UNREGISTERED"}]}}`
 	fcmErrNotJSON         = `<html>Bad Request: INVALID_ARGUMENT</html>`
+	// 404s that are not about the token: a wrong or deleted project id, or a
+	// proxy in the way. They must never wipe every device's token.
+	fcmErrBare404         = `{"error":{"code":404,"message":"Requested entity was not found."}}`
+	fcmErrProjectNotFound = `{"error":{"code":404,"message":"Requested entity was not found.","status":"NOT_FOUND"}}`
+	fcmErrUnregistered503 = `{"error":{"code":503,"message":"The service is currently unavailable.","status":"UNAVAILABLE","details":[{"@type":"type.googleapis.com/google.firebase.fcm.v1.FcmError","errorCode":"UNREGISTERED"}]}}`
 )
 
 // TestDispatcher_FCMRetriesPerToken checks that a failure on one token never
@@ -288,7 +299,10 @@ func TestFCM_DeadTokenDetection(t *testing.T) {
 		{"invalid token (field message.token)", http.StatusBadRequest, fcmErrBadToken, true},
 		{"unregistered (404)", http.StatusNotFound, fcmErrUnregistered, true},
 		{"unregistered errorCode on a 400", http.StatusBadRequest, fcmErrUnregistered400, true},
-		{"bare 404", http.StatusNotFound, `{"error":{"code":404,"message":"Requested entity was not found"}}`, true},
+		{"bare 404 (no FCM error code)", http.StatusNotFound, fcmErrBare404, false},
+		{"404 NOT_FOUND without UNREGISTERED (wrong project)", http.StatusNotFound, fcmErrProjectNotFound, false},
+		{"404 without a JSON body", http.StatusNotFound, fcmErrNotJSON, false},
+		{"UNREGISTERED on a 5xx", http.StatusServiceUnavailable, fcmErrUnregistered503, false},
 	}
 
 	for _, tt := range tests {
@@ -307,6 +321,7 @@ func TestFCM_DeadTokenDetection(t *testing.T) {
 				Tokens:         func() []string { return []string{"tok-a", "tok-b"} },
 				Client:         server.Client(),
 				OnInvalidToken: func(token string) { dead = append(dead, token) },
+				RetryDelay:     time.Millisecond, // the 5xx case retries
 			}
 
 			if err := fcm.Send(context.Background(), Message{Event: EventDone, Title: "t"}); err == nil {
@@ -317,7 +332,7 @@ func TestFCM_DeadTokenDetection(t *testing.T) {
 				t.Fatalf("expected both tokens reported dead, got %v", dead)
 			}
 			if !tt.wantDead && len(dead) != 0 {
-				t.Fatalf("payload error must not unregister tokens, got %v", dead)
+				t.Fatalf("a %d that is not about the token must not unregister tokens, got %v", tt.status, dead)
 			}
 		})
 	}

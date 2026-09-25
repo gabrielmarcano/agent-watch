@@ -212,12 +212,17 @@ type fcmErrorResponse struct {
 }
 
 // isDeadTokenResponse reports whether an FCM error response means the device
-// token itself is dead, as opposed to a payload or server error. FCM returns
-// 400 INVALID_ARGUMENT for payload errors too (bad ttl, oversize data…), so
-// that status alone must never unregister a token.
+// token itself is dead, as opposed to a payload, project or server error. Only
+// two answers qualify:
+//   - FCM's UNREGISTERED error code, on a 404 or a 400;
+//   - a 400 INVALID_ARGUMENT whose field violation is message.token.
+//
+// A status alone never does: FCM returns 400 INVALID_ARGUMENT for payload
+// errors too (bad ttl, oversize data…), and a 404 without UNREGISTERED means
+// a wrong project id or a proxy in the way, which would wipe every token.
 func isDeadTokenResponse(status int, body []byte) bool {
-	if status == http.StatusNotFound {
-		return true
+	if status != http.StatusNotFound && status != http.StatusBadRequest {
+		return false
 	}
 
 	var er fcmErrorResponse
@@ -240,5 +245,5 @@ func isDeadTokenResponse(status int, body []byte) bool {
 			}
 		}
 	}
-	return invalidArgument && tokenField
+	return status == http.StatusBadRequest && invalidArgument && tokenField
 }
