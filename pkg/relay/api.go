@@ -51,6 +51,12 @@ func (lrw *loggingResponseWriter) Flush() {
 	}
 }
 
+// FlushError is what http.ResponseController.Flush calls; unlike Flush it
+// reports a failed write (e.g. an expired write deadline) to the SSE handler.
+func (lrw *loggingResponseWriter) FlushError() error {
+	return http.NewResponseController(lrw.ResponseWriter).Flush()
+}
+
 // Unwrap lets http.ResponseController reach the underlying connection
 // (the SSE handler sets write deadlines through it).
 func (lrw *loggingResponseWriter) Unwrap() http.ResponseWriter {

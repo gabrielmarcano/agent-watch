@@ -10,21 +10,43 @@ import (
 	"github.com/gabrielmarcano/agent-monitor/pkg/model"
 )
 
+// sseWriteTimeoutDefault bounds each SSE write: a client that stops reading
+// (a watch that lost its network without closing the socket) is dropped
+// instead of pinning the handler forever.
+const sseWriteTimeoutDefault = 10 * time.Second
+
 // events handles GET /v1/events SSE streaming.
 func (s *Server) events(w http.ResponseWriter, r *http.Request) {
-	flusher, ok := w.(http.Flusher)
-	if !ok {
+	if _, ok := w.(http.Flusher); !ok {
 		writeError(w, model.ErrInternal, "streaming unsupported")
 		return
 	}
 
-	// The request context is cancelled when the client goes away or the device
-	// is revoked. Then also expire the write deadline, so a write blocked on a
-	// client that stopped reading returns too.
+	// The request context is cancelled when the client goes away, the device
+	// is revoked or the relay shuts down. Then also expire the write
+	// deadline, so a write blocked on a client that stopped reading returns.
 	ctx := r.Context()
 	rc := http.NewResponseController(w)
 	stopDeadline := context.AfterFunc(ctx, func() { _ = rc.SetWriteDeadline(time.Now()) })
 	defer stopDeadline()
+
+	writeTimeout := s.sseWriteTimeout
+	if writeTimeout <= 0 {
+		writeTimeout = sseWriteTimeoutDefault
+	}
+	// send writes one event and flushes it, within writeTimeout.
+	send := func(format string, args ...any) bool {
+		_ = rc.SetWriteDeadline(time.Now().Add(writeTimeout))
+		// Checked after moving the deadline: if ctx ended before, the
+		// AfterFunc's "now" deadline may just have been overwritten.
+		if ctx.Err() != nil {
+			return false
+		}
+		if _, err := fmt.Fprintf(w, format, args...); err != nil {
+			return false
+		}
+		return rc.Flush() == nil
+	}
 
 	h := w.Header()
 	h.Set("Content-Type", "text/event-stream")
@@ -39,10 +61,9 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 	snap := s.state.Snapshot()
 	snapData, err := json.Marshal(snap)
 	if err == nil {
-		if _, writeErr := fmt.Fprintf(w, "event: snapshot\ndata: %s\n\n", snapData); writeErr != nil {
+		if !send("event: snapshot\ndata: %s\n\n", snapData) {
 			return
 		}
-		flusher.Flush()
 	}
 
 	// 3. Keepalive and event loop
@@ -59,15 +80,13 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 			if !ok || ctx.Err() != nil {
 				return
 			}
-			if _, writeErr := fmt.Fprintf(w, "event: %s\ndata: %s\n\n", ev.Name, ev.Data); writeErr != nil {
+			if !send("event: %s\ndata: %s\n\n", ev.Name, ev.Data) {
 				return
 			}
-			flusher.Flush()
 		case <-ticker.C:
-			if _, writeErr := fmt.Fprintf(w, ":\n\n"); writeErr != nil {
+			if !send(":\n\n") {
 				return
 			}
-			flusher.Flush()
 		case <-ctx.Done():
 			return
 		}

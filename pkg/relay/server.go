@@ -26,6 +26,7 @@ type Server struct {
 	hub               *Hub
 	handler           http.Handler
 	keepAliveInterval time.Duration
+	sseWriteTimeout   time.Duration // per SSE event; 0 means sseWriteTimeoutDefault
 
 	lock      *dataDirLock // nil for servers built with NewServerWithDeps
 	closeOnce sync.Once
