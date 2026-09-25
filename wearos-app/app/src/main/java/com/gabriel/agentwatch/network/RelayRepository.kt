@@ -2,6 +2,7 @@ package com.gabriel.agentwatch.network
 
 import android.content.Context
 import android.util.Log
+import com.gabriel.agentwatch.approval.commandErrorFeedback
 import com.gabriel.agentwatch.data.Prefs
 import com.gabriel.agentwatch.model.*
 import com.google.gson.Gson
@@ -246,30 +247,30 @@ object RelayRepository {
         }
     }
 
-    suspend fun answer(paneId: String, optionId: String, expectedSeq: Long, fingerprint: String): Result<Unit> {
-        val currentClient = getClient() ?: return Result.failure(Exception("Client not configured"))
-        val res = currentClient.answer(paneId, optionId, expectedSeq, fingerprint)
-        if (res.isSuccess) {
+    private fun notPaired(): Result<Unit> =
+        Result.failure(RelayError("not_paired", "Client not configured", 0))
+
+    /** Re-fetches after a success, and after an error that means our view is stale (see commandErrorFeedback). */
+    private suspend fun refreshAfter(res: Result<Unit>): Result<Unit> {
+        val err = res.exceptionOrNull()
+        if (err == null || commandErrorFeedback(err).refresh) {
             refresh()
         }
         return res
+    }
+
+    suspend fun answer(paneId: String, optionId: String, expectedSeq: Long, fingerprint: String): Result<Unit> {
+        val currentClient = getClient() ?: return notPaired()
+        return refreshAfter(currentClient.answer(paneId, optionId, expectedSeq, fingerprint))
     }
 
     suspend fun cancel(paneId: String, expectedSeq: Long): Result<Unit> {
-        val currentClient = getClient() ?: return Result.failure(Exception("Client not configured"))
-        val res = currentClient.cancel(paneId, expectedSeq)
-        if (res.isSuccess) {
-            refresh()
-        }
-        return res
+        val currentClient = getClient() ?: return notPaired()
+        return refreshAfter(currentClient.cancel(paneId, expectedSeq))
     }
 
     suspend fun prompt(paneId: String, text: String, expectedSeq: Long): Result<Unit> {
-        val currentClient = getClient() ?: return Result.failure(Exception("Client not configured"))
-        val res = currentClient.prompt(paneId, text, expectedSeq)
-        if (res.isSuccess) {
-            refresh()
-        }
-        return res
+        val currentClient = getClient() ?: return notPaired()
+        return refreshAfter(currentClient.prompt(paneId, text, expectedSeq))
     }
 }

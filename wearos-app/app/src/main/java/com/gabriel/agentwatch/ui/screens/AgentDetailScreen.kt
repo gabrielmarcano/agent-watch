@@ -26,6 +26,8 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.wear.compose.foundation.lazy.ScalingLazyColumn
 import androidx.wear.compose.foundation.lazy.rememberScalingLazyListState
 import androidx.wear.compose.material.*
+import com.gabriel.agentwatch.approval.CommandFeedback
+import com.gabriel.agentwatch.approval.commandErrorFeedback
 import com.gabriel.agentwatch.data.Prefs
 import com.gabriel.agentwatch.model.AgentState
 import com.gabriel.agentwatch.network.RelayRepository
@@ -50,7 +52,7 @@ fun AgentDetailScreen(
     val lifecycleOwner = LocalLifecycleOwner.current
 
     var actionInFlight by remember { mutableStateOf(false) }
-    var feedbackMessage by remember { mutableStateOf<String?>(null) }
+    var feedback by remember { mutableStateOf<CommandFeedback?>(null) }
 
     // Opening this screen pins this agent for quick dictation
     LaunchedEffect(agent.pane_id) {
@@ -65,7 +67,7 @@ fun AgentDetailScreen(
             val spokenText = result.data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)?.firstOrNull()
             if (!spokenText.isNullOrBlank()) {
                 actionInFlight = true
-                feedbackMessage = null
+                feedback = null
                 coroutineScope.launch {
                     val res = RelayRepository.prompt(
                         paneId = agent.pane_id,
@@ -74,8 +76,8 @@ fun AgentDetailScreen(
                     )
                     actionInFlight = false
                     res.fold(
-                        onSuccess = { feedbackMessage = "Prompt sent" },
-                        onFailure = { err -> feedbackMessage = err.message ?: "Failed to send" }
+                        onSuccess = { feedback = CommandFeedback.success("Prompt sent") },
+                        onFailure = { err -> feedback = commandErrorFeedback(err) }
                     )
                 }
             }
@@ -166,13 +168,13 @@ fun AgentDetailScreen(
                 }
             }
 
-            // Feedback Message Banner (e.g. "Changed — refreshed" or error)
-            if (feedbackMessage != null) {
+            // Feedback banner (e.g. "Prompt changed — refreshed"); errors are always red
+            feedback?.let { fb ->
                 item {
                     Text(
-                        text = feedbackMessage ?: "",
+                        text = fb.message,
                         style = MaterialTheme.typography.caption2.copy(fontSize = 9.5.sp, fontWeight = FontWeight.Bold),
-                        color = if (feedbackMessage?.contains("Failed", ignoreCase = true) == true) Red400 else BrightGreen,
+                        color = if (fb.isError) Red400 else BrightGreen,
                         textAlign = TextAlign.Center,
                         modifier = Modifier.padding(vertical = 2.dp)
                     )
@@ -187,7 +189,7 @@ fun AgentDetailScreen(
                         isActionInFlight = actionInFlight,
                         onAnswerClick = { optionId ->
                             actionInFlight = true
-                            feedbackMessage = null
+                            feedback = null
                             coroutineScope.launch {
                                 val res = RelayRepository.answer(
                                     paneId = agent.pane_id,
@@ -197,20 +199,14 @@ fun AgentDetailScreen(
                                 )
                                 actionInFlight = false
                                 res.fold(
-                                    onSuccess = { feedbackMessage = "Sent answer" },
-                                    onFailure = { err ->
-                                        feedbackMessage = if (err.message?.contains("409") == true || err.message?.contains("stale") == true) {
-                                            "Changed — refreshed"
-                                        } else {
-                                            err.message ?: "Failed"
-                                        }
-                                    }
+                                    onSuccess = { feedback = CommandFeedback.success("Sent answer") },
+                                    onFailure = { err -> feedback = commandErrorFeedback(err) }
                                 )
                             }
                         },
                         onCancelClick = {
                             actionInFlight = true
-                            feedbackMessage = null
+                            feedback = null
                             coroutineScope.launch {
                                 val res = RelayRepository.cancel(
                                     paneId = agent.pane_id,
@@ -218,8 +214,8 @@ fun AgentDetailScreen(
                                 )
                                 actionInFlight = false
                                 res.fold(
-                                    onSuccess = { feedbackMessage = "Canceled" },
-                                    onFailure = { err -> feedbackMessage = err.message ?: "Failed" }
+                                    onSuccess = { feedback = CommandFeedback.success("Canceled") },
+                                    onFailure = { err -> feedback = commandErrorFeedback(err) }
                                 )
                             }
                         }

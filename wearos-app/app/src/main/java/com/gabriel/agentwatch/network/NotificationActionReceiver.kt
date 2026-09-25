@@ -9,6 +9,8 @@ import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.app.RemoteInput
 import com.gabriel.agentwatch.MainActivity
+import com.gabriel.agentwatch.approval.FeedbackSurface
+import com.gabriel.agentwatch.approval.commandErrorFeedback
 import com.gabriel.agentwatch.data.Prefs
 import kotlinx.coroutines.*
 
@@ -65,10 +67,10 @@ class NotificationActionReceiver : BroadcastReceiver() {
                         }
                     }
                 }
-            } catch (e: TimeoutCancellationException) {
-                showFeedback(context, notifManager, notifId, paneId, "Could not reach the relay (timeout)", false)
             } catch (e: Exception) {
-                showFeedback(context, notifManager, notifId, paneId, "Error: ${e.message}", false)
+                // Includes the 10 s TimeoutCancellationException: mapped to "Relay timed out".
+                val message = commandErrorFeedback(e, FeedbackSurface.NOTIFICATION).message
+                showFeedback(context, notifManager, notifId, paneId, message, false)
             } finally {
                 pendingResult.finish()
             }
@@ -93,12 +95,9 @@ class NotificationActionReceiver : BroadcastReceiver() {
                 }
             },
             onFailure = { error ->
-                val isConflict = error is RelayError && error.httpStatus == 409
-                if (isConflict) {
-                    showFeedback(context, manager, notifId, paneId, "Changed — open the app", isSuccess = false)
-                } else {
-                    showFeedback(context, manager, notifId, paneId, "Could not reach the relay", isSuccess = false)
-                }
+                // Same mapping as the app screen (contracts §2.4), worded for a notification.
+                val message = commandErrorFeedback(error, FeedbackSurface.NOTIFICATION).message
+                showFeedback(context, manager, notifId, paneId, message, isSuccess = false)
             }
         )
     }
