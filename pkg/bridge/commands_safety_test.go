@@ -292,7 +292,7 @@ func TestCommands_DuplicateCancelOnUnknownSendsKeysOnce(t *testing.T) {
 	h.sendRelayToBridge(t, cancel("req-unknown-1"))
 	h.sendRelayToBridge(t, cancel("req-unknown-1")) // replay
 	h.sendRelayToBridge(t, cancel("req-unknown-2")) // second tap
-	results := append(waitResults(t, h, "req-unknown-1", 2), waitResults(t, h, "req-unknown-2", 1)...)
+	results := collectResults(t, h, map[string]int{"req-unknown-1": 2, "req-unknown-2": 1})
 
 	oks := 0
 	for _, r := range results {
@@ -384,17 +384,38 @@ func TestEngine_ReparseClearsCachedPrompt(t *testing.T) {
 
 // --- Bug 2: commands must be idempotent (no double key press) ---
 
-// waitResults collects n command_results for reqID (a duplicate request_id
-// produces one result per delivery).
-func waitResults(t *testing.T, h *testHarness, reqID string, n int) []model.CommandResultMsg {
+// collectResults reads relay messages until it holds want[id] command_results
+// for every request id (a duplicate request_id produces one result per
+// delivery). It keeps each tracked result whatever the arrival order: every
+// command runs in its own goroutine, so results for different request ids can
+// arrive in any order, and waiting for one id must not drop another's.
+func collectResults(t *testing.T, h *testHarness, want map[string]int) []model.CommandResultMsg {
 	t.Helper()
+	got := make(map[string]int, len(want))
 	var out []model.CommandResultMsg
-	for len(out) < n {
-		msg, _ := waitMsg(h, 3*time.Second, isResult(reqID))
-		if msg == nil {
-			t.Fatalf("timed out: got %d of %d command_results for %s", len(out), n, reqID)
+	complete := func() bool {
+		for id, n := range want {
+			if got[id] < n {
+				return false
+			}
 		}
-		out = append(out, msg.(model.CommandResultMsg))
+		return true
+	}
+	deadline := time.After(3 * time.Second)
+	for !complete() {
+		select {
+		case msg := <-h.relayMsgs:
+			r, ok := msg.(model.CommandResultMsg)
+			if !ok {
+				continue
+			}
+			if _, tracked := want[r.RequestID]; tracked {
+				got[r.RequestID]++
+				out = append(out, r)
+			}
+		case <-deadline:
+			t.Fatalf("timed out: got command_results %v, want %v", got, want)
+		}
 	}
 	return out
 }
@@ -421,7 +442,7 @@ func TestCommands_DuplicateRequestIDSendsKeysOnce(t *testing.T) {
 	h.sendRelayToBridge(t, cmd)
 	h.sendRelayToBridge(t, cmd)
 
-	results := waitResults(t, h, "req-dup", 2)
+	results := collectResults(t, h, map[string]int{"req-dup": 2})
 	oks := 0
 	for _, r := range results {
 		if r.OK {
