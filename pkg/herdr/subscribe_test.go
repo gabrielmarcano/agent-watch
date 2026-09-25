@@ -166,9 +166,10 @@ func TestSubscribeClearsHandshakeDeadline(t *testing.T) {
 // An event written in the same packet as the ack is buffered by the reader
 // that parsed the ack; it must still be delivered.
 func TestSubscribeKeepsEventBufferedWithAck(t *testing.T) {
-	sock := rawServer(t,
-		`{"id":"x","result":{"type":"subscription_started"}}`+"\n"+
-			`{"event":"pane_agent_status_changed","data":{"pane_id":"w1:p1","agent_status":"working"}}`+"\n")
+	sock := rawServerFunc(t, func(id string) string {
+		return `{"id":"` + id + `","result":{"type":"subscription_started"}}` + "\n" +
+			`{"event":"pane_agent_status_changed","data":{"pane_id":"w1:p1","agent_status":"working"}}` + "\n"
+	})
 	client := &herdr.Client{SocketPath: sock, Timeout: 2 * time.Second}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -191,7 +192,9 @@ func TestSubscribeKeepsEventBufferedWithAck(t *testing.T) {
 }
 
 func TestSubscribeRejectsUnexpectedAckType(t *testing.T) {
-	sock := rawServer(t, `{"id":"x","result":{"type":"pong"}}`+"\n")
+	sock := rawServerFunc(t, func(id string) string {
+		return `{"id":"` + id + `","result":{"type":"pong"}}` + "\n"
+	})
 	client := &herdr.Client{SocketPath: sock, Timeout: 2 * time.Second}
 
 	ctx, cancel := context.WithCancel(context.Background())

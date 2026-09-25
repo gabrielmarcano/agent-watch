@@ -86,8 +86,9 @@ func (c *Client) Subscribe(ctx context.Context, subs []Subscription) (<-chan Eve
 		return fail(fmt.Errorf("herdr subscribe deadline: %w", err))
 	}
 
+	reqID := nextID()
 	req := map[string]any{
-		"id":     nextID(),
+		"id":     reqID,
 		"method": "events.subscribe",
 		"params": map[string]any{
 			"subscriptions": subs,
@@ -106,6 +107,7 @@ func (c *Client) Subscribe(ctx context.Context, subs []Subscription) (<-chan Eve
 	}
 
 	var resp struct {
+		ID     string `json:"id"`
 		Result *struct {
 			Type string `json:"type"`
 		} `json:"result"`
@@ -113,6 +115,9 @@ func (c *Client) Subscribe(ctx context.Context, subs []Subscription) (<-chan Eve
 	}
 	if err := json.Unmarshal(line, &resp); err != nil {
 		return fail(fmt.Errorf("herdr decode subscribe ack: %w", err))
+	}
+	if err := checkResponseID("events.subscribe", reqID, resp.ID, resp.Error); err != nil {
+		return fail(err)
 	}
 	if resp.Error != nil {
 		return fail(resp.Error)

@@ -151,37 +151,81 @@ func (c *Client) Call(ctx context.Context, method string, params, out any) error
 	if err := json.Unmarshal(line, &resp); err != nil {
 		return fmt.Errorf("herdr decode: %w", err)
 	}
+	if err := checkResponseID(method, reqID, resp.ID, resp.Error); err != nil {
+		return err
+	}
 
 	if resp.Error != nil {
 		return resp.Error
 	}
+	if len(resp.Result) == 0 {
+		return fmt.Errorf("herdr %s: response has neither result nor error", method)
+	}
 
-	if out != nil && len(resp.Result) > 0 {
+	if out != nil {
 		if err := json.Unmarshal(resp.Result, out); err != nil {
-			return fmt.Errorf("herdr decode result: %w", err)
+			return fmt.Errorf("herdr %s: decode result: %w", method, err)
 		}
 	}
 
 	return nil
 }
 
+// checkResponseID rejects an answer to some other request. herdr answers a
+// request it could not parse with id "" and an error; that error is kept,
+// since it says what was wrong.
+func checkResponseID(method, reqID, respID string, herdrErr *Error) error {
+	if respID == reqID || (respID == "" && herdrErr != nil) {
+		return nil
+	}
+	return fmt.Errorf("herdr %s: response id %q does not match request id %q", method, respID, reqID)
+}
+
+// callResult calls method and decodes its result into out, after checking
+// that the result's type is want.
+func (c *Client) callResult(ctx context.Context, method string, params any, want string, out any) error {
+	var raw json.RawMessage
+	if err := c.Call(ctx, method, params, &raw); err != nil {
+		return err
+	}
+	var head struct {
+		Type string `json:"type"`
+	}
+	if err := json.Unmarshal(raw, &head); err != nil {
+		return fmt.Errorf("herdr %s: decode result: %w", method, err)
+	}
+	if head.Type != want {
+		return fmt.Errorf("herdr %s: unexpected result type %q (want %q)", method, head.Type, want)
+	}
+	if err := json.Unmarshal(raw, out); err != nil {
+		return fmt.Errorf("herdr %s: decode result: %w", method, err)
+	}
+	return nil
+}
+
 // Ping queries herdr's health, protocol, and version.
 func (c *Client) Ping(ctx context.Context) (Pong, error) {
 	var pong Pong
-	err := c.Call(ctx, "ping", nil, &pong)
-	return pong, err
+	if err := c.callResult(ctx, "ping", nil, "pong", &pong); err != nil {
+		return Pong{}, err
+	}
+	return pong, nil
 }
 
 // ListAgents retrieves the authoritative list of agents from herdr.
 func (c *Client) ListAgents(ctx context.Context) ([]AgentInfo, error) {
 	var res struct {
-		Type   string      `json:"type"`
-		Agents []AgentInfo `json:"agents"`
+		Agents *[]AgentInfo `json:"agents"`
 	}
-	if err := c.Call(ctx, "agent.list", nil, &res); err != nil {
+	if err := c.callResult(ctx, "agent.list", nil, "agent_list", &res); err != nil {
 		return nil, err
 	}
-	return res.Agents, nil
+	// An empty herd is "agents": []. A missing list must not read as
+	// "every agent is gone".
+	if res.Agents == nil {
+		return nil, fmt.Errorf("herdr agent.list: result has no agents list")
+	}
+	return *res.Agents, nil
 }
 
 // Read extracts text from a pane's screen buffer.
@@ -196,13 +240,15 @@ func (c *Client) Read(ctx context.Context, paneID string, src ReadSource, lines 
 	}
 
 	var res struct {
-		Type string `json:"type"`
-		Read struct {
+		Read *struct {
 			Text string `json:"text"`
 		} `json:"read"`
 	}
-	if err := c.Call(ctx, "agent.read", params, &res); err != nil {
+	if err := c.callResult(ctx, "agent.read", params, "pane_read", &res); err != nil {
 		return "", err
+	}
+	if res.Read == nil {
+		return "", fmt.Errorf("herdr agent.read: result has no read")
 	}
 	return res.Read.Text, nil
 }
