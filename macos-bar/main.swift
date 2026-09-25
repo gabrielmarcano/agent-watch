@@ -1,356 +1,331 @@
 import AppKit
 import Foundation
 
-// MARK: - Models
+// Agent Watch menu bar companion. It shows the bridge's health and drives the
+// agent-watch-bridge CLI; all decisions live in BarLogic.swift.
+//
+// Threading: the delegate is @MainActor and owns all state. Every file and
+// process call runs off the main thread (runInBackground) and hands back a
+// Sendable value that is applied on the main actor.
 
-struct BridgeStatus: Decodable {
-    let pid: Int
-    let relayConnected: Bool
-    let herdrOnline: Bool
-    let agents: Int
-    let lastError: String
-    let updatedAt: String
+@MainActor
+final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
+    private var statusItem: NSStatusItem?
+    private let menu = NSMenu()
 
-    enum CodingKeys: String, CodingKey {
-        case pid
-        case relayConnected = "relay_connected"
-        case herdrOnline = "herdr_online"
-        case agents
-        case lastError = "last_error"
-        case updatedAt = "updated_at"
-    }
-}
+    // Built once; render() only updates titles, visibility and enablement.
+    private let headlineItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
+    private var detailItems: [NSMenuItem] = []
+    private let hintItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
+    private var startItem = NSMenuItem()
+    private var stopItem = NSMenuItem()
+    private var restartItem = NSMenuItem()
+    private var pairItem = NSMenuItem()
+    private var logsItem = NSMenuItem()
+    private var configItem = NSMenuItem()
 
-// MARK: - App Delegate
-
-final class AppDelegate: NSObject, NSApplicationDelegate {
-    private var statusItem: NSStatusItem!
     private var timer: Timer?
-    private var cachedStatus: BridgeStatus?
-    private var isProcessRunning = false
-    private var relayHost: String = ""
+    private var pollInFlight = false
+    private var binary: String?
+    private var status: LocalStatus?
+    private var pollError: String?
+    private var busy: String?
+    private var lastPresentation: Presentation?
+
+    private let pollInterval: TimeInterval = 2.5
+    private let statusTimeout: TimeInterval = 5
+    private let actionTimeout: TimeInterval = 45
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        // Create the status bar item
-        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-
-        if let button = statusItem.button {
-            button.imagePosition = .imageLeading
-            updateButton(status: nil, running: false)
-        }
-
+        let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+        item.button?.imagePosition = .imageLeading
+        statusItem = item
         buildMenu()
-        loadRelayHost()
-        refreshStatus()
+        item.menu = menu
+        render()
+        poll()
 
-        // Poll status every 2.5 seconds
-        timer = Timer.scheduledTimer(withTimeInterval: 2.5, repeats: true) { [weak self] _ in
-            self?.refreshStatus()
+        // .common mode keeps polling while the menu is open (event tracking).
+        let t = Timer(timeInterval: pollInterval, repeats: true) { [weak self] _ in
+            Task { @MainActor in self?.poll() }
         }
+        RunLoop.main.add(t, forMode: .common)
+        timer = t
     }
 
-    // MARK: - Paths & Helpers
-
-    private var homeDir: String {
-        FileManager.default.homeDirectoryForCurrentUser.path
-    }
-
-    private var statusPaths: [String] {
-        var paths: [String] = []
-        if let env = ProcessInfo.processInfo.environment["HERDR_PLUGIN_STATE_DIR"] {
-            paths.append("\(env)/status.json")
-        }
-        paths.append("\(homeDir)/.local/state/herdr/plugins/herdr-agent-watch/status.json")
-        paths.append("\(homeDir)/.local/state/agent-watch/status.json")
-        return paths
-    }
-
-    private var configPath: String {
-        if let env = ProcessInfo.processInfo.environment["HERDR_PLUGIN_CONFIG_DIR"] {
-            return "\(env)/config.toml"
-        }
-        return "\(homeDir)/.config/herdr/plugins/config/herdr-agent-watch/config.toml"
-    }
-
-    private var logPath: String {
-        "\(homeDir)/Library/Logs/agent-watch-bridge.log"
-    }
-
-    private func findBridgeBinary() -> String {
-        // Check relative to current working directory or repo bin
-        let cwd = FileManager.default.currentDirectoryPath
-        let candidates = [
-            "\(cwd)/bin/agent-watch-bridge",
-            "\(homeDir)/Code/personal/agent-watch/bin/agent-watch-bridge",
-            "/usr/local/bin/agent-watch-bridge"
-        ]
-        for candidate in candidates {
-            if FileManager.default.isExecutableFile(atPath: candidate) {
-                return candidate
-            }
-        }
-        return "agent-watch-bridge"
-    }
-
-    private func runBridge(subcommand: String) -> (exitCode: Int32, output: String) {
-        let binary = findBridgeBinary()
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: binary)
-        process.arguments = [subcommand]
-
-        let pipe = Pipe()
-        process.standardOutput = pipe
-        process.standardError = pipe
-
-        do {
-            try process.run()
-            process.waitUntilExit()
-            let data = pipe.fileHandleForReading.readDataToEndOfFile()
-            let output = String(data: data, encoding: .utf8) ?? ""
-            return (process.terminationStatus, output)
-        } catch {
-            return (-1, error.localizedDescription)
-        }
-    }
-
-    // MARK: - Config & Status Reading
-
-    private func loadRelayHost() {
-        guard let content = try? String(contentsOfFile: configPath, encoding: .utf8) else { return }
-        for line in content.components(separatedBy: .newlines) {
-            let trimmed = line.trimmingCharacters(in: .whitespaces)
-            if trimmed.hasPrefix("relay_url") {
-                let parts = trimmed.components(separatedBy: "=")
-                if parts.count >= 2 {
-                    var val = parts[1].trimmingCharacters(in: .whitespaces)
-                    val = val.replacingOccurrences(of: "\"", with: "")
-                    if let u = URL(string: val), let host = u.host {
-                        relayHost = host
-                    } else {
-                        relayHost = val
-                    }
-                }
-            }
-        }
-    }
-
-    private func refreshStatus() {
-        var activeStatus: BridgeStatus?
-        var running = false
-
-        for path in statusPaths {
-            if let data = try? Data(contentsOf: URL(fileURLWithPath: path)),
-               let decoded = try? JSONDecoder().decode(BridgeStatus.self, from: data) {
-                if decoded.pid > 0 && kill(pid_t(decoded.pid), 0) == 0 {
-                    activeStatus = decoded
-                    running = true
-                    break
-                } else if activeStatus == nil {
-                    activeStatus = decoded
-                }
-            }
-        }
-
-        self.cachedStatus = activeStatus
-        self.isProcessRunning = running
-
-        DispatchQueue.main.async { [weak self] in
-            guard let self = self else { return }
-            self.updateButton(status: activeStatus, running: running)
-            self.buildMenu()
-        }
-    }
-
-    // MARK: - UI Updates
-
-    private func updateButton(status: BridgeStatus?, running: Bool) {
-        guard let button = statusItem.button else { return }
-
-        // Use standard SF Symbol
-        let symbolName = "applewatch.radiowaves.left.and.right"
-        if let image = NSImage(systemSymbolName: symbolName, accessibilityDescription: "Agent Watch") {
-            image.isTemplate = true
-            button.image = image
-        }
-
-        if running, let st = status {
-            if st.relayConnected {
-                button.title = " \(st.agents)"
-                button.toolTip = "Agent Watch: Connected to \(relayHost) (\(st.agents) agents active)"
-            } else {
-                button.title = " …"
-                button.toolTip = "Agent Watch: Connecting to relay..."
-            }
-        } else {
-            button.title = " ✕"
-            button.toolTip = "Agent Watch: Stopped"
-        }
-    }
+    // MARK: Menu
 
     private func buildMenu() {
-        let menu = NSMenu()
         menu.autoenablesItems = false
+        menu.delegate = self
 
-        // Header: Status title
-        let running = isProcessRunning
-        let status = cachedStatus
-
-        let statusItem: NSMenuItem
-        if running, let st = status, st.relayConnected {
-            statusItem = NSMenuItem(title: "🟢 Bridge Connected (\(st.agents) agents)", action: nil, keyEquivalent: "")
-        } else if running {
-            statusItem = NSMenuItem(title: "🟡 Bridge Running (connecting...)", action: nil, keyEquivalent: "")
-        } else {
-            statusItem = NSMenuItem(title: "⚪ Bridge Stopped", action: nil, keyEquivalent: "")
+        headlineItem.isEnabled = false
+        menu.addItem(headlineItem)
+        for _ in 0..<3 {
+            let d = NSMenuItem(title: "", action: nil, keyEquivalent: "")
+            d.isEnabled = false
+            d.isHidden = true
+            detailItems.append(d)
+            menu.addItem(d)
         }
-        statusItem.isEnabled = false
-        menu.addItem(statusItem)
+        hintItem.isEnabled = false
+        hintItem.isHidden = true
+        menu.addItem(hintItem)
 
-        if !relayHost.isEmpty {
-            let relayItem = NSMenuItem(title: "   Relay: \(relayHost)", action: nil, keyEquivalent: "")
-            relayItem.isEnabled = false
-            menu.addItem(relayItem)
-        }
-
-        if let st = status, running {
-            let herdrItem = NSMenuItem(title: "   Herdr: \(st.herdrOnline ? "Online" : "Offline")", action: nil, keyEquivalent: "")
-            herdrItem.isEnabled = false
-            menu.addItem(herdrItem)
-        }
-
-        menu.addItem(NSMenuItem.separator())
-
-        // Service Controls
-        if running {
-            let stopItem = NSMenuItem(title: "Stop Bridge", action: #selector(stopBridge), keyEquivalent: "s")
-            stopItem.target = self
-            menu.addItem(stopItem)
-
-            let restartItem = NSMenuItem(title: "Restart Bridge", action: #selector(restartBridge), keyEquivalent: "r")
-            restartItem.target = self
-            menu.addItem(restartItem)
-        } else {
-            let startItem = NSMenuItem(title: "Start Bridge", action: #selector(startBridge), keyEquivalent: "s")
-            startItem.target = self
-            menu.addItem(startItem)
-        }
-
-        menu.addItem(NSMenuItem.separator())
-
-        // Pairing
-        let pairItem = NSMenuItem(title: "Pair Watch (Get Code)...", action: #selector(pairWatch), keyEquivalent: "p")
-        pairItem.target = self
-        pairItem.isEnabled = running
-        menu.addItem(pairItem)
-
-        menu.addItem(NSMenuItem.separator())
-
-        // Diagnostics
-        let logItem = NSMenuItem(title: "View Bridge Logs...", action: #selector(openLogs), keyEquivalent: "l")
-        logItem.target = self
-        menu.addItem(logItem)
-
-        let configItem = NSMenuItem(title: "Open Configuration...", action: #selector(openConfig), keyEquivalent: "c")
-        configItem.target = self
-        menu.addItem(configItem)
-
-        menu.addItem(NSMenuItem.separator())
-
-        // Quit menu app
-        let quitItem = NSMenuItem(title: "Quit Menu Bar App", action: #selector(quitApp), keyEquivalent: "q")
-        quitItem.target = self
-        menu.addItem(quitItem)
-
-        self.statusItem.menu = menu
+        menu.addItem(.separator())
+        startItem = addAction("Start Bridge", #selector(startBridge), "s")
+        stopItem = addAction("Stop Bridge…", #selector(stopBridge), ".")
+        restartItem = addAction("Restart Bridge", #selector(restartBridge), "r")
+        menu.addItem(.separator())
+        pairItem = addAction("Pair a Watch…", #selector(pairWatch), "p")
+        menu.addItem(.separator())
+        logsItem = addAction("Open Bridge Log", #selector(openLogs), "l")
+        configItem = addAction("Show Configuration in Finder", #selector(revealConfig), ",")
+        menu.addItem(.separator())
+        _ = addAction("Quit Agent Watch Menu", #selector(quit), "q")
     }
 
-    // MARK: - Actions
+    private func addAction(_ title: String, _ action: Selector, _ key: String) -> NSMenuItem {
+        let item = NSMenuItem(title: title, action: action, keyEquivalent: key)
+        item.target = self
+        menu.addItem(item)
+        return item
+    }
 
-    @objc private func startBridge() {
-        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            _ = self?.runBridge(subcommand: "start")
-            Thread.sleep(forTimeInterval: 0.5)
-            self?.refreshStatus()
+    func menuWillOpen(_ menu: NSMenu) {
+        poll() // refresh right away; items update in place while the menu is open
+    }
+
+    // MARK: Polling
+
+    private var launchAgent: URL {
+        launchAgentURL(home: FileManager.default.homeDirectoryForCurrentUser)
+    }
+
+    private var cliEnvironment: [String: String] {
+        childEnvironment(ProcessInfo.processInfo.environment)
+    }
+
+    private func poll() {
+        guard !pollInFlight else { return }
+        pollInFlight = true
+        let agentURL = launchAgent
+        let bundleURL = Bundle.main.bundleURL
+        let env = cliEnvironment
+        let timeout = statusTimeout
+        Task {
+            let (bin, result) = await runInBackground { () -> (String?, ProcessResult?) in
+                guard let bin = locateBridgeBinary(
+                    launchAgent: agentURL, appBundle: bundleURL,
+                    isExecutable: { FileManager.default.isExecutableFile(atPath: $0) }
+                ) else { return (nil, nil) }
+                return (bin, runProcess(executable: bin, arguments: ["status", "--json", "--local"],
+                                        timeout: timeout, environment: env))
+            }
+            self.apply(binary: bin, result: result)
+            self.pollInFlight = false
         }
     }
+
+    private func apply(binary bin: String?, result: ProcessResult?) {
+        binary = bin
+        if bin == nil {
+            status = nil
+            pollError = nil
+        } else if let result {
+            if let decoded = decodeLocalStatus(result.stdout) {
+                status = decoded
+                pollError = nil
+            } else {
+                pollError = result.ok ? "unreadable output from agent-watch-bridge status" : result.failureDescription
+            }
+        }
+        render()
+    }
+
+    // MARK: Rendering
+
+    private func render() {
+        let state = deriveState(binaryFound: binary != nil, status: status, pollError: pollError)
+        let p = present(state: state, status: status, busy: busy)
+        guard p != lastPresentation else { return }
+        lastPresentation = p
+
+        if let button = statusItem?.button {
+            let image = NSImage(systemSymbolName: p.symbolName, accessibilityDescription: "Agent Watch")
+                ?? NSImage(systemSymbolName: Symbols.neutral, accessibilityDescription: "Agent Watch")
+            image?.isTemplate = true
+            button.image = image
+            if p.emphasize {
+                button.attributedTitle = NSAttributedString(string: p.title, attributes: [
+                    .foregroundColor: NSColor.systemOrange,
+                    .font: NSFont.monospacedDigitSystemFont(ofSize: NSFont.systemFontSize, weight: .bold),
+                ])
+            } else {
+                button.attributedTitle = NSAttributedString(string: p.title)
+            }
+            button.toolTip = p.tooltip
+        }
+
+        headlineItem.title = p.headline
+        for (i, item) in detailItems.enumerated() {
+            let text = i < p.details.count ? p.details[i] : ""
+            item.title = "   " + text
+            item.isHidden = text.isEmpty
+        }
+        hintItem.title = "   " + (p.hint ?? "")
+        hintItem.isHidden = p.hint == nil
+
+        let running = status?.running ?? false
+        startItem.isEnabled = p.canStart
+        startItem.isHidden = running
+        stopItem.isEnabled = p.canStop
+        restartItem.isEnabled = p.canRestart
+        pairItem.isEnabled = p.canPair
+        logsItem.isEnabled = p.canOpenLogs
+        configItem.isEnabled = p.canRevealConfig
+    }
+
+    // MARK: Actions
+
+    @objc private func startBridge() { runCLI(["start"], busy: "Starting", failure: "Could not start the bridge") }
+
+    @objc private func restartBridge() { runCLI(["restart"], busy: "Restarting", failure: "Could not restart the bridge") }
 
     @objc private func stopBridge() {
-        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            _ = self?.runBridge(subcommand: "stop")
-            Thread.sleep(forTimeInterval: 0.5)
-            self?.refreshStatus()
-        }
+        let alert = NSAlert()
+        alert.messageText = "Stop the bridge?"
+        alert.informativeText = "Your watch will show this Mac as offline until you start it again."
+        alert.addButton(withTitle: "Stop")
+        alert.addButton(withTitle: "Cancel")
+        activate()
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        runCLI(["stop"], busy: "Stopping", failure: "Could not stop the bridge")
     }
 
-    @objc private func restartBridge() {
-        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            _ = self?.runBridge(subcommand: "start")
-            Thread.sleep(forTimeInterval: 0.5)
-            self?.refreshStatus()
+    /// Runs one CLI action off the main thread and reports any failure.
+    private func runCLI(_ args: [String], busy label: String, failure: String) {
+        guard let bin = binary, busy == nil else { return }
+        busy = label
+        render()
+        let env = cliEnvironment
+        let timeout = actionTimeout
+        Task {
+            let result = await runInBackground {
+                runProcess(executable: bin, arguments: args, timeout: timeout, environment: env)
+            }
+            self.busy = nil
+            if !result.ok {
+                self.showAlert(failure, result.failureDescription)
+            }
+            self.render()
+            self.poll()
         }
     }
 
     @objc private func pairWatch() {
-        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            let res = self?.runBridge(subcommand: "pair") ?? (exitCode: -1, output: "Failed to run")
-            DispatchQueue.main.async {
-                self?.showPairAlert(output: res.output)
+        guard let bin = binary, busy == nil else { return }
+        busy = "Requesting a pairing code"
+        render()
+        let env = cliEnvironment
+        Task {
+            let result = await runInBackground {
+                runProcess(executable: bin, arguments: ["pair", "--json"], timeout: 20, environment: env)
             }
+            self.busy = nil
+            self.render()
+            guard result.ok, let info = decodePairInfo(result.stdout) else {
+                self.showAlert("Could not get a pairing code", result.failureDescription)
+                return
+            }
+            self.showPairCode(info)
         }
     }
 
-    private func showPairAlert(output: String) {
-        var code = ""
-        for line in output.components(separatedBy: .newlines) {
-            if line.contains("Pairing code:") {
-                let parts = line.components(separatedBy: ":")
-                if parts.count >= 2 {
-                    code = parts[1].trimmingCharacters(in: .whitespaces)
-                }
-            }
-        }
-
+    private func showPairCode(_ info: PairInfo) {
         let alert = NSAlert()
-        if !code.isEmpty {
-            alert.messageText = "Watch Pairing Code"
-            alert.informativeText = "Enter this code on your watch app to complete pairing:\n\n\(code)\n\n(Expires in 5 minutes)"
-            alert.alertStyle = .informational
-            alert.addButton(withTitle: "Copy Code")
-            alert.addButton(withTitle: "Done")
-
-            // Clean 6 digits for clipboard
-            let cleanCode = code.replacingOccurrences(of: "·", with: "").replacingOccurrences(of: " ", with: "")
-            let response = alert.runModal()
-            if response == .alertFirstButtonReturn {
-                NSPasteboard.general.clearContents()
-                NSPasteboard.general.setString(cleanCode, forType: .string)
-            }
-        } else {
-            alert.messageText = "Pairing Output"
-            alert.informativeText = output.isEmpty ? "No output from bridge." : output
-            alert.alertStyle = .warning
-            alert.addButton(withTitle: "OK")
-            alert.runModal()
+        alert.messageText = "Watch pairing code"
+        alert.informativeText = "Enter it in Agent Watch on your watch.\n\(pairExpiryText(info))"
+        let code = NSTextField(labelWithString: spacedCode(info.code))
+        code.font = NSFont.monospacedDigitSystemFont(ofSize: 30, weight: .semibold)
+        code.isSelectable = true
+        code.sizeToFit()
+        alert.accessoryView = code
+        alert.addButton(withTitle: "Done")
+        alert.addButton(withTitle: "Copy Code")
+        activate()
+        if alert.runModal() == .alertSecondButtonReturn {
+            copyConcealed(info.code)
         }
+    }
+
+    /// Copies the code marked as concealed, so clipboard managers skip it.
+    private func copyConcealed(_ text: String) {
+        let pb = NSPasteboard.general
+        let concealed = NSPasteboard.PasteboardType("org.nspasteboard.ConcealedType")
+        pb.clearContents()
+        pb.declareTypes([.string, concealed], owner: nil)
+        pb.setString(text, forType: .string)
+        pb.setString(text, forType: concealed)
     }
 
     @objc private func openLogs() {
-        NSWorkspace.shared.open(URL(fileURLWithPath: logPath))
+        guard let path = status?.logPath, !path.isEmpty else { return }
+        guard FileManager.default.fileExists(atPath: path) else {
+            showAlert("No bridge log yet", "\(path) does not exist. It appears once the bridge has run.")
+            return
+        }
+        if !NSWorkspace.shared.open(URL(fileURLWithPath: path)) {
+            showAlert("Could not open the bridge log", path)
+        }
     }
 
-    @objc private func openConfig() {
-        NSWorkspace.shared.open(URL(fileURLWithPath: configPath))
+    /// Reveals config.toml in Finder instead of opening the token file in an editor.
+    @objc private func revealConfig() {
+        guard let path = status?.configPath, !path.isEmpty else { return }
+        let url = URL(fileURLWithPath: path)
+        if FileManager.default.fileExists(atPath: path) {
+            NSWorkspace.shared.activateFileViewerSelecting([url])
+            return
+        }
+        let dir = url.deletingLastPathComponent()
+        if FileManager.default.fileExists(atPath: dir.path) {
+            NSWorkspace.shared.activateFileViewerSelecting([dir])
+        }
+        showAlert("No configuration yet", "\(path) does not exist.\n\n\(configureHint)")
     }
 
-    @objc private func quitApp() {
+    @objc private func quit() {
         NSApp.terminate(nil)
+    }
+
+    // MARK: Alerts
+
+    /// An accessory app's alerts open behind other windows unless it is activated first.
+    private func activate() {
+        if #available(macOS 14.0, *) {
+            NSApp.activate()
+        } else {
+            NSApp.activate(ignoringOtherApps: true)
+        }
+    }
+
+    private func showAlert(_ title: String, _ text: String) {
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = title
+        alert.informativeText = text.isEmpty ? "No output." : text
+        alert.addButton(withTitle: "OK")
+        activate()
+        alert.runModal()
     }
 }
 
-// MARK: - Main Entry Point
-
-let app = NSApplication.shared
-app.setActivationPolicy(.accessory) // Accessory policy = lives in menu bar, no dock icon
-let delegate = AppDelegate()
-app.delegate = delegate
-app.run()
+// Top-level code runs on the main thread; say so in both Swift 5 and 6 modes.
+MainActor.assumeIsolated {
+    let app = NSApplication.shared
+    let delegate = AppDelegate()
+    app.delegate = delegate
+    app.setActivationPolicy(.accessory) // menu bar only, no Dock icon
+    app.run() // never returns; keeps `delegate` alive (NSApplication holds it weakly)
+}
