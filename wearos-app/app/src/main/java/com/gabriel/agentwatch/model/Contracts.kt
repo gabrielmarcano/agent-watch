@@ -98,7 +98,8 @@ data class AnswerRequest(
 
 @Keep
 data class CancelRequest(
-    val expected_seq: Long
+    val expected_seq: Long,
+    val fingerprint: String? = null
 )
 
 @Keep

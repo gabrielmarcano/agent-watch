@@ -54,7 +54,9 @@ class NotificationActionReceiver : BroadcastReceiver() {
                             handleResult(context, notifManager, notifId, paneId, result, if (isDeny) "Denied" else "Approved")
                         }
                         ACTION_CANCEL -> {
-                            val result = client.cancel(paneId, expectedSeq)
+                            // The push's fingerprint, when present: the bridge refuses the cancel if the menu changed.
+                            val fingerprint = intent.getStringExtra("fingerprint")?.takeIf { it.isNotBlank() }
+                            val result = client.cancel(paneId, expectedSeq, fingerprint)
                             handleResult(context, notifManager, notifId, paneId, result, "Denied")
                         }
                         ACTION_PROMPT -> {

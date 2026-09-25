@@ -107,6 +107,27 @@ class RelayClientTest {
     }
 
     @Test
+    fun cancelSendsTheFingerprintWhenGiven() = runBlocking {
+        server.enqueue(MockResponse().setBody("""{"ok":true}"""))
+        val client = RelayClient(baseUrl(), "tok")
+
+        assertTrue(client.cancel("w1:p1", 7, fingerprint = "9f2c61d0a4b3e871").isSuccess)
+
+        val body = server.takeRequest().body.readUtf8()
+        assertEquals("""{"expected_seq":7,"fingerprint":"9f2c61d0a4b3e871"}""", body)
+    }
+
+    @Test
+    fun cancelWithoutFingerprintOmitsTheField() = runBlocking {
+        server.enqueue(MockResponse().setBody("""{"ok":true}"""))
+        val client = RelayClient(baseUrl(), "tok")
+
+        assertTrue(client.cancel("w1:p1", 7).isSuccess)
+
+        assertEquals("""{"expected_seq":7}""", server.takeRequest().body.readUtf8())
+    }
+
+    @Test
     fun relayErrorBodyIsMapped() = runBlocking {
         server.enqueue(
             MockResponse().setResponseCode(409)

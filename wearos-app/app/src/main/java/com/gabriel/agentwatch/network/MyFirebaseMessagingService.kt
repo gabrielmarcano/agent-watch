@@ -128,11 +128,11 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
                 if (denyOptionId.isNotBlank()) {
                     action = NotificationActionReceiver.ACTION_ANSWER
                     putExtra("option_id", denyOptionId)
-                    putExtra("fingerprint", fingerprint)
                     putExtra("is_deny", true)
                 } else {
                     action = NotificationActionReceiver.ACTION_CANCEL
                 }
+                putExtra("fingerprint", fingerprint)
                 putExtra("pane_id", paneId)
                 putExtra("state_change_seq", stateChangeSeq)
                 putExtra("notif_id", notifId)

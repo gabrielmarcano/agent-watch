@@ -264,9 +264,10 @@ object RelayRepository {
         return refreshAfter(currentClient.answer(paneId, optionId, expectedSeq, fingerprint))
     }
 
-    suspend fun cancel(paneId: String, expectedSeq: Long): Result<Unit> {
+    /** [fingerprint]: the fingerprint of the prompt being cancelled, when one is shown (see [RelayClient.cancel]). */
+    suspend fun cancel(paneId: String, expectedSeq: Long, fingerprint: String? = null): Result<Unit> {
         val currentClient = getClient() ?: return notPaired()
-        return refreshAfter(currentClient.cancel(paneId, expectedSeq))
+        return refreshAfter(currentClient.cancel(paneId, expectedSeq, fingerprint))
     }
 
     suspend fun prompt(paneId: String, text: String, expectedSeq: Long): Result<Unit> {

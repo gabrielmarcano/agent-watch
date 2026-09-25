@@ -185,9 +185,13 @@ class RelayClient(
         return executeRequest(http.command, request, Unit::class.java)
     }
 
-    suspend fun cancel(paneId: String, expectedSeq: Long): Result<Unit> {
+    /**
+     * `POST /v1/agents/{pane}/cancel`. [fingerprint] is the prompt's fingerprint when the cancel targets a
+     * visible prompt, so the bridge refuses it if the menu changed; null (omitted from the JSON) otherwise.
+     */
+    suspend fun cancel(paneId: String, expectedSeq: Long, fingerprint: String? = null): Result<Unit> {
         val encodedPane = URLEncoder.encode(paneId, "UTF-8")
-        val reqBody = gson.toJson(CancelRequest(expected_seq = expectedSeq)).toRequestBody(jsonMediaType)
+        val reqBody = gson.toJson(CancelRequest(expected_seq = expectedSeq, fingerprint = fingerprint)).toRequestBody(jsonMediaType)
         val request = newRequestBuilder("/v1/agents/$encodedPane/cancel").post(reqBody).build()
         return executeRequest(http.command, request, Unit::class.java)
     }
