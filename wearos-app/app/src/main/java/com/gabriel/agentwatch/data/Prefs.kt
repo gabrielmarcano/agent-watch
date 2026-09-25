@@ -3,24 +3,26 @@ package com.gabriel.agentwatch.data
 import android.content.Context
 import android.content.SharedPreferences
 
-class Prefs(context: Context) {
+class Prefs(context: Context) : FcmRegistrationStore {
     private val prefs: SharedPreferences = context.getSharedPreferences("AgentWatchPrefs", Context.MODE_PRIVATE)
 
     init {
-        // Purge legacy fields if present
-        if (prefs.contains("local_ip") || prefs.contains("tailscale_ip")) {
+        // Purge legacy fields if present. `fcm_registered_token` was written even when registration
+        // failed; the pairing-bound `fcm_registration` record replaces it.
+        if (prefs.contains("local_ip") || prefs.contains("tailscale_ip") || prefs.contains("fcm_registered_token")) {
             prefs.edit()
                 .remove("local_ip")
                 .remove("tailscale_ip")
+                .remove("fcm_registered_token")
                 .apply()
         }
     }
 
-    var relayUrl: String
+    override var relayUrl: String
         get() = prefs.getString("relay_url", "") ?: ""
         set(value) = prefs.edit().putString("relay_url", value.trim()).apply()
 
-    var deviceToken: String?
+    override var deviceToken: String?
         get() = prefs.getString("device_token", null)
         set(value) = prefs.edit().putString("device_token", value).apply()
 
@@ -28,13 +30,28 @@ class Prefs(context: Context) {
         get() = prefs.getString("device_id", null)
         set(value) = prefs.edit().putString("device_id", value).apply()
 
-    var fcmToken: String?
+    override var fcmToken: String?
         get() = prefs.getString("fcm_token", null)
         set(value) = prefs.edit().putString("fcm_token", value).apply()
 
+    /** Written by [com.gabriel.agentwatch.network.FcmRegistrar] only after the relay accepted the token. */
+    override var fcmRegistration: FcmRegistrationRecord?
+        get() = FcmRegistrationRecord.decode(prefs.getString("fcm_registration", null))
+        set(value) = prefs.edit().putString("fcm_registration", value?.encode()).apply()
+
+    /**
+     * The FCM token the relay has accepted for the **current** pairing, or null.
+     *
+     * Writes are ignored: registration is recorded by `FcmRegistrar` only after a 200, so a caller that
+     * sets this after a registration that may have failed can no longer mark push as working.
+     */
     var fcmRegisteredToken: String?
-        get() = prefs.getString("fcm_registered_token", null)
-        set(value) = prefs.edit().putString("fcm_registered_token", value).apply()
+        get() {
+            val record = fcmRegistration ?: return null
+            return record.fcmToken.takeUnless { needsFcmRegistration(it, relayUrl, deviceToken, record) }
+        }
+        @Deprecated("Ignored. Use PushRegistration.ensure(context); it records the token only after the relay accepts it.")
+        set(@Suppress("UNUSED_PARAMETER") value) {}
 
     var pinnedPaneId: String?
         get() = prefs.getString("pinned_pane_id", null)
@@ -47,7 +64,7 @@ class Prefs(context: Context) {
         prefs.edit()
             .remove("device_token")
             .remove("device_id")
-            .remove("fcm_registered_token")
+            .remove("fcm_registration")
             .apply()
     }
 }

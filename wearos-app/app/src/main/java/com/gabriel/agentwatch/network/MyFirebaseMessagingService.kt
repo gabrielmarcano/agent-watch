@@ -29,23 +29,8 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
 
     override fun onNewToken(token: String) {
         super.onNewToken(token)
-        Log.d(TAG, "New FCM token generated: $token")
-
-        val prefs = Prefs(this)
-        prefs.fcmToken = token
-
-        if (prefs.isPaired && token != prefs.fcmRegisteredToken) {
-            CoroutineScope(Dispatchers.IO).launch {
-                val client = RelayClient(prefs.relayUrl, prefs.deviceToken)
-                val res = client.registerPush(token)
-                if (res.isSuccess) {
-                    prefs.fcmRegisteredToken = token
-                    Log.d(TAG, "Successfully registered FCM token with relay")
-                } else {
-                    Log.e(TAG, "Failed to register FCM token: ${res.exceptionOrNull()?.message}")
-                }
-            }
-        }
+        Log.d(TAG, "New FCM token received (${token.length} chars)")
+        PushRegistration.onToken(this, token)
     }
 
     override fun onMessageReceived(remoteMessage: RemoteMessage) {

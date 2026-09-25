@@ -25,6 +25,8 @@ interface RelayCredentials {
 
 /** Side effects the engine triggers but does not own. Called outside the engine's lock. */
 interface RelayEngineHooks {
+    /** The SSE stream opened: the relay is reachable and accepts the token (retry pending work here). */
+    fun onStreamOpened() {}
     /** The relay rejected the stored token (401); the credentials are already cleared. */
     fun onAuthRevoked() {}
 }
@@ -158,21 +160,27 @@ class RelayEngine(
         state.update { it.copy(connection = Connection.Connecting) }
         eventSource?.cancel()
         eventSource = currentClient.events(object : EventSourceListener() {
-            override fun onOpen(eventSource: EventSource, response: Response) = onStream(generation) {
-                log("SSE onOpen")
-                state.update { it.copy(connection = Connection.Live) }
+            override fun onOpen(eventSource: EventSource, response: Response) {
+                val opened = onStream(generation) {
+                    log("SSE onOpen")
+                    state.update { it.copy(connection = Connection.Live) }
+                }
+                if (opened) hooks.onStreamOpened()
             }
 
-            override fun onEvent(eventSource: EventSource, id: String?, type: String?, data: String) = onStream(generation) {
-                handleEventLocked(type ?: "", data)
+            override fun onEvent(eventSource: EventSource, id: String?, type: String?, data: String) {
+                onStream(generation) { handleEventLocked(type ?: "", data) }
             }
 
-            override fun onClosed(eventSource: EventSource) = onStream(generation) {
-                log("SSE onClosed")
-                scheduleReconnectLocked("Connection closed")
+            override fun onClosed(eventSource: EventSource) {
+                onStream(generation) {
+                    log("SSE onClosed")
+                    scheduleReconnectLocked("Connection closed")
+                }
             }
 
-            override fun onFailure(eventSource: EventSource, t: Throwable?, response: Response?) = onStream(generation) {
+            override fun onFailure(eventSource: EventSource, t: Throwable?, response: Response?) {
+                onStream(generation) {
                 val statusCode = response?.code ?: 0
                 val reason = when {
                     t is SocketTimeoutException -> "No data from the relay"
@@ -180,16 +188,22 @@ class RelayEngine(
                     else -> "HTTP $statusCode"
                 }
                 log("SSE onFailure: $reason (code: $statusCode)")
-                // A 401 was already reported by RelayClient.events → onUnauthorized; never retry with that token.
-                if (statusCode == 401) return@onStream
-                scheduleReconnectLocked(reason)
+                    // A 401 was already reported by RelayClient.events → onUnauthorized; never retry with that token.
+                    if (statusCode == 401) return@onStream
+                    scheduleReconnectLocked(reason)
+                }
             }
         })
     }
 
-    /** Runs [block] under the lock if [generation] is still the live stream. */
-    private inline fun onStream(generation: Long, block: () -> Unit) = synchronized(lock) {
-        if (generation == streamGeneration && started) block()
+    /** Runs [block] under the lock if [generation] is still the live stream; returns whether it ran. */
+    private inline fun onStream(generation: Long, block: () -> Unit): Boolean = synchronized(lock) {
+        if (generation == streamGeneration && started) {
+            block()
+            true
+        } else {
+            false
+        }
     }
 
     /** The stream is gone (closed, failed or silent): the list is now stale until the next snapshot. */

@@ -38,6 +38,11 @@ object RelayRepository {
         val newEngine = RelayEngine(
             state = _state,
             credentials = PrefsCredentials(Prefs(appContext)),
+            hooks = object : RelayEngineHooks {
+                // Reachable relay + accepted token: the moment to (re)send a pending FCM registration,
+                // including right after pairing (PairingScreen restarts the engine).
+                override fun onStreamOpened() = PushRegistration.ensure(appContext)
+            },
             log = { Log.d(TAG, it) }
         )
         engine = newEngine

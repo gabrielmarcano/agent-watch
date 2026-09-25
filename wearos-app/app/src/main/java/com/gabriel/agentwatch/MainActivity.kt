@@ -25,13 +25,10 @@ import androidx.wear.compose.navigation.SwipeDismissableNavHost
 import androidx.wear.compose.navigation.composable
 import androidx.wear.compose.navigation.rememberSwipeDismissableNavController
 import com.gabriel.agentwatch.data.Prefs
-import com.gabriel.agentwatch.network.RelayClient
+import com.gabriel.agentwatch.network.PushRegistration
 import com.gabriel.agentwatch.network.RelayRepository
 import com.gabriel.agentwatch.ui.screens.*
 import com.gabriel.agentwatch.ui.theme.AgentWatchTheme
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
     private val prefs by lazy { Prefs(this) }
@@ -261,19 +258,8 @@ class MainActivity : ComponentActivity() {
                     if (task.isSuccessful) {
                         val token = task.result
                         if (!token.isNullOrBlank()) {
-                            prefs.fcmToken = token
-                            if (prefs.isPaired && token != prefs.fcmRegisteredToken) {
-                                kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
-                                    val client = com.gabriel.agentwatch.network.RelayClient(prefs.relayUrl, prefs.deviceToken)
-                                    val res = client.registerPush(token)
-                                    if (res.isSuccess) {
-                                        prefs.fcmRegisteredToken = token
-                                        Log.d("FCM", "Successfully registered FCM token with relay: $token")
-                                    } else {
-                                        Log.e("FCM", "Failed to register FCM token with relay: ${res.exceptionOrNull()?.message}")
-                                    }
-                                }
-                            }
+                            // Stores it and registers it with the relay; recorded only on success, retried on failure.
+                            PushRegistration.onToken(this, token)
                         }
                     } else {
                         Log.w("FCM", "Fetching FCM registration token failed", task.exception)
