@@ -3,6 +3,7 @@ package com.gabriel.agentwatch.ui.screens
 import android.app.Activity
 import android.content.Intent
 import android.speech.RecognizerIntent
+import android.view.HapticFeedbackConstants
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.focusable
@@ -17,6 +18,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.rotary.onRotaryScrollEvent
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -27,7 +29,9 @@ import androidx.wear.compose.foundation.lazy.ScalingLazyColumn
 import androidx.wear.compose.foundation.lazy.rememberScalingLazyListState
 import androidx.wear.compose.material.*
 import com.gabriel.agentwatch.approval.CommandFeedback
+import com.gabriel.agentwatch.approval.SentAnswer
 import com.gabriel.agentwatch.approval.commandErrorFeedback
+import com.gabriel.agentwatch.approval.isAwaitingUpdate
 import com.gabriel.agentwatch.data.Prefs
 import com.gabriel.agentwatch.model.AgentState
 import com.gabriel.agentwatch.network.RelayRepository
@@ -51,8 +55,18 @@ fun AgentDetailScreen(
     val focusRequester = remember { FocusRequester() }
     val lifecycleOwner = LocalLifecycleOwner.current
 
+    val view = LocalView.current
+
     var actionInFlight by remember { mutableStateOf(false) }
     var feedback by remember { mutableStateOf<CommandFeedback?>(null) }
+
+    // After a successful answer/cancel, the prompt stays locked ("Sent…") until the relay
+    // reports a new seq or fingerprint, or the agent leaves blocked. Prevents a double send.
+    var sentAnswer by remember(agent.pane_id) { mutableStateOf<SentAnswer?>(null) }
+    val awaitingUpdate = isAwaitingUpdate(agent, sentAnswer)
+    LaunchedEffect(sentAnswer, awaitingUpdate) {
+        if (sentAnswer != null && !awaitingUpdate) sentAnswer = null
+    }
 
     // Opening this screen pins this agent for quick dictation
     LaunchedEffect(agent.pane_id) {
@@ -184,39 +198,54 @@ fun AgentDetailScreen(
             // Prompt Card if blocked
             if (agent.status == "blocked" && agent.prompt != null) {
                 item {
+                    // What the command is sent against; also what locks the card on success.
+                    val target = SentAnswer(agent.pane_id, agent.state_change_seq, agent.prompt.fingerprint)
                     PromptCard(
                         agent = agent,
-                        isActionInFlight = actionInFlight,
+                        isActionInFlight = actionInFlight || awaitingUpdate,
+                        isSent = awaitingUpdate,
                         onAnswerClick = { optionId ->
-                            actionInFlight = true
-                            feedback = null
-                            coroutineScope.launch {
-                                val res = RelayRepository.answer(
-                                    paneId = agent.pane_id,
-                                    optionId = optionId,
-                                    expectedSeq = agent.state_change_seq,
-                                    fingerprint = agent.prompt.fingerprint
-                                )
-                                actionInFlight = false
-                                res.fold(
-                                    onSuccess = { feedback = CommandFeedback.success("Sent answer") },
-                                    onFailure = { err -> feedback = commandErrorFeedback(err) }
-                                )
+                            if (!actionInFlight && !awaitingUpdate) {
+                                actionInFlight = true
+                                feedback = null
+                                coroutineScope.launch {
+                                    val res = RelayRepository.answer(
+                                        paneId = target.paneId,
+                                        optionId = optionId,
+                                        expectedSeq = target.seq,
+                                        fingerprint = target.fingerprint
+                                    )
+                                    res.fold(
+                                        onSuccess = {
+                                            sentAnswer = target
+                                            view.performHapticFeedback(HapticFeedbackConstants.CONFIRM)
+                                            feedback = CommandFeedback.success("Sent answer")
+                                        },
+                                        onFailure = { err -> feedback = commandErrorFeedback(err) }
+                                    )
+                                    actionInFlight = false
+                                }
                             }
                         },
                         onCancelClick = {
-                            actionInFlight = true
-                            feedback = null
-                            coroutineScope.launch {
-                                val res = RelayRepository.cancel(
-                                    paneId = agent.pane_id,
-                                    expectedSeq = agent.state_change_seq
-                                )
-                                actionInFlight = false
-                                res.fold(
-                                    onSuccess = { feedback = CommandFeedback.success("Canceled") },
-                                    onFailure = { err -> feedback = commandErrorFeedback(err) }
-                                )
+                            if (!actionInFlight && !awaitingUpdate) {
+                                actionInFlight = true
+                                feedback = null
+                                coroutineScope.launch {
+                                    val res = RelayRepository.cancel(
+                                        paneId = target.paneId,
+                                        expectedSeq = target.seq
+                                    )
+                                    res.fold(
+                                        onSuccess = {
+                                            sentAnswer = target
+                                            view.performHapticFeedback(HapticFeedbackConstants.CONFIRM)
+                                            feedback = CommandFeedback.success("Canceled")
+                                        },
+                                        onFailure = { err -> feedback = commandErrorFeedback(err) }
+                                    )
+                                    actionInFlight = false
+                                }
                             }
                         }
                     )

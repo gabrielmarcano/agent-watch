@@ -26,7 +26,8 @@ fun PromptCard(
     onAnswerClick: (optionId: String) -> Unit,
     onCancelClick: () -> Unit,
     isActionInFlight: Boolean,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    isSent: Boolean = false
 ) {
     val prompt = agent.prompt ?: return
     var showAllOptions by remember { mutableStateOf(false) }
@@ -88,6 +89,18 @@ fun PromptCard(
                     maxLines = 6
                 )
                 Spacer(modifier = Modifier.height(6.dp))
+            }
+
+            // Answer accepted; buttons stay disabled until the agent's state changes
+            if (isSent) {
+                Text(
+                    text = "Sent…",
+                    style = MaterialTheme.typography.caption2.copy(fontSize = 9.5.sp, fontWeight = FontWeight.Bold),
+                    color = BrightGreen,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Spacer(modifier = Modifier.height(4.dp))
             }
 
             // Options rendering based on kind
