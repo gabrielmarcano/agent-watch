@@ -33,7 +33,7 @@ func TestGoldenAgentState(t *testing.T) {
 				{ID: "opt-2", Label: "Yes, and don't ask again for go test commands", Role: model.RoleAllowAlways},
 				{ID: "opt-3", Label: "No, and tell Claude what to do differently", Role: model.RoleDeny},
 			},
-			Fingerprint: "9f2c61d0a4b3e871",
+			Fingerprint: "fd6ff7388739252d",
 		},
 		UpdatedAt: "2026-09-23T17:04:05Z",
 	}

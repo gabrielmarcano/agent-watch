@@ -38,7 +38,7 @@ class ContractsTest {
         assertEquals("permission", prompt!!.kind)
         assertEquals("Bash command", prompt.title)
         assertEquals("go test ./...", prompt.detail)
-        assertEquals("9f2c61d0a4b3e871", prompt.fingerprint)
+        assertEquals("fd6ff7388739252d", prompt.fingerprint)
         assertEquals(3, prompt.options.size)
 
         val opt1 = prompt.options[0]
