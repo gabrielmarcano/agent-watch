@@ -206,8 +206,10 @@ Keep entries short, and use absolute dates (YYYY-MM-DD).
     - call `RelayRepository.restart(context)` after pairing instead of `resetClient()` + `start()`;
     - pass `fingerprint = prompt.fingerprint` to `RelayRepository.cancel` in `AgentDetailScreen` (≈ line 235; it sends none today);
     - delete the manual `registerPush` + `prefs.fcmRegisteredToken` write in `PairingScreen` (≈ lines 264–270; the write is ignored and `FcmRegistrar` already registers on stream open);
-    - map `QuickDictateActivity`'s toast errors through `CommandFeedback` (it shows raw exception messages).
-  - Before `AW_PUSH_RESOLVED` is enabled, the app should also ignore a `blocked` push whose seq is ≤ the last `resolved` seq for its pane (`contracts.md` §4.1); it does not track that yet.
+    - map `QuickDictateActivity`'s toast errors through `CommandFeedback` (it shows raw exception messages);
+    - show the relay `message` for a `prompt_changed` focus refusal ("answer it on the Mac") instead of the generic "Prompt changed — refreshed", and don't invite a retry (the prompt is unchanged);
+    - drop the owner's relay domain pre-filled in `PairingScreen` (personal data if the repo goes public; a wrong default for anyone else).
+  - Done 2026-09-25: the app ignores a `blocked` push whose seq is ≤ the last `resolved` seq for its pane (`contracts.md` §4.1), a prerequisite for `AW_PUSH_RESOLVED`.
 
 ## Phase 5 — End-to-end + docs (release gate)
 - Claimed by: agy, 2026-09-24 — **reopened 2026-09-25**
@@ -240,5 +242,5 @@ Keep entries short, and use absolute dates (YYYY-MM-DD).
 
 ## Blocked / questions
 - **herdr dialog-status gap — mitigated 2026-09-25, review regularly.** herdr 0.9.1 misses every agy 1.2.x permission dialog (its rule expects wording agy no longer shows) and any Claude dialog after Claude is relaunched in the same pane (a stale input box wins `live_prompt_box`; it is not WebFetch-specific). Hooks can't fix it: herdr ignores the state reported by the claude/agy integrations. Mitigation: temporary local detection overrides, `tools/herdr-overrides/` (installed on the owner's Mac, herdr keeps being the source of truth). **Remove them once upstream fixes it:** run `tools/herdr-overrides/herdr-overrides.sh check` after every herdr manifest update or upgrade. Draft upstream issues, not filed: `tools/herdr-overrides/UPSTREAM-ISSUES.md`.
-- **OpenCode button focus.** OpenCode's keys assume the focus it sets when the dialog opens (`Allow once`). If someone moved the focus on the Mac (arrows or mouse hover) before the watch answers, `Enter` acts on the focused button. Reject (`esc`) is safe. A fix needs the focused button from the screen (an ANSI/styled read), which `agent.read format:text` does not give.
+- **OpenCode button focus — guarded 2026-09-25.** Before focus-dependent keys (Allow once/always, Confirm) the bridge reads the pane with `format: "ansi"` and checks the focused button against the dialog's accent colour (works in every bundled theme); if focus moved, it refuses with `prompt_changed` and presses nothing. Verified live in the sandbox (default focus → accepted; focus moved → refused; moved back → accepted). Left: a millisecond window between the ANSI read and `send_keys`; the watch still shows the generic "Prompt changed" text (UI session item below).
 - **watchOS contracts.** Only `CancelRequest` was added to the legacy Swift models; the rest of the `/v1` contracts are not mirrored, so AGENTS.md §1.5 ("always compiles against `/v1`") does not hold until Phase 6.

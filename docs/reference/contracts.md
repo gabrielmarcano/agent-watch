@@ -322,7 +322,7 @@ Every non-200 response carries an `ErrorResponse`.
 | `unauthorized` | 401 | Missing or unknown token | Go to pairing screen |
 | `unknown_pane` | 404 | Pane is not in the relay's list | Remove the card |
 | `stale_state` | 409 | `expected_seq` no longer matches | "The agent changed — refreshed" |
-| `prompt_changed` | 409 | Fingerprint mismatch | "The question changed — refreshed" |
+| `prompt_changed` | 409 | Fingerprint mismatch; or, for OpenCode, the focus on the host is not on the button the keys assume (the `message` says to answer on the Mac; nothing was pressed) | "The question changed — refreshed" |
 | `agent_busy` | 409 | Prompt sent while `working` to an agent that cannot queue | "Agent is busy" |
 | `agent_blocked` | 409 | Prompt sent while `blocked` | "Answer the question first" |
 | `agent_state_unknown` | 409 | Command sent while `unknown` | "Agent state unknown" |

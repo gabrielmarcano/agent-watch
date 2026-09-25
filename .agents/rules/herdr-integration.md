@@ -29,7 +29,8 @@ Full reference: `docs/reference/herdr-socket-api.md` (verified on herdr 0.9.1, p
   1. re-list the agent;
   2. check `expected_seq`;
   3. re-read the screen;
-  4. re-parse it and compare the fingerprint.
+  4. re-parse it and compare the fingerprint;
+  5. if the adapter implements `FocusGuard` (OpenCode) and the keys depend on focus, re-read with `format: "ansi"` and verify the focused button (`CheckFocus`).
 
   On mismatch, send nothing.
 - `agent.prompt` is never sent to `blocked` agents, nor while the adapter parses a menu on the screen (herdr 0.9.1 reports some open dialogs as `done`/`working`). Answers go through `send_keys`.

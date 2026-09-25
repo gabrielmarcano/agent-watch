@@ -73,7 +73,7 @@ This document defines the development rules, architectural boundaries, and codin
 - **Never map prompt options by position.**
   - Roles (`allow_once`, `allow_always`, `deny`, `choice`) are derived from the option **label**.
   - Example of why: in Claude Code, `2` means "Yes, and don't ask again".
-- **Every adapter change ships with a real captured fixture** in `pkg/agents/testdata/<agent>/`, taken with `herdr agent read <pane> --source visible --format text`.
+- **Every adapter change ships with a real captured fixture** in `pkg/agents/testdata/<agent>/`, taken with `herdr agent read <pane> --source visible --format text` (`--format ansi` for focus fixtures such as `pkg/agents/testdata/opencode/focus/`).
 
 ### 1.3 Go for Host Bridge & Cloud Relay
 - Backend is **Go 1.22+**, a single module: `github.com/gabrielmarcano/agent-monitor`.
