@@ -24,13 +24,21 @@ type Config struct {
 	ClaudeConfigDirs []string `toml:"claude_config_dirs"`
 }
 
-// StatusFile is written by the bridge daemon periodically to report health and status.
+// StatusFile is written by the bridge daemon every 5 s to report health.
+//
+// Every key is always written (no omitempty): the first menu bar build
+// decodes the original six unconditionally. A PID of 0 means the bridge is
+// not running: it exited cleanly (or failed to start, see LastError).
 type StatusFile struct {
 	PID            int    `json:"pid"`
 	RelayConnected bool   `json:"relay_connected"`
 	HerdrOnline    bool   `json:"herdr_online"`
 	Agents         int    `json:"agents"`
-	LastError      string `json:"last_error"`
+	Blocked        int    `json:"blocked"`     // agents whose status is blocked
+	LastError      string `json:"last_error"`  // relay_error and herdr_error joined; "" when healthy
+	RelayError     string `json:"relay_error"` // why the relay is not connected
+	HerdrError     string `json:"herdr_error"` // why herdr is offline
+	Version        string `json:"version"`     // version of the running bridge
 	UpdatedAt      string `json:"updated_at"`
 }
 
@@ -102,6 +110,31 @@ func LoadConfig(path string) (*Config, error) {
 		return nil, fmt.Errorf("parse config %s: %w", path, err)
 	}
 
+	return &cfg, nil
+}
+
+// CheckConfig loads and validates the config at path. Its errors are safe to
+// show and to store in status.json: they never quote the file's contents
+// (a TOML parse error can echo the host_token line).
+func CheckConfig(path string) (*Config, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, fmt.Errorf("config %s not found; run `agent-watch-bridge configure --relay-url URL --host-token TOKEN`", path)
+		}
+		return nil, fmt.Errorf("config %s cannot be read: %w", path, err)
+	}
+	var cfg Config
+	if err := toml.Unmarshal(data, &cfg); err != nil {
+		var perr toml.ParseError
+		if errors.As(err, &perr) {
+			return nil, fmt.Errorf("config %s is not valid TOML (line %d); re-run configure", path, perr.Position.Line)
+		}
+		return nil, fmt.Errorf("config %s is not valid TOML; re-run configure", path)
+	}
+	if err := ValidateConfig(&cfg); err != nil {
+		return nil, fmt.Errorf("config %s is invalid: %w", path, err)
+	}
 	return &cfg, nil
 }
 

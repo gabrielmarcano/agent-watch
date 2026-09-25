@@ -40,7 +40,7 @@ type Engine struct {
 	workspaces  map[string]string // workspace_id -> label
 	herdrOnline bool
 	pong        herdr.Pong
-	lastError   string
+	herdrErr    string                      // why herdr is offline; "" while online
 	consumed    map[string]*consumedPrompts // pane_id -> prompts already acted on (guarded by mu)
 
 	lockMu    sync.Mutex
@@ -84,6 +84,14 @@ func (e *Engine) OnHerdrOnline(online bool, pong herdr.Pong) {
 	e.mu.Lock()
 	e.herdrOnline = online
 	e.pong = pong
+	if online {
+		e.herdrErr = ""
+	} else {
+		e.herdrErr = "herdr unreachable"
+		if e.Herdr != nil && e.Herdr.SocketPath != "" {
+			e.herdrErr = "herdr unreachable at " + e.Herdr.SocketPath
+		}
+	}
 	e.mu.Unlock()
 
 	if online {
@@ -504,8 +512,27 @@ func (e *Engine) Status() StatusFile {
 	defer e.mu.RUnlock()
 
 	relayConnected := false
+	relayErr := ""
 	if e.Relay != nil {
 		relayConnected = e.Relay.Connected()
+		if !relayConnected {
+			relayErr = e.Relay.LastError()
+		}
+	}
+
+	blocked := 0
+	for _, st := range e.states {
+		if st.public.Status == model.StatusBlocked {
+			blocked++
+		}
+	}
+
+	var errs []string
+	if relayErr != "" {
+		errs = append(errs, relayErr)
+	}
+	if e.herdrErr != "" {
+		errs = append(errs, e.herdrErr)
 	}
 
 	return StatusFile{
@@ -513,37 +540,55 @@ func (e *Engine) Status() StatusFile {
 		RelayConnected: relayConnected,
 		HerdrOnline:    e.herdrOnline,
 		Agents:         len(e.states),
-		LastError:      e.lastError,
+		Blocked:        blocked,
+		LastError:      strings.Join(errs, "; "),
+		RelayError:     relayErr,
+		HerdrError:     e.herdrErr,
+		Version:        e.Version,
 		UpdatedAt:      model.Now(),
 	}
 }
 
-// StartStatusWriter starts a goroutine that periodically writes status.json.
-func (e *Engine) StartStatusWriter(ctx context.Context, interval time.Duration) {
+// StoppedStatus is the status file of a bridge that is not running: pid 0
+// and nothing connected. lastErr says why, when it did not stop cleanly.
+func StoppedStatus(version, lastErr string) StatusFile {
+	return StatusFile{Version: version, LastError: lastErr, UpdatedAt: model.Now()}
+}
+
+// StartStatusWriter writes status.json now and every interval until ctx is
+// done, then writes a final stopped status (pid 0) so readers do not see a
+// stale "connected". The returned channel is closed after that final write;
+// wait for it before exiting. It is closed at once if there is no StatusPath.
+func (e *Engine) StartStatusWriter(ctx context.Context, interval time.Duration) <-chan struct{} {
+	done := make(chan struct{})
 	if e.StatusPath == "" || interval <= 0 {
-		return
+		close(done)
+		return done
+	}
+
+	write := func(s StatusFile) {
+		if err := WriteStatus(e.StatusPath, s); err != nil && e.Logger != nil {
+			e.Logger.Warn("failed to write status file", "path", e.StatusPath, "err", err)
+		}
 	}
 
 	go func() {
+		defer close(done)
 		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
 
-		// Write initial status immediately
-		_ = WriteStatus(e.StatusPath, e.Status())
-
+		write(e.Status())
 		for {
 			select {
 			case <-ctx.Done():
+				write(StoppedStatus(e.Version, ""))
 				return
 			case <-ticker.C:
-				if err := WriteStatus(e.StatusPath, e.Status()); err != nil {
-					if e.Logger != nil {
-						e.Logger.Warn("failed to write status file", "path", e.StatusPath, "err", err)
-					}
-				}
+				write(e.Status())
 			}
 		}
 	}()
+	return done
 }
 
 func (e *Engine) isHerdrOnline() bool {

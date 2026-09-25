@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -151,13 +152,14 @@ func runDaemon(args []string) error {
 		targetConfig = bridge.DefaultConfigPath()
 	}
 
-	cfg, err := bridge.LoadConfig(targetConfig)
-	if err != nil {
-		return fmt.Errorf("load config: %w", err)
-	}
+	stateDir := bridge.DefaultStateDir()
+	statusPath := filepath.Join(stateDir, "status.json")
 
-	if err := bridge.ValidateConfig(cfg); err != nil {
-		return fmt.Errorf("validate config: %w", err)
+	cfg, err := bridge.CheckConfig(targetConfig)
+	if err != nil {
+		// Leave the reason where status readers (the menu bar) look for it.
+		_ = bridge.WriteStatus(statusPath, bridge.StoppedStatus(version, err.Error()))
+		return err
 	}
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
@@ -180,9 +182,6 @@ func runDaemon(args []string) error {
 		Logger: logger,
 	}
 
-	stateDir := bridge.DefaultStateDir()
-	statusPath := filepath.Join(stateDir, "status.json")
-
 	engine := bridge.NewEngine(hClient, syncer, reg, rClient, version, cfg.HostName, statusPath, logger)
 	syncer.Listener = engine
 	rClient.OnConnect = engine.ConnectMessages
@@ -191,9 +190,9 @@ func runDaemon(args []string) error {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 
-	logger.Info("starting agent-watch-bridge", "version", version, "socket", hClient.SocketPath, "config", targetConfig)
+	logger.Info("starting agent-watch-bridge", "version", version, "socket", hClient.SocketPath, "config", targetConfig, "status", statusPath)
 
-	engine.StartStatusWriter(ctx, 5*time.Second)
+	writerDone := engine.StartStatusWriter(ctx, 5*time.Second)
 
 	go func() {
 		if err := syncer.Run(ctx); err != nil && ctx.Err() == nil {
@@ -201,8 +200,13 @@ func runDaemon(args []string) error {
 		}
 	}()
 
-	if err := rClient.Run(ctx); err != nil && ctx.Err() == nil {
-		return fmt.Errorf("relay client run: %w", err)
+	runErr := rClient.Run(ctx)
+	// Run only returns once ctx is done; make sure it is, then let the
+	// writer mark the status file as stopped before the process exits.
+	cancel()
+	<-writerDone
+	if runErr != nil && !errors.Is(runErr, context.Canceled) {
+		return fmt.Errorf("relay client run: %w", runErr)
 	}
 
 	logger.Info("agent-watch-bridge stopped cleanly")
