@@ -246,7 +246,7 @@ type HistoryResponse struct {
     Items []HistoryItem `json:"items"`
 }
 type PromptRequest struct {
-    Text        string `json:"text"`         // 1..4000 chars
+    Text        string `json:"text"`         // 1..4000 characters (Unicode code points, not bytes)
     ExpectedSeq uint64 `json:"expected_seq"`
 }
 type AnswerRequest struct {
@@ -278,6 +278,7 @@ type ErrorBody struct {
 
 | Field | Bodies | Rule |
 |---|---|---|
+| `text` | prompt | 1 to 4000 **characters**, counted as Unicode code points after JSON decoding (`é` and `😀` count 1 each), never bytes. Outside that range → `invalid_request`. The prompt body may be up to 64 KiB, so 4000 characters fit however the client escapes them |
 | `expected_seq` | prompt, answer, cancel | The `state_change_seq` the watch showed. A mismatch → `stale_state` |
 | `option_id` | answer | An `id` from `prompt.options`. Not in the current prompt → `unknown_option` |
 | `fingerprint` | answer (required), cancel (optional) | The `prompt.fingerprint` the watch showed. A mismatch → `prompt_changed`. On cancel, when it is omitted the bridge compares against the prompt it published for `expected_seq` |

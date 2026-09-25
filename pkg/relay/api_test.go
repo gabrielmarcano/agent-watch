@@ -12,6 +12,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf16"
+	"unicode/utf8"
 
 	"github.com/coder/websocket"
 	"github.com/gabrielmarcano/agent-monitor/pkg/model"
@@ -573,6 +575,71 @@ func TestAPI_CancelForwardsFingerprint(t *testing.T) {
 		case <-ctx.Done():
 			t.Fatalf("host never received the cancel")
 		}
+	}
+}
+
+// The prompt limit is 4000 characters (Unicode code points), not bytes, and
+// the body cap leaves room for 4000 characters however the client escapes them.
+func TestAPI_PromptLengthCountsCharacters(t *testing.T) {
+	server, ts := setupTestServer(t)
+	devToken, _ := GenerateDeviceToken()
+	_, _ = server.Store().AddDevice("Watch", Sha256Hex(devToken))
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	conn := connectTestHost(t, ctx, server, ts, "w5:pAW")
+	received := answerCommands(ctx, conn)
+
+	jsonBody := func(text string) string {
+		b, _ := json.Marshal(model.PromptRequest{Text: text, ExpectedSeq: 10})
+		return string(b)
+	}
+	// U+1F600 written as a JSON surrogate-pair escape: 12 bytes for 1 character.
+	var escaped strings.Builder
+	for _, u := range utf16.Encode([]rune(strings.Repeat(string(rune(0x1F600)), 4000))) {
+		fmt.Fprintf(&escaped, "%cu%04x", '\\', u)
+	}
+	escapedEmoji := `{"expected_seq":10,"text":"` + escaped.String() + `"}`
+	if len(escapedEmoji) < 48000 {
+		t.Fatalf("escaped body is %d bytes, want the 12-byte escape per character", len(escapedEmoji))
+	}
+
+	for _, tc := range []struct {
+		name  string
+		body  string
+		want  int
+		runes int
+	}{
+		{"4000 two-byte characters", jsonBody(strings.Repeat("é", 4000)), http.StatusOK, 4000},
+		{"4000 escaped emoji (48 KB body)", escapedEmoji, http.StatusOK, 4000},
+		{"4001 ASCII characters", jsonBody(strings.Repeat("a", 4001)), http.StatusBadRequest, 0},
+		{"empty", jsonBody(""), http.StatusBadRequest, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			req, _ := http.NewRequest("POST", ts.URL+"/v1/agents/w5%3ApAW/prompt", strings.NewReader(tc.body))
+			req.Header.Set("Authorization", "Bearer "+devToken)
+			resp, err := http.DefaultClient.Do(req)
+			if err != nil {
+				t.Fatalf("POST prompt: %v", err)
+			}
+			var errResp model.ErrorResponse
+			_ = json.NewDecoder(resp.Body).Decode(&errResp)
+			resp.Body.Close()
+			if resp.StatusCode != tc.want {
+				t.Fatalf("status %d (%s), want %d", resp.StatusCode, errResp.Error.Message, tc.want)
+			}
+			if tc.want != http.StatusOK {
+				return
+			}
+			select {
+			case cmd := <-received:
+				if n := utf8.RuneCountInString(cmd.Text); n != tc.runes {
+					t.Fatalf("host got %d characters, want %d", n, tc.runes)
+				}
+			case <-ctx.Done():
+				t.Fatalf("host never received the prompt")
+			}
+		})
 	}
 }
 

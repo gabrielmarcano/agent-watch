@@ -5,14 +5,26 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/gabrielmarcano/agent-monitor/pkg/model"
+)
+
+const (
+	// maxPromptChars is the prompt limit from contracts.md §2.2, in Unicode
+	// code points (what a person counts as characters), not bytes.
+	maxPromptChars = 4000
+	// maxPromptBodyBytes fits maxPromptChars in the worst JSON encoding: an
+	// astral character escaped as a surrogate pair (two backslash-u escapes) is 12
+	// bytes, and some encoders (Gson) escape even '<' or '=' as 6 bytes.
+	maxPromptBodyBytes = 64 << 10
 )
 
 // writeError serializes an ErrorResponse with the appropriate HTTP status code.
@@ -241,15 +253,15 @@ func (s *Server) prompt(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	r.Body = http.MaxBytesReader(w, r.Body, 16<<10)
+	r.Body = http.MaxBytesReader(w, r.Body, maxPromptBodyBytes)
 	var req model.PromptRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, model.ErrInvalidRequest, "malformed request body")
 		return
 	}
 
-	if len(req.Text) == 0 || len(req.Text) > 4000 {
-		writeError(w, model.ErrInvalidRequest, "text length must be between 1 and 4000")
+	if n := utf8.RuneCountInString(req.Text); n == 0 || n > maxPromptChars {
+		writeError(w, model.ErrInvalidRequest, fmt.Sprintf("text must be 1 to %d characters", maxPromptChars))
 		return
 	}
 
