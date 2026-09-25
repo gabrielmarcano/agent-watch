@@ -11,7 +11,7 @@ Everything that depends on **which** coding agent runs in a pane lives in `pkg/a
 The rest of the system (`pkg/herdr`, the relay, the clients) must stay agent-agnostic.
 
 **Status legend:**
-- ✅ verified on the development Mac on 2026-09-23
+- ✅ verified on the development Mac on 2026-09-23; rows marked (2026-09-25) were re-captured with Claude Code 2.1.282, Antigravity CLI 1.2.10, OpenCode 1.18.32 and herdr 0.9.1
 - 🔍 must be captured and verified in Phase 0 before the adapter is written
 
 ---
@@ -38,11 +38,11 @@ type Adapter interface {
 
 | Aspect | Generic rule |
 |---|---|
-| Menu detection | The **last** block of ≥ 2 consecutive lines matching `^\s*(?:[❯›>▶●]\s*)?(\d+)[.)]\s+(.+?)\s*$` on the visible screen. Up to 2 continuation lines (indented, no number) may follow an option; append them to its label with a space |
+| Menu detection | The **last** block of ≥ 2 consecutive lines matching `^(?:[❯›>▶●]\s*)?(\d+)[.)]\s+(.+?)\s*$` on the visible screen, after stripping indentation and vertical borders (`│ ┃ ║`) from both ends, so `  │ 1. Yes │` and `  ┃  1. red` match. Up to 2 continuation lines (no number) may follow an option; append them to its label with a space. A continuation line starts at the label's column (up to 4 deeper); a line at the options' own indentation (a footer such as `  Esc to cancel`) ends the block. Key hints under an option (`shift+tab to …`, `ctrl+…`, `esc to …`) are skipped, not appended. **The adapters for claude, agy and opencode also require the block to be the open dialog** (§3.1, §4.1, §5.1): a numbered list in an answer is not a menu |
 | Cursor row | The option line that starts with a marker `❯ › > ▶ ●`. If none has one, assume the first |
 | Title | The nearest non-empty line above the menu block that is not a box-drawing line (`─│╭╮╰╯┌┐└┘`), with box characters and surrounding whitespace trimmed |
-| Detail | Non-empty lines between the title and the menu, joined with `\n`, trimmed, max 400 chars |
-| Role by label | lowercase the label, then: contains `don't ask again`, `always`, `for this session`, `all edits`, `for all` → `allow_always`; else starts with `yes` or contains `allow`, `approve`, `proceed`, `accept` → `allow_once`; else starts with `no` or contains `deny`, `reject`, `cancel`, `decline` → `deny`; else `choice` |
+| Detail | Non-empty lines between the title and the menu, joined with `\n`, trimmed, max 400 characters (runes; never cut inside a UTF-8 sequence) |
+| Role by label | lowercase the label and turn typographic apostrophes (`’`) into `'`, then: contains `don't ask again`, `always`, `for this session`, `all edits`, `for all` → `allow_always`; else starts with `yes` or contains `allow`, `approve`, `proceed`, `accept` → `allow_once`; else starts with `no` or contains `deny`, `reject`, `cancel`, `decline` → `deny`; else `choice` |
 | Keys for option n | `[fmt.Sprint(n)]` (digit selection) |
 | Cancel | `["esc"]` |
 | Prompt while working | `false` |
@@ -65,7 +65,11 @@ type Adapter interface {
 | Selected-row marker | ✅ | `❯` |
 | Digit selects immediately | ✅ | Confirmed: typing the option digit selects immediately (no Enter needed). |
 | Cancel | ✅ | `esc` rejects the tool call |
-| AskUserQuestion / plan approval | ✅ | Confirmed: both render numbered menus with digit selection (`1. ...`, `2. ...`). Mapped to `kind: "question"`. Captured in `question-multiple.txt` and `plan-approval.txt`. |
+| Dialog detection | ✅ (2026-09-25) | While a dialog is open Claude hides its input box (`❯` between two rules). A numbered block counts as a menu only if at most 6 non-empty lines follow it and none of them is the input line (`❯` alone or `❯ ` + text). Negative fixtures: `no-menu-idle-numbered-list.txt` (idle), `no-menu-working-numbered-list.txt` (working). Positive with a numbered list and numbered diff lines above the dialog: `permission-write-numbered-list.txt` |
+| Typographic apostrophe | ✅ (2026-09-25) | Some menus write `Yes, and don’t ask again for: mv *` with U+2019 (`permission-bash-dont-ask-again.txt`). It is `allow_always` |
+| WebFetch | ✅ (2026-09-25) | Title `Fetch`, detail = `url: …`, `prompt: …` and `Claude wants to fetch content from <domain>`; options `Yes` / `Yes, and don't ask again for <domain>` / `No, and tell Claude what to do differently (esc)`; no footer line. **herdr 0.9.1 reported the pane `done`, not `blocked`, with this dialog open** (`herdr agent explain`: rule `live_prompt_box` matched a stale shell prompt in scrollback). Digit 3 denied. `permission-webfetch.txt` |
+| AskUserQuestion | ✅ | Numbered menu with digit selection; the description under each option is appended to its label. Mapped to `kind: "question"`. Captured in `question-multiple.txt` and, asked in plan mode, `question-plan-mode.txt` (captured in Phase 0 as `plan-approval.txt`) |
+| Plan approval (ExitPlanMode) | ✅ (2026-09-25) | `Claude has written up a plan and is ready to execute. Would you like to proceed?` with `1. Yes, and use auto mode` (`allow_always`), `2. Yes, manually approve edits` (`allow_once`), `3. Tell Claude what to change` (`choice`; its hint line `shift+tab to approve with this feedback` is not part of the label). No deny option → `kind: "question"`, Deny uses `esc`. The plan's own numbered steps above the dialog are not the menu. Digit 2 approved immediately. `plan-approval.txt` |
 | Prompt while working | ✅ | Claude queues typed messages while working → `PromptWhileWorking() = true` |
 
 ### 3.2 Transcript
@@ -95,7 +99,7 @@ type Adapter interface {
 3. **Query** = the last `user` line whose content is a string, or an array containing at least one `text` block, and that is not a command wrapper (text starting with `<command-`, `<local-command-`, `<bash-` or `<system-reminder>`). Join its `text` blocks with `\n`.
 4. **Response** = walk forward from the query line and collect `text` blocks from `assistant` lines. Whenever a `tool_use` block appears, reset the collection. Join the remaining blocks with `\n\n`. This yields the **final** answer segment after the last tool call.
 5. If the response is empty, return `ErrNoTranscript` (fall back to screen).
-6. Set `session_value` to the UUID when computing the `HistoryItem.id`.
+6. `LastTurn` fills only `query`, `response` and `source`. The bridge computes `HistoryItem.id` with `SessionRef.Value` as `session_value` (the UUID for `kind="id"`, the path for `kind="path"`).
 
 ---
 
@@ -105,7 +109,9 @@ type Adapter interface {
 
 | Item | Status | Value |
 |---|---|---|
-| Approval menu | ✅ | Numbered vertical list inside a box. Header indicates tool/kind (e.g. `Command`, `File edit`). Captured in `permission-bash.txt` and `permission-edit.txt`. Multiple-choice and plan approval are unsupported (`.missing.md`). |
+| Approval menu | ✅ | Numbered vertical list inside a box. Header indicates tool/kind (e.g. `Command`, `Pending edit`). Captured in `permission-bash.txt` and `permission-edit.txt`. Multiple-choice and plan approval are unsupported (`.missing.md`). |
+| Dialog detection | ✅ (2026-09-25) | The dialog replaces the input box (`>` between two rules); its tail is `↑/↓ Navigate · …` and `esc to cancel`. Same rule as Claude with `>` as the input line. Negative: `no-menu-idle-numbered-list.txt`; `no-menu-working.txt` is now captured while really working (`Generating...` spinner, herdr `working`) |
+| herdr status with the dialog open | ✅ (2026-09-25) | **herdr 0.9.1 does not report `blocked` for agy.** With the permission dialog open it reported `done` (`permission-bash-herdr-done.txt`; `agent explain`: state idle, rule none, `default_known_agent_idle_fallback`), and `working` when a background task was running (`permission-bash-herdr-working.txt`). The bridge refuses dictation whenever `ParsePrompt` finds a menu, so these screens must parse |
 | Digit selection vs arrows | ✅ | Digit selects immediately without Enter. |
 | Cancel | ✅ | `esc` cancels/rejects standard commands. **Crucial quirk:** In file edits, Esc is explicitly disabled by the TUI (`"Esc disabled during file edits — press 1 to accept or 2 to reject."`), so `cancel_keys` for file edits is `["2"]`. |
 | Prompt while working | ✅ | Agy queues typed prompts while working → `PromptWhileWorking() = true`. |
@@ -121,7 +127,7 @@ type Adapter interface {
 
 **`LastTurn` algorithm:**
 1. Tail-read the last 256 KB, as for Claude.
-2. **Query** = `content` of the last `USER_INPUT` step.
+2. **Query** = the last `USER_INPUT` step's `content` inside `<USER_REQUEST>…</USER_REQUEST>`, trimmed. Antigravity 1.2.x appends `<ADDITIONAL_METADATA>` (local time) and sometimes `<USER_SETTINGS_CHANGE>` after it; content without the wrapper is used as is.
 3. **Response** = `content` of the last `PLANNER_RESPONSE` after that query that has a non-empty `content` and an empty or missing `tool_calls`. `PLANNER_RESPONSE` steps with tool calls have no `content`.
 4. If there is no such response, return `ErrNoTranscript`.
 
@@ -133,9 +139,12 @@ type Adapter interface {
 
 | Item | Status | Value |
 |---|---|---|
-| Approval UI | ✅ | Rendered with `△ Permission required`, action description, patterns, and a horizontal button bar: `Allow once   Allow always   Reject`. Footer: `ctrl+f fullscreen  ⇆ select  enter confirm`. Captured in `permission-bash.txt` and `permission-edit.txt`. Multiple-choice question and plan approval are unsupported (`.missing.md`). |
-| Keys | ✅ | `Allow once` is selected by default and confirmed with `["Enter"]`. `Allow always` is selected via `["Right", "Enter"]` (or `["Tab", "Enter"]`). `Reject` is `["esc"]` or `["Right", "Right", "Enter"]`. |
-| Cancel | ✅ | `esc` rejects the permission request / interrupts. |
+| Approval UI | ✅ (2026-09-25) | Drawn inside a `┃` frame at the bottom, in place of the input box (which ends with a `╹▀▀▀` line). `△ Permission required`, then `<icon> <action>`, a body, and a horizontal button bar `Allow once   Allow always   Reject` (footer `ctrl+f fullscreen  ⇆ select  enter confirm`). Icons/actions (from the 1.18.32 source; the first, second and fourth captured): `# Shell command` + `$ <command>`, `→ Edit <file>` + a diff, `→ Read <file>`, `← Access external directory <dir>` + `Patterns` / `- <glob>`, `% WebFetch <url>`, `✱ Glob/Grep "<pattern>"`, `⚙ Call tool <name>`. Detail = action, then any `$ …` / `Path: …` line, then `Patterns: …`. Captured: `permission-bash.txt`, `permission-edit.txt`, `permission-external-directory.txt` |
+| Dialog detection | ✅ (2026-09-25) | Only the framed dialog counts: the button bar (or question footer) must be in the `┃` frame with no `╹` input-box line below it. There is **no** generic numbered fallback (it matched numbered lists in answers: `no-menu-idle-numbered-list.txt`) |
+| Keys | ✅ (2026-09-25) | Buttons, not digits. Bindings (from the 1.18.32 source, checked live): Left/`h` previous, Right/`l` next, **both wrap** (Left on `Allow once` goes to `Reject`); Enter selects; esc = Reject. herdr has no Home/End keys (`invalid_key`), and there are no per-option shortcuts. **No key sequence reaches an allow button whatever the focus**, so keys assume the focus OpenCode sets when the dialog mounts: `Allow once` (reset on every new request and when coming back from the confirm stage; verified). `Allow once` = `["Enter"]`. `Allow always` opens a second stage (`△ Always allow`, `This will allow the following patterns until OpenCode is restarted`, `- <pattern>`, buttons `Confirm   Cancel`, Confirm focused), so it is `["Right", "Enter", "Enter"]` (`Right, Enter` alone left the dialog on that stage). `Reject` = `["esc"]`, focus-independent. If someone moved the focus on the Mac (arrow keys or mouse hover) before the watch answers, `Enter` acts on that button |
+| Always-allow stage | ✅ (2026-09-25) | Parsed as its own prompt: `Confirm` (`allow_always`, `["Enter"]`), `Cancel` (`deny` by label, `["esc"]`). Its esc goes back to the first stage; it does not reject. `permission-always-confirm.txt` |
+| Question tool | ✅ (2026-09-25) | Exists (the Phase 0 `.missing.md` was wrong). Framed numbered list, description under each option, last option `Type your own answer`, footer `↑↓ select  enter submit  esc dismiss`. Digits 1–9 pick an answer; a single question is submitted at once (digit 2 answered). esc dismisses (rejects) it. `question-multiple.txt` |
+| Cancel | ✅ | `esc` rejects the permission request / dismisses the question. For a sub-agent's permission, Reject opens a `Reject permission` stage with a text box (from the source; not captured). |
 | Prompt while working | ✅ | OpenCode queues typed prompts while working and executes them when the current turn finishes → `PromptWhileWorking() = true`. |
 
 ### 5.2 Transcript (SQLite)
@@ -158,7 +167,7 @@ ORDER BY time_created DESC, id DESC
 LIMIT 40;
 ```
 1. **Query message** = the newest message whose `data.role == "user"`.
-2. **Response message** = the newest message whose `data.role == "assistant"` and that is newer than the query message.
+2. **Response message** = the newest message whose `data.role == "assistant"`, that is newer than the query message and that has text. OpenCode stores one assistant message per step; earlier steps are tool calls, with or without a line of text before them (`session-multistep.json`).
 3. For each of the two, read its parts:
 
    ```sql
@@ -199,4 +208,4 @@ Follow the `capture-fixture` skill. Summary:
 5. In the sandbox **only**, try the keys and record which ones worked. Update the ✅/🔍 marks in this file.
 6. Close the sandbox pane.
 
-**Naming:** `permission-bash.txt`, `permission-edit.txt`, `question-multiple.txt`, `plan-approval.txt`, `no-menu-working.txt`.
+**Naming:** `permission-bash.txt`, `permission-edit.txt`, `question-multiple.txt`, `plan-approval.txt`, `no-menu-working.txt`. Extra cases use a descriptive suffix (`permission-webfetch.txt`, `permission-bash-herdr-done.txt`, `no-menu-idle-numbered-list.txt`). Record the herdr status you observed in the golden's `herdr_status` and `notes`.
