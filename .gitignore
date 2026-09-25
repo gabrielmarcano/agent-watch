@@ -4,6 +4,12 @@
 bin/
 
 # Secrets and configuration
+# agent-watch.env holds the host token (agent-watch.env.example is committed;
+# agent-watch.env.* also covers the temp files `make config` writes).
+agent-watch.env
+agent-watch.env.*
+!agent-watch.env.example
+/watchos-app/Config.generated.xcconfig
 firebase-service-account*.json
 store.json
 .env*

@@ -1,9 +1,23 @@
 .PHONY: build bridge relay relay-linux bar bar-test restart test vet fmt check clean
+.PHONY: config configure-bridge deploy-relay watchos-config _need-bridge-env _need-deploy-env _need-watchos-env
 
 # Keep VERSION in sync with herdr-plugin.toml (version and the [[build]] ldflags).
 VERSION ?= 0.2.0
 LDFLAGS := -s -w -X main.version=$(VERSION)
 UNAME_S := $(shell uname -s)
+
+# ── Shared configuration: agent-watch.env ─────────────────────────────────
+# The one file a deployment edits (agent-watch.env.example documents it).
+# Included for the guards below only: recipes never expand AW_HOST_TOKEN,
+# the programs they run read it from the file themselves.
+AW_ENV_FILE ?= agent-watch.env
+-include $(AW_ENV_FILE)
+AWENV := tools/config/awenv.sh
+WATCHOS_XCCONFIG ?= watchos-app/Config.generated.xcconfig
+
+need-env = $(if $(wildcard $(AW_ENV_FILE)),,$(error $(AW_ENV_FILE) not found: run `make config` first))
+need-key = $(if $(strip $($(1))),,$(error $(1) is not set in $(AW_ENV_FILE)))
+need-domain = $(call need-key,AW_RELAY_DOMAIN)$(if $(filter relay.example.com,$(strip $(AW_RELAY_DOMAIN))),$(error AW_RELAY_DOMAIN in $(AW_ENV_FILE) is still the example value: set your relay's host name))
 
 build: bridge relay
 
@@ -46,6 +60,39 @@ endif
 # (normally this checkout's bin/); `agent-watch-bridge start --binary` changes it.
 restart: bridge
 	./bin/agent-watch-bridge restart
+
+# Create agent-watch.env from the example (mode 0600) and generate
+# AW_HOST_TOKEN if it is empty. Safe to re-run: it never replaces a token.
+config:
+	@$(AWENV) init $(AW_ENV_FILE) agent-watch.env.example
+	@echo "next: set AW_RELAY_DOMAIN and AW_RELAY_SSH in $(AW_ENV_FILE) (README.md, Setup Guide)"
+
+# Write the bridge config (relay URL + host token) from agent-watch.env, then
+# `make restart`. configure rewrites the whole config.toml: pass the optional
+# settings again, e.g. make configure-bridge ARGS="--claude-config-dir ~/.claude-work".
+configure-bridge: _need-bridge-env bridge
+	./bin/agent-watch-bridge configure --env-file $(AW_ENV_FILE) $(ARGS)
+
+_need-bridge-env:
+	@:$(call need-env)$(call need-domain)$(call need-key,AW_HOST_TOKEN)
+
+# Deploy the relay to AW_RELAY_SSH (with AW_RELAY_SSH_OPTS). ARGS=--sync-env
+# also copies the relay keys of agent-watch.env into the server's env file.
+deploy-relay: _need-deploy-env
+	AW_ENV_FILE=$(AW_ENV_FILE) deploy/relay/deploy.sh $(ARGS)
+
+_need-deploy-env:
+	@:$(call need-env)$(call need-key,AW_RELAY_SSH)
+
+# Generate the watchOS xcconfig (relay URL, bundle id). Git-ignored, and not
+# used by the legacy Xcode project: the Phase 6 rewrite takes it as its base
+# configuration.
+watchos-config: _need-watchos-env
+	@$(AWENV) xcconfig $(AW_ENV_FILE) $(WATCHOS_XCCONFIG)
+	@echo "wrote $(WATCHOS_XCCONFIG)"
+
+_need-watchos-env:
+	@:$(call need-env)$(call need-domain)
 
 test:
 	go test -race ./...
