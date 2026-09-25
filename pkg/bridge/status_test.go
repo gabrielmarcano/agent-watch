@@ -184,6 +184,44 @@ func TestCheckConfig_SafeErrors(t *testing.T) {
 	}
 }
 
+// os.WriteFile(…, 0600) keeps an existing file's mode and MkdirAll(0700)
+// leaves an existing directory alone: SaveConfig must tighten both.
+func TestSaveConfig_TightensExistingModes(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "herdr-agent-watch")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "config.toml")
+	if err := os.WriteFile(path, []byte("relay_url = \"old\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(path, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := &Config{RelayURL: "wss://r.example.com", HostToken: strings.Repeat("ab", 32)}
+	if err := SaveConfig(path, cfg); err != nil {
+		t.Fatal(err)
+	}
+	if fi, err := os.Stat(path); err != nil || fi.Mode().Perm() != 0o600 {
+		t.Errorf("config mode = %v (err %v), want 0600", fi.Mode().Perm(), err)
+	}
+	if fi, err := os.Stat(dir); err != nil || fi.Mode().Perm() != 0o700 {
+		t.Errorf("config dir mode = %v (err %v), want 0700", fi.Mode().Perm(), err)
+	}
+	got, err := LoadConfig(path)
+	if err != nil || got.RelayURL != cfg.RelayURL || got.HostToken != cfg.HostToken {
+		t.Errorf("reloaded config = %+v, %v", got, err)
+	}
+	entries, _ := os.ReadDir(dir)
+	if len(entries) != 1 {
+		t.Errorf("config dir holds %d entries, want only config.toml (no temp files)", len(entries))
+	}
+}
+
 // Older readers (the first menu bar build) decode these keys unconditionally:
 // they must always be present.
 func TestStatusFile_KeepsLegacyKeys(t *testing.T) {

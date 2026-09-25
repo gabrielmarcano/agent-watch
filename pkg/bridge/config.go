@@ -138,11 +138,17 @@ func CheckConfig(path string) (*Config, error) {
 	return &cfg, nil
 }
 
-// SaveConfig writes a Config to path with mode 0600, creating parent directories with mode 0700.
+// SaveConfig writes a Config to path with mode 0600 in a directory with mode
+// 0700. Both modes are enforced even when the file or directory already
+// exists (os.WriteFile and os.MkdirAll only apply a mode on creation). The
+// write is atomic: a temp file in the same directory, then a rename.
 func SaveConfig(path string, cfg *Config) error {
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return fmt.Errorf("create config dir %s: %w", dir, err)
+	}
+	if err := os.Chmod(dir, 0o700); err != nil {
+		return fmt.Errorf("chmod config dir %s: %w", dir, err)
 	}
 
 	var buf strings.Builder
@@ -151,10 +157,27 @@ func SaveConfig(path string, cfg *Config) error {
 		return fmt.Errorf("encode config: %w", err)
 	}
 
-	if err := os.WriteFile(path, []byte(buf.String()), 0o600); err != nil {
+	tmp, err := os.CreateTemp(dir, ".config.toml.*") // created 0600
+	if err != nil {
 		return fmt.Errorf("write config %s: %w", path, err)
 	}
+	tmpName := tmp.Name()
+	defer os.Remove(tmpName) // no-op after a successful rename
 
+	if err := tmp.Chmod(0o600); err != nil {
+		tmp.Close()
+		return fmt.Errorf("chmod config %s: %w", tmpName, err)
+	}
+	if _, err := tmp.WriteString(buf.String()); err != nil {
+		tmp.Close()
+		return fmt.Errorf("write config %s: %w", path, err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("write config %s: %w", path, err)
+	}
+	if err := os.Rename(tmpName, path); err != nil {
+		return fmt.Errorf("write config %s: %w", path, err)
+	}
 	return nil
 }
 
