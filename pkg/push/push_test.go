@@ -3,9 +3,12 @@ package push
 import (
 	"context"
 	"fmt"
+	"sort"
+	"strings"
 	"sync"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/gabrielmarcano/agent-monitor/pkg/model"
 )
@@ -348,10 +351,194 @@ func TestDispatcher_Debounce(t *testing.T) {
 	}
 }
 
+// agentAt returns pane's state with the given status and seq.
+func agentAt(pane, label string, status model.AgentStatus, seq uint64) model.AgentState {
+	return model.AgentState{PaneID: pane, Label: label, Status: status, StateChangeSeq: seq}
+}
+
+// finish reports pane going working → done, which pushes a done message.
+func finish(d *Dispatcher, pane, label string, seq uint64) {
+	working := agentAt(pane, label, model.StatusWorking, seq-1)
+	d.OnAgentUpdate(&working, agentAt(pane, label, model.StatusDone, seq))
+}
+
+// flushWindow fires the window timer and waits for every send.
+func flushWindow(d *Dispatcher, timers *fakeTimers) {
+	timers.Fire()
+	d.Wait()
+}
+
+// The digest counts agents, not messages: an agent held twice in the window
+// counts once, and its label appears once.
+func TestDispatcher_DigestCountsDistinctAgents(t *testing.T) {
+	sender := &mockSender{name: "mock"}
+	d, clock, timers := newTestDispatcher(sender)
+
+	d.OnAgentUpdate(nil, blockedState("p1", "a")) // sent right away
+	d.Wait()
+	finish(d, "p2", "b", 10) // held
+	clock.Advance(d.DebounceDuration + time.Second)
+	finish(d, "p2", "b", 12) // held again: past the debounce
+	d.OnAgentUpdate(nil, blockedState("p3", "c"))
+	d.OnAgentUpdate(nil, blockedState("p4", "d"))
+	flushWindow(d, timers)
+
+	msgs := sender.getMessages()
+	if len(msgs) != 2 {
+		t.Fatalf("got %d messages, want 2 (p1 + one digest): %+v", len(msgs), msgs)
+	}
+	digest := msgs[1]
+	if digest.Event != EventDigest {
+		t.Fatalf("second message is %s, want digest", digest.Event)
+	}
+	if digest.Title != "3 agents need you" {
+		t.Errorf("digest title = %q, want %q (p2, p3, p4)", digest.Title, "3 agents need you")
+	}
+	if digest.Body != "b, c, d" {
+		t.Errorf("digest body = %q, want %q", digest.Body, "b, c, d")
+	}
+}
+
+// The digest body obeys the same 240-character limit as every other body.
+func TestDispatcher_DigestBodyIsTruncated(t *testing.T) {
+	sender := &mockSender{name: "mock"}
+	d, _, timers := newTestDispatcher(sender)
+
+	d.OnAgentUpdate(nil, blockedState("p0", "zero"))
+	d.Wait()
+	for i := 1; i <= 30; i++ {
+		d.OnAgentUpdate(nil, blockedState(fmt.Sprintf("p%d", i), fmt.Sprintf("a-rather-long-label-%02d", i)))
+	}
+	flushWindow(d, timers)
+
+	msgs := sender.getMessages()
+	if len(msgs) != 2 || msgs[1].Event != EventDigest {
+		t.Fatalf("want p0 then one digest, got %d messages", len(msgs))
+	}
+	if n := utf8.RuneCountInString(msgs[1].Body); n > 240 || !strings.HasSuffix(msgs[1].Body, "…") {
+		t.Fatalf("digest body has %d runes (want <= 240, cut with …): %q", n, msgs[1].Body)
+	}
+}
+
+// A digest of finished agents only must not claim they need the user.
+func TestDispatcher_DigestTitleFitsTheEvents(t *testing.T) {
+	tests := []struct {
+		name      string
+		blocked   []string // panes that block, after p0
+		done      []string // panes that finish, after p0
+		wantTitle string
+	}{
+		{"done only", nil, []string{"p1", "p2", "p3", "p4"}, "4 agents finished"},
+		{"blocked only", []string{"p1", "p2", "p3", "p4"}, nil, "4 agents need you"},
+		{"mixed", []string{"p1", "p2"}, []string{"p3", "p4"}, "4 agents need you"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			sender := &mockSender{name: "mock"}
+			d, _, timers := newTestDispatcher(sender)
+
+			finish(d, "p0", "zero", 5) // sent right away
+			d.Wait()
+			for _, p := range tt.blocked {
+				d.OnAgentUpdate(nil, blockedState(p, p))
+			}
+			for _, p := range tt.done {
+				finish(d, p, p, 5)
+			}
+			flushWindow(d, timers)
+
+			msgs := sender.getMessages()
+			if len(msgs) != 2 || msgs[1].Event != EventDigest {
+				t.Fatalf("want p0 then one digest, got %+v", msgs)
+			}
+			if msgs[1].Title != tt.wantTitle {
+				t.Errorf("digest title = %q, want %q", msgs[1].Title, tt.wantTitle)
+			}
+		})
+	}
+}
+
+// A message held for the window is dropped at flush time when its agent has
+// left the state it announces: no "needs approval" for an answered prompt, no
+// "finished" for an agent that is working again. The survivors are counted
+// again, so the digest threshold applies to what actually goes out.
+func TestDispatcher_FlushDropsStaleMessages(t *testing.T) {
+	sender := &mockSender{name: "mock"}
+	d, _, timers := newTestDispatcher(sender)
+
+	d.OnAgentUpdate(nil, blockedState("p1", "a")) // sent right away
+	for _, p := range []string{"p2", "p3", "p4"} {
+		d.OnAgentUpdate(nil, blockedState(p, p))
+	}
+	finish(d, "p5", "p5", 7)
+
+	// Before the flush: p2's prompt is answered, p5 starts working again.
+	blocked2 := blockedState("p2", "p2")
+	d.OnAgentUpdate(&blocked2, agentAt("p2", "p2", model.StatusWorking, 3))
+	done5 := agentAt("p5", "p5", model.StatusDone, 7)
+	d.OnAgentUpdate(&done5, agentAt("p5", "p5", model.StatusWorking, 8))
+	flushWindow(d, timers)
+
+	var got []string
+	for _, m := range sender.getMessages() {
+		got = append(got, fmt.Sprintf("%s:%s", m.Event, m.PaneID))
+	}
+	sort.Strings(got) // sends run concurrently
+	// 1 sent + p3 + p4 = 3 pushes: no digest, and nothing for p2 or p5.
+	want := []string{"blocked:p1", "blocked:p3", "blocked:p4"}
+	if fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Fatalf("pushes = %v, want %v", got, want)
+	}
+}
+
+// When an agent answers a held prompt and blocks again on a new one (whose own
+// push the debounce swallowed), the flush pushes the new prompt, never the
+// answered one: its fingerprint and option ids would be stale.
+func TestDispatcher_FlushPushesTheCurrentPrompt(t *testing.T) {
+	sender := &mockSender{name: "mock"}
+	d, clock, timers := newTestDispatcher(sender)
+
+	promptA := &model.PendingPrompt{
+		Kind: model.PromptPermission, Title: "Bash command", Detail: "rm -rf build", Fingerprint: "fp-A",
+		Options: []model.PromptOption{{ID: "a-yes", Label: "Yes", Role: model.RoleAllowOnce}, {ID: "a-no", Label: "No", Role: model.RoleDeny}},
+	}
+	promptB := &model.PendingPrompt{
+		Kind: model.PromptPermission, Title: "Edit file", Detail: "main.go", Fingerprint: "fp-B",
+		Options: []model.PromptOption{{ID: "b-yes", Label: "Yes", Role: model.RoleAllowOnce}, {ID: "b-no", Label: "No", Role: model.RoleDeny}},
+	}
+	blockedOn := func(p *model.PendingPrompt, seq uint64) model.AgentState {
+		s := agentAt("p2", "two", model.StatusBlocked, seq)
+		s.Prompt = p
+		return s
+	}
+
+	d.OnAgentUpdate(nil, blockedState("p1", "one")) // opens the window
+	d.Wait()
+	onA := blockedOn(promptA, 20)
+	d.OnAgentUpdate(nil, onA) // held
+	clock.Advance(time.Second)
+	working := agentAt("p2", "two", model.StatusWorking, 21)
+	d.OnAgentUpdate(&onA, working)                    // A answered
+	d.OnAgentUpdate(&working, blockedOn(promptB, 22)) // B: debounced
+	flushWindow(d, timers)
+
+	msgs := sender.getMessages()
+	if len(msgs) != 2 {
+		t.Fatalf("got %d messages, want p1 and one for p2: %+v", len(msgs), msgs)
+	}
+	m := msgs[1]
+	if m.PaneID != "p2" || m.Event != EventBlocked {
+		t.Fatalf("second push = %s:%s, want blocked:p2", m.Event, m.PaneID)
+	}
+	if m.Fingerprint != "fp-B" || m.AllowOptionID != "b-yes" || m.DenyOptionID != "b-no" ||
+		m.StateChangeSeq != 22 || m.Body != "Edit file: main.go" {
+		t.Fatalf("p2 push describes the answered prompt: %+v", m)
+	}
+}
+
 func TestDispatcher_Digest(t *testing.T) {
 	sender := &mockSender{name: "mock"}
-	currentTime := time.Date(2026, 9, 24, 12, 0, 0, 0, time.UTC)
-	d := NewDispatcher([]Sender{sender}, func() time.Time { return currentTime }, nil)
+	d, _, timers := newTestDispatcher(sender)
 
 	// Send 5 distinct blocked panes within 10s:
 	// First pane should be sent immediately.
@@ -377,9 +564,7 @@ func TestDispatcher_Digest(t *testing.T) {
 		t.Fatalf("expected first message to be p1, got %s", msgs[0].PaneID)
 	}
 
-	// Flush window
-	d.Flush()
-	d.Wait()
+	flushWindow(d, timers)
 
 	msgs = sender.getMessages()
 	// Should now have 2 messages: the immediate one, and the 1 digest

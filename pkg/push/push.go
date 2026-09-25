@@ -74,9 +74,16 @@ type Dispatcher struct {
 	afterFunc func(time.Duration, func()) stopper // time.AfterFunc; tests fake it
 	lastPush  map[string]time.Time                // key: pane_id + ":" + event; pruned past DebounceDuration
 	lastPrune time.Time
-	window    []Message // pending messages in the current window
-	timer     stopper
-	wg        sync.WaitGroup
+
+	// The current window. Its first message went out right away; the later
+	// ones wait in held until the window timer flushes them.
+	timer      stopper // nil while no window is open
+	windowGen  uint64  // tells a stale timer from the current window's
+	windowSent int     // messages of this window already sent
+	held       []Message
+	latest     map[string]model.AgentState // newest state of every pane in held
+
+	wg sync.WaitGroup
 }
 
 // stopper is the part of *time.Timer the Dispatcher uses.
@@ -104,6 +111,20 @@ func NewDispatcher(senders []Sender, now func() time.Time, logger *slog.Logger) 
 		WindowDuration:   10 * time.Second,
 		afterFunc:        realAfterFunc,
 		lastPush:         make(map[string]time.Time),
+		latest:           make(map[string]model.AgentState),
+	}
+}
+
+// initLocked fills in what a Dispatcher built without NewDispatcher lacks.
+func (d *Dispatcher) initLocked() {
+	if d.afterFunc == nil {
+		d.afterFunc = realAfterFunc
+	}
+	if d.lastPush == nil {
+		d.lastPush = make(map[string]time.Time)
+	}
+	if d.latest == nil {
+		d.latest = make(map[string]model.AgentState)
 	}
 }
 
@@ -130,107 +151,119 @@ func TruncateRunes(s string, maxRunes int) string {
 // OnAgentUpdate implements relay.Notifier.
 func (d *Dispatcher) OnAgentUpdate(prev *model.AgentState, cur model.AgentState) {
 	msg, shouldPush := d.buildMessage(prev, cur)
-	if !shouldPush {
-		return
-	}
 
-	d.enqueue(msg)
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.initLocked()
+
+	// A held message is checked against its pane's newest state at flush.
+	if _, held := d.latest[cur.PaneID]; held {
+		d.latest[cur.PaneID] = cur
+	}
+	if shouldPush {
+		d.enqueueLocked(msg, cur)
+	}
 }
 
 // buildMessage determines if a transition should push, and formats the message.
 func (d *Dispatcher) buildMessage(prev *model.AgentState, cur model.AgentState) (Message, bool) {
 	// Transition 1: (prev == nil || prev.Status != blocked) && cur.Status == blocked
 	if (prev == nil || prev.Status != model.StatusBlocked) && cur.Status == model.StatusBlocked {
-		title := fmt.Sprintf("%s needs approval", cur.Label)
-		body := ""
-		if cur.Prompt == nil || cur.Prompt.Kind == model.PromptUnknown {
-			body = "Open Agent Watch to see the question"
-		} else {
-			if cur.Prompt.Detail != "" {
-				body = fmt.Sprintf("%s: %s", cur.Prompt.Title, cur.Prompt.Detail)
-			} else {
-				body = cur.Prompt.Title
-			}
-		}
-		body = TruncateRunes(body, 240)
-
-		fingerprint := ""
-		allowOpt := ""
-		denyOpt := ""
-		if cur.Prompt != nil {
-			fingerprint = cur.Prompt.Fingerprint
-			for _, opt := range cur.Prompt.Options {
-				if allowOpt == "" && opt.Role == model.RoleAllowOnce {
-					allowOpt = opt.ID
-				}
-				if denyOpt == "" && opt.Role == model.RoleDeny {
-					denyOpt = opt.ID
-				}
-			}
-		}
-
-		return Message{
-			Event:          EventBlocked,
-			PaneID:         cur.PaneID,
-			Agent:          cur.Agent,
-			Label:          cur.Label,
-			Title:          title,
-			Body:           body,
-			StateChangeSeq: cur.StateChangeSeq,
-			Fingerprint:    fingerprint,
-			AllowOptionID:  allowOpt,
-			DenyOptionID:   denyOpt,
-		}, true
+		return blockedMessage(cur), true
 	}
 
 	// Transition 2: prev != nil && prev.Status == working && cur.Status == done
 	if prev != nil && prev.Status == model.StatusWorking && cur.Status == model.StatusDone {
-		return Message{
-			Event:          EventDone,
-			PaneID:         cur.PaneID,
-			Agent:          cur.Agent,
-			Label:          cur.Label,
-			Title:          fmt.Sprintf("%s finished", cur.Label),
-			Body:           "Task finished",
-			StateChangeSeq: cur.StateChangeSeq,
-		}, true
+		return doneMessage(cur), true
 	}
 
 	return Message{}, false
 }
 
-// enqueue applies debounce and windowing/digest logic.
-func (d *Dispatcher) enqueue(m Message) {
-	d.mu.Lock()
-	defer d.mu.Unlock()
+// blockedMessage announces that cur waits for an answer to its prompt.
+func blockedMessage(cur model.AgentState) Message {
+	title := fmt.Sprintf("%s needs approval", cur.Label)
+	body := ""
+	if cur.Prompt == nil || cur.Prompt.Kind == model.PromptUnknown {
+		body = "Open Agent Watch to see the question"
+	} else {
+		if cur.Prompt.Detail != "" {
+			body = fmt.Sprintf("%s: %s", cur.Prompt.Title, cur.Prompt.Detail)
+		} else {
+			body = cur.Prompt.Title
+		}
+	}
+	body = TruncateRunes(body, 240)
 
+	fingerprint := ""
+	allowOpt := ""
+	denyOpt := ""
+	if cur.Prompt != nil {
+		fingerprint = cur.Prompt.Fingerprint
+		for _, opt := range cur.Prompt.Options {
+			if allowOpt == "" && opt.Role == model.RoleAllowOnce {
+				allowOpt = opt.ID
+			}
+			if denyOpt == "" && opt.Role == model.RoleDeny {
+				denyOpt = opt.ID
+			}
+		}
+	}
+
+	return Message{
+		Event:          EventBlocked,
+		PaneID:         cur.PaneID,
+		Agent:          cur.Agent,
+		Label:          cur.Label,
+		Title:          title,
+		Body:           body,
+		StateChangeSeq: cur.StateChangeSeq,
+		Fingerprint:    fingerprint,
+		AllowOptionID:  allowOpt,
+		DenyOptionID:   denyOpt,
+	}
+}
+
+// doneMessage announces that cur finished its turn.
+func doneMessage(cur model.AgentState) Message {
+	return Message{
+		Event:          EventDone,
+		PaneID:         cur.PaneID,
+		Agent:          cur.Agent,
+		Label:          cur.Label,
+		Title:          fmt.Sprintf("%s finished", cur.Label),
+		Body:           "Task finished",
+		StateChangeSeq: cur.StateChangeSeq,
+	}
+}
+
+// enqueueLocked applies the debounce and the window to m, built from cur.
+func (d *Dispatcher) enqueueLocked(m Message, cur model.AgentState) {
 	now := d.Now()
 	d.pruneLocked(now)
-	key := m.PaneID + ":" + string(m.Event)
 
-	// Debounce: drop if the same pane_id + event was sent less than 5s ago
-	if last, ok := d.lastPush[key]; ok {
-		if now.Sub(last) < d.DebounceDuration {
-			return
-		}
+	// Debounce: drop if the same pane_id + event was accepted less than
+	// DebounceDuration ago.
+	key := m.PaneID + ":" + string(m.Event)
+	if last, ok := d.lastPush[key]; ok && now.Sub(last) < d.DebounceDuration {
+		return
 	}
 	d.lastPush[key] = now
 
-	// 10s Windowing & Digest:
-	// Latency matters for blocked agents, so send the first message of a window
-	// immediately and hold subsequent messages. If > 3 messages arrive during the
-	// 10s window, flush sends one digest notification covering the remaining messages.
-	if len(d.window) == 0 {
-		d.window = append(d.window, m)
+	// Window & digest: latency matters for blocked agents, so the first
+	// message of a window goes out immediately and the later ones are held
+	// until the window ends. The flush then sends them one by one, or a
+	// single digest when more than 3 pushes would go out in the window.
+	if d.timer == nil {
 		d.dispatchLocked(m)
-
-		d.timer = d.afterFunc(d.WindowDuration, func() {
-			d.Flush()
-		})
+		d.windowSent = 1
+		d.windowGen++
+		gen := d.windowGen
+		d.timer = d.afterFunc(d.WindowDuration, func() { d.flush(gen) })
 		return
 	}
-
-	d.window = append(d.window, m)
+	d.held = append(d.held, m)
+	d.latest[m.PaneID] = cur
 }
 
 // pruneLocked drops the lastPush entries the debounce can no longer match, so
@@ -248,59 +281,109 @@ func (d *Dispatcher) pruneLocked(now time.Time) {
 	}
 }
 
-// Flush flushes the current pending window, sending pending messages or a digest.
+// Flush ends the current window now: it sends the held messages that still
+// hold, one by one or as one digest.
 func (d *Dispatcher) Flush() {
 	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.initLocked()
+	d.flushLocked()
+}
+
+// flush is the window timer's callback. A timer that fires after its window
+// was flushed some other way does nothing.
+func (d *Dispatcher) flush(gen uint64) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.timer == nil || d.windowGen != gen {
+		return
+	}
+	d.flushLocked()
+}
+
+func (d *Dispatcher) flushLocked() {
 	if d.timer != nil {
 		d.timer.Stop()
 		d.timer = nil
 	}
+	due := dueMessages(d.held, d.latest)
+	sent := d.windowSent
+	d.held, d.windowSent = nil, 0
+	clear(d.latest)
 
-	if len(d.window) <= 1 {
-		// Only 0 or 1 message in window (the 1st was already sent immediately)
-		d.window = nil
-		d.mu.Unlock()
+	if sent+len(due) <= 3 {
+		for _, m := range due {
+			d.dispatchLocked(m)
+		}
 		return
 	}
+	d.dispatchLocked(digestMessage(due))
+}
 
-	total := len(d.window)
-	pending := make([]Message, len(d.window)-1)
-	copy(pending, d.window[1:])
-	d.window = nil
-	d.mu.Unlock()
+// paneEvent identifies what a held message announces.
+type paneEvent struct {
+	pane  string
+	event Event
+}
 
-	if total <= 3 {
-		// <= 3 total messages: send remaining messages individually
-		for _, m := range pending {
-			d.dispatch(m)
+// dueMessages returns what a flush may still push: at most one message per
+// agent, built from the agent's newest state, and only while that state is one
+// a held message announced. When the agent has left it (the prompt was
+// answered, the finished agent is working again) its messages are dropped:
+// the watch must never offer to approve a prompt that is gone.
+func dueMessages(held []Message, latest map[string]model.AgentState) []Message {
+	announced := make(map[paneEvent]bool)
+	var panes []string
+	for _, m := range held {
+		if !announced[paneEvent{m.PaneID, EventBlocked}] && !announced[paneEvent{m.PaneID, EventDone}] {
+			panes = append(panes, m.PaneID)
 		}
-	} else {
-		// > 3 total messages: send one digest message covering the remaining messages
-		seen := make(map[string]bool)
-		var labels []string
-		for _, m := range pending {
-			if m.Label != "" && !seen[m.Label] {
-				seen[m.Label] = true
-				labels = append(labels, m.Label)
-			}
-		}
+		announced[paneEvent{m.PaneID, m.Event}] = true
+	}
 
-		digestMsg := Message{
-			Event: EventDigest,
-			Title: fmt.Sprintf("%d agents need you", len(pending)),
-			Body:  strings.Join(labels, ", "),
+	var due []Message
+	for _, pane := range panes {
+		cur, ok := latest[pane]
+		switch {
+		case !ok:
+		case cur.Status == model.StatusBlocked && announced[paneEvent{pane, EventBlocked}]:
+			due = append(due, blockedMessage(cur))
+		case cur.Status == model.StatusDone && announced[paneEvent{pane, EventDone}]:
+			due = append(due, doneMessage(cur))
 		}
-		d.dispatch(digestMsg)
+	}
+	return due
+}
+
+// digestMessage covers due, which holds one message per agent. A digest only
+// goes out when more than 3 pushes would in a window, and the window's first
+// one is already sent, so len(due) >= 3: the title is always plural.
+func digestMessage(due []Message) Message {
+	anyBlocked := false
+	seen := make(map[string]bool)
+	var labels []string
+	for _, m := range due {
+		if m.Event == EventBlocked {
+			anyBlocked = true
+		}
+		if m.Label != "" && !seen[m.Label] {
+			seen[m.Label] = true
+			labels = append(labels, m.Label)
+		}
+	}
+
+	title := fmt.Sprintf("%d agents finished", len(due))
+	if anyBlocked {
+		title = fmt.Sprintf("%d agents need you", len(due))
+	}
+	return Message{
+		Event: EventDigest,
+		Title: title,
+		Body:  TruncateRunes(strings.Join(labels, ", "), 240),
 	}
 }
 
-// dispatch delivers m to all registered senders in separate goroutines with retry.
-func (d *Dispatcher) dispatch(m Message) {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	d.dispatchLocked(m)
-}
-
+// dispatchLocked delivers m to all registered senders in separate goroutines with retry.
 func (d *Dispatcher) dispatchLocked(m Message) {
 	for _, s := range d.Senders {
 		d.wg.Add(1)

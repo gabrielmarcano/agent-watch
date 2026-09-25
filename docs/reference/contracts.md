@@ -434,7 +434,14 @@ FCM message options:
 | anything else | no push |
 
 - **Debounce:** skip a push if the same pane pushed the same event less than 5 s ago.
-- **Digest:** if more than 3 pushes would go out within 10 s, send one `digest` push instead: title `N agents need you`, body = the labels joined with `, `.
+- **Window:** the first push of a 10 s window goes out at once (latency matters for `blocked`). Later ones are held until the window ends.
+- **End of the window:** each held agent gets at most one push, built from its **current** state, and only if it is still in the state a held push announced (`blocked` or `done`).
+  - An agent that left that state gets nothing: the watch never offers to approve a prompt that was already answered.
+  - An agent that answered and blocked again gets the push for its current prompt (fingerprint and option ids included).
+- **Digest:** if more than 3 pushes would go out in the window (the first one included), the held ones go out as one `digest` push instead:
+  - title `N agents need you` if any of them is `blocked`, `N agents finished` if all are `done`;
+  - N counts **agents**, not messages;
+  - body = the distinct labels joined with `, `, ≤ 240 chars.
 
 ---
 
