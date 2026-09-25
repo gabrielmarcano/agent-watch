@@ -38,13 +38,16 @@ type Engine struct {
 	// for the pane lock (defaults to 9s, below the relay's 10s wait).
 	CommandTimeout time.Duration
 
-	mu          sync.RWMutex
-	states      map[string]*paneState
-	workspaces  map[string]string // workspace_id -> label
-	herdrOnline bool
-	pong        herdr.Pong
-	herdrErr    string                      // why herdr is offline; "" while online
-	consumed    map[string]*consumedPrompts // pane_id -> prompts already acted on (guarded by mu)
+	mu            sync.RWMutex
+	states        map[string]*paneState
+	workspaces    map[string]string // workspace_id -> label ("" when unlabeled); from the last workspace.list
+	wsRefreshing  bool              // a workspace.list is in flight
+	wsRefreshedAt time.Time         // when the last workspace.list finished (ok or not)
+	wsRefreshes   int               // workspace refreshes started (tests)
+	herdrOnline   bool
+	pong          herdr.Pong
+	herdrErr      string                      // why herdr is offline; "" while online
+	consumed      map[string]*consumedPrompts // pane_id -> prompts already acted on (guarded by mu)
 
 	lockMu    sync.Mutex
 	paneLocks map[string]*paneLock // pane_id -> lock, only while commands are in flight
@@ -95,11 +98,10 @@ func (e *Engine) OnHerdrOnline(online bool, pong herdr.Pong) {
 			e.herdrErr = "herdr unreachable at " + e.Herdr.SocketPath
 		}
 	}
-	e.mu.Unlock()
-
 	if online {
-		go e.refreshWorkspaces(context.Background())
+		e.startWorkspaceRefreshLocked()
 	}
+	e.mu.Unlock()
 
 	if e.Relay != nil {
 		e.Relay.Send(model.HerdrStatusMsg{
@@ -114,18 +116,7 @@ func (e *Engine) OnChanges(changes []herdr.Change) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
-	needRefresh := false
-	for _, ch := range changes {
-		if ch.Kind == herdr.Added || ch.Kind == herdr.Updated {
-			if _, ok := e.workspaces[ch.Agent.WorkspaceID]; !ok {
-				needRefresh = true
-				break
-			}
-		}
-	}
-	if needRefresh {
-		go e.refreshWorkspaces(context.Background())
-	}
+	e.maybeRefreshWorkspacesLocked(changes)
 
 	for _, ch := range changes {
 		paneID := ch.Agent.PaneID
@@ -328,6 +319,11 @@ func (e *Engine) captureHistory(paneID, cwd, agent string, info herdr.AgentInfo)
 			CWD:   cwd,
 		})
 		readCancel()
+		if (err != nil || item == nil) && e.Logger != nil {
+			// Never log the transcript itself; the error names the cause.
+			e.Logger.Warn("LastTurn failed; falling back to a screen capture for history",
+				"pane_id", paneID, "agent", agent, "session_kind", ref.Kind, "err", err)
+		}
 	}
 
 	if err != nil || item == nil {
@@ -380,46 +376,91 @@ func (e *Engine) captureHistory(paneID, cwd, agent string, info herdr.AgentInfo)
 	}
 }
 
-func (e *Engine) refreshWorkspaces(ctx context.Context) {
-	if e.Herdr == nil {
+const (
+	// wsRetryInterval is the minimum gap between workspace.list calls
+	// triggered by a workspace the engine has not seen yet.
+	wsRetryInterval = 5 * time.Second
+	// wsMaxAge is how stale workspace labels may get while agents change;
+	// it picks up renames without a call per change batch.
+	wsMaxAge = 60 * time.Second
+)
+
+// maybeRefreshWorkspacesLocked starts a workspace.list when a change names a
+// workspace missing from the last list (at most every wsRetryInterval), or
+// when the labels are older than wsMaxAge. Unlabeled workspaces are cached
+// too, so they no longer cause a call per batch. Callers hold e.mu.
+func (e *Engine) maybeRefreshWorkspacesLocked(changes []herdr.Change) {
+	if e.Herdr == nil || e.wsRefreshing {
 		return
 	}
+	unknown := false
+	for _, ch := range changes {
+		if ch.Kind != herdr.Added && ch.Kind != herdr.Updated {
+			continue
+		}
+		if _, ok := e.workspaces[ch.Agent.WorkspaceID]; !ok {
+			unknown = true
+			break
+		}
+	}
+	age := time.Since(e.wsRefreshedAt)
+	if (unknown && age >= wsRetryInterval) || age >= wsMaxAge {
+		e.startWorkspaceRefreshLocked()
+	}
+}
+
+// startWorkspaceRefreshLocked runs one workspace.list in the background
+// unless one is already in flight. Callers hold e.mu.
+func (e *Engine) startWorkspaceRefreshLocked() {
+	if e.Herdr == nil || e.wsRefreshing {
+		return
+	}
+	e.wsRefreshing = true
+	e.wsRefreshes++
+	go e.refreshWorkspaces(context.Background())
+}
+
+// refreshWorkspaces replaces the workspace label cache with herdr's list and
+// republishes agents whose workspace label changed.
+func (e *Engine) refreshWorkspaces(ctx context.Context) {
 	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
 
 	wsList, err := e.Herdr.ListWorkspaces(ctx)
+
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.wsRefreshing = false
+	e.wsRefreshedAt = time.Now()
+
 	if err != nil {
 		if e.Logger != nil {
-			e.Logger.Error("refresh workspaces failed", "err", err)
+			e.Logger.Warn("refresh workspaces failed", "err", err)
 		}
 		return
 	}
-	e.mu.Lock()
-	defer e.mu.Unlock()
 
-	changed := false
+	labels := make(map[string]string, len(wsList))
 	for _, ws := range wsList {
-		if ws.Label != "" && e.workspaces[ws.WorkspaceID] != ws.Label {
-			e.workspaces[ws.WorkspaceID] = ws.Label
-			changed = true
-		}
+		labels[ws.WorkspaceID] = ws.Label
 	}
+	e.workspaces = labels
 
 	if e.Logger != nil {
-		e.Logger.Info("refreshed workspaces", "count", len(wsList), "workspaces", e.workspaces, "changed", changed)
+		e.Logger.Debug("refreshed workspaces", "count", len(wsList), "workspaces", labels)
 	}
 
-	if changed {
-		for _, st := range e.states {
-			if wsLabel, ok := e.workspaces[st.info.WorkspaceID]; ok && st.public.Workspace != wsLabel {
-				st.public.Workspace = wsLabel
-				if e.Relay != nil {
-					e.Relay.Send(model.AgentUpdateMsg{
-						Type:  model.WireAgentUpdate,
-						Agent: st.public,
-					})
-				}
-			}
+	for _, st := range e.states {
+		wsLabel := labels[st.info.WorkspaceID]
+		if st.public.Workspace == wsLabel {
+			continue
+		}
+		st.public.Workspace = wsLabel
+		if e.Relay != nil {
+			e.Relay.Send(model.AgentUpdateMsg{
+				Type:  model.WireAgentUpdate,
+				Agent: st.public,
+			})
 		}
 	}
 }
