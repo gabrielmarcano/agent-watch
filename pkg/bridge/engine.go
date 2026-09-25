@@ -41,7 +41,11 @@ type Engine struct {
 	herdrOnline bool
 	pong        herdr.Pong
 	lastError   string
-	cmdLocks    sync.Map // pane_id -> *sync.Mutex
+	consumed    map[string]*consumedPrompts // pane_id -> prompts already acted on (guarded by mu)
+
+	lockMu    sync.Mutex
+	paneLocks map[string]*paneLock // pane_id -> lock, only while commands are in flight
+	requests  requestIDLog
 }
 
 // NewEngine creates a new bridge Engine instance.
@@ -117,6 +121,7 @@ func (e *Engine) OnChanges(changes []herdr.Change) {
 		switch ch.Kind {
 		case herdr.Removed:
 			delete(e.states, paneID)
+			e.forgetConsumedLocked(paneID, true, 0)
 			if e.Relay != nil {
 				e.Relay.Send(model.AgentRemovedMsg{
 					Type:   model.WireAgentRemoved,
@@ -130,6 +135,9 @@ func (e *Engine) OnChanges(changes []herdr.Change) {
 			if info.Agent != nil {
 				agentName = *info.Agent
 			}
+
+			// A new seq (or a lost agent) ends any "already answered" record.
+			e.forgetConsumedLocked(paneID, agentName == "", info.StateChangeSeq)
 
 			// Only panes with a detected agent are tracked
 			if agentName == "" {
@@ -513,9 +521,4 @@ func (e *Engine) isHerdrOnline() bool {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
 	return e.herdrOnline
-}
-
-func (e *Engine) getPaneLock(paneID string) *sync.Mutex {
-	v, _ := e.cmdLocks.LoadOrStore(paneID, &sync.Mutex{})
-	return v.(*sync.Mutex)
 }

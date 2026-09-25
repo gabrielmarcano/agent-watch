@@ -296,3 +296,175 @@ func TestEngine_ReparseClearsCachedPrompt(t *testing.T) {
 		t.Errorf("the seq=100 prompt was re-published at seq=101")
 	}
 }
+
+// --- Bug 2: commands must be idempotent (no double key press) ---
+
+// waitResults collects n command_results for reqID (a duplicate request_id
+// produces one result per delivery).
+func waitResults(t *testing.T, h *testHarness, reqID string, n int) []model.CommandResultMsg {
+	t.Helper()
+	var out []model.CommandResultMsg
+	for len(out) < n {
+		msg, _ := waitMsg(h, 3*time.Second, isResult(reqID))
+		if msg == nil {
+			t.Fatalf("timed out: got %d of %d command_results for %s", len(out), n, reqID)
+		}
+		out = append(out, msg.(model.CommandResultMsg))
+	}
+	return out
+}
+
+// The same request_id delivered twice (e.g. a transport replay) must press
+// the keys once.
+func TestCommands_DuplicateRequestIDSendsKeysOnce(t *testing.T) {
+	h := newTestHarness(t)
+	bash := loadFixture(t, "claude", "permission-bash.txt")
+	h.server.SetAgents([]map[string]any{agentRow("w1:p1", "claude", "blocked", 100)})
+	h.server.SetScreen("w1:p1", "visible", bash)
+	h.engine.OnHerdrOnline(true, herdr.Pong{Version: "0.9.1", Protocol: 22})
+
+	cmd := model.CommandMsg{
+		Type:        model.WireCommand,
+		RequestID:   "req-dup",
+		Action:      "answer",
+		PaneID:      "w1:p1",
+		ExpectedSeq: 100,
+		OptionID:    "opt-1",
+		Fingerprint: fingerprintOf(t, h, "claude", bash),
+	}
+	before := len(h.server.Calls())
+	h.sendRelayToBridge(t, cmd)
+	h.sendRelayToBridge(t, cmd)
+
+	results := waitResults(t, h, "req-dup", 2)
+	oks := 0
+	for _, r := range results {
+		if r.OK {
+			oks++
+		} else if r.ErrorCode != "stale_state" {
+			t.Errorf("duplicate rejected with %q, want stale_state", r.ErrorCode)
+		}
+	}
+	if oks != 1 {
+		t.Errorf("got %d successful results for one request_id, want 1", oks)
+	}
+	if keys := sendKeysSince(h, before); len(keys) != 1 {
+		t.Errorf("duplicate request_id sent keys %v, want exactly one [[1]]", keys)
+	}
+}
+
+// A second tap (new request_id, same expected_seq and fingerprint) before
+// herdr reflects the first one must not press again; a new seq re-arms it.
+func TestCommands_SecondTapSameSeqAndFingerprintRejected(t *testing.T) {
+	h := newTestHarness(t)
+	bash := loadFixture(t, "claude", "permission-bash.txt")
+	h.server.SetAgents([]map[string]any{agentRow("w1:p1", "claude", "blocked", 100)})
+	h.server.SetScreen("w1:p1", "visible", bash)
+	h.engine.OnHerdrOnline(true, herdr.Pong{Version: "0.9.1", Protocol: 22})
+	fp := fingerprintOf(t, h, "claude", bash)
+	syncAndAwaitPrompt(t, h, "w1:p1", 100, fp)
+
+	answer := func(reqID string, seq uint64) model.CommandMsg {
+		return model.CommandMsg{
+			RequestID: reqID, Action: "answer", PaneID: "w1:p1",
+			ExpectedSeq: seq, OptionID: "opt-1", Fingerprint: fp,
+		}
+	}
+
+	before := len(h.server.Calls())
+	if res, _ := runCmd(t, h, answer("req-tap-1", 100)); !res.OK {
+		t.Fatalf("first tap: code=%q msg=%q, want ok", res.ErrorCode, res.Message)
+	}
+	if res, _ := runCmd(t, h, answer("req-tap-2", 100)); res.OK || res.ErrorCode != "stale_state" {
+		t.Errorf("second tap: ok=%v code=%q, want stale_state", res.OK, res.ErrorCode)
+	}
+	if res, _ := runCmd(t, h, model.CommandMsg{
+		RequestID: "req-tap-cancel", Action: "cancel", PaneID: "w1:p1", ExpectedSeq: 100,
+	}); res.OK || res.ErrorCode != "stale_state" {
+		t.Errorf("cancel after answer at same seq: ok=%v code=%q, want stale_state", res.OK, res.ErrorCode)
+	}
+	if keys := sendKeysSince(h, before); len(keys) != 1 {
+		t.Fatalf("keys sent at seq 100: %v, want exactly one [[1]]", keys)
+	}
+
+	// herdr reports a new blocked episode (identical menu, new seq): allowed again.
+	h.server.SetAgents([]map[string]any{agentRow("w1:p1", "claude", "blocked", 101)})
+	before = len(h.server.Calls())
+	if res, _ := runCmd(t, h, answer("req-tap-3", 101)); !res.OK {
+		t.Errorf("answer at new seq: code=%q msg=%q, want ok", res.ErrorCode, res.Message)
+	}
+	if keys := sendKeysSince(h, before); len(keys) != 1 {
+		t.Errorf("keys sent at seq 101: %v, want exactly one", keys)
+	}
+}
+
+// Per-pane command bookkeeping must not outlive the pane.
+func TestEngine_PrunesCommandBookkeeping(t *testing.T) {
+	h := newTestHarness(t)
+	bash := loadFixture(t, "claude", "permission-bash.txt")
+	h.server.SetAgents([]map[string]any{agentRow("w1:p1", "claude", "blocked", 100)})
+	h.server.SetScreen("w1:p1", "visible", bash)
+	h.engine.OnHerdrOnline(true, herdr.Pong{Version: "0.9.1", Protocol: 22})
+
+	if res, _ := runCmd(t, h, model.CommandMsg{
+		RequestID: "req-prune", Action: "answer", PaneID: "w1:p1",
+		ExpectedSeq: 100, OptionID: "opt-1", Fingerprint: fingerprintOf(t, h, "claude", bash),
+	}); !res.OK {
+		t.Fatalf("answer: code=%q msg=%q, want ok", res.ErrorCode, res.Message)
+	}
+
+	h.engine.mu.RLock()
+	_, marked := h.engine.consumed["w1:p1"]
+	h.engine.mu.RUnlock()
+	if !marked {
+		t.Fatal("answered prompt was not recorded as consumed")
+	}
+
+	// The pane lock is released and dropped once no command uses it.
+	deadline := time.Now().Add(time.Second)
+	for {
+		h.engine.lockMu.Lock()
+		n := len(h.engine.paneLocks)
+		h.engine.lockMu.Unlock()
+		if n == 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("paneLocks still holds %d entries after the command finished", n)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	// The pane closes: its consumed record goes with it.
+	h.server.SetAgents([]map[string]any{})
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if _, err := h.syncer.Refresh(ctx); err != nil {
+		t.Fatalf("syncer refresh: %v", err)
+	}
+	h.engine.mu.RLock()
+	left := len(h.engine.consumed)
+	h.engine.mu.RUnlock()
+	if left != 0 {
+		t.Errorf("consumed still holds %d panes after the pane was removed", left)
+	}
+}
+
+func TestRequestIDLogIsBounded(t *testing.T) {
+	var l requestIDLog
+	if l.observe("") {
+		t.Error("empty request_id reported as seen")
+	}
+	for i := 0; i < requestIDCap*3; i++ {
+		id := string(rune('a'+i%26)) + time.Duration(i).String()
+		if l.observe(id) {
+			t.Fatalf("fresh id %q reported as seen", id)
+		}
+		if !l.observe(id) {
+			t.Fatalf("id %q not remembered", id)
+		}
+	}
+	if len(l.seen) > requestIDCap {
+		t.Errorf("request log holds %d ids, cap is %d", len(l.seen), requestIDCap)
+	}
+}

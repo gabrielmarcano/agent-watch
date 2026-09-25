@@ -36,9 +36,8 @@ func (e *Engine) HandleRelayMessage(msg any) {
 }
 
 func (e *Engine) executeCommand(cmd model.CommandMsg) {
-	lock := e.getPaneLock(cmd.PaneID)
-	lock.Lock()
-	defer lock.Unlock()
+	unlock := e.lockPane(cmd.PaneID)
+	defer unlock()
 
 	reply := func(ok bool, code, errMsg, agentName string) {
 		textLen := len(cmd.Text)
@@ -71,6 +70,12 @@ func (e *Engine) executeCommand(cmd model.CommandMsg) {
 				Message:   errMsg,
 			})
 		}
+	}
+
+	// Checked under the pane lock, so a replay waits for the original to finish.
+	if e.requests.observe(cmd.RequestID) {
+		reply(false, "stale_state", "duplicate request_id", "")
+		return
 	}
 
 	if !e.isHerdrOnline() {
@@ -112,6 +117,8 @@ func (e *Engine) executeCommand(cmd model.CommandMsg) {
 		reply(false, "unknown_pane", "pane not found or no agent detected", "")
 		return
 	}
+
+	e.pruneConsumed(agentsList)
 
 	agentName := *info.Agent
 	if info.StateChangeSeq != cmd.ExpectedSeq {
@@ -161,11 +168,7 @@ func (e *Engine) executeCommand(cmd model.CommandMsg) {
 		}
 
 		reply(true, "", "", agentName)
-		go func() {
-			refCtx, refCancel := context.WithTimeout(context.Background(), 3*time.Second)
-			defer refCancel()
-			_, _ = e.Syncer.Refresh(refCtx)
-		}()
+		e.refreshSoon()
 
 	case "answer":
 		if status != model.StatusBlocked {
@@ -190,24 +193,13 @@ func (e *Engine) executeCommand(cmd model.CommandMsg) {
 			return
 		}
 
-		sendCtx, sendCancel := context.WithTimeout(ctx, 3*time.Second)
-		err := e.Herdr.SendKeys(sendCtx, cmd.PaneID, keys)
-		sendCancel()
-		if err != nil {
-			if errors.Is(err, herdr.ErrUnavailable) {
-				reply(false, "herdr_offline", err.Error(), agentName)
-				return
-			}
-			reply(false, "internal", err.Error(), agentName)
+		if code, msg := e.pressPromptKeys(ctx, cmd.PaneID, info.StateChangeSeq, p.Public.Fingerprint, keys); code != "" {
+			reply(false, code, msg, agentName)
 			return
 		}
 
 		reply(true, "", "", agentName)
-		go func() {
-			refCtx, refCancel := context.WithTimeout(context.Background(), 3*time.Second)
-			defer refCancel()
-			_, _ = e.Syncer.Refresh(refCtx)
-		}()
+		e.refreshSoon()
 
 	case "cancel":
 		if status != model.StatusBlocked {
@@ -239,29 +231,51 @@ func (e *Engine) executeCommand(cmd model.CommandMsg) {
 			return
 		}
 
-		cancelKeys := p.EffectiveCancelKeys(ad)
-		sendCtx, sendCancel := context.WithTimeout(ctx, 3*time.Second)
-		err := e.Herdr.SendKeys(sendCtx, cmd.PaneID, cancelKeys)
-		sendCancel()
-		if err != nil {
-			if errors.Is(err, herdr.ErrUnavailable) {
-				reply(false, "herdr_offline", err.Error(), agentName)
-				return
-			}
-			reply(false, "internal", err.Error(), agentName)
+		if code, msg := e.pressPromptKeys(ctx, cmd.PaneID, info.StateChangeSeq, p.Public.Fingerprint, p.EffectiveCancelKeys(ad)); code != "" {
+			reply(false, code, msg, agentName)
 			return
 		}
 
 		reply(true, "", "", agentName)
-		go func() {
-			refCtx, refCancel := context.WithTimeout(context.Background(), 3*time.Second)
-			defer refCancel()
-			_, _ = e.Syncer.Refresh(refCtx)
-		}()
+		e.refreshSoon()
 
 	default:
 		reply(false, "invalid_request", fmt.Sprintf("unsupported command action: %q", cmd.Action), agentName)
 	}
+}
+
+// pressPromptKeys sends keys for the prompt fp shown at seq, at most once.
+// A prompt already answered or cancelled at that seq is rejected with
+// stale_state until herdr reports a new seq. The claim happens before the
+// send: a send that fails after reaching herdr (e.g. a timeout) cannot be told
+// apart from one that never arrived, and pressing twice is the worse outcome.
+func (e *Engine) pressPromptKeys(ctx context.Context, paneID string, seq uint64, fp string, keys []string) (string, string) {
+	if !e.claimPrompt(paneID, seq, fp) {
+		return "stale_state", "prompt already answered; waiting for herdr to report a new state"
+	}
+	sendCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	err := e.Herdr.SendKeys(sendCtx, paneID, keys)
+	cancel()
+	if err != nil {
+		if errors.Is(err, herdr.ErrUnavailable) {
+			return "herdr_offline", err.Error()
+		}
+		return "internal", err.Error()
+	}
+	return "", ""
+}
+
+// refreshSoon re-lists herdr in the background so the watch sees the effect
+// of a command quickly.
+func (e *Engine) refreshSoon() {
+	if e.Syncer == nil {
+		return
+	}
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		_, _ = e.Syncer.Refresh(ctx)
+	}()
 }
 
 // readFreshPrompt re-reads the pane's visible screen and parses it with the
