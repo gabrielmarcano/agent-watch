@@ -14,8 +14,21 @@ import (
 	"github.com/gabrielmarcano/agent-monitor/pkg/push"
 )
 
-// shutdownTimeout bounds a graceful stop (systemd's stop timeout is longer).
-const shutdownTimeout = 10 * time.Second
+const (
+	// shutdownTimeout bounds a graceful stop (systemd's stop timeout is longer).
+	shutdownTimeout = 10 * time.Second
+	// readHeaderTimeoutDefault bounds reading a request's headers.
+	readHeaderTimeoutDefault = 10 * time.Second
+	// idleTimeoutDefault closes keep-alive connections idle between requests.
+	idleTimeoutDefault = 120 * time.Second
+)
+
+func orDefault(d, def time.Duration) time.Duration {
+	if d > 0 {
+		return d
+	}
+	return def
+}
 
 // Server coordinates the relay components and serves the HTTP API.
 type Server struct {
@@ -27,6 +40,8 @@ type Server struct {
 	handler           http.Handler
 	keepAliveInterval time.Duration
 	sseWriteTimeout   time.Duration // per SSE event; 0 means sseWriteTimeoutDefault
+	readHeaderTimeout time.Duration // 0 means readHeaderTimeoutDefault
+	idleTimeout       time.Duration // 0 means idleTimeoutDefault
 
 	lock      *dataDirLock // nil for servers built with NewServerWithDeps
 	closeOnce sync.Once
@@ -192,10 +207,14 @@ func (s *Server) Serve(ctx context.Context, ln net.Listener) error {
 	defer cancelRequests()
 
 	srv := &http.Server{
-		Handler:           s.handler,
-		ReadHeaderTimeout: 10 * time.Second,
-		// Explicitly NO WriteTimeout as SSE and WebSocket are long-lived
-		BaseContext: func(net.Listener) context.Context { return reqCtx },
+		Handler: s.handler,
+		// Both only apply outside a handler (headers of a new request, a
+		// keep-alive connection between requests), so they never cut an SSE
+		// stream or the hijacked host WebSocket. No ReadTimeout and no
+		// WriteTimeout: those would. SSE writes have their own deadline.
+		ReadHeaderTimeout: orDefault(s.readHeaderTimeout, readHeaderTimeoutDefault),
+		IdleTimeout:       orDefault(s.idleTimeout, idleTimeoutDefault),
+		BaseContext:       func(net.Listener) context.Context { return reqCtx },
 	}
 	srv.RegisterOnShutdown(cancelRequests)
 

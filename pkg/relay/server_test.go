@@ -74,6 +74,13 @@ type serving struct {
 
 func startServing(t *testing.T, configure func(*Config)) *serving {
 	t.Helper()
+	return startServingTuned(t, configure, nil)
+}
+
+// startServingTuned is startServing with a hook to adjust the Server (e.g.
+// shorter timeouts) before it starts serving.
+func startServingTuned(t *testing.T, configure func(*Config), tune func(*Server)) *serving {
+	t.Helper()
 	cfg := &Config{HostToken: testHostToken, DataDir: shortTempDir(t)}
 	if configure != nil {
 		configure(cfg)
@@ -81,6 +88,9 @@ func startServing(t *testing.T, configure func(*Config)) *serving {
 	server, err := NewServer(cfg)
 	if err != nil {
 		t.Fatalf("NewServer: %v", err)
+	}
+	if tune != nil {
+		tune(server)
 	}
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -179,4 +189,96 @@ func TestServer_ShutdownEndsStreamsAndExitsCleanly(t *testing.T) {
 		t.Fatalf("data-dir lock still held after shutdown: %v", err)
 	}
 	lock.release()
+}
+
+func shortServerTimeouts(s *Server) {
+	s.readHeaderTimeout = 50 * time.Millisecond
+	s.idleTimeout = 50 * time.Millisecond
+	s.SetKeepAliveInterval(20 * time.Millisecond)
+}
+
+// An idle keep-alive connection is closed after IdleTimeout, and a client
+// that never finishes its headers after ReadHeaderTimeout.
+func TestServer_IdleAndHeaderTimeouts(t *testing.T) {
+	sv := startServingTuned(t, nil, shortServerTimeouts)
+
+	idle, err := net.Dial("tcp", sv.addr)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	defer idle.Close()
+	_, _ = io.WriteString(idle, "GET /v1/healthz HTTP/1.1\r\nHost: relay\r\n\r\n")
+	resp, err := http.ReadResponse(bufio.NewReader(idle), nil)
+	if err != nil {
+		t.Fatalf("healthz: %v", err)
+	}
+	resp.Body.Close()
+	// Keep-alive: the server now waits for the next request, for IdleTimeout.
+	_ = idle.SetReadDeadline(time.Now().Add(5 * time.Second))
+	if _, err := idle.Read(make([]byte, 1)); !errors.Is(err, io.EOF) {
+		t.Fatalf("idle keep-alive connection: read err = %v, want EOF (closed by IdleTimeout)", err)
+	}
+
+	slow, err := net.Dial("tcp", sv.addr)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	defer slow.Close()
+	_, _ = io.WriteString(slow, "GET /v1/healthz HTTP/1.1\r\nHost: re") // never finished
+	_ = slow.SetReadDeadline(time.Now().Add(5 * time.Second))
+	if _, err := io.ReadAll(slow); err != nil {
+		t.Fatalf("stalled headers: read err = %v, want the server to close the connection", err)
+	}
+}
+
+// Neither timeout may cut long-lived streams: an SSE stream and the host
+// WebSocket outlive both by far and still carry events.
+func TestServer_TimeoutsKeepStreamsAlive(t *testing.T) {
+	sv := startServingTuned(t, nil, shortServerTimeouts)
+	devToken, _ := GenerateDeviceToken()
+	_, _ = sv.server.Store().AddDevice("Watch", Sha256Hex(devToken))
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	req, _ := http.NewRequestWithContext(ctx, "GET", "http://"+sv.addr+"/v1/events", nil)
+	req.Header.Set("Authorization", "Bearer "+devToken)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("GET /v1/events: %v", err)
+	}
+	defer resp.Body.Close()
+	stream := bufio.NewReader(resp.Body)
+
+	host, _, err := websocket.Dial(ctx, "ws://"+sv.addr+"/v1/host", &websocket.DialOptions{
+		HTTPHeader: http.Header{"Authorization": []string{"Bearer " + testHostToken}},
+	})
+	if err != nil {
+		t.Fatalf("dial host: %v", err)
+	}
+	defer host.CloseNow()
+	hello, _ := json.Marshal(model.HelloMsg{Type: model.WireHello, Host: "mac", HerdrOnline: true})
+	if err := host.Write(ctx, websocket.MessageText, hello); err != nil {
+		t.Fatalf("hello: %v", err)
+	}
+
+	// 15 keepalives at 20 ms: the stream has lived 6x the 50 ms timeouts.
+	for keepalives := 0; keepalives < 15; {
+		line, err := stream.ReadString('\n')
+		if err != nil {
+			t.Fatalf("SSE stream died after %d keepalives: %v", keepalives, err)
+		}
+		if line == ":\n" {
+			keepalives++
+		}
+	}
+
+	update, _ := json.Marshal(model.AgentUpdateMsg{Type: model.WireAgentUpdate, Agent: model.AgentState{PaneID: "w1:p1", Status: model.StatusWorking}})
+	if err := host.Write(ctx, websocket.MessageText, update); err != nil {
+		t.Fatalf("host socket died: %v", err)
+	}
+	for {
+		if name, _ := nextSSEEvent(t, stream); name == "agent" {
+			break
+		}
+	}
 }
