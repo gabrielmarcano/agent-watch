@@ -357,7 +357,6 @@ func (o *opencodeAdapter) LastTurn(ctx context.Context, ref SessionRef) (*model.
 	response = model.TruncateUTF8(response, 16384)
 
 	return &model.HistoryItem{
-		ID:       ref.Value,
 		Query:    query,
 		Response: response,
 		Source:   "transcript",

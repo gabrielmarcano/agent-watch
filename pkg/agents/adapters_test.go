@@ -196,8 +196,9 @@ func TestClaudeLastTurn(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LastTurn id error: %v", err)
 	}
-	if itemID.ID != testUUID {
-		t.Errorf("expected sessionValue=%q, got %q", testUUID, itemID.ID)
+	// ID is the caller's (contracts.md §1.4 hash of pane, session, query, response).
+	if itemID.ID != "" {
+		t.Errorf("LastTurn must leave ID to the caller, got %q", itemID.ID)
 	}
 	if itemID.Response != expected.Response {
 		t.Errorf("response mismatch: got %q, want %q", itemID.Response, expected.Response)

@@ -143,6 +143,44 @@ func TestTranscriptBadJSON(t *testing.T) {
 	}
 }
 
+// LastTurn fills Query, Response and Source only. The bridge fills ID (the
+// contracts.md §1.4 hash, with SessionRef.Value as session_value), PaneID,
+// Agent, Label and CompletedAt.
+func TestLastTurnLeavesIDToCaller(t *testing.T) {
+	ctx := context.Background()
+	dump := loadOpenCodeDump(t, "session-multistep.json")
+	agyPath := filepath.Join(t.TempDir(), "brain", "conv-1", ".system_generated", "logs", "transcript_full.jsonl")
+	if err := os.MkdirAll(filepath.Dir(agyPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(agyPath, []byte(`{"type":"USER_INPUT","content":"q"}`+"\n"+`{"type":"PLANNER_RESPONSE","content":"a"}`+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cases := []struct {
+		name string
+		ad   Adapter
+		ref  SessionRef
+	}{
+		{"claude", newClaudeAdapter(Config{}), SessionRef{Kind: "path", Value: filepath.Join("testdata", "claude", "transcript.jsonl")}},
+		{"agy path", newAgyAdapter(Config{}), SessionRef{Kind: "path", Value: agyPath}},
+		{"agy id", newAgyAdapter(Config{AgyBrainDir: filepath.Join(filepath.Dir(agyPath), "..", "..", "..")}), SessionRef{Kind: "id", Value: "conv-1"}},
+		{"opencode", newOpenCodeAdapter(Config{OpenCodeDBPath: writeOpenCodeDB(t, dump)}), SessionRef{Kind: "id", Value: dump.SessionID}},
+	}
+	for _, c := range cases {
+		item, err := c.ad.LastTurn(ctx, c.ref)
+		if err != nil {
+			t.Fatalf("%s: %v", c.name, err)
+		}
+		if item.ID != "" || item.PaneID != "" || item.Agent != "" || item.CompletedAt != "" {
+			t.Errorf("%s: adapter filled caller fields: %+v", c.name, *item)
+		}
+		if item.Source != "transcript" || item.Response == "" {
+			t.Errorf("%s: Source=%q Response=%q", c.name, item.Source, item.Response)
+		}
+	}
+}
+
 // A 20 KB answer is cut to 16 384 bytes on a rune boundary, plus the marker.
 func TestTranscriptTruncation20KB(t *testing.T) {
 	ctx := context.Background()

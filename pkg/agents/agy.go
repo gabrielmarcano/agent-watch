@@ -116,7 +116,7 @@ type agyStep struct {
 }
 
 func (a *agyAdapter) LastTurn(ctx context.Context, ref SessionRef) (*model.HistoryItem, error) {
-	path, sessionVal := a.resolvePath(ref)
+	path := a.resolvePath(ref)
 	if path == "" {
 		return nil, ErrNoTranscript
 	}
@@ -193,7 +193,6 @@ func (a *agyAdapter) LastTurn(ctx context.Context, ref SessionRef) (*model.Histo
 	response = model.TruncateUTF8(response, 16384)
 
 	return &model.HistoryItem{
-		ID:       sessionVal,
 		Query:    query,
 		Response: response,
 		Source:   "transcript",
@@ -217,26 +216,17 @@ func agyUserRequest(content string) string {
 	return strings.TrimSpace(rest)
 }
 
-func (a *agyAdapter) resolvePath(ref SessionRef) (string, string) {
+func (a *agyAdapter) resolvePath(ref SessionRef) string {
 	if ref.Kind == "path" && ref.Value != "" {
-		// If path is provided, extract conversation id from directory structure if possible
-		sessionVal := ref.Value
-		dir := filepath.Dir(ref.Value)
-		if filepath.Base(dir) == "logs" {
-			parent := filepath.Dir(dir)
-			if filepath.Base(parent) == ".system_generated" {
-				sessionVal = filepath.Base(filepath.Dir(parent))
-			}
-		}
-		return ref.Value, sessionVal
+		return ref.Value
 	}
 
 	if ref.Kind == "id" && ref.Value != "" {
 		target := filepath.Join(a.cfg.AgyBrainDir, ref.Value, ".system_generated", "logs", "transcript_full.jsonl")
 		if _, err := os.Stat(target); err == nil {
-			return target, ref.Value
+			return target
 		}
 	}
 
-	return "", ""
+	return ""
 }

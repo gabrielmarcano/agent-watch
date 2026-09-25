@@ -3,6 +3,7 @@ package agents
 import (
 	"context"
 	"encoding/json"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -127,7 +128,7 @@ type claudeContentBlock struct {
 }
 
 func (c *claudeAdapter) LastTurn(ctx context.Context, ref SessionRef) (*model.HistoryItem, error) {
-	path, sessionValue := c.resolvePath(ref)
+	path := c.resolvePath(ref)
 	if path == "" {
 		return nil, ErrNoTranscript
 	}
@@ -261,17 +262,15 @@ func (c *claudeAdapter) LastTurn(ctx context.Context, ref SessionRef) (*model.Hi
 	response = model.TruncateUTF8(response, 16384)
 
 	return &model.HistoryItem{
-		ID:       sessionValue,
 		Query:    query,
 		Response: response,
 		Source:   "transcript",
 	}, nil
 }
 
-func (c *claudeAdapter) resolvePath(ref SessionRef) (string, string) {
+func (c *claudeAdapter) resolvePath(ref SessionRef) string {
 	if ref.Kind == "path" && ref.Value != "" {
-		sessionVal := strings.TrimSuffix(filepath.Base(ref.Value), ".jsonl")
-		return ref.Value, sessionVal
+		return ref.Value
 	}
 
 	if ref.Kind == "id" && ref.Value != "" {
@@ -281,24 +280,16 @@ func (c *claudeAdapter) resolvePath(ref SessionRef) (string, string) {
 
 		for _, dir := range c.cfg.ClaudeConfigDirs {
 			target := filepath.Join(dir, "projects", slug, ref.Value+".jsonl")
-			if content, err := TailFile(target, 1); err == nil && content != "" || fileExists(target) {
-				return target, ref.Value
+			if fi, err := os.Stat(target); err == nil && fi.Mode().IsRegular() {
+				return target
 			}
 			// Glob fallback
 			pattern := filepath.Join(dir, "projects", "*", ref.Value+".jsonl")
 			if matches, _ := filepath.Glob(pattern); len(matches) > 0 {
-				return matches[0], ref.Value
+				return matches[0]
 			}
 		}
 	}
 
-	return "", ""
-}
-
-func fileExists(p string) bool {
-	// Simple helper to check if file can be opened
-	if _, err := TailFile(p, 1); err == nil {
-		return true
-	}
-	return false
+	return ""
 }

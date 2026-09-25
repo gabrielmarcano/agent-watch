@@ -41,9 +41,15 @@ func (p Prompt) EffectiveCancelKeys(a Adapter) []string {
 // Adapter defines the agent-specific capabilities for a coding agent.
 type Adapter interface {
 	Name() string
+	// ParsePrompt returns the menu of the dialog open on the visible screen.
+	// ok is false when no dialog is open, even if the screen shows a numbered
+	// list: the bridge also uses it to refuse dictation while a menu is up.
 	ParsePrompt(screen string) (Prompt, bool)
 	CancelKeys() []string
 	PromptWhileWorking() bool
+	// LastTurn fills Query, Response and Source="transcript" only. ID, PaneID,
+	// Agent, Label and CompletedAt belong to the caller, which computes ID
+	// with model.HistoryID using ref.Value as the session value.
 	LastTurn(ctx context.Context, ref SessionRef) (*model.HistoryItem, error)
 }
 
