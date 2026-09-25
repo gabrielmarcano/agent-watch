@@ -53,6 +53,25 @@ type Adapter interface {
 	LastTurn(ctx context.Context, ref SessionRef) (*model.HistoryItem, error)
 }
 
+// FocusGuard is implemented by adapters whose answer keys act on whichever
+// button has focus, which a text screen cannot show (OpenCode's button bar:
+// Enter presses the focused button). The bridge consults it right before
+// sending an answer; adapters whose keys pick an option by itself (digits)
+// do not implement it.
+type FocusGuard interface {
+	// FocusDependent reports whether the keys for optionID in p act on the
+	// focused button, so that the bridge must read the screen in herdr's
+	// "ansi" format and call CheckFocus before sending them. It is true for
+	// an option that is not in p (CheckFocus then refuses it).
+	FocusDependent(p Prompt, optionID string) bool
+	// CheckFocus returns nil when the keys for optionID in p do not depend on
+	// focus, or when ansiScreen (the visible screen, format "ansi") shows p's
+	// dialog with the focus on the button those keys assume. Anything else,
+	// including a screen it cannot read with certainty, is an error: the
+	// caller must then send nothing.
+	CheckFocus(ansiScreen string, p Prompt, optionID string) error
+}
+
 // Config specifies host paths for reading agent transcripts.
 type Config struct {
 	ClaudeConfigDirs []string // expanded (no "~")

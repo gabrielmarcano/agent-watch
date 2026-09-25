@@ -1,0 +1,2 @@
+# Real herdr "ansi" captures: rows end with \r\n. Keep the bytes as captured.
+*.ansi -text
