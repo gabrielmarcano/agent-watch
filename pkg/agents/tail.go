@@ -24,8 +24,13 @@ func TailFile(path string, maxBytes int64) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	return tailRead(f, fi.Size(), maxBytes)
+}
 
-	size := fi.Size()
+// tailRead reads the last maxBytes of r as it was when its size was size.
+// Bytes appended after that (the agent still writing) are not read, so the
+// read is bounded even if the file grows meanwhile.
+func tailRead(r io.ReadSeeker, size, maxBytes int64) (string, error) {
 	offset := int64(0)
 	dropFirstLine := false
 
@@ -34,11 +39,11 @@ func TailFile(path string, maxBytes int64) (string, error) {
 		dropFirstLine = true
 	}
 
-	if _, err := f.Seek(offset, io.SeekStart); err != nil {
+	if _, err := r.Seek(offset, io.SeekStart); err != nil {
 		return "", fmt.Errorf("seek: %w", err)
 	}
 
-	data, err := io.ReadAll(f)
+	data, err := io.ReadAll(io.LimitReader(r, size-offset))
 	if err != nil {
 		return "", fmt.Errorf("read: %w", err)
 	}
