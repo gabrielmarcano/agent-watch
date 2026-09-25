@@ -1,0 +1,64 @@
+package com.gabriel.agentwatch.network
+
+import com.gabriel.agentwatch.model.AgentState
+import com.gabriel.agentwatch.model.AgentsSnapshot
+import kotlinx.coroutines.flow.MutableStateFlow
+import org.junit.After
+import org.junit.Assert.assertEquals
+import org.junit.Before
+import org.junit.Test
+
+/** The engine's basic SSE → state path (regression net for the extraction out of RelayRepository). */
+class RelayEngineTest {
+    private lateinit var relay: FakeRelay
+    private lateinit var engine: RelayEngine
+    private val state = MutableStateFlow(UiState())
+
+    private fun agent(pane: String, seq: Long, status: String = "working") =
+        AgentState(pane_id = pane, label = pane, status = status, state_change_seq = seq)
+
+    @Before
+    fun setUp() {
+        relay = FakeRelay()
+        relay.agents = AgentsSnapshot(host_online = true, herdr_online = true, agents = listOf(agent("A", 1)))
+        engine = RelayEngine(state, FakeCredentials(relay.url, "tok"), reconnectDelayMs = { 50 })
+    }
+
+    @After
+    fun tearDown() {
+        engine.stop()
+        relay.close()
+    }
+
+    @Test
+    fun startStreamsTheSnapshotWithTheBearerToken() {
+        engine.start()
+
+        val s = awaitValue(state, what = "live snapshot") { it.connection == Connection.Live && it.agents.isNotEmpty() }
+
+        assertEquals(listOf("A"), s.agents.map { it.pane_id })
+        assertEquals("Bearer tok", relay.eventsRequests().first().authorization)
+    }
+
+    @Test
+    fun agentEventsUpdateTheList() {
+        engine.start()
+        awaitValue(state, what = "live snapshot") { it.agents.isNotEmpty() }
+
+        relay.sendAgent(agent("B", 1, status = "blocked"))
+
+        val s = awaitValue(state, what = "agent B") { st -> st.agents.any { it.pane_id == "B" } }
+        assertEquals(listOf("B", "A"), s.agents.map { it.pane_id })
+    }
+
+    @Test
+    fun aDroppedStreamIsReconnected() {
+        engine.start()
+        awaitValue(state, what = "live snapshot") { it.agents.isNotEmpty() }
+
+        relay.dropStreams()
+
+        awaitTrue(what = "second /v1/events") { relay.eventsRequests().size >= 2 }
+        awaitValue(state, what = "live again") { it.connection == Connection.Live }
+    }
+}
