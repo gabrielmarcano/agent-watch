@@ -1,6 +1,9 @@
+import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
+    id("org.jetbrains.kotlin.plugin.compose")
     id("com.google.gms.google-services")
 }
 
@@ -29,7 +32,7 @@ val defaultRelayUrl: String = agentWatchEnv["AW_RELAY_DOMAIN"].orEmpty().let { d
 
 android {
     namespace = "com.gabriel.agentwatch"
-    compileSdk = 34
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "com.gabriel.agentwatch"
@@ -57,15 +60,9 @@ android {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
-    kotlinOptions {
-        jvmTarget = "17"
-    }
     buildFeatures {
         compose = true
         buildConfig = true
-    }
-    composeOptions {
-        kotlinCompilerExtensionVersion = "1.5.8"
     }
     packaging {
         resources {
@@ -78,28 +75,34 @@ android {
     }
 }
 
+kotlin {
+    compilerOptions {
+        jvmTarget.set(JvmTarget.JVM_17)
+    }
+}
+
 dependencies {
-    // Wear OS Compose libraries
-    implementation("androidx.wear.compose:compose-material:1.4.0")
-    implementation("androidx.wear.compose:compose-foundation:1.4.0")
+    // Wear OS Compose. Material 3 is the target; Material 2 stays only until every screen is migrated.
+    // 1.6.x is the newest line that builds with AGP 8 (1.7 needs AGP 9.1 and compileSdk 37).
+    implementation("androidx.wear.compose:compose-material3:1.6.2")
+    implementation("androidx.wear.compose:compose-foundation:1.6.2")
+    implementation("androidx.wear.compose:compose-navigation:1.6.2")
+    implementation("androidx.wear.compose:compose-material:1.6.2")
 
-    // Markdown Renderer
-    implementation("androidx.compose.material:material:1.6.1")
+    // Markdown renderer (phone Material 2): replaced by the block renderer with the reader screen
+    implementation("androidx.compose.material:material:1.9.0")
     implementation("com.mikepenz:multiplatform-markdown-renderer-m2:0.25.0")
-    implementation("androidx.wear.compose:compose-navigation:1.4.0")
 
-    // Core Android Compose
-    implementation("androidx.activity:activity-compose:1.8.2")
-    implementation("androidx.compose.ui:ui-tooling-preview:1.6.1")
-    debugImplementation("androidx.compose.ui:ui-tooling:1.6.1")
+    // Activity and lifecycle
+    implementation("androidx.activity:activity-compose:1.12.4")
+    implementation("androidx.lifecycle:lifecycle-runtime-compose:2.10.0")
 
-    // Wear OS specific helpers
-    implementation("androidx.wear:wear:1.3.0")
-    implementation("com.google.android.gms:play-services-wearable:18.1.0")
+    // Complication, tile
     implementation("androidx.wear.watchface:watchface-complications-data-source-ktx:1.2.1")
-    implementation("androidx.wear.tiles:tiles:1.4.0")
-    implementation("androidx.wear.protolayout:protolayout:1.2.0")
-    implementation("androidx.wear.protolayout:protolayout-material:1.2.0")
+    implementation("androidx.wear.tiles:tiles:1.6.2")
+    implementation("androidx.wear.protolayout:protolayout:1.4.2")
+    implementation("androidx.wear.protolayout:protolayout-material:1.4.2")
+    implementation("androidx.wear.protolayout:protolayout-material3:1.4.2")
     implementation("androidx.concurrent:concurrent-futures:1.1.0")
 
     // HTTP / SSE client
@@ -108,9 +111,6 @@ dependencies {
 
     // JSON parsing
     implementation("com.google.code.gson:gson:2.10.1")
-
-    // Lifecycle
-    implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.7.0")
 
     // Firebase Cloud Messaging
     implementation(platform("com.google.firebase:firebase-bom:32.7.2"))
