@@ -129,6 +129,7 @@ agent-monitor/
 │   └── relay/                    # systemd unit, env/proxy examples, deploy.sh, Dockerfile, README.md (operations)
 ├── macos-bar/                    # macOS menu bar app over the bridge CLI (make bar, make bar-test)
 ├── tools/guards/                 # guard implementation (hooks, pre-commit)
+├── tools/herdr-overrides/        # TEMPORARY herdr detection overrides (agy, claude); remove when upstream fixes them
 ├── wearos-app/                   # Wear OS client (Kotlin, Jetpack Compose)
 └── watchos-app/                  # watchOS client (Swift, SwiftUI; legacy until Phase 6)
 ```

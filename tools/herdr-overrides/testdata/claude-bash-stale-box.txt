@@ -1,0 +1,41 @@
+✻ Brewed for 5s · done 1:24 PM
+
+❯ /exit
+
+✢ Boogieing…
+  ⎿  Tip: Run /install-slack-app to use Claude in Slack
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  ⏸ manual mode on · esc to interrupt · ← for agents
+
+Resume this session with:
+claude --resume 00000000-0000-0000-0000-000000000000
+
+󰉋 /private/tmp/aw-sandbox 󰘬 main 󰈙 2 󱎫 1m53s
+❯ claude --permission-mode default --model sonnet
+ ▐▛███▛█   Claude Code v2.1.282
+▝▜██████▀  Sonnet 5 with xhigh effort · Claude Max
+ ▝▝   ▝▝   /private/tmp/aw-sandbox
+
+
+❯ Run the shell command touch foo.txt
+
+⏺ Bash(touch foo.txt)
+  ⎿  Waiting…
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ Bash command
+ Tip: auto mode handles these prompts for you — choose "switch to auto mode" below
+
+   touch foo.txt
+   Create empty file foo.txt
+
+ Do you want to proceed?
+ ❯ 1. Yes
+   2. Yes, and always allow access to /private/tmp/aw-sandbox from this project
+   3. Yes, and switch to auto mode · auto mode handles these prompts for you
+   4. No
+
+ Esc to cancel · Tab to amend

@@ -1,0 +1,41 @@
+⏺ Fetch(https://example.com)
+  ⎿  Interrupted · What should Claude do instead?
+
+✻ Brewed for 5s · done 1:23 PM
+
+❯ /exit
+
+✶ Ebbing…
+  ⎿  Tip: Use /memory to view and manage Claude memory
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  ⏸ manual mode on · esc to interrupt · ← for agents                                                                         ◉ xhigh · /effort
+
+Resume this session with:
+claude --resume 00000000-0000-0000-0000-000000000000
+
+󰉋 /private/tmp/aw-sandbox 󰘬 main 󰈙 2 󱎫 54s
+❯ claude --permission-mode default --model sonnet
+ ▐▛███▛█   Claude Code v2.1.282
+▝▜██████▀  Sonnet 5 with xhigh effort · Claude Max
+ ▝▝   ▝▝   /private/tmp/aw-sandbox
+
+
+❯ Use the WebFetch tool to fetch https://example.com and tell me the page title.
+
+⏺ Fetch(https://example.com)
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ Fetch
+
+   url: https://example.com/
+   │ prompt: What is the page title (the contents of the <title> tag, or the main heading if the title is not available)? Report both if they
+   │ differ.
+   Claude wants to fetch content from example.com
+
+ Do you want to allow Claude to fetch this content?
+ ❯ 1. Yes
+   2. Yes, and don't ask again for example.com
+   3. No, and tell Claude what to do differently (esc)
