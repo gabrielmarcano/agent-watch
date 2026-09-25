@@ -105,20 +105,7 @@ func (f *FCM) Send(ctx context.Context, m Message) error {
 		priority = "high"
 	}
 
-	// All data values must be strings, with empty strings when unknown.
-	// state_change_seq is always a number, "0" included: the app parses it.
-	data := map[string]string{
-		"event":            string(m.Event),
-		"pane_id":          m.PaneID,
-		"agent":            m.Agent,
-		"label":            m.Label,
-		"title":            m.Title,
-		"body":             m.Body,
-		"state_change_seq": strconv.FormatUint(m.StateChangeSeq, 10),
-		"fingerprint":      m.Fingerprint,
-		"allow_option_id":  m.AllowOptionID,
-		"deny_option_id":   m.DenyOptionID,
-	}
+	data := fcmData(m)
 
 	client := f.Client
 	if client == nil {
@@ -158,6 +145,41 @@ func (f *FCM) Send(ctx context.Context, m Message) error {
 	// Each token was already retried as needed: the dispatcher must not
 	// retry the whole Send, or the tokens that succeeded get it twice.
 	return NoRetry(errors.Join(sendErrors...))
+}
+
+var _ ResolvedSender = (*FCM)(nil)
+
+// SendsResolved implements ResolvedSender: the Wear OS app withdraws the
+// notification of a pane that is no longer blocked.
+func (f *FCM) SendsResolved() bool {
+	return true
+}
+
+// fcmData is the data map of m (contracts.md §4.1). All values are strings,
+// empty when unknown, and state_change_seq is always a number, "0" included:
+// the app parses it. A resolved message carries only what the app needs to
+// find the notification to withdraw.
+func fcmData(m Message) map[string]string {
+	seq := strconv.FormatUint(m.StateChangeSeq, 10)
+	if m.Event == EventResolved {
+		return map[string]string{
+			"event":            string(m.Event),
+			"pane_id":          m.PaneID,
+			"state_change_seq": seq,
+		}
+	}
+	return map[string]string{
+		"event":            string(m.Event),
+		"pane_id":          m.PaneID,
+		"agent":            m.Agent,
+		"label":            m.Label,
+		"title":            m.Title,
+		"body":             m.Body,
+		"state_change_seq": seq,
+		"fingerprint":      m.Fingerprint,
+		"allow_option_id":  m.AllowOptionID,
+		"deny_option_id":   m.DenyOptionID,
+	}
 }
 
 // sendToken delivers one message and retries it once after a transient

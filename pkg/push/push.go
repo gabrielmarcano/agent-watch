@@ -20,7 +20,13 @@ const (
 	EventBlocked Event = "blocked"
 	EventDone    Event = "done"
 	EventDigest  Event = "digest"
+	// EventResolved tells the app to withdraw the notification of a blocked
+	// push whose agent is no longer blocked.
+	EventResolved Event = "resolved"
 )
+
+// maxShownBlocked caps Dispatcher.blockedShown.
+const maxShownBlocked = 1024
 
 // Message is the push notification payload forwarded to Senders.
 type Message struct {
@@ -40,6 +46,19 @@ type Message struct {
 type Sender interface {
 	Name() string
 	Send(ctx context.Context, m Message) error
+}
+
+// ResolvedSender is a Sender whose app can withdraw a notification it already
+// shows. Only these senders get EventResolved messages: the others (ntfy)
+// cannot take a notification back, and would show an empty one instead.
+type ResolvedSender interface {
+	Sender
+	SendsResolved() bool
+}
+
+func sendsResolved(s Sender) bool {
+	rs, ok := s.(ResolvedSender)
+	return ok && rs.SendsResolved()
 }
 
 // noRetryError marks a Send error that the Dispatcher must not retry.
@@ -83,6 +102,11 @@ type Dispatcher struct {
 	held       []Message
 	latest     map[string]model.AgentState // newest state of every pane in held
 
+	// blockedShown holds the panes whose own blocked push went out and was
+	// not withdrawn yet, with when it went out. Capped at maxShownBlocked:
+	// a pane removed while blocked is never seen leaving blocked.
+	blockedShown map[string]time.Time
+
 	wg sync.WaitGroup
 }
 
@@ -112,6 +136,7 @@ func NewDispatcher(senders []Sender, now func() time.Time, logger *slog.Logger) 
 		afterFunc:        realAfterFunc,
 		lastPush:         make(map[string]time.Time),
 		latest:           make(map[string]model.AgentState),
+		blockedShown:     make(map[string]time.Time),
 	}
 }
 
@@ -125,6 +150,9 @@ func (d *Dispatcher) initLocked() {
 	}
 	if d.latest == nil {
 		d.latest = make(map[string]model.AgentState)
+	}
+	if d.blockedShown == nil {
+		d.blockedShown = make(map[string]time.Time)
 	}
 }
 
@@ -160,6 +188,15 @@ func (d *Dispatcher) OnAgentUpdate(prev *model.AgentState, cur model.AgentState)
 	if _, held := d.latest[cur.PaneID]; held {
 		d.latest[cur.PaneID] = cur
 	}
+
+	// The pane's blocked notification is stale once the pane leaves blocked
+	// (answered on the Mac, on another watch, or canceled): withdraw it right
+	// away. No debounce, no window, no digest.
+	if _, shown := d.blockedShown[cur.PaneID]; shown && cur.Status != model.StatusBlocked {
+		delete(d.blockedShown, cur.PaneID)
+		d.dispatchLocked(Message{Event: EventResolved, PaneID: cur.PaneID, StateChangeSeq: cur.StateChangeSeq})
+	}
+
 	if shouldPush {
 		d.enqueueLocked(msg, cur)
 	}
@@ -255,7 +292,7 @@ func (d *Dispatcher) enqueueLocked(m Message, cur model.AgentState) {
 	// until the window ends. The flush then sends them one by one, or a
 	// single digest when more than 3 pushes would go out in the window.
 	if d.timer == nil {
-		d.dispatchLocked(m)
+		d.sendLocked(m, now)
 		d.windowSent = 1
 		d.windowGen++
 		gen := d.windowGen
@@ -312,12 +349,34 @@ func (d *Dispatcher) flushLocked() {
 	clear(d.latest)
 
 	if sent+len(due) <= 3 {
+		now := d.Now()
 		for _, m := range due {
-			d.dispatchLocked(m)
+			d.sendLocked(m, now)
 		}
 		return
 	}
+	// A digest shows no per-pane notification, so there is nothing for a
+	// resolved message to withdraw later.
 	d.dispatchLocked(digestMessage(due))
+}
+
+// sendLocked dispatches a message about one pane and remembers a blocked
+// one, so the pane's notification can be withdrawn when it leaves blocked.
+func (d *Dispatcher) sendLocked(m Message, now time.Time) {
+	d.dispatchLocked(m)
+	if m.Event != EventBlocked {
+		return
+	}
+	if _, ok := d.blockedShown[m.PaneID]; !ok && len(d.blockedShown) >= maxShownBlocked {
+		oldest := ""
+		for pane, at := range d.blockedShown {
+			if oldest == "" || at.Before(d.blockedShown[oldest]) {
+				oldest = pane
+			}
+		}
+		delete(d.blockedShown, oldest)
+	}
+	d.blockedShown[m.PaneID] = now
 }
 
 // paneEvent identifies what a held message announces.
@@ -386,6 +445,9 @@ func digestMessage(due []Message) Message {
 // dispatchLocked delivers m to all registered senders in separate goroutines with retry.
 func (d *Dispatcher) dispatchLocked(m Message) {
 	for _, s := range d.Senders {
+		if m.Event == EventResolved && !sendsResolved(s) {
+			continue
+		}
 		d.wg.Add(1)
 		go func(sender Sender) {
 			defer d.wg.Done()

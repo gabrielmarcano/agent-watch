@@ -585,6 +585,171 @@ func TestDispatcher_Digest(t *testing.T) {
 	}
 }
 
+// resolvedMock is a mockSender whose app can withdraw a notification (FCM).
+type resolvedMock struct {
+	mockSender
+}
+
+func (m *resolvedMock) SendsResolved() bool { return true }
+
+func newResolvedMock() *resolvedMock {
+	return &resolvedMock{mockSender: mockSender{name: "fcm"}}
+}
+
+func eventsOf(msgs []Message) []string {
+	out := make([]string, 0, len(msgs))
+	for _, m := range msgs {
+		out = append(out, fmt.Sprintf("%s:%s", m.Event, m.PaneID))
+	}
+	sort.Strings(out)
+	return out
+}
+
+// When an agent whose blocked push went out leaves blocked, for any status,
+// the app gets one "resolved" message so it can withdraw the notification;
+// senders that cannot withdraw (ntfy) never get it.
+func TestDispatcher_ResolvedWithdrawsABlockedPush(t *testing.T) {
+	for _, next := range []model.AgentStatus{model.StatusWorking, model.StatusIdle, model.StatusDone, model.StatusUnknown} {
+		t.Run(string(next), func(t *testing.T) {
+			fcm := newResolvedMock()
+			ntfy := &mockSender{name: "ntfy"}
+			d, _, _ := newTestDispatcher(fcm, ntfy)
+
+			blocked := agentAt("p1", "one", model.StatusBlocked, 42)
+			d.OnAgentUpdate(nil, blocked)
+			d.Wait()
+			left := agentAt("p1", "one", next, 43)
+			d.OnAgentUpdate(&blocked, left)
+			d.Wait()
+			// Nothing is left to withdraw after that.
+			d.OnAgentUpdate(&left, agentAt("p1", "one", model.StatusIdle, 44))
+			d.Wait()
+
+			got := fcm.getMessages()
+			if len(got) != 2 {
+				t.Fatalf("fcm got %v, want blocked then one resolved", eventsOf(got))
+			}
+			if want := (Message{Event: EventResolved, PaneID: "p1", StateChangeSeq: 43}); got[1] != want {
+				t.Fatalf("resolved message = %+v, want %+v", got[1], want)
+			}
+			if n := len(ntfy.getMessages()); n != 1 {
+				t.Fatalf("ntfy got %d messages, want only the blocked one", n)
+			}
+		})
+	}
+}
+
+// A resolved message goes out at once: it is not debounced, not held for the
+// window, not counted toward a digest, and never part of one.
+func TestDispatcher_ResolvedSkipsTheWindow(t *testing.T) {
+	fcm := newResolvedMock()
+	d, _, timers := newTestDispatcher(fcm)
+
+	b1 := agentAt("p1", "one", model.StatusBlocked, 1)
+	d.OnAgentUpdate(nil, b1) // sent, opens the window
+	d.Wait()
+	d.OnAgentUpdate(&b1, agentAt("p1", "one", model.StatusWorking, 2))
+	d.Wait()
+	if got := fcm.getMessages(); len(got) != 2 || got[1].Event != EventResolved {
+		t.Fatalf("resolved was not sent at once: %v", eventsOf(got))
+	}
+
+	d.OnAgentUpdate(nil, blockedState("p2", "two"))
+	d.OnAgentUpdate(nil, blockedState("p3", "three"))
+	flushWindow(d, timers)
+
+	// 1 sent + 2 held = 3 pushes: no digest (a counted resolved would make 4).
+	want := []string{"blocked:p1", "blocked:p2", "blocked:p3", "resolved:p1"}
+	if got := eventsOf(fcm.getMessages()); fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Fatalf("pushes = %v, want %v", got, want)
+	}
+}
+
+// Only a pane whose own blocked push went out gets a resolved one: not a
+// pane held and answered before the flush, not a pane covered by a digest,
+// not a pane that never blocked.
+func TestDispatcher_ResolvedOnlyAfterABlockedPush(t *testing.T) {
+	fcm := newResolvedMock()
+	d, _, timers := newTestDispatcher(fcm)
+
+	d.OnAgentUpdate(nil, blockedState("p0", "zero")) // sent, opens the window
+	d.Wait()
+	b1 := blockedState("p1", "one")
+	d.OnAgentUpdate(nil, b1)
+	d.OnAgentUpdate(&b1, agentAt("p1", "one", model.StatusWorking, 1)) // answered while held
+	for _, p := range []string{"p2", "p3", "p4"} {
+		d.OnAgentUpdate(nil, blockedState(p, p)) // will be a digest
+	}
+	flushWindow(d, timers)
+
+	for _, p := range []string{"p2", "p3", "p4"} {
+		b := blockedState(p, p)
+		d.OnAgentUpdate(&b, agentAt(p, p, model.StatusWorking, 1))
+	}
+	finish(d, "p5", "five", 3)
+	d.Wait()
+
+	for _, m := range fcm.getMessages() {
+		if m.Event == EventResolved {
+			t.Fatalf("unexpected resolved for %s; pushes: %v", m.PaneID, eventsOf(fcm.getMessages()))
+		}
+	}
+}
+
+// A blocked push sent one by one at the end of the window is withdrawn too.
+func TestDispatcher_ResolvedAfterAFlushedBlockedPush(t *testing.T) {
+	fcm := newResolvedMock()
+	d, _, timers := newTestDispatcher(fcm)
+
+	d.OnAgentUpdate(nil, blockedState("p0", "zero"))
+	b1 := blockedState("p1", "one")
+	d.OnAgentUpdate(nil, b1) // held, then sent on its own
+	flushWindow(d, timers)
+	d.OnAgentUpdate(&b1, agentAt("p1", "one", model.StatusWorking, 8))
+	d.Wait()
+
+	want := []string{"blocked:p0", "blocked:p1", "resolved:p1"}
+	if got := eventsOf(fcm.getMessages()); fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Fatalf("pushes = %v, want %v", got, want)
+	}
+}
+
+// Panes removed while blocked are never seen leaving blocked, so the set of
+// shown blocked pushes is capped; the oldest entries go first.
+func TestDispatcher_ShownBlockedIsBounded(t *testing.T) {
+	fcm := newResolvedMock()
+	d, clock, timers := newTestDispatcher(fcm)
+
+	n := maxShownBlocked + 10
+	for i := 0; i < n; i++ {
+		d.OnAgentUpdate(nil, blockedState(fmt.Sprintf("p%d", i), "a")) // each opens its own window
+		timers.Fire()
+		clock.Advance(time.Second)
+	}
+	d.Wait()
+
+	d.mu.Lock()
+	size := len(d.blockedShown)
+	d.mu.Unlock()
+	if size > maxShownBlocked {
+		t.Fatalf("blockedShown holds %d panes, want at most %d", size, maxShownBlocked)
+	}
+
+	oldest, newest := blockedState("p0", "a"), blockedState(fmt.Sprintf("p%d", n-1), "a")
+	d.OnAgentUpdate(&oldest, agentAt("p0", "a", model.StatusWorking, 1))
+	d.OnAgentUpdate(&newest, agentAt(newest.PaneID, "a", model.StatusWorking, 1))
+	d.Wait()
+	var resolved []string
+	for _, m := range fcm.getMessages() {
+		if m.Event == EventResolved {
+			resolved = append(resolved, m.PaneID)
+		}
+	}
+	if fmt.Sprint(resolved) != fmt.Sprint([]string{newest.PaneID}) {
+		t.Fatalf("resolved sent for %v, want only the newest pane %s", resolved, newest.PaneID)
+	}
+}
+
 // chanSender reports every message it gets on a channel, and can be held
 // inside Send until released.
 type chanSender struct {

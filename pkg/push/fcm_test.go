@@ -91,6 +91,17 @@ func TestFCM_Payload(t *testing.T) {
 				        "allow_option_id":"","deny_option_id":""},
 				"android":{"priority":"normal","ttl":"600s"}}}`,
 		},
+		{
+			// Exactly three data keys: the app withdraws the pane's notification.
+			name: "resolved",
+			msg: Message{
+				Event: EventResolved, PaneID: "w5:pAE", Agent: "claude", Label: "bizum",
+				Title: "ignored", Body: "ignored", StateChangeSeq: 335, Fingerprint: "ignored",
+			},
+			want: `{"message":{"token":"device-token-1",
+				"data":{"event":"resolved","pane_id":"w5:pAE","state_change_seq":"335"},
+				"android":{"priority":"normal","ttl":"600s"}}}`,
+		},
 	}
 
 	for _, tt := range tests {
@@ -133,6 +144,49 @@ func TestFCM_Payload(t *testing.T) {
 			}
 			assertSameJSON(t, got.body, tt.want)
 		})
+	}
+}
+
+// End to end through the real senders: answering a prompt elsewhere sends FCM
+// a data-only "resolved" message, and ntfy (which cannot withdraw a
+// notification) gets nothing.
+func TestDispatcher_ResolvedReachesFCMNotNtfy(t *testing.T) {
+	fcmBodies := make(chan []byte, 8)
+	fcmServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		fcmBodies <- body
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer fcmServer.Close()
+
+	ntfyTitles := make(chan string, 8)
+	ntfyServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ntfyTitles <- r.Header.Get("Title")
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer ntfyServer.Close()
+
+	fcm := newTestFCM(fcmServer.URL, func() []string { return []string{"device-token-1"} }, nil)
+	ntfy := &Ntfy{BaseURL: ntfyServer.URL, Topic: "test-topic", Client: ntfyServer.Client()}
+	d, _, _ := newTestDispatcher(fcm, ntfy)
+
+	blocked := model.AgentState{PaneID: "w5:pAE", Agent: "claude", Label: "bizum", Status: model.StatusBlocked, StateChangeSeq: 334}
+	d.OnAgentUpdate(nil, blocked)
+	d.Wait()
+	<-fcmBodies // the blocked push
+	d.OnAgentUpdate(&blocked, model.AgentState{PaneID: "w5:pAE", Agent: "claude", Label: "bizum", Status: model.StatusWorking, StateChangeSeq: 335})
+	d.Wait()
+
+	select {
+	case body := <-fcmBodies:
+		assertSameJSON(t, body, `{"message":{"token":"device-token-1",
+			"data":{"event":"resolved","pane_id":"w5:pAE","state_change_seq":"335"},
+			"android":{"priority":"normal","ttl":"600s"}}}`)
+	default:
+		t.Fatalf("FCM never got the resolved message")
+	}
+	if n := len(ntfyTitles); n != 1 {
+		t.Fatalf("ntfy got %d requests, want 1 (the blocked push only)", n)
 	}
 }
 

@@ -399,20 +399,43 @@ All values are strings (FCM data maps allow only strings). No `notification` blo
 
 | Key | Example | Notes |
 |---|---|---|
-| `event` | `blocked` | `blocked` \| `done` \| `digest` |
+| `event` | `blocked` | `blocked` \| `done` \| `digest` (and `resolved`, below) |
 | `pane_id` | `w5:pAE` | Empty for `digest` |
 | `agent` | `claude` | |
 | `label` | `bizum` | |
 | `title` | `bizum needs approval` | Ready to display |
 | `body` | `Bash: go test ./...` | ≤ 240 chars |
-| `state_change_seq` | `334` | Decimal string |
+| `state_change_seq` | `334` | Decimal string, always a number (`0` for `digest`) |
 | `fingerprint` | `9f2c61d0a4b3e871` | Only for `blocked` |
 | `allow_option_id` | `opt-1` | First `allow_once` option, else empty |
 | `deny_option_id` | `opt-3` | First `deny` option, else empty (the app then calls `cancel`) |
 
+**`resolved`: withdraw a `blocked` notification.** It carries **only** these three keys, and never a notification block:
+
+```json
+{"message":{"token":"<device fcm token>",
+            "data":{"event":"resolved","pane_id":"w5:pAE","state_change_seq":"335"},
+            "android":{"priority":"normal","ttl":"600s"}}}
+```
+
+| Key | Example | Notes |
+|---|---|---|
+| `event` | `resolved` | |
+| `pane_id` | `w5:pAE` | The pane whose `blocked` notification the app removes |
+| `state_change_seq` | `335` | Seq of the update that left `blocked`, so greater than the `blocked` push's seq |
+
+- FCM does not guarantee delivery order. The app ignores a `blocked` for a pane whose `state_change_seq` is ≤ the last `resolved` seq it got for that pane.
+- Apps must ignore an `event` value they do not know, like unknown JSON fields.
+
 FCM message options:
-- `android.priority = "high"` for `blocked`, `"normal"` otherwise.
+- `android.priority = "high"` for `blocked`, `"normal"` otherwise (`resolved` included).
 - `android.ttl = "600s"`.
+
+**Dead tokens:** the relay unregisters a device's FCM token only when FCM says the token itself is dead:
+- error code `UNREGISTERED`, on a 404 or a 400;
+- or `400 INVALID_ARGUMENT` whose field violation is `message.token`.
+
+Any other error keeps the token, a bare 404 included (a wrong project id must not wipe every device).
 
 ### 4.2 ntfy (watchOS via iPhone)
 
@@ -425,13 +448,23 @@ FCM message options:
 | `Tags` | `warning` for `blocked`, `white_check_mark` for `done`, `bell` for `digest` |
 | `Authorization` | `Bearer {AW_NTFY_TOKEN}` (only when the token is set) |
 
+ntfy never gets `resolved`: it cannot withdraw a notification it already delivered.
+
 ### 4.3 When to push (relay)
 
 | Transition (per pane, from `agent_update`) | Event |
 |---|---|
 | any → `blocked` | `blocked` |
 | `working` → `done` | `done` |
+| `blocked` → any other status, when that pane's own `blocked` push went out | `resolved` (FCM only) |
 | anything else | no push |
+
+- **`resolved`** goes out at once, once per `blocked` push:
+  - no debounce, no window, never counted toward or included in a `digest`, never sent to ntfy;
+  - a pane whose `blocked` push was dropped, or covered by a `digest`, gets none: the watch shows no notification of its own for it.
+- **Removed panes:** push only sees `agent_update`.
+  - A pane that leaves `blocked` through a `snapshot` gets its `resolved` with its next `agent_update`.
+  - A pane removed while blocked (`agent_removed`, or missing from a `snapshot`) gets none; its notification stays until dismissed.
 
 - **Debounce:** skip a push if the same pane pushed the same event less than 5 s ago.
 - **Window:** the first push of a 10 s window goes out at once (latency matters for `blocked`). Later ones are held until the window ends.
