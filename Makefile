@@ -28,11 +28,14 @@ endif
 # harness. It runs the freshly built CLI with HOME set to an empty temp dir:
 # it never launches the app, calls launchctl or reads the real home.
 ifeq ($(UNAME_S),Darwin)
-bar-test: bridge
+# Builds its own CLI in a temp dir: bin/agent-watch-bridge is what the
+# installed service runs, and a test run must never replace it.
+bar-test:
 	@tmp="$$(mktemp -d)"; trap 'rm -rf "$$tmp"' EXIT; \
 	mkdir "$$tmp/home" && \
+	CGO_ENABLED=0 go build -o "$$tmp/agent-watch-bridge" ./cmd/bridge && \
 	swiftc -swift-version 6 macos-bar/BarLogic.swift macos-bar/Tests/main.swift -o "$$tmp/bartests" && \
-	"$$tmp/bartests" "$(CURDIR)/bin/agent-watch-bridge" "$$tmp/home"
+	"$$tmp/bartests" "$$tmp/agent-watch-bridge" "$$tmp/home"
 else
 bar-test:
 	@echo "bar-test: the menu bar app only builds on macOS" >&2; exit 1
