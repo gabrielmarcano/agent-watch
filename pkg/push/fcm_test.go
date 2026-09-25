@@ -128,6 +128,33 @@ func TestFCM_DonePriorityNormal(t *testing.T) {
 	}
 }
 
+// state_change_seq is a decimal string even when it is 0 (a digest, or an
+// agent herdr has not counted yet): the app parses it as a number.
+func TestFCM_ZeroStateChangeSeqIsSent(t *testing.T) {
+	var capturedPayload fcmMessagePayload
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&capturedPayload)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	fcm := &FCM{
+		ProjectID: "test-proj",
+		Endpoint:  server.URL,
+		Tokens:    func() []string { return []string{"tok-1"} },
+		Client:    server.Client(),
+	}
+
+	if err := fcm.Send(context.Background(), Message{Event: EventDigest, Title: "4 agents need you"}); err != nil {
+		t.Fatalf("Send failed: %v", err)
+	}
+
+	got, ok := capturedPayload.Message.Data["state_change_seq"]
+	if !ok || got != "0" {
+		t.Fatalf(`data["state_change_seq"] = %q (present: %t), want "0"`, got, ok)
+	}
+}
+
 func TestFCM_InvalidTokens(t *testing.T) {
 	var deadTokens []string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

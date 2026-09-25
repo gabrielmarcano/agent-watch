@@ -94,12 +94,8 @@ func (f *FCM) Send(ctx context.Context, m Message) error {
 		priority = "high"
 	}
 
-	seqStr := ""
-	if m.StateChangeSeq > 0 {
-		seqStr = strconv.FormatUint(m.StateChangeSeq, 10)
-	}
-
-	// All data values must be strings, with empty strings when unknown
+	// All data values must be strings, with empty strings when unknown.
+	// state_change_seq is always a number, "0" included: the app parses it.
 	data := map[string]string{
 		"event":            string(m.Event),
 		"pane_id":          m.PaneID,
@@ -107,7 +103,7 @@ func (f *FCM) Send(ctx context.Context, m Message) error {
 		"label":            m.Label,
 		"title":            m.Title,
 		"body":             m.Body,
-		"state_change_seq": seqStr,
+		"state_change_seq": strconv.FormatUint(m.StateChangeSeq, 10),
 		"fingerprint":      m.Fingerprint,
 		"allow_option_id":  m.AllowOptionID,
 		"deny_option_id":   m.DenyOptionID,
