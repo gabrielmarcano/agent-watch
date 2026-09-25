@@ -47,8 +47,9 @@ class NotificationActionReceiver : BroadcastReceiver() {
                         ACTION_ANSWER -> {
                             val optionId = intent.getStringExtra("option_id") ?: ""
                             val fingerprint = intent.getStringExtra("fingerprint") ?: ""
+                            val isDeny = intent.getBooleanExtra("is_deny", false)
                             val result = client.answer(paneId, optionId, expectedSeq, fingerprint)
-                            handleResult(context, notifManager, notifId, paneId, result, "Approved")
+                            handleResult(context, notifManager, notifId, paneId, result, if (isDeny) "Denied" else "Approved")
                         }
                         ACTION_CANCEL -> {
                             val result = client.cancel(paneId, expectedSeq)

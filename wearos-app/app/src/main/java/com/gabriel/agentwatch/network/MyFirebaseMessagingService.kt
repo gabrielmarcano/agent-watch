@@ -58,9 +58,10 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
         val paneId = data["pane_id"] ?: ""
         val agent = data["agent"] ?: ""
         val label = data["label"] ?: agent
-        val event = data["event"] ?: "agent_blocked"
-        val status = data["status"] ?: "blocked"
-        val title = data["title"] ?: (if (event == "digest") "Agent Watch" else "$label needs you")
+        val event = data["event"] ?: "blocked"
+        val isBlocked = event == "blocked" || event == "agent_blocked"
+        val isDone = event == "done" || event == "agent_done"
+        val title = data["title"] ?: (if (event == "digest") "Agent Watch" else if (isDone) "$label finished" else "$label needs you")
         val body = data["body"] ?: ""
         val seqStr = data["state_change_seq"] ?: "0"
         val stateChangeSeq = seqStr.toLongOrNull() ?: 0L
@@ -89,8 +90,8 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
-        val channelId = if (status == "blocked") CHANNEL_BLOCKED else CHANNEL_DONE
-        val priority = if (status == "blocked") NotificationCompat.PRIORITY_HIGH else NotificationCompat.PRIORITY_DEFAULT
+        val channelId = if (isBlocked) CHANNEL_BLOCKED else CHANNEL_DONE
+        val priority = if (isBlocked) NotificationCompat.PRIORITY_HIGH else NotificationCompat.PRIORITY_DEFAULT
 
         val builder = NotificationCompat.Builder(this, channelId)
             .setSmallIcon(android.R.drawable.ic_dialog_info)
@@ -102,7 +103,7 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
 
         val baseRequestCode = (notifId % 100000) * 10
 
-        if (status == "blocked") {
+        if (isBlocked) {
             // Allow Action
             if (allowOptionId.isNotBlank()) {
                 val allowIntent = Intent(this, NotificationActionReceiver::class.java).apply {
@@ -128,6 +129,7 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
                     action = NotificationActionReceiver.ACTION_ANSWER
                     putExtra("option_id", denyOptionId)
                     putExtra("fingerprint", fingerprint)
+                    putExtra("is_deny", true)
                 } else {
                     action = NotificationActionReceiver.ACTION_CANCEL
                 }
@@ -141,11 +143,12 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
                 denyIntent,
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
             )
-            builder.addAction(android.R.drawable.ic_delete, "Deny", denyPending)
+            val denyLabel = if (denyOptionId.isNotBlank()) "Deny" else "Cancel"
+            builder.addAction(android.R.drawable.ic_delete, denyLabel, denyPending)
 
             // Open Action
             builder.addAction(android.R.drawable.ic_menu_view, "Open", openPendingIntent)
-        } else if (status == "done") {
+        } else if (isDone) {
             // Done Action: Reply via RemoteInput
             val remoteInput = RemoteInput.Builder("KEY_TEXT_REPLY")
                 .setLabel("Reply to $label...")

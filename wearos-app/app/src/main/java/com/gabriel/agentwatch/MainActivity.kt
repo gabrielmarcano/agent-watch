@@ -9,9 +9,18 @@ import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.layout.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.dp
 import androidx.navigation.NavType
 import androidx.navigation.navArgument
+import androidx.wear.compose.material.CircularProgressIndicator
+import androidx.wear.compose.material.CompactChip
+import androidx.wear.compose.material.MaterialTheme
+import androidx.wear.compose.material.Text
 import androidx.wear.compose.navigation.SwipeDismissableNavHost
 import androidx.wear.compose.navigation.composable
 import androidx.wear.compose.navigation.rememberSwipeDismissableNavController
@@ -26,9 +35,12 @@ import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
     private val prefs by lazy { Prefs(this) }
+    private var pendingDeepLinkPaneId by mutableStateOf<String?>(null)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        pendingDeepLinkPaneId = intent?.getStringExtra("pane_id")
 
         // Request notification permission for Android 13+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -46,18 +58,17 @@ class MainActivity : ComponentActivity() {
                 val navController = rememberSwipeDismissableNavController()
                 val uiState by RelayRepository.state.collectAsState()
 
-                // Check deep link from notification
-                val deepLinkPaneId = remember {
-                    intent?.getStringExtra("pane_id")
+                val startDestination = remember {
+                    if (!prefs.isPaired) "pairing" else "agents"
                 }
 
-                val startDestination = remember {
-                    if (!prefs.isPaired) {
-                        "pairing"
-                    } else if (!deepLinkPaneId.isNullOrBlank()) {
-                        "agent/${Uri.encode(deepLinkPaneId)}"
-                    } else {
-                        "agents"
+                val currentTargetPaneId = pendingDeepLinkPaneId
+                LaunchedEffect(currentTargetPaneId) {
+                    if (!currentTargetPaneId.isNullOrBlank() && prefs.isPaired) {
+                        pendingDeepLinkPaneId = null
+                        navController.navigate("agent/${Uri.encode(currentTargetPaneId)}") {
+                            popUpTo("agents") { inclusive = false }
+                        }
                     }
                 }
 
@@ -106,9 +117,36 @@ class MainActivity : ComponentActivity() {
                                 },
                                 onBackClick = { navController.popBackStack() }
                             )
+                        } else if (uiState.agents.isEmpty()) {
+                            Box(
+                                modifier = Modifier.fillMaxSize(),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                CircularProgressIndicator()
+                            }
                         } else {
-                            // Agent not found or closed
-                            navController.popBackStack()
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .padding(16.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Column(
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    verticalArrangement = Arrangement.Center
+                                ) {
+                                    Text(
+                                        text = "Agent closed",
+                                        style = MaterialTheme.typography.body2,
+                                        textAlign = TextAlign.Center
+                                    )
+                                    Spacer(modifier = Modifier.height(8.dp))
+                                    CompactChip(
+                                        label = { Text("Back to list") },
+                                        onClick = { navController.popBackStack() }
+                                    )
+                                }
+                            }
                         }
                     }
 
@@ -158,12 +196,49 @@ class MainActivity : ComponentActivity() {
                                 item = item,
                                 onBackClick = { navController.popBackStack() }
                             )
+                        } else if (uiState.history.isEmpty()) {
+                            Box(
+                                modifier = Modifier.fillMaxSize(),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                CircularProgressIndicator()
+                            }
                         } else {
-                            navController.popBackStack()
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .padding(16.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Column(
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    verticalArrangement = Arrangement.Center
+                                ) {
+                                    Text(
+                                        text = "Item not found",
+                                        style = MaterialTheme.typography.body2,
+                                        textAlign = TextAlign.Center
+                                    )
+                                    Spacer(modifier = Modifier.height(8.dp))
+                                    CompactChip(
+                                        label = { Text("Back") },
+                                        onClick = { navController.popBackStack() }
+                                    )
+                                }
+                            }
                         }
                     }
                 }
             }
+        }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        val paneId = intent.getStringExtra("pane_id")
+        if (!paneId.isNullOrBlank()) {
+            pendingDeepLinkPaneId = paneId
         }
     }
 
