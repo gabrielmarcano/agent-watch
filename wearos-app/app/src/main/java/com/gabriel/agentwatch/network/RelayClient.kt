@@ -73,8 +73,8 @@ class RelayHttpClients private constructor(
  * cancels the OkHttp call at once, and the caller sees the `CancellationException`, never a failure.
  */
 class RelayClient(
-    private val baseUrl: String,
-    private val token: String? = null,
+    val baseUrl: String,
+    internal val token: String? = null,
     private val http: RelayHttpClients = RelayHttpClients.shared
 ) {
     private val gson = Gson()

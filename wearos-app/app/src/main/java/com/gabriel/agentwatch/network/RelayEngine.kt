@@ -48,18 +48,38 @@ class RelayEngine(
     private var started = false
     /** Bumped whenever a stream is replaced or stopped; callbacks from older streams are ignored. */
     private var streamGeneration = 0L
+    /** Bumped when the pairing changes; results of requests made under an older pairing are dropped. */
+    private var pairingEpoch = 0L
 
+    /** A client for the stored pairing, or null when not paired. Rebuilt when the stored URL or token changes. */
     fun getClient(): RelayClient? = synchronized(lock) { clientLocked() }
 
     private fun clientLocked(): RelayClient? {
         if (!credentials.isPaired) return null
-        return client ?: RelayClient(credentials.relayUrl, credentials.deviceToken, http).also { client = it }
+        val url = credentials.relayUrl
+        val token = credentials.deviceToken
+        val current = client
+        if (current != null && current.baseUrl == url && current.token == token) return current
+        return RelayClient(url, token, http).also { client = it }
     }
 
+    /**
+     * The stored pairing changed (new relay URL or token): closes the stream, drops the client and every
+     * agent/history item of the old pairing, and forgets in-flight results. Follow with [start], or call
+     * [restart] which does both.
+     */
     fun resetClient() = synchronized(lock) {
+        stopLocked("Disconnected")
+        pairingEpoch++
         client = null
-        clientLocked()
-        Unit
+        store.clear()
+        state.value = UiState(connection = Connection.Connecting)
+    }
+
+    /** Reconnects from scratch with the stored pairing (call after pairing or re-pairing). */
+    fun restart() = synchronized(lock) {
+        resetClient()
+        start()
     }
 
     fun start() = synchronized(lock) {
@@ -188,12 +208,13 @@ class RelayEngine(
     }
 
     suspend fun refresh() {
-        val currentClient = getClient() ?: return
+        val (currentClient, epoch) = synchronized(lock) { (clientLocked() ?: return) to pairingEpoch }
         coroutineScope {
             launch {
                 val since = synchronized(lock) { store.beginFetch() }
                 currentClient.agents().onSuccess { snapshot ->
                     synchronized(lock) {
+                        if (epoch != pairingEpoch) return@onSuccess
                         store.applyFetched(snapshot, since)
                         publishAgentsLocked()
                     }
@@ -201,7 +222,10 @@ class RelayEngine(
             }
             launch {
                 currentClient.history().onSuccess { items ->
-                    state.update { it.copy(history = mergeHistory(it.history, items)) }
+                    synchronized(lock) {
+                        if (epoch != pairingEpoch) return@onSuccess
+                        state.update { it.copy(history = mergeHistory(it.history, items)) }
+                    }
                 }
             }
         }

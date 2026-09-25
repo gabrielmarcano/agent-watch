@@ -39,13 +39,24 @@ object RelayRepository {
 
     fun getClient(): RelayClient? = engine?.getClient()
 
+    /**
+     * The stored pairing changed: closes the stream and drops the old pairing's client and data.
+     * Kept for `PairingScreen` (`resetClient()` then `start()` is a full restart); new code calls [restart].
+     */
     fun resetClient() {
         engine?.resetClient()
     }
 
+    /** Opens the SSE stream if paired and not already running (idempotent). */
     fun start(context: Context) {
         init(context)
         engine?.start()
+    }
+
+    /** Reconnects from scratch with the pairing now in Prefs. Call after pairing or re-pairing. */
+    fun restart(context: Context) {
+        init(context)
+        engine?.restart()
     }
 
     fun stop() {
