@@ -309,9 +309,9 @@ Every non-200 response carries an `ErrorResponse`.
 | `unknown_option` | 409 | `option_id` is not in the current prompt | "The question changed — refreshed" |
 | `pair_code_invalid` | 403 | Wrong or expired code | "Invalid code" |
 | `rate_limited` | 429 | Too many attempts | "Try again later" |
-| `host_offline` | 503 | Bridge not connected | "Mac offline" |
+| `host_offline` | 503 | Bridge not connected, or it disconnected (or was replaced) before answering a command | "Mac offline" |
 | `herdr_offline` | 503 | Bridge connected, herdr unreachable | "herdr stopped" |
-| `timeout` | 504 | Bridge did not answer within 10 s | "No answer from the Mac" |
+| `timeout` | 504 | Bridge did not answer within 10 s (one budget for sending the command and waiting for `command_result`) | "No answer from the Mac" |
 | `internal` | 500 | Bug | "Something went wrong" |
 
 ---
@@ -385,7 +385,11 @@ type ResyncMsg struct {
 - If no `hello` arrives within 5 s, close the socket with status 4001.
 - Reply to unknown `type` values by ignoring them (forward compatibility).
 
-**Keepalive:** the bridge sends a WebSocket ping every 30 s. If no pong arrives within 10 s, it reconnects.
+**Keepalive:** both sides send a WebSocket ping every 30 s and expect the pong within 10 s.
+- **Bridge:** no pong → it reconnects.
+- **Relay:** no pong → it drops the host: closes the socket, broadcasts `host` with `host_online=false`, and fails the host's in-flight commands with `host_offline`.
+
+**In-flight commands** fail with `host_offline` as soon as their host disconnects, is dropped, or is replaced by a new connection, without waiting for the 10 s budget.
 
 **Reconnect backoff** (bridge side): 1 s, 2 s, 4 s … up to 60 s, each ±20 % jitter. The backoff resets after 60 s of healthy connection.
 

@@ -22,6 +22,8 @@ const (
 
 	helloTimeout   = 5 * time.Second
 	commandTimeout = 10 * time.Second
+	pingInterval   = 30 * time.Second
+	pingTimeout    = 10 * time.Second
 )
 
 // Notifier receives agent update notifications for push dispatching.
@@ -35,16 +37,30 @@ type NoopNotifier struct{}
 // OnAgentUpdate is a no-op implementation.
 func (NoopNotifier) OnAgentUpdate(prev *model.AgentState, cur model.AgentState) {}
 
+// hostConnection is one bridge WebSocket. gone is closed exactly once, as soon
+// as the connection stops being the current host (replaced, disconnected or
+// dropped for missing pings); commands waiting on it fail at that moment.
 type hostConnection struct {
-	conn    *websocket.Conn
-	writeMu sync.Mutex
-	done    chan struct{}
+	conn     *websocket.Conn
+	gone     chan struct{}
+	goneOnce sync.Once
 }
 
-func (c *hostConnection) writeMessage(ctx context.Context, data []byte) error {
-	c.writeMu.Lock()
-	defer c.writeMu.Unlock()
-	return c.conn.Write(ctx, websocket.MessageText, data)
+func newHostConnection(conn *websocket.Conn) *hostConnection {
+	return &hostConnection{conn: conn, gone: make(chan struct{})}
+}
+
+func (c *hostConnection) markGone() {
+	c.goneOnce.Do(func() { close(c.gone) })
+}
+
+func (c *hostConnection) isGone() bool {
+	select {
+	case <-c.gone:
+		return true
+	default:
+		return false
+	}
 }
 
 // Hub coordinates the WebSocket connection from the bridge host and command routing.
@@ -54,10 +70,14 @@ type Hub struct {
 	store    *Store
 	notifier Notifier
 
-	mu           sync.Mutex
-	currentHost  *hostConnection
-	pending      map[string]chan model.CommandResultMsg
-	helloTimeout time.Duration
+	mu             sync.Mutex
+	currentHost    *hostConnection
+	pending        map[string]chan model.CommandResultMsg
+	helloTimeout   time.Duration
+	commandTimeout time.Duration
+	pingInterval   time.Duration
+	pingTimeout    time.Duration
+	afterPing      func(err error) // test hook, see setAfterPing
 }
 
 // NewHub initializes a new host Hub.
@@ -66,13 +86,33 @@ func NewHub(auth *AuthManager, state *State, store *Store, notifier Notifier) *H
 		notifier = NoopNotifier{}
 	}
 	return &Hub{
-		auth:         auth,
-		state:        state,
-		store:        store,
-		notifier:     notifier,
-		pending:      make(map[string]chan model.CommandResultMsg),
-		helloTimeout: helloTimeout,
+		auth:           auth,
+		state:          state,
+		store:          store,
+		notifier:       notifier,
+		pending:        make(map[string]chan model.CommandResultMsg),
+		helloTimeout:   helloTimeout,
+		commandTimeout: commandTimeout,
+		pingInterval:   pingInterval,
+		pingTimeout:    pingTimeout,
 	}
+}
+
+// SetCommandTimeout overrides the 10-second budget for a command round trip
+// (useful for tests).
+func (h *Hub) SetCommandTimeout(d time.Duration) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.commandTimeout = d
+}
+
+// SetPingInterval overrides how often the host is pinged (30 s) and how long
+// a pong may take (10 s) (useful for tests).
+func (h *Hub) SetPingInterval(interval, timeout time.Duration) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.pingInterval = interval
+	h.pingTimeout = timeout
 }
 
 // SetHelloTimeout overrides the default 5-second hello handshake timeout (useful for tests).
@@ -80,6 +120,13 @@ func (h *Hub) SetHelloTimeout(d time.Duration) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.helloTimeout = d
+}
+
+// setAfterPing installs a hook called after every host ping (tests only).
+func (h *Hub) setAfterPing(fn func(err error)) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.afterPing = fn
 }
 
 // ServeHost handles GET /v1/host WebSocket connections.
@@ -97,41 +144,40 @@ func (h *Hub) ServeHost(w http.ResponseWriter, r *http.Request) {
 	}
 	conn.SetReadLimit(1 << 20)
 
-	hostConn := &hostConnection{
-		conn: conn,
-		done: make(chan struct{}),
-	}
+	host := newHostConnection(conn)
 
-	// Enforce 1 active host connection: close old connection with 4000 replaced
+	// Enforce 1 active host connection.
 	h.mu.Lock()
 	oldHost := h.currentHost
-	h.currentHost = hostConn
+	h.currentHost = host
+	helloWait, pingEvery, pingWait, afterPing := h.helloTimeout, h.pingInterval, h.pingTimeout, h.afterPing
 	h.mu.Unlock()
 
 	if oldHost != nil {
-		_ = oldHost.conn.Close(wsCloseCodeReplaced, "replaced")
+		// Its in-flight commands fail now. The close handshake runs in the
+		// background: a peer that never answers it would otherwise hold up
+		// this host's hello and snapshot for seconds.
+		oldHost.markGone()
+		go func() { _ = oldHost.conn.Close(wsCloseCodeReplaced, "replaced") }()
 	}
 
 	defer func() {
-		_ = conn.Close(websocket.StatusNormalClosure, "")
-		close(hostConn.done)
-
+		host.markGone()
 		h.mu.Lock()
-		if h.currentHost == hostConn {
+		if h.currentHost == host {
 			h.currentHost = nil
-			h.failAllPendingLocked("host disconnected")
 			h.state.SetHost(false, false)
 		}
 		h.mu.Unlock()
+		// Only now: closing a dead peer can take seconds, and watches must
+		// see the host go offline at once.
+		_ = conn.Close(websocket.StatusNormalClosure, "")
 	}()
 
-	h.mu.Lock()
-	timeout := h.helloTimeout
-	h.mu.Unlock()
-	if timeout <= 0 {
-		timeout = helloTimeout
+	if helloWait <= 0 {
+		helloWait = helloTimeout
 	}
-	helloCtx, helloCancel := context.WithTimeout(r.Context(), timeout)
+	helloCtx, helloCancel := context.WithTimeout(r.Context(), helloWait)
 	_, helloData, err := conn.Read(helloCtx)
 	helloCancel()
 	if err != nil {
@@ -151,13 +197,21 @@ func (h *Hub) ServeHost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if host.isGone() {
+		return // replaced while saying hello
+	}
 	slog.Info("host connected", "host", hello.Host, "version", hello.Version, "herdr_online", hello.HerdrOnline)
 	h.state.SetHost(true, hello.HerdrOnline)
+
+	pingCtx, stopPing := context.WithCancel(r.Context())
+	defer stopPing()
+	go pingHost(pingCtx, host, pingEvery, pingWait, afterPing)
 
 	// Message read loop
 	for {
 		_, data, err := conn.Read(r.Context())
-		if err != nil {
+		if err != nil || host.isGone() {
+			// A replaced host may still be flushing messages: ignore them.
 			break
 		}
 
@@ -172,6 +226,44 @@ func (h *Hub) ServeHost(w http.ResponseWriter, r *http.Request) {
 		}
 
 		h.handleWireMessage(wireMsg)
+	}
+}
+
+// pingHost pings the host every interval. A ping without a pong within
+// timeout means the host is gone (a dead peer or a half-open TCP connection
+// never errors on its own): the connection is closed, which ends ServeHost's
+// read loop and broadcasts host_online=false.
+func pingHost(ctx context.Context, host *hostConnection, interval, timeout time.Duration, afterPing func(error)) {
+	if interval <= 0 {
+		interval = pingInterval
+	}
+	if timeout <= 0 {
+		timeout = pingTimeout
+	}
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-host.gone:
+			return
+		case <-ticker.C:
+		}
+
+		pctx, cancel := context.WithTimeout(ctx, timeout)
+		err := host.conn.Ping(pctx)
+		cancel()
+		if afterPing != nil {
+			afterPing(err)
+		}
+		if err != nil {
+			if ctx.Err() == nil {
+				slog.Warn("host did not answer ping, dropping it", "timeout", timeout, "err", err)
+			}
+			_ = host.conn.CloseNow()
+			return
+		}
 	}
 }
 
@@ -207,18 +299,29 @@ func (h *Hub) handleWireMessage(msg any) {
 	}
 }
 
-// Command sends a command to the host and awaits the result with a 10-second timeout.
+func commandFailure(reqID string, code model.ErrorCode, msg string) model.CommandResultMsg {
+	return model.CommandResultMsg{
+		Type:      model.WireCommandResult,
+		RequestID: reqID,
+		OK:        false,
+		ErrorCode: string(code),
+		Message:   msg,
+	}
+}
+
+// Command sends a command to the host and waits for its result. Writing the
+// command and waiting for the answer share one budget (10 s by default).
+//
+// It returns host_offline when no host is connected or the host goes away
+// before answering (at once, not after the budget), and timeout when the
+// budget runs out. A non-nil error means ctx ended first (the caller left).
 func (h *Hub) Command(ctx context.Context, cmd model.CommandMsg) (model.CommandResultMsg, error) {
 	h.mu.Lock()
 	host := h.currentHost
+	budget := h.commandTimeout
 	if host == nil {
 		h.mu.Unlock()
-		return model.CommandResultMsg{
-			Type:      model.WireCommandResult,
-			OK:        false,
-			ErrorCode: string(model.ErrHostOffline),
-			Message:   "host offline",
-		}, nil
+		return commandFailure("", model.ErrHostOffline, "host offline"), nil
 	}
 
 	var reqIDBytes [8]byte
@@ -245,51 +348,52 @@ func (h *Hub) Command(ctx context.Context, cmd model.CommandMsg) (model.CommandR
 		return model.CommandResultMsg{}, fmt.Errorf("marshal command: %w", err)
 	}
 
-	if err := host.writeMessage(ctx, data); err != nil {
-		return model.CommandResultMsg{
-			Type:      model.WireCommandResult,
-			RequestID: reqID,
-			OK:        false,
-			ErrorCode: string(model.ErrHostOffline),
-			Message:   "failed to send command to host",
-		}, nil
+	deadline := time.Now().Add(budget)
+	timedOut := commandFailure(reqID, model.ErrTimeout, fmt.Sprintf("bridge did not answer within %v", budget))
+
+	// The write is bounded by the budget but not by the caller: the websocket
+	// library closes the whole connection when a write's context ends
+	// mid-write, and a watch hanging up must not take the host down with it.
+	writeCtx, cancelWrite := context.WithDeadline(context.WithoutCancel(ctx), deadline)
+	err = host.conn.Write(writeCtx, websocket.MessageText, data)
+	writeTimedOut := errors.Is(writeCtx.Err(), context.DeadlineExceeded)
+	cancelWrite()
+	if err != nil {
+		if writeTimedOut {
+			return timedOut, nil
+		}
+		return commandFailure(reqID, model.ErrHostOffline, "failed to send command to host"), nil
 	}
 
-	timer := time.NewTimer(commandTimeout)
-	defer timer.Stop()
+	waitCtx, cancelWait := context.WithDeadline(ctx, deadline)
+	defer cancelWait()
 
 	select {
 	case res := <-ch:
 		return res, nil
-	case <-timer.C:
-		return model.CommandResultMsg{
-			Type:      model.WireCommandResult,
-			RequestID: reqID,
-			OK:        false,
-			ErrorCode: string(model.ErrTimeout),
-			Message:   "bridge did not answer within 10s",
-		}, nil
-	case <-ctx.Done():
-		return model.CommandResultMsg{
-			Type:      model.WireCommandResult,
-			RequestID: reqID,
-			OK:        false,
-			ErrorCode: string(model.ErrTimeout),
-			Message:   ctx.Err().Error(),
-		}, ctx.Err()
+	case <-host.gone:
+		if res, ok := resultIfReady(ch); ok {
+			return res, nil
+		}
+		return commandFailure(reqID, model.ErrHostOffline, "host disconnected before answering"), nil
+	case <-waitCtx.Done():
+		if res, ok := resultIfReady(ch); ok {
+			return res, nil
+		}
+		if err := ctx.Err(); err != nil {
+			return commandFailure(reqID, model.ErrTimeout, err.Error()), err
+		}
+		return timedOut, nil
 	}
 }
 
-// failAllPendingLocked fails all currently pending commands with host_offline.
-func (h *Hub) failAllPendingLocked(msg string) {
-	for reqID, ch := range h.pending {
-		ch <- model.CommandResultMsg{
-			Type:      model.WireCommandResult,
-			RequestID: reqID,
-			OK:        false,
-			ErrorCode: string(model.ErrHostOffline),
-			Message:   msg,
-		}
-		delete(h.pending, reqID)
+// resultIfReady returns a result that arrived at the same time as another
+// select case fired, so a delivered answer always wins.
+func resultIfReady(ch <-chan model.CommandResultMsg) (model.CommandResultMsg, bool) {
+	select {
+	case res := <-ch:
+		return res, true
+	default:
+		return model.CommandResultMsg{}, false
 	}
 }

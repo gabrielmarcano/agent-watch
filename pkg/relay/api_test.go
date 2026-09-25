@@ -429,6 +429,132 @@ func TestAPI_HistoryQuery(t *testing.T) {
 	}
 }
 
+// connectTestHost dials /v1/host on ts, sends hello and a snapshot with the
+// given panes, and waits until the relay has applied the snapshot.
+func connectTestHost(t *testing.T, ctx context.Context, server *Server, ts *httptest.Server, panes ...string) *websocket.Conn {
+	t.Helper()
+	sub, ch := server.State().Subscribe()
+	defer server.State().Unsubscribe(sub)
+
+	wsURL := strings.Replace(ts.URL, "http://", "ws://", 1) + "/v1/host"
+	conn, _, err := websocket.Dial(ctx, wsURL, &websocket.DialOptions{
+		HTTPHeader: http.Header{"Authorization": []string{"Bearer " + testHostToken}},
+	})
+	if err != nil {
+		t.Fatalf("dial host: %v", err)
+	}
+	t.Cleanup(func() { _ = conn.CloseNow() })
+	hello, _ := json.Marshal(model.HelloMsg{Type: model.WireHello, Host: "mac", HerdrOnline: true})
+	if err := conn.Write(ctx, websocket.MessageText, hello); err != nil {
+		t.Fatalf("write hello: %v", err)
+	}
+	agents := make([]model.AgentState, 0, len(panes))
+	for _, p := range panes {
+		agents = append(agents, model.AgentState{PaneID: p, Agent: "claude", Status: model.StatusBlocked, StateChangeSeq: 10})
+	}
+	snap, _ := json.Marshal(model.SnapshotMsg{Type: model.WireSnapshot, Agents: agents})
+	if err := conn.Write(ctx, websocket.MessageText, snap); err != nil {
+		t.Fatalf("write snapshot: %v", err)
+	}
+	waitEvent(t, ch, "snapshot", 5*time.Second)
+	return conn
+}
+
+// nextSSEEvent reads the next event from an SSE stream, skipping keepalives.
+func nextSSEEvent(t *testing.T, r *bufio.Reader) (name, data string) {
+	t.Helper()
+	for {
+		line, err := r.ReadString('\n')
+		if err != nil {
+			t.Fatalf("read SSE stream: %v", err)
+		}
+		line = strings.TrimRight(line, "\n")
+		switch {
+		case strings.HasPrefix(line, "event: "):
+			name = strings.TrimPrefix(line, "event: ")
+		case strings.HasPrefix(line, "data: "):
+			return name, strings.TrimPrefix(line, "data: ")
+		}
+	}
+}
+
+// A host that receives a command and never answers yields 504 timeout.
+func TestAPI_SilentHostTimesOut(t *testing.T) {
+	server, ts := setupTestServer(t)
+	server.Hub().SetCommandTimeout(100 * time.Millisecond)
+	devToken, _ := GenerateDeviceToken()
+	_, _ = server.Store().AddDevice("Watch", Sha256Hex(devToken))
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	conn := connectTestHost(t, ctx, server, ts, "w5:pAW")
+	received := readCommands(ctx, conn)
+
+	body, _ := json.Marshal(model.CancelRequest{ExpectedSeq: 10})
+	req, _ := http.NewRequest("POST", ts.URL+"/v1/agents/w5%3ApAW/cancel", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+devToken)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("POST cancel: %v", err)
+	}
+	defer resp.Body.Close()
+
+	var errResp model.ErrorResponse
+	_ = json.NewDecoder(resp.Body).Decode(&errResp)
+	if resp.StatusCode != http.StatusGatewayTimeout || errResp.Error.Code != string(model.ErrTimeout) {
+		t.Fatalf("silent host: status %d code %q, want 504 timeout", resp.StatusCode, errResp.Error.Code)
+	}
+	select {
+	case <-received:
+	case <-ctx.Done():
+		t.Fatalf("the host never received the command")
+	}
+}
+
+// Watches connected over SSE see the host come online and go offline.
+func TestAPI_SSEHostOnlineAndOffline(t *testing.T) {
+	server, ts := setupTestServer(t)
+	devToken, _ := GenerateDeviceToken()
+	_, _ = server.Store().AddDevice("Watch", Sha256Hex(devToken))
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	req, _ := http.NewRequestWithContext(ctx, "GET", ts.URL+"/v1/events", nil)
+	req.Header.Set("Authorization", "Bearer "+devToken)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("GET /v1/events: %v", err)
+	}
+	defer resp.Body.Close()
+	stream := bufio.NewReader(resp.Body)
+	if name, _ := nextSSEEvent(t, stream); name != "snapshot" {
+		t.Fatalf("first event = %q, want snapshot", name)
+	}
+
+	conn := connectTestHost(t, ctx, server, ts, "w1:p1")
+
+	wantHost := func(online bool) {
+		t.Helper()
+		for {
+			name, data := nextSSEEvent(t, stream)
+			if name != "host" {
+				continue
+			}
+			var payload map[string]bool
+			if err := json.Unmarshal([]byte(data), &payload); err != nil {
+				t.Fatalf("decode host event %q: %v", data, err)
+			}
+			if payload["host_online"] == online {
+				return
+			}
+		}
+	}
+	wantHost(true)
+
+	_ = conn.Close(websocket.StatusNormalClosure, "bye")
+	wantHost(false)
+}
+
 // pairAttempt posts a wrong pairing code with the given extra headers and
 // returns the status code.
 func pairAttempt(t *testing.T, ts *httptest.Server, headers map[string]string) int {
