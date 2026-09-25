@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gabrielmarcano/agent-monitor/pkg/agents"
 	"github.com/gabrielmarcano/agent-monitor/pkg/herdr"
 	"github.com/gabrielmarcano/agent-monitor/pkg/model"
 )
@@ -199,30 +200,113 @@ func TestCommands_CancelFingerprintMismatchSendsNothing(t *testing.T) {
 	}
 }
 
-// With no menu on screen, cancel must not send esc blindly (it would interrupt
-// a running Claude turn).
-func TestCommands_CancelWithoutMenuSendsNothing(t *testing.T) {
+// unknownFP is the (constant) fingerprint of every unknown-kind prompt.
+var unknownFP = agents.UnknownPrompt("").Public.Fingerprint
+
+// An unknown prompt (no parseable menu, raw tail on the watch) can be
+// cancelled: herdr says blocked at expected_seq and the published prompt is
+// unknown (or the command names the unknown fingerprint), so the adapter's
+// default cancel keys are sent.
+func TestCommands_CancelUnknownPromptSendsDefaultKeys(t *testing.T) {
 	h := newTestHarness(t)
 	noMenu := loadFixture(t, "claude", "no-menu-working.txt")
 
-	h.server.SetAgents([]map[string]any{agentRow("w1:p1", "claude", "blocked", 100)})
+	h.server.SetAgents([]map[string]any{
+		agentRow("w1:p1", "claude", "blocked", 100),
+		agentRow("w1:p2", "agy", "blocked", 200),
+	})
 	h.server.SetScreen("w1:p1", "visible", noMenu)
+	h.server.SetScreen("w1:p2", "visible", noMenu)
 	h.engine.OnHerdrOnline(true, herdr.Pong{Version: "0.9.1", Protocol: 22})
 	// The engine falls back to an unknown prompt after its retries.
-	syncAndAwaitPrompt(t, h, "w1:p1", 100, "")
-
-	before := len(h.server.Calls())
-	res, _ := runCmd(t, h, model.CommandMsg{
-		RequestID:   "req-cancel-nomenu",
-		Action:      "cancel",
-		PaneID:      "w1:p1",
-		ExpectedSeq: 100,
-	})
-	if res.OK || res.ErrorCode != "prompt_changed" {
-		t.Errorf("cancel without menu: ok=%v code=%q, want prompt_changed", res.OK, res.ErrorCode)
+	if p := syncAndAwaitPrompt(t, h, "w1:p1", 100, ""); p.Kind != model.PromptUnknown {
+		t.Fatalf("published prompt kind = %q, want unknown", p.Kind)
 	}
-	if keys := sendKeysSince(h, before); len(keys) != 0 {
-		t.Errorf("cancel without menu sent keys %v, want none", keys)
+
+	cases := []struct {
+		name, pane, fp string
+		seq            uint64
+	}{
+		{"published unknown, no fingerprint", "w1:p1", "", 100},
+		{"command names the unknown fingerprint", "w1:p2", unknownFP, 200},
+	}
+	for _, c := range cases {
+		before := len(h.server.Calls())
+		res, _ := runCmd(t, h, model.CommandMsg{
+			RequestID: "req-cancel-unknown-" + c.pane, Action: "cancel", PaneID: c.pane,
+			ExpectedSeq: c.seq, Fingerprint: c.fp,
+		})
+		if !res.OK {
+			t.Errorf("%s: code=%q msg=%q, want ok", c.name, res.ErrorCode, res.Message)
+		}
+		if keys := sendKeysSince(h, before); len(keys) != 1 || len(keys[0]) != 1 || keys[0][0] != "esc" {
+			t.Errorf("%s: sent %v, want [[esc]]", c.name, keys)
+		}
+	}
+}
+
+// The published prompt was a parsed menu and the screen now shows none: the
+// menu is gone, so nothing is sent (esc could interrupt a running turn).
+func TestCommands_CancelMenuGoneSendsNothing(t *testing.T) {
+	h := newTestHarness(t)
+	bash := loadFixture(t, "claude", "permission-bash.txt")
+	noMenu := loadFixture(t, "claude", "no-menu-working.txt")
+	menuFP := fingerprintOf(t, h, "claude", bash)
+
+	h.server.SetAgents([]map[string]any{agentRow("w1:p1", "claude", "blocked", 100)})
+	h.server.SetScreen("w1:p1", "visible", bash)
+	h.engine.OnHerdrOnline(true, herdr.Pong{Version: "0.9.1", Protocol: 22})
+	syncAndAwaitPrompt(t, h, "w1:p1", 100, menuFP)
+
+	h.server.SetScreen("w1:p1", "visible", noMenu)
+	for _, fp := range []string{"", menuFP} {
+		before := len(h.server.Calls())
+		res, _ := runCmd(t, h, model.CommandMsg{
+			RequestID: "req-cancel-gone-" + fp, Action: "cancel", PaneID: "w1:p1",
+			ExpectedSeq: 100, Fingerprint: fp,
+		})
+		if res.OK || res.ErrorCode != "prompt_changed" {
+			t.Errorf("fingerprint %q: ok=%v code=%q, want prompt_changed", fp, res.OK, res.ErrorCode)
+		}
+		if keys := sendKeysSince(h, before); len(keys) != 0 {
+			t.Errorf("fingerprint %q: sent %v, want none", fp, keys)
+		}
+	}
+}
+
+// Replays and second taps of a cancel on an unknown prompt press once.
+func TestCommands_DuplicateCancelOnUnknownSendsKeysOnce(t *testing.T) {
+	h := newTestHarness(t)
+	h.server.SetAgents([]map[string]any{agentRow("w1:p1", "claude", "blocked", 100)})
+	h.server.SetScreen("w1:p1", "visible", loadFixture(t, "claude", "no-menu-working.txt"))
+	h.engine.OnHerdrOnline(true, herdr.Pong{Version: "0.9.1", Protocol: 22})
+	syncAndAwaitPrompt(t, h, "w1:p1", 100, unknownFP)
+
+	cancel := func(reqID string) model.CommandMsg {
+		return model.CommandMsg{
+			Type: model.WireCommand, RequestID: reqID, Action: "cancel",
+			PaneID: "w1:p1", ExpectedSeq: 100,
+		}
+	}
+	before := len(h.server.Calls())
+	h.sendRelayToBridge(t, cancel("req-unknown-1"))
+	h.sendRelayToBridge(t, cancel("req-unknown-1")) // replay
+	h.sendRelayToBridge(t, cancel("req-unknown-2")) // second tap
+	results := append(waitResults(t, h, "req-unknown-1", 2), waitResults(t, h, "req-unknown-2", 1)...)
+
+	oks := 0
+	for _, r := range results {
+		if r.OK {
+			oks++
+		} else if r.ErrorCode != "stale_state" {
+			t.Errorf("duplicate cancel rejected with %q, want stale_state", r.ErrorCode)
+		}
+	}
+	if oks != 1 {
+		t.Errorf("got %d successful cancels, want 1", oks)
+	}
+	if keys := sendKeysSince(h, before); len(keys) != 1 || len(keys[0]) != 1 || keys[0][0] != "esc" {
+		t.Errorf("duplicate cancels sent %v, want exactly [[esc]]", keys)
 	}
 }
 

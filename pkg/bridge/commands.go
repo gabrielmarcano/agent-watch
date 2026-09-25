@@ -232,9 +232,26 @@ func (e *Engine) executeCommand(cmd model.CommandMsg) {
 		// Never trust the cached prompt: re-read the screen and take the cancel
 		// keys from what is on it right now (agy's edit prompt cancels with "2",
 		// which means "always allow" in its bash prompt).
-		p, code, msg := e.readFreshPrompt(ctx, cmd.PaneID, ad)
-		if code != "" {
-			reply(false, code, msg, agentName)
+		screen, err := e.readVisible(ctx, cmd.PaneID)
+		if err != nil {
+			reply(false, "herdr_offline", fmt.Sprintf("read screen: %v", err), agentName)
+			return
+		}
+		p, menu := ad.ParsePrompt(screen)
+		if !menu {
+			// No parseable menu. herdr (this command's own list) says blocked at
+			// expected_seq; cancel only if the watch was showing an unknown
+			// prompt, and then with the adapter's default keys, never cached
+			// per-prompt ones. A menu that simply vanished is prompt_changed.
+			if !e.cancelTargetsUnknown(cmd.PaneID, info.StateChangeSeq, cmd.Fingerprint) {
+				reply(false, "prompt_changed", "no menu on the visible screen", agentName)
+				return
+			}
+			if code, msg := e.pressPromptKeys(ctx, cmd.PaneID, info.StateChangeSeq, unknownFingerprint, ad.CancelKeys()); code != "" {
+				reply(false, code, msg, agentName)
+				return
+			}
+			reply(true, "", "", agentName)
 			return
 		}
 
@@ -321,6 +338,28 @@ func (e *Engine) readVisible(ctx context.Context, paneID string) (string, error)
 	readCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
 	return e.Herdr.Read(readCtx, paneID, herdr.SourceVisible, 0)
+}
+
+// unknownFingerprint is the fingerprint every unknown-kind prompt carries
+// (agents.UnknownPrompt builds it from the kind alone).
+var unknownFingerprint = agents.UnknownPrompt("").Public.Fingerprint
+
+// cancelTargetsUnknown reports whether a cancel that finds no menu on screen
+// is aimed at an unknown-kind prompt: the command names the unknown
+// fingerprint, or it names none and the prompt this bridge published for
+// paneID at seq is of kind unknown. A command naming any other fingerprint
+// saw a menu that is gone.
+func (e *Engine) cancelTargetsUnknown(paneID string, seq uint64, cmdFP string) bool {
+	if cmdFP != "" {
+		return cmdFP == unknownFingerprint
+	}
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	st, ok := e.states[paneID]
+	return ok && st.prompt != nil &&
+		st.info.StateChangeSeq == seq &&
+		st.public.Status == model.StatusBlocked &&
+		st.prompt.Public.Kind == model.PromptUnknown
 }
 
 // publishedFingerprint returns the fingerprint of the prompt this bridge
