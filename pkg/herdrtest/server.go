@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 // Call records an incoming JSON-RPC request to the fake server.
@@ -72,6 +73,7 @@ type Server struct {
 	stopped      chan struct{} // closed by Stop; a new one per Start
 	running      bool
 	closed       bool
+	emitTimeout  time.Duration // per event write; defaultEmitTimeout when zero
 
 	// Test hooks for the subscribe handshake (internal tests only).
 	testHookBeforeRegister func()
@@ -252,10 +254,7 @@ func (s *Server) Calls() []Call {
 
 // EmitStatusChanged pushes a pane_agent_status_changed event to matching subscribers.
 func (s *Server) EmitStatusChanged(paneID, status string) {
-	s.mu.Lock()
-	subs := make([]*subscriber, len(s.subscribers))
-	copy(subs, s.subscribers)
-	s.mu.Unlock()
+	subs, timeout := s.eventTargets()
 
 	eventData := map[string]any{
 		"event": "pane_agent_status_changed",
@@ -270,22 +269,14 @@ func (s *Server) EmitStatusChanged(paneID, status string) {
 
 	for _, sub := range subs {
 		if sub.paneIDs[paneID] {
-			sub.mu.Lock()
-			_, err := sub.conn.Write(line)
-			sub.mu.Unlock()
-			if err != nil {
-				s.removeSubscriber(sub)
-			}
+			s.writeEvent(sub, line, timeout)
 		}
 	}
 }
 
 // EmitGlobal pushes an arbitrary event to subscribers.
 func (s *Server) EmitGlobal(event string, data map[string]any) {
-	s.mu.Lock()
-	subs := make([]*subscriber, len(s.subscribers))
-	copy(subs, s.subscribers)
-	s.mu.Unlock()
+	subs, timeout := s.eventTargets()
 
 	// Normalize event name to snake_case if passed as dot-form
 	eventName := strings.ReplaceAll(event, ".", "_")
@@ -300,13 +291,38 @@ func (s *Server) EmitGlobal(event string, data map[string]any) {
 
 	for _, sub := range subs {
 		if sub.eventTypes[dotEvent] || sub.eventTypes[eventName] || len(sub.eventTypes) == 0 {
-			sub.mu.Lock()
-			_, err := sub.conn.Write(line)
-			sub.mu.Unlock()
-			if err != nil {
-				s.removeSubscriber(sub)
-			}
+			s.writeEvent(sub, line, timeout)
 		}
+	}
+}
+
+// defaultEmitTimeout bounds each event write, so a subscriber that stopped
+// reading cannot block Emit* (and the test calling it).
+const defaultEmitTimeout = 2 * time.Second
+
+// eventTargets returns a copy of the subscribers and the event write timeout.
+func (s *Server) eventTargets() ([]*subscriber, time.Duration) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	subs := make([]*subscriber, len(s.subscribers))
+	copy(subs, s.subscribers)
+	timeout := s.emitTimeout
+	if timeout <= 0 {
+		timeout = defaultEmitTimeout
+	}
+	return subs, timeout
+}
+
+// writeEvent writes one event line to sub within timeout. A subscriber whose
+// write fails or times out (a partial line may be out) is dropped, as herdr
+// drops a dead stream.
+func (s *Server) writeEvent(sub *subscriber, line []byte, timeout time.Duration) {
+	sub.mu.Lock()
+	_ = sub.conn.SetWriteDeadline(time.Now().Add(timeout))
+	_, err := sub.conn.Write(line)
+	sub.mu.Unlock()
+	if err != nil {
+		s.removeSubscriber(sub)
 	}
 }
 
