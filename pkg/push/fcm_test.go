@@ -137,7 +137,7 @@ func TestFCM_InvalidTokens(t *testing.T) {
 		}
 		if strings.Contains(payload.Message.Token, "unregistered") {
 			w.WriteHeader(http.StatusBadRequest)
-			_, _ = w.Write([]byte(`{"error":{"code":400,"message":"The registration token is not registered","status":"UNREGISTERED"}}`))
+			_, _ = w.Write([]byte(`{"error":{"code":400,"message":"The registration token is not registered","status":"INVALID_ARGUMENT","details":[{"@type":"type.googleapis.com/google.firebase.fcm.v1.FcmError","errorCode":"UNREGISTERED"}]}}`))
 			return
 		}
 		w.WriteHeader(http.StatusOK)
@@ -163,5 +163,64 @@ func TestFCM_InvalidTokens(t *testing.T) {
 	}
 	if deadTokens[0] != "token-404" || deadTokens[1] != "token-unregistered" {
 		t.Errorf("unexpected dead tokens: %v", deadTokens)
+	}
+}
+
+// Real FCM v1 error bodies. Only errors about the token itself mean the token
+// is dead; payload errors also come back as 400 INVALID_ARGUMENT.
+const (
+	fcmErrTTL             = `{"error":{"code":400,"message":"Invalid value at 'message.android.ttl' (type.googleapis.com/google.protobuf.Duration), Field 'ttl', Illegal duration format","status":"INVALID_ARGUMENT","details":[{"@type":"type.googleapis.com/google.rpc.BadRequest","fieldViolations":[{"field":"message.android.ttl","description":"Invalid value at 'message.android.ttl'"}]}]}}`
+	fcmErrTooBig          = `{"error":{"code":400,"message":"Request contains an invalid argument.","status":"INVALID_ARGUMENT","details":[{"@type":"type.googleapis.com/google.firebase.fcm.v1.FcmError","errorCode":"INVALID_ARGUMENT"}]}}`
+	fcmErrBadToken        = `{"error":{"code":400,"message":"The registration token is not a valid FCM registration token","status":"INVALID_ARGUMENT","details":[{"@type":"type.googleapis.com/google.firebase.fcm.v1.FcmError","errorCode":"INVALID_ARGUMENT"},{"@type":"type.googleapis.com/google.rpc.BadRequest","fieldViolations":[{"field":"message.token","description":"The registration token is not a valid FCM registration token"}]}]}}`
+	fcmErrUnregistered    = `{"error":{"code":404,"message":"Requested entity was not found.","status":"NOT_FOUND","details":[{"@type":"type.googleapis.com/google.firebase.fcm.v1.FcmError","errorCode":"UNREGISTERED"}]}}`
+	fcmErrUnregistered400 = `{"error":{"code":400,"message":"Requested entity was not found.","status":"INVALID_ARGUMENT","details":[{"@type":"type.googleapis.com/google.firebase.fcm.v1.FcmError","errorCode":"UNREGISTERED"}]}}`
+	fcmErrNotJSON         = `<html>Bad Request: INVALID_ARGUMENT</html>`
+)
+
+func TestFCM_DeadTokenDetection(t *testing.T) {
+	tests := []struct {
+		name     string
+		status   int
+		body     string
+		wantDead bool
+	}{
+		{"payload error: bad ttl", http.StatusBadRequest, fcmErrTTL, false},
+		{"payload error: message too big", http.StatusBadRequest, fcmErrTooBig, false},
+		{"400 without a JSON body", http.StatusBadRequest, fcmErrNotJSON, false},
+		{"invalid token (field message.token)", http.StatusBadRequest, fcmErrBadToken, true},
+		{"unregistered (404)", http.StatusNotFound, fcmErrUnregistered, true},
+		{"unregistered errorCode on a 400", http.StatusBadRequest, fcmErrUnregistered400, true},
+		{"bare 404", http.StatusNotFound, `{"error":{"code":404,"message":"Requested entity was not found"}}`, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(tt.status)
+				_, _ = w.Write([]byte(tt.body))
+			}))
+			defer server.Close()
+
+			var dead []string
+			fcm := &FCM{
+				ProjectID:      "test-proj",
+				Endpoint:       server.URL,
+				Tokens:         func() []string { return []string{"tok-a", "tok-b"} },
+				Client:         server.Client(),
+				OnInvalidToken: func(token string) { dead = append(dead, token) },
+			}
+
+			if err := fcm.Send(context.Background(), Message{Event: EventDone, Title: "t"}); err == nil {
+				t.Fatalf("Send returned nil for a %d response", tt.status)
+			}
+
+			if tt.wantDead && len(dead) != 2 {
+				t.Fatalf("expected both tokens reported dead, got %v", dead)
+			}
+			if !tt.wantDead && len(dead) != 0 {
+				t.Fatalf("payload error must not unregister tokens, got %v", dead)
+			}
+		})
 	}
 }

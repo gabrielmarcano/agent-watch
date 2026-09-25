@@ -151,17 +151,58 @@ func (f *FCM) Send(ctx context.Context, m Message) error {
 			continue
 		}
 
-		// Detect dead / invalid tokens: 404, or 400 with UNREGISTERED or INVALID_ARGUMENT
 		respStr := string(respBody)
-		if resp.StatusCode == http.StatusNotFound ||
-			(resp.StatusCode == http.StatusBadRequest && (strings.Contains(respStr, "UNREGISTERED") || strings.Contains(respStr, "INVALID_ARGUMENT"))) {
-			if f.OnInvalidToken != nil {
-				f.OnInvalidToken(token)
-			}
+		if isDeadTokenResponse(resp.StatusCode, respBody) && f.OnInvalidToken != nil {
+			f.OnInvalidToken(token)
 		}
 
 		sendErrors = append(sendErrors, fmt.Errorf("fcm status %d: %s", resp.StatusCode, respStr))
 	}
 
 	return errors.Join(sendErrors...)
+}
+
+// fcmErrorResponse is the FCM v1 error body (a google.rpc.Status).
+type fcmErrorResponse struct {
+	Error struct {
+		Status  string `json:"status"`
+		Details []struct {
+			ErrorCode       string `json:"errorCode"` // google.firebase.fcm.v1.FcmError
+			FieldViolations []struct {
+				Field string `json:"field"`
+			} `json:"fieldViolations"` // google.rpc.BadRequest
+		} `json:"details"`
+	} `json:"error"`
+}
+
+// isDeadTokenResponse reports whether an FCM error response means the device
+// token itself is dead, as opposed to a payload or server error. FCM returns
+// 400 INVALID_ARGUMENT for payload errors too (bad ttl, oversize data…), so
+// that status alone must never unregister a token.
+func isDeadTokenResponse(status int, body []byte) bool {
+	if status == http.StatusNotFound {
+		return true
+	}
+
+	var er fcmErrorResponse
+	if err := json.Unmarshal(body, &er); err != nil {
+		return false
+	}
+
+	invalidArgument := er.Error.Status == "INVALID_ARGUMENT"
+	tokenField := false
+	for _, d := range er.Error.Details {
+		switch d.ErrorCode {
+		case "UNREGISTERED":
+			return true
+		case "INVALID_ARGUMENT":
+			invalidArgument = true
+		}
+		for _, fv := range d.FieldViolations {
+			if fv.Field == "message.token" {
+				tokenField = true
+			}
+		}
+	}
+	return invalidArgument && tokenField
 }
