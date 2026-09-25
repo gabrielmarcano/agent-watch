@@ -173,7 +173,7 @@ func (a *agyAdapter) LastTurn(ctx context.Context, ref SessionRef) (*model.Histo
 		return nil, ErrNoTranscript
 	}
 
-	query := steps[lastUserIdx].content
+	query := agyUserRequest(steps[lastUserIdx].content)
 
 	// Response = content of the last PLANNER_RESPONSE after that query that has
 	// non-empty content and no tool_calls.
@@ -198,6 +198,23 @@ func (a *agyAdapter) LastTurn(ctx context.Context, ref SessionRef) (*model.Histo
 		Response: response,
 		Source:   "transcript",
 	}, nil
+}
+
+// agyUserRequest returns what the user typed. Antigravity (1.2.x) stores a
+// USER_INPUT step as "<USER_REQUEST>\n…\n</USER_REQUEST>" followed by blocks
+// such as <ADDITIONAL_METADATA> (local time) or <USER_SETTINGS_CHANGE>.
+// Content without the wrapper is returned as is.
+func agyUserRequest(content string) string {
+	const open, closing = "<USER_REQUEST>", "</USER_REQUEST>"
+	start := strings.Index(content, open)
+	if start < 0 {
+		return strings.TrimSpace(content)
+	}
+	rest := content[start+len(open):]
+	if end := strings.Index(rest, closing); end >= 0 {
+		rest = rest[:end]
+	}
+	return strings.TrimSpace(rest)
 }
 
 func (a *agyAdapter) resolvePath(ref SessionRef) (string, string) {

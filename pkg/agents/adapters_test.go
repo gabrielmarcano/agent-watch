@@ -312,6 +312,21 @@ func TestAgyLastTurn(t *testing.T) {
 	}
 }
 
+func TestAgyUserRequest(t *testing.T) {
+	cases := map[string]string{
+		// Antigravity 1.2.10, first prompt of a session (settings block appended)
+		"<USER_REQUEST>\nWithout using any tools, reply with a numbered list.\n</USER_REQUEST>\n<ADDITIONAL_METADATA>\nThe current local time is: 2026-09-25T10:25:53-04:00.\n</ADDITIONAL_METADATA>\n<USER_SETTINGS_CHANGE>\nThe user changed setting `Model Selection`\n</USER_SETTINGS_CHANGE>": "Without using any tools, reply with a numbered list.",
+		"<USER_REQUEST>\nline one\nline two\n</USER_REQUEST>":         "line one\nline two",
+		"plain text without the wrapper\n":                            "plain text without the wrapper",
+		"<USER_REQUEST>\nunterminated request\n<ADDITIONAL_METADATA>": "unterminated request\n<ADDITIONAL_METADATA>",
+	}
+	for in, want := range cases {
+		if got := agyUserRequest(in); got != want {
+			t.Errorf("agyUserRequest(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
 type openCodeSessionDump struct {
 	SessionID string `json:"session_id"`
 	Messages  []struct {
