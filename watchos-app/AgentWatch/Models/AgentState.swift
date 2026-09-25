@@ -74,3 +74,10 @@ struct AgentState: Codable {
         return nil
     }
 }
+
+// Body of POST /v1/agents/{pane_id}/cancel (contracts.md §2.2).
+// fingerprint is the prompt the watch showed; nil is omitted from the JSON.
+struct CancelRequest: Codable, Sendable {
+    let expected_seq: UInt64
+    let fingerprint: String?
+}

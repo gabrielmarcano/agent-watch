@@ -256,6 +256,7 @@ type AnswerRequest struct {
 }
 type CancelRequest struct {
     ExpectedSeq uint64 `json:"expected_seq"`
+    Fingerprint string `json:"fingerprint,omitempty"` // optional: the prompt the watch showed
 }
 type PushRegisterRequest struct {
     Platform string `json:"platform"` // only "fcm" for now
@@ -271,6 +272,20 @@ type ErrorBody struct {
     Code    string `json:"code"`
     Message string `json:"message"`
 }
+```
+
+**Command body fields** (the relay copies them into `CommandMsg`, §3; the bridge re-validates them):
+
+| Field | Bodies | Rule |
+|---|---|---|
+| `expected_seq` | prompt, answer, cancel | The `state_change_seq` the watch showed. A mismatch → `stale_state` |
+| `option_id` | answer | An `id` from `prompt.options`. Not in the current prompt → `unknown_option` |
+| `fingerprint` | answer (required), cancel (optional) | The `prompt.fingerprint` the watch showed. A mismatch → `prompt_changed`. On cancel, when it is omitted the bridge compares against the prompt it published for `expected_seq` |
+
+**Example** (`POST /v1/agents/w5%3ApAE/cancel`):
+
+```json
+{ "expected_seq": 334, "fingerprint": "9f2c61d0a4b3e871" }
 ```
 
 ### 2.3 Server-Sent Events (`GET /v1/events`)
@@ -361,7 +376,7 @@ type CommandMsg struct {
     ExpectedSeq uint64 `json:"expected_seq"`
     Text        string `json:"text,omitempty"`        // prompt
     OptionID    string `json:"option_id,omitempty"`   // answer
-    Fingerprint string `json:"fingerprint,omitempty"` // answer
+    Fingerprint string `json:"fingerprint,omitempty"` // answer; cancel when the watch sent one
 }
 type CommandResultMsg struct {
     Type      string `json:"type"` // "command_result"

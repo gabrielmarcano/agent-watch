@@ -511,6 +511,71 @@ func TestAPI_SilentHostTimesOut(t *testing.T) {
 	}
 }
 
+// answerCommands makes the fake host answer every command with ok=true and
+// forwards the commands it received to the returned channel.
+func answerCommands(ctx context.Context, conn *websocket.Conn) <-chan model.CommandMsg {
+	out := make(chan model.CommandMsg, 64)
+	go func() {
+		for {
+			_, data, err := conn.Read(ctx)
+			if err != nil {
+				return
+			}
+			msg, err := model.DecodeWire(data)
+			if err != nil {
+				continue
+			}
+			if cmd, ok := msg.(model.CommandMsg); ok {
+				out <- cmd
+				res, _ := json.Marshal(model.CommandResultMsg{Type: model.WireCommandResult, RequestID: cmd.RequestID, OK: true})
+				_ = conn.Write(ctx, websocket.MessageText, res)
+			}
+		}
+	}()
+	return out
+}
+
+// The cancel fingerprint travels from the watch to the bridge, which checks
+// it against the prompt on screen; without one the bridge uses the published
+// prompt.
+func TestAPI_CancelForwardsFingerprint(t *testing.T) {
+	server, ts := setupTestServer(t)
+	devToken, _ := GenerateDeviceToken()
+	_, _ = server.Store().AddDevice("Watch", Sha256Hex(devToken))
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	conn := connectTestHost(t, ctx, server, ts, "w5:pAW")
+	received := answerCommands(ctx, conn)
+
+	for _, tc := range []struct {
+		body string
+		want string
+	}{
+		{`{"expected_seq":10,"fingerprint":"9f2c61d0a4b3e871"}`, "9f2c61d0a4b3e871"},
+		{`{"expected_seq":10}`, ""},
+	} {
+		req, _ := http.NewRequest("POST", ts.URL+"/v1/agents/w5%3ApAW/cancel", strings.NewReader(tc.body))
+		req.Header.Set("Authorization", "Bearer "+devToken)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("POST cancel: %v", err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("POST cancel %s: status %d, want 200", tc.body, resp.StatusCode)
+		}
+		select {
+		case cmd := <-received:
+			if cmd.Action != "cancel" || cmd.ExpectedSeq != 10 || cmd.Fingerprint != tc.want {
+				t.Fatalf("host got %+v for body %s, want cancel seq 10 fingerprint %q", cmd, tc.body, tc.want)
+			}
+		case <-ctx.Done():
+			t.Fatalf("host never received the cancel")
+		}
+	}
+}
+
 // Watches connected over SSE see the host come online and go offline.
 func TestAPI_SSEHostOnlineAndOffline(t *testing.T) {
 	server, ts := setupTestServer(t)

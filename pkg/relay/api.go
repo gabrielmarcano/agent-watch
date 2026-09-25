@@ -362,6 +362,7 @@ func (s *Server) cancel(w http.ResponseWriter, r *http.Request) {
 		Action:      "cancel",
 		PaneID:      paneID,
 		ExpectedSeq: req.ExpectedSeq,
+		Fingerprint: req.Fingerprint,
 	}
 
 	res, err := s.hub.Command(r.Context(), cmd)

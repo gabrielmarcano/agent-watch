@@ -46,9 +46,11 @@ type AnswerRequest struct {
 	Fingerprint string `json:"fingerprint"`
 }
 
-// CancelRequest dismisses a prompt or interrupts an agent.
+// CancelRequest dismisses a prompt or interrupts an agent. Fingerprint is the
+// prompt the watch showed; when empty the bridge checks the published prompt.
 type CancelRequest struct {
 	ExpectedSeq uint64 `json:"expected_seq"`
+	Fingerprint string `json:"fingerprint,omitempty"`
 }
 
 // PushRegisterRequest registers a device push token with the relay.
