@@ -420,3 +420,111 @@ func TestOpenCodeLastTurn(t *testing.T) {
 		t.Errorf("expected ErrNoTranscript for missing db, got %v", err)
 	}
 }
+
+// loadOpenCodeDump reads a session exported from the sandbox OpenCode DB.
+func loadOpenCodeDump(t *testing.T, name string) openCodeSessionDump {
+	t.Helper()
+	b, err := os.ReadFile(filepath.Join("testdata", "opencode", name))
+	if err != nil {
+		t.Fatalf("read %s: %v", name, err)
+	}
+	var dump openCodeSessionDump
+	if err := json.Unmarshal(b, &dump); err != nil {
+		t.Fatalf("unmarshal %s: %v", name, err)
+	}
+	return dump
+}
+
+// writeOpenCodeDB builds a temp SQLite DB with OpenCode's message/part tables
+// from dump and returns its path.
+func writeOpenCodeDB(t *testing.T, dump openCodeSessionDump) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "opencode.db")
+	db, err := sql.Open("sqlite", "file:"+path+"?mode=rwc")
+	if err != nil {
+		t.Fatalf("create sqlite db: %v", err)
+	}
+	defer db.Close()
+	if _, err := db.Exec(`
+		CREATE TABLE message (id TEXT PRIMARY KEY, session_id TEXT, time_created INTEGER, time_updated INTEGER, data TEXT);
+		CREATE TABLE part (id TEXT PRIMARY KEY, message_id TEXT, session_id TEXT, time_created INTEGER, time_updated INTEGER, data TEXT);
+	`); err != nil {
+		t.Fatalf("create tables: %v", err)
+	}
+	for _, m := range dump.Messages {
+		if _, err := db.Exec("INSERT INTO message(id, session_id, time_created, time_updated, data) VALUES (?, ?, ?, ?, ?)",
+			m.ID, dump.SessionID, m.TimeCreated, m.TimeCreated, string(m.Data)); err != nil {
+			t.Fatalf("insert message: %v", err)
+		}
+	}
+	for _, p := range dump.Parts {
+		if _, err := db.Exec("INSERT INTO part(id, message_id, session_id, time_created, time_updated, data) VALUES (?, ?, ?, ?, ?, ?)",
+			p.ID, p.MessageID, dump.SessionID, p.TimeCreated, p.TimeCreated, string(p.Data)); err != nil {
+			t.Fatalf("insert part: %v", err)
+		}
+	}
+	return path
+}
+
+// truncateDump keeps the messages (and their parts) up to and including the
+// message with id last, as if the session had ended there.
+func truncateDump(dump openCodeSessionDump, last string) openCodeSessionDump {
+	out := dump
+	out.Messages = nil
+	keep := map[string]bool{}
+	for _, m := range dump.Messages {
+		out.Messages = append(out.Messages, m)
+		keep[m.ID] = true
+		if m.ID == last {
+			break
+		}
+	}
+	out.Parts = nil
+	for _, p := range dump.Parts {
+		if keep[p.MessageID] {
+			out.Parts = append(out.Parts, p)
+		}
+	}
+	return out
+}
+
+// A real sandbox session where a turn has several assistant messages (one per
+// step): the response is the final answer, not the step closest to the query.
+func TestOpenCodeLastTurn_MultiStep(t *testing.T) {
+	ctx := context.Background()
+	dump := loadOpenCodeDump(t, "session-multistep.json")
+
+	b, err := os.ReadFile(filepath.Join("testdata", "opencode", "transcript-multistep.expected.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var expected expectedTranscript
+	if err := json.Unmarshal(b, &expected); err != nil {
+		t.Fatal(err)
+	}
+
+	// Last turn: step 1 is a tool call with no text, step 2 is the answer.
+	adapter := newOpenCodeAdapter(Config{OpenCodeDBPath: writeOpenCodeDB(t, dump)})
+	item, err := adapter.LastTurn(ctx, SessionRef{Agent: "opencode", Kind: "id", Value: dump.SessionID})
+	if err != nil {
+		t.Fatalf("last turn with a tool-only first step: %v", err)
+	}
+	if item.Query != expected.Query || item.Response != expected.Response {
+		t.Errorf("got query %q response %q, want %q / %q", item.Query, item.Response, expected.Query, expected.Response)
+	}
+
+	// Session cut after its first turn: step 1 says "Running wc -l on
+	// note.txt." before the tool call, step 2 has the result.
+	first := truncateDump(dump, "msg_0d8fb20810010zrFJm2Mn911dJ")
+	if n := len(first.Messages); n != 3 {
+		t.Fatalf("truncated dump has %d messages, want 3", n)
+	}
+	adapter = newOpenCodeAdapter(Config{OpenCodeDBPath: writeOpenCodeDB(t, first)})
+	item, err = adapter.LastTurn(ctx, SessionRef{Agent: "opencode", Kind: "id", Value: dump.SessionID})
+	if err != nil {
+		t.Fatalf("first turn: %v", err)
+	}
+	if want := "Result: `1 note.txt`"; item.Response != want {
+		t.Errorf("first turn response = %q, want the final step %q", item.Response, want)
+	}
+}

@@ -1,0 +1,4 @@
+{
+  "query": "Without writing any text before the tool call, run the shell command wc -l note.txt, then tell me the line count in one sentence.",
+  "response": "The file note.txt has 1 line."
+}

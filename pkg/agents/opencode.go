@@ -331,27 +331,26 @@ func (o *opencodeAdapter) LastTurn(ctx context.Context, ref SessionRef) (*model.
 		return nil, ErrNoTranscript
 	}
 
-	// Assistant response message is newer than user message, so index < userIdx
-	assistIdx := -1
-	for i := userIdx - 1; i >= 0; i-- {
-		if messages[i].role == "assistant" {
-			assistIdx = i
-			break
-		}
-	}
-	if assistIdx < 0 {
-		return nil, ErrNoTranscript
-	}
-
 	// Read parts for user message
 	query, err := o.readPartsText(ctx, db, messages[userIdx].id)
 	if err != nil || query == "" {
 		return nil, ErrNoTranscript
 	}
 
-	// Read parts for assistant message
-	response, err := o.readPartsText(ctx, db, messages[assistIdx].id)
-	if err != nil || response == "" {
+	// OpenCode stores one assistant message per step of a turn, all newer than
+	// the query (index < userIdx). The answer is the newest one with text:
+	// earlier steps are tool calls, with or without a line of text before them.
+	var response string
+	for i := 0; i < userIdx && response == ""; i++ {
+		if messages[i].role != "assistant" {
+			continue
+		}
+		response, err = o.readPartsText(ctx, db, messages[i].id)
+		if err != nil {
+			return nil, ErrNoTranscript
+		}
+	}
+	if response == "" {
 		return nil, ErrNoTranscript
 	}
 
