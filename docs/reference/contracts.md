@@ -410,7 +410,11 @@ All values are strings (FCM data maps allow only strings). No `notification` blo
 | `allow_option_id` | `opt-1` | First `allow_once` option, else empty |
 | `deny_option_id` | `opt-3` | First `deny` option, else empty (the app then calls `cancel`) |
 
-**`resolved`: withdraw a `blocked` notification.** It carries **only** these three keys, and never a notification block:
+**`resolved`: withdraw a `blocked` notification.**
+
+> ⚠️ **Disabled by default.** The relay sends `resolved` only when the FCM sender's `EnableResolved` is set (`pkg/push.FCM`). Enable it **only once the installed watch app handles `resolved`**: older apps show an unknown event as `"<label> needs you"` on the pane's notification id, which replaces a real approval with a bogus one.
+
+It carries **only** these three keys, and never a notification block:
 
 ```json
 {"message":{"token":"<device fcm token>",
@@ -456,7 +460,7 @@ ntfy never gets `resolved`: it cannot withdraw a notification it already deliver
 |---|---|
 | any → `blocked` | `blocked` |
 | `working` → `done` | `done` |
-| `blocked` → any other status, when that pane's own `blocked` push went out | `resolved` (FCM only) |
+| `blocked` → any other status, when that pane's own `blocked` push went out | `resolved` (FCM only, and only when enabled: §4.1) |
 | anything else | no push |
 
 - **`resolved`** goes out at once, once per `blocked` push:

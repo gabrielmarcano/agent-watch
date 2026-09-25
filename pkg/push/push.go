@@ -49,8 +49,9 @@ type Sender interface {
 }
 
 // ResolvedSender is a Sender whose app can withdraw a notification it already
-// shows. Only these senders get EventResolved messages: the others (ntfy)
-// cannot take a notification back, and would show an empty one instead.
+// shows. Only senders whose SendsResolved reports true get EventResolved
+// messages: the others (ntfy, or FCM until it is enabled) cannot take a
+// notification back, and would show a bogus one instead.
 type ResolvedSender interface {
 	Sender
 	SendsResolved() bool

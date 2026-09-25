@@ -40,6 +40,9 @@ type FCM struct {
 	// TokenTimeout bounds the delivery to one token, retry included. Zero
 	// means 10s. The caller's deadline still applies.
 	TokenTimeout time.Duration
+	// EnableResolved turns on "resolved" messages (contracts.md §4.1). Off by
+	// default, and until then SendsResolved reports false.
+	EnableResolved bool
 }
 
 // NewFCMFromCredentials parses Firebase service account credentials and initializes FCM.
@@ -85,7 +88,7 @@ type fcmAndroid struct {
 
 // Send delivers m to all registered FCM device tokens.
 func (f *FCM) Send(ctx context.Context, m Message) error {
-	if f.Tokens == nil {
+	if f.Tokens == nil || (m.Event == EventResolved && !f.EnableResolved) {
 		return nil
 	}
 
@@ -149,10 +152,12 @@ func (f *FCM) Send(ctx context.Context, m Message) error {
 
 var _ ResolvedSender = (*FCM)(nil)
 
-// SendsResolved implements ResolvedSender: the Wear OS app withdraws the
-// notification of a pane that is no longer blocked.
+// SendsResolved implements ResolvedSender: once EnableResolved is set, the
+// Wear OS app withdraws the notification of a pane that is no longer blocked.
+// It stays off until the installed watch app handles "resolved": older apps
+// show it as a bogus "needs you" over the real approval.
 func (f *FCM) SendsResolved() bool {
-	return true
+	return f.EnableResolved
 }
 
 // fcmData is the data map of m (contracts.md §4.1). All values are strings,

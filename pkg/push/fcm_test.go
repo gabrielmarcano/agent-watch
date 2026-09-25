@@ -119,6 +119,7 @@ func TestFCM_Payload(t *testing.T) {
 			defer server.Close()
 
 			fcm := newTestFCM(server.URL, func() []string { return []string{"device-token-1"} }, nil)
+			fcm.EnableResolved = true
 			if err := fcm.Send(context.Background(), tt.msg); err != nil {
 				t.Fatalf("fcm.Send failed: %v", err)
 			}
@@ -147,6 +148,49 @@ func TestFCM_Payload(t *testing.T) {
 	}
 }
 
+// "resolved" is off unless the relay turns it on: the watch app installed
+// today shows an unknown event as "<label> needs you" on the pane's
+// notification, which would replace a real approval with a bogus one.
+func TestFCM_ResolvedIsOffByDefault(t *testing.T) {
+	var requests []string
+	var mu sync.Mutex
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		mu.Lock()
+		requests = append(requests, string(body))
+		mu.Unlock()
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	if (&FCM{}).SendsResolved() {
+		t.Fatalf("a zero FCM sends resolved")
+	}
+	fcm := newTestFCM(server.URL, func() []string { return []string{"device-token-1"} }, nil)
+	if fcm.SendsResolved() {
+		t.Fatalf("NewFCM sends resolved by default")
+	}
+
+	// Through the dispatcher: only the blocked push goes out.
+	d, _, _ := newTestDispatcher(fcm)
+	blocked := model.AgentState{PaneID: "w5:pAE", Label: "bizum", Status: model.StatusBlocked, StateChangeSeq: 334}
+	d.OnAgentUpdate(nil, blocked)
+	d.Wait()
+	d.OnAgentUpdate(&blocked, model.AgentState{PaneID: "w5:pAE", Label: "bizum", Status: model.StatusWorking, StateChangeSeq: 335})
+	d.Wait()
+
+	// And even when handed one directly, FCM sends nothing.
+	if err := fcm.Send(context.Background(), Message{Event: EventResolved, PaneID: "w5:pAE", StateChangeSeq: 335}); err != nil {
+		t.Fatalf("Send(resolved) with resolved off = %v, want nil", err)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(requests) != 1 || !strings.Contains(requests[0], `"event":"blocked"`) {
+		t.Fatalf("FCM requests = %v, want only the blocked push", requests)
+	}
+}
+
 // End to end through the real senders: answering a prompt elsewhere sends FCM
 // a data-only "resolved" message, and ntfy (which cannot withdraw a
 // notification) gets nothing.
@@ -167,6 +211,7 @@ func TestDispatcher_ResolvedReachesFCMNotNtfy(t *testing.T) {
 	defer ntfyServer.Close()
 
 	fcm := newTestFCM(fcmServer.URL, func() []string { return []string{"device-token-1"} }, nil)
+	fcm.EnableResolved = true
 	ntfy := &Ntfy{BaseURL: ntfyServer.URL, Topic: "test-topic", Client: ntfyServer.Client()}
 	d, _, _ := newTestDispatcher(fcm, ntfy)
 
