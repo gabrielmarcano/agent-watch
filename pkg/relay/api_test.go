@@ -172,6 +172,8 @@ func TestAPI_CommandRoundTripAndErrors(t *testing.T) {
 	// Connect fake host
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
+	sub, events := server.State().Subscribe()
+	defer server.State().Unsubscribe(sub)
 
 	wsURL := strings.Replace(ts.URL, "http://", "ws://", 1) + "/v1/host"
 	opts := &websocket.DialOptions{
@@ -206,12 +208,8 @@ func TestAPI_CommandRoundTripAndErrors(t *testing.T) {
 	})
 	_ = conn.Write(ctx, websocket.MessageText, snap)
 
-	for i := 0; i < 50; i++ {
-		if server.State().HasPane("w5:pAW") && server.State().HostOnline() {
-			break
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
+	// hello is handled before the snapshot, so both are applied now.
+	waitEvent(t, events, "snapshot", 5*time.Second)
 
 	// 1. Unknown pane -> 404
 	ansBody, _ := json.Marshal(model.AnswerRequest{
@@ -294,12 +292,7 @@ func TestAPI_CommandRoundTripAndErrors(t *testing.T) {
 
 	// 4. Host offline -> 503
 	conn.Close(websocket.StatusNormalClosure, "")
-	for i := 0; i < 50; i++ {
-		if !server.State().HostOnline() {
-			break
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
+	waitHostOnline(t, events, false, 5*time.Second)
 
 	req, _ = http.NewRequest("POST", ts.URL+"/v1/agents/w5%3ApAW/answer", bytes.NewReader(ansBody))
 	req.Header.Set("Authorization", "Bearer "+devToken)
@@ -399,11 +392,14 @@ func TestAPI_HistoryQuery(t *testing.T) {
 	devToken, _ := GenerateDeviceToken()
 	_, _ = server.Store().AddDevice("Watch", Sha256Hex(devToken))
 
+	// Relative to now: panes older than 7 days are pruned on every add, so
+	// fixed dates would break this test a week after they were written.
+	base := time.Now().UTC().Add(-time.Hour)
 	for i := 0; i < 10; i++ {
 		server.Store().AddHistory(model.HistoryItem{
 			ID:          fmt.Sprintf("item-%d", i),
 			PaneID:      "w1:p1",
-			CompletedAt: fmt.Sprintf("2026-09-24T00:00:%02dZ", i),
+			CompletedAt: base.Add(time.Duration(i) * time.Second).Format(time.RFC3339),
 		})
 	}
 
@@ -640,6 +636,77 @@ func TestAPI_PromptLengthCountsCharacters(t *testing.T) {
 				t.Fatalf("host never received the prompt")
 			}
 		})
+	}
+}
+
+func TestAPI_PushRegister(t *testing.T) {
+	server, ts := setupTestServer(t)
+	devToken, _ := GenerateDeviceToken()
+	dev, _ := server.Store().AddDevice("Watch", Sha256Hex(devToken))
+
+	post := func(t *testing.T, bearer, body string) (int, string) {
+		t.Helper()
+		req, _ := http.NewRequest("POST", ts.URL+"/v1/push/register", strings.NewReader(body))
+		if bearer != "" {
+			req.Header.Set("Authorization", "Bearer "+bearer)
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("POST push/register: %v", err)
+		}
+		defer resp.Body.Close()
+		var errResp model.ErrorResponse
+		_ = json.NewDecoder(resp.Body).Decode(&errResp)
+		return resp.StatusCode, errResp.Error.Code
+	}
+	fcmTokenOf := func() string {
+		for _, d := range server.Store().ListDevices() {
+			if d.ID == dev.ID {
+				return d.FCMToken
+			}
+		}
+		t.Fatalf("device %s vanished", dev.ID)
+		return ""
+	}
+
+	for _, tc := range []struct {
+		name   string
+		bearer string
+		body   string
+		status int
+		code   string
+	}{
+		{"no token", "", `{"platform":"fcm","token":"x"}`, http.StatusUnauthorized, "unauthorized"},
+		{"unknown device", strings.Repeat("0", 64), `{"platform":"fcm","token":"x"}`, http.StatusUnauthorized, "unauthorized"},
+		{"unsupported platform", devToken, `{"platform":"apns","token":"x"}`, http.StatusBadRequest, "invalid_request"},
+		{"blank token", devToken, `{"platform":"fcm","token":"   "}`, http.StatusBadRequest, "invalid_request"},
+		{"malformed body", devToken, `not json`, http.StatusBadRequest, "invalid_request"},
+		{"oversized body", devToken, `{"platform":"fcm","token":"` + strings.Repeat("a", 17<<10) + `"}`, http.StatusBadRequest, "invalid_request"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			status, code := post(t, tc.bearer, tc.body)
+			if status != tc.status || code != tc.code {
+				t.Fatalf("status %d code %q, want %d %q", status, code, tc.status, tc.code)
+			}
+			if got := fcmTokenOf(); got != "" {
+				t.Fatalf("rejected request stored FCM token %q", got)
+			}
+		})
+	}
+
+	if status, _ := post(t, devToken, `{"platform":"fcm","token":"  fcm-token-1  "}`); status != http.StatusOK {
+		t.Fatalf("register: status %d, want 200", status)
+	}
+	if got := fcmTokenOf(); got != "fcm-token-1" {
+		t.Fatalf("stored FCM token %q, want the trimmed fcm-token-1", got)
+	}
+
+	// A new token (the app reinstalled) replaces the old one.
+	if status, _ := post(t, devToken, `{"platform":"fcm","token":"fcm-token-2"}`); status != http.StatusOK {
+		t.Fatalf("re-register: status %d, want 200", status)
+	}
+	if got := server.Store().AllFCMTokens(); len(got) != 1 || got[0] != "fcm-token-2" {
+		t.Fatalf("FCM tokens after re-register = %v, want [fcm-token-2]", got)
 	}
 }
 

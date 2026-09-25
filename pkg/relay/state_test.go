@@ -121,47 +121,57 @@ func TestState_SetHost(t *testing.T) {
 func TestState_SlowSubscriberDropped(t *testing.T) {
 	state := NewState()
 
-	// Slow subscriber: never reads from channel
+	// Slow subscriber: never reads from its channel.
 	slowSub, slowCh := state.Subscribe()
 	defer state.Unsubscribe(slowSub)
 
-	// Fast subscriber: continuously reads
+	// Fast subscriber: reads every event right after it is broadcast.
 	fastSub, fastCh := state.Subscribe()
 	defer state.Unsubscribe(fastSub)
 
-	fastReceived := 0
-	fastDone := make(chan struct{})
-	go func() {
-		for range fastCh {
-			fastReceived++
-		}
-		close(fastDone)
-	}()
-
-	// Buffer is 64. Send 80 events with slight pacing so fast subscriber keeps up.
-	for i := 0; i < 80; i++ {
+	const events = subscriberBufferSize + 16
+	for i := 0; i < events; i++ {
 		state.Upsert(model.AgentState{
 			PaneID: fmt.Sprintf("pane-%d", i),
 			Status: model.StatusWorking,
 		})
-		time.Sleep(50 * time.Microsecond)
+		// broadcast is synchronous, so the event is already queued.
+		select {
+		case ev, ok := <-fastCh:
+			if !ok || ev.Name != "agent" {
+				t.Fatalf("fast subscriber: event %d = %+v (open %v), want an agent event", i, ev, ok)
+			}
+		default:
+			t.Fatalf("fast subscriber missed event %d (dropped although it keeps up?)", i)
+		}
 	}
 
-	// The slow subscriber's channel should have been closed when dropped
-	dropped := false
-	for range slowCh {
+	// The slow subscriber holds a full buffer and then a closed channel, so
+	// its client reconnects and resyncs from a snapshot. Never blocks: if the
+	// channel were still open, the default branch fails the test.
+	buffered := 0
+	for closed := false; !closed; {
+		select {
+		case _, ok := <-slowCh:
+			if !ok {
+				closed = true
+			} else {
+				buffered++
+			}
+		default:
+			t.Fatalf("slow subscriber channel still open after %d buffered events", buffered)
+		}
 	}
-	dropped = true
-
-	if !dropped {
-		t.Fatalf("slow subscriber channel was not closed")
+	if buffered != subscriberBufferSize {
+		t.Fatalf("slow subscriber got %d events before being dropped, want %d (a full buffer)", buffered, subscriberBufferSize)
 	}
 
-	// Fast subscriber can unsubscribe and verify it got events without blocking
-	state.Unsubscribe(fastSub)
-	<-fastDone
-	if fastReceived < 80 {
-		t.Fatalf("expected fast subscriber to receive 80 events, got %d", fastReceived)
+	state.mu.RLock()
+	_, slowStillSubscribed := state.subscribers[slowSub]
+	_, fastStillSubscribed := state.subscribers[fastSub]
+	state.mu.RUnlock()
+	if slowStillSubscribed || !fastStillSubscribed {
+		t.Fatalf("subscribers after the drop: slow %v fast %v, want only the fast one", slowStillSubscribed, fastStillSubscribed)
 	}
 }
 

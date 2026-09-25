@@ -23,6 +23,17 @@ const (
 	idleTimeoutDefault = 120 * time.Second
 )
 
+// newFCMSender builds the FCM sender from the service-account JSON. The relay
+// hands it the store's token list and its dead-token callback. Tests replace
+// it to check that wiring without talking to Google.
+var newFCMSender = func(ctx context.Context, credsJSON []byte, tokens func() []string, onInvalidToken func(string)) (push.Sender, string, error) {
+	f, err := push.NewFCMFromCredentials(ctx, credsJSON, tokens, onInvalidToken)
+	if err != nil {
+		return nil, "", err
+	}
+	return f, f.ProjectID, nil
+}
+
 func orDefault(d, def time.Duration) time.Duration {
 	if d > 0 {
 		return d
@@ -78,12 +89,12 @@ func NewServer(cfg *Config) (_ *Server, err error) {
 		if err != nil {
 			return nil, fmt.Errorf("read fcm credentials from %s: %w", cfg.FCMCredentials, err)
 		}
-		fcmSender, err := push.NewFCMFromCredentials(context.Background(), credsData, store.AllFCMTokens, store.RemoveFCMToken)
+		fcmSender, projectID, err := newFCMSender(context.Background(), credsData, store.AllFCMTokens, store.RemoveFCMToken)
 		if err != nil {
 			return nil, fmt.Errorf("init fcm sender: %w", err)
 		}
 		senders = append(senders, fcmSender)
-		slog.Info("fcm push enabled", "project_id", fcmSender.ProjectID)
+		slog.Info("fcm push enabled", "project_id", projectID)
 	}
 
 	if cfg.NtfyURL != "" && cfg.NtfyTopic != "" {

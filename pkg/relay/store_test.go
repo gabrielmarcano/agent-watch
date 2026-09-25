@@ -281,14 +281,23 @@ func TestStore_HistoryBoundsAndDedup(t *testing.T) {
 	}
 	defer store.Close()
 
+	// Relative to now: panes older than 7 days are pruned on every add, so
+	// fixed dates would break this test a week after they were written.
+	base := time.Now().UTC().Add(-2 * time.Hour)
+	at := func(d time.Duration) string { return base.Add(d).Format(time.RFC3339) }
+
 	// 1. Dedup by ID
 	it1 := model.HistoryItem{
 		ID:          "dedup-id",
 		PaneID:      "w1:p1",
-		CompletedAt: "2026-09-24T00:00:01Z",
+		CompletedAt: at(time.Second),
 	}
-	store.AddHistory(it1)
-	store.AddHistory(it1) // Duplicate should be ignored
+	if !store.AddHistory(it1) {
+		t.Fatalf("first AddHistory reported the item as not stored")
+	}
+	if store.AddHistory(it1) { // Duplicate should be ignored
+		t.Fatalf("duplicate AddHistory reported the item as stored")
+	}
 	items := store.GetHistory("w1:p1", 50)
 	if len(items) != 1 {
 		t.Fatalf("expected 1 item after duplicate insertion, got %d", len(items))
@@ -299,7 +308,7 @@ func TestStore_HistoryBoundsAndDedup(t *testing.T) {
 		store.AddHistory(model.HistoryItem{
 			ID:          "pane-item-" + strconv.Itoa(i),
 			PaneID:      "w1:p1",
-			CompletedAt: "2026-09-24T00:00:" + strconv.Itoa(10+i) + "Z",
+			CompletedAt: at(time.Duration(10+i) * time.Second),
 		})
 	}
 	paneItems := store.GetHistory("w1:p1", 50)
@@ -319,13 +328,13 @@ func TestStore_HistoryBoundsAndDedup(t *testing.T) {
 			store.AddHistory(model.HistoryItem{
 				ID:          paneID + "-it-" + strconv.Itoa(i),
 				PaneID:      paneID,
-				CompletedAt: "2026-09-24T01:00:00Z",
+				CompletedAt: at(time.Hour),
 			})
 		}
 	}
 	all := store.GetHistory("", 300)
-	if len(all) > 200 {
-		t.Fatalf("expected total history to be capped at 200, got %d", len(all))
+	if len(all) != 200 {
+		t.Fatalf("expected total history to be capped at exactly 200, got %d", len(all))
 	}
 }
 

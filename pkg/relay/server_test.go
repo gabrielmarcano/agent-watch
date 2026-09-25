@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -18,6 +19,7 @@ import (
 
 	"github.com/coder/websocket"
 	"github.com/gabrielmarcano/agent-monitor/pkg/model"
+	"github.com/gabrielmarcano/agent-monitor/pkg/push"
 )
 
 // The ntfy topic is a secret (anyone who knows it can read the pushes), so it
@@ -279,6 +281,122 @@ func TestServer_TimeoutsKeepStreamsAlive(t *testing.T) {
 	for {
 		if name, _ := nextSSEEvent(t, stream); name == "agent" {
 			break
+		}
+	}
+}
+
+// recordingSender is a push.Sender that records every message.
+type recordingSender struct {
+	msgs chan push.Message
+}
+
+func (r *recordingSender) Name() string { return "recording" }
+func (r *recordingSender) Send(_ context.Context, m push.Message) error {
+	r.msgs <- m
+	return nil
+}
+
+type ntfyHit struct {
+	path, title, auth, priority, body string
+}
+
+// NewServer wires push end to end: the host's agent updates reach every
+// sender, FCM gets the store's registered tokens, and a token FCM reports
+// dead is removed from the store.
+func TestServer_PushWiring(t *testing.T) {
+	fcm := &recordingSender{msgs: make(chan push.Message, 8)}
+	var fcmTokens func() []string
+	var fcmTokenDead func(string)
+	prevNewFCM := newFCMSender
+	newFCMSender = func(_ context.Context, creds []byte, tokens func() []string, onInvalid func(string)) (push.Sender, string, error) {
+		if string(creds) != "fake-credentials" {
+			return nil, "", errors.New("unexpected credentials file content")
+		}
+		fcmTokens, fcmTokenDead = tokens, onInvalid
+		return fcm, "test-project", nil
+	}
+	t.Cleanup(func() { newFCMSender = prevNewFCM })
+
+	ntfyHits := make(chan ntfyHit, 8)
+	ntfy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		ntfyHits <- ntfyHit{r.URL.Path, r.Header.Get("Title"), r.Header.Get("Authorization"), r.Header.Get("Priority"), string(body)}
+	}))
+	defer ntfy.Close()
+
+	credsPath := filepath.Join(t.TempDir(), "fcm.json")
+	if err := os.WriteFile(credsPath, []byte("fake-credentials"), 0600); err != nil {
+		t.Fatalf("write creds: %v", err)
+	}
+	server, ts := setupTestServerWith(t, func(cfg *Config) {
+		cfg.FCMCredentials = credsPath
+		cfg.NtfyURL = ntfy.URL
+		cfg.NtfyTopic = "aw-test-topic"
+		cfg.NtfyToken = "ntfy-test-token"
+	})
+	if fcmTokens == nil || fcmTokenDead == nil {
+		t.Fatalf("NewServer did not build the FCM sender")
+	}
+
+	// A watch registers its FCM token: the FCM sender sees it.
+	devToken, _ := GenerateDeviceToken()
+	dev, _ := server.Store().AddDevice("Watch", Sha256Hex(devToken))
+	req, _ := http.NewRequest("POST", ts.URL+"/v1/push/register", strings.NewReader(`{"platform":"fcm","token":"fcm-device-1"}`))
+	req.Header.Set("Authorization", "Bearer "+devToken)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil || resp.StatusCode != http.StatusOK {
+		t.Fatalf("push/register: %v, %v", resp, err)
+	}
+	resp.Body.Close()
+	if got := fcmTokens(); len(got) != 1 || got[0] != "fcm-device-1" {
+		t.Fatalf("FCM sender tokens = %v, want [fcm-device-1]", got)
+	}
+
+	// The bridge reports an agent that became blocked: both senders push it.
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	host := connectTestHost(t, ctx, server, ts)
+	update, _ := json.Marshal(model.AgentUpdateMsg{Type: model.WireAgentUpdate, Agent: model.AgentState{
+		PaneID: "w5:pAE", Agent: "claude", Label: "bizum", Status: model.StatusBlocked, StateChangeSeq: 334,
+		Prompt: &model.PendingPrompt{
+			Kind: model.PromptPermission, Title: "Bash command", Detail: "go test ./...", Fingerprint: "9f2c61d0a4b3e871",
+			Options: []model.PromptOption{
+				{ID: "opt-1", Label: "Yes", Role: model.RoleAllowOnce},
+				{ID: "opt-3", Label: "No", Role: model.RoleDeny},
+			},
+		},
+	}})
+	if err := host.Write(ctx, websocket.MessageText, update); err != nil {
+		t.Fatalf("host write: %v", err)
+	}
+
+	select {
+	case m := <-fcm.msgs:
+		if m.Event != push.EventBlocked || m.PaneID != "w5:pAE" || m.Fingerprint != "9f2c61d0a4b3e871" ||
+			m.AllowOptionID != "opt-1" || m.DenyOptionID != "opt-3" || m.StateChangeSeq != 334 {
+			t.Fatalf("FCM message = %+v", m)
+		}
+	case <-ctx.Done():
+		t.Fatalf("FCM sender never got the blocked push")
+	}
+	select {
+	case hit := <-ntfyHits:
+		if hit.path != "/aw-test-topic" || hit.auth != "Bearer ntfy-test-token" || hit.priority != "5" ||
+			hit.title != "bizum needs approval" || hit.body != "Bash command: go test ./..." {
+			t.Fatalf("ntfy request = %+v", hit)
+		}
+	case <-ctx.Done():
+		t.Fatalf("ntfy never got the blocked push")
+	}
+
+	// FCM reports the token dead: the store forgets it.
+	fcmTokenDead("fcm-device-1")
+	if got := fcmTokens(); len(got) != 0 {
+		t.Fatalf("FCM tokens after a dead-token report = %v, want none", got)
+	}
+	for _, d := range server.Store().ListDevices() {
+		if d.ID == dev.ID && d.FCMToken != "" {
+			t.Fatalf("device still has FCM token %q", d.FCMToken)
 		}
 	}
 }

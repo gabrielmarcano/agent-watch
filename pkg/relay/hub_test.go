@@ -79,6 +79,8 @@ func TestHub_ConnectAndReplace(t *testing.T) {
 
 	s := httptest.NewServer(http.HandlerFunc(hub.ServeHost))
 	defer s.Close()
+	sub, events := state.Subscribe()
+	defer state.Unsubscribe(sub)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -107,16 +109,7 @@ func TestHub_ConnectAndReplace(t *testing.T) {
 		t.Fatalf("conn1 write hello: %v", err)
 	}
 
-	// Wait for state to reflect host online
-	for i := 0; i < 50; i++ {
-		if state.HostOnline() {
-			break
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	if !state.HostOnline() {
-		t.Fatalf("expected state.HostOnline to be true")
-	}
+	waitHostOnline(t, events, true, 5*time.Second)
 
 	// 2. Connect host 2; host 1 should be closed with code 4000 ("replaced")
 	conn2, _, err := websocket.Dial(ctx, wsURL, opts)
@@ -143,12 +136,7 @@ func TestHub_ConnectAndReplace(t *testing.T) {
 
 	// 3. Disconnect conn2; state should revert to HostOnline = false
 	conn2.Close(websocket.StatusNormalClosure, "bye")
-	for i := 0; i < 50; i++ {
-		if !state.HostOnline() {
-			break
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
+	waitHostOnline(t, events, false, 5*time.Second)
 	if state.HostOnline() {
 		t.Fatalf("expected hostOnline to be false after disconnect")
 	}
@@ -163,6 +151,8 @@ func TestHub_CommandRoundTrip(t *testing.T) {
 
 	s := httptest.NewServer(http.HandlerFunc(hub.ServeHost))
 	defer s.Close()
+	sub, events := state.Subscribe()
+	defer state.Unsubscribe(sub)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -189,12 +179,7 @@ func TestHub_CommandRoundTrip(t *testing.T) {
 	}
 
 	// Wait for host connection to be ready
-	for i := 0; i < 50; i++ {
-		if state.HostOnline() {
-			break
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
+	waitHostOnline(t, events, true, 5*time.Second)
 
 	// Host loop to reply to commands
 	go func() {
