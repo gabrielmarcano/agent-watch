@@ -2,12 +2,12 @@
 
 The Wear OS app is the primary client of the relay's `/v1` API (`docs/reference/contracts.md` §1, §2, §4.1). It never talks to the computer directly and never sends raw keys. Build, install and device checks: `docs/phases/4-wearos.md` and `.agents/skills/wearos-deploy/SKILL.md`.
 
-> **State on 2026-09-25:** the data layer below was reworked in the Phase 4 review, and the UI was rebuilt on Wear Compose Material 3 in Phase 4b (`docs/phases/4b-wearos-ui.md`). 173 JVM tests. Verified on the emulator (round, 192 dp) against a local relay; **not yet on the watch**.
+> **State on 2026-09-25:** the data layer below was reworked in the Phase 4 review, and the UI was rebuilt on Wear Compose Material 3 in Phase 4b (`docs/phases/4b-wearos-ui.md`). 189 JVM tests. Verified on the emulator (round, 192 dp) against a local relay; **not yet on the watch**.
 
 ## 1. Stack
 
 - Kotlin 2.2, Jetpack Compose for Wear OS **Material 3** 1.6.2 (`androidx.wear.compose.material3`): `AppScaffold`, `ScreenScaffold` + `TransformingLazyColumn` (native rotary, the clock scrolls away), `EdgeButton`, confirmation and alert dialogs. 1.6 is the newest line on AGP 8; 1.7 needs AGP 9.1 and compileSdk 37.
-- Tile on ProtoLayout Material 3 (`Material3TileService`); text entry through `androidx.wear:wear-input` (system keyboard, handwriting or voice).
+- Two tiles on ProtoLayout Material 3 (`Material3TileService`); text entry through `androidx.wear:wear-input` (system keyboard, handwriting or voice).
 - Toolchain: AGP 8.13.2, Gradle 8.14.3, compileSdk 36, targetSdk 34.
 - OkHttp + `okhttp-sse`, Gson (models with `@Keep`, snake_case field names, for R8).
 - Firebase Cloud Messaging (data-only messages).
@@ -25,8 +25,8 @@ The Wear OS app is the primary client of the relay's `/v1` API (`docs/reference/
 | `ui/logic/` | Pure presentation logic with JVM tests: `attentionSections` (list order), `headPreview`/`tailPreview`, `ageOf`, `listStatus` (the list's notice and dimming), relay URL checks |
 | `ui/components/` | `ScreenList` (`ScreenScaffold` + `TransformingLazyColumn`), `transformedItem`, age text, voice and text input intents, `rememberPaneHistory` (the state's items merged with one `GET /v1/history?pane_id=`) |
 | `ui/screens/` | Agent list, agent screen + `PromptSection`, dictation confirm (`DictationFlow`), full text, history, reader, pairing, settings |
-| `complication/` | `complicationContent` (state → count and the agent a tap opens) and the data source: SHORT_TEXT, LONG_TEXT and MONOCHROMATIC_IMAGE, with the app's terminal glyph |
-| `tile/` | `tileContent`, `dictationTarget`, the Material 3 tile and `QuickDictateActivity` |
+| `complication/` | `complicationContent` (state → count and the agent a tap opens), `complicationBadge` (the short type: glyph and how many need the user, a problem's own glyph and a dash) and the data source: SHORT_TEXT, LONG_TEXT and MONOCHROMATIC_IMAGE |
+| `tile/` | Quick Dictate (`tileContent`, `dictationTarget`, `QuickDictateActivity`); Agents (`agentsTile`: the two most urgent agents, each opening its screen, and how many more); `TileCommon` (palette, the 3 s fetch, launching into the app) |
 | `util/` | `MarkdownFormatter` (plain previews), `MarkdownBlocks` (the reader's block parser) |
 
 ## 3. Data flow
@@ -42,7 +42,7 @@ The Wear OS app is the primary client of the relay's `/v1` API (`docs/reference/
                                  │
                    hooks ────────┼──► ApprovalNotifications (dismiss stale approvals)
                                  ├──► PushRegistration.ensure (on every stream open)
-                                 └──► SurfaceUpdates (complication / tile refresh, throttled)
+                                 └──► SurfaceUpdates (complication / tiles refresh, throttled)
 
  FCM ──► MyFirebaseMessagingService ──► blocked / done / digest notifications
                                    └──► resolved: dismiss the pane's approval
@@ -94,8 +94,9 @@ commandErrorFeedback(error, surface)             // the message to show for a fa
 - One notification per pane (`pane_id.hashCode()`); digests use a fixed id. Channels: `agent_blocked` (high), `agent_done` (default), `agent_watch_feedback` (low, silent action results).
 - Every `PendingIntent` carries a data URI unique per pane and action (`agentwatch://notification/<action>/<pane>`), so extras from different panes can never be swapped.
 - `resolved` pushes and live state (SSE/refresh) dismiss approvals that no longer match the agent. The relay sends `resolved` only with `AW_PUSH_RESOLVED` enabled.
-- Action results: "Approved", "Denied", "Canceled", "Sent" (auto-dismissed after 3 s), or an error message with an Open action.
+- Buttons (`blockedButtons`): a question's answers (the push's `options`, up to 4), a permission's Allow and Deny, nothing for an `unknown` prompt, then Open. Cancel is never offered for a question. A finished agent's notification shows its reply and offers Reply (keyboard or voice → `prompt`).
+- Action results: "Approved", "Denied", "Answered", "Canceled", "Sent" (auto-dismissed after 3 s), or an error message with an Open action.
 
 ## 6. Tests
 
-`./gradlew :app:testDebugUnitTest` (JVM, no device): `RelayEngine*Test` against `FakeRelay` (auth, restart, silence, merging), `RelayClientTest`, `FcmRegistrarTest`, `AgentStoreTest`, `HistoryMergeTest`, `AgentNotificationsTest`, `SurfaceUpdatesTest`, the `approval/` tests, `ContractsTest` (parses `pkg/model/testdata/agent_state.json`), and the presentation tests: `ui/logic/*Test`, `MarkdownBlocksTest`, `DictationTargetTest`, `TileContentTest`, `ComplicationContentTest`.
+`./gradlew :app:testDebugUnitTest` (JVM, no device): `RelayEngine*Test` against `FakeRelay` (auth, restart, silence, merging), `RelayClientTest`, `FcmRegistrarTest`, `AgentStoreTest`, `HistoryMergeTest`, `AgentNotificationsTest`, `SurfaceUpdatesTest`, the `approval/` tests, `ContractsTest` (parses `pkg/model/testdata/agent_state.json`), and the presentation tests: `ui/logic/*Test`, `MarkdownBlocksTest`, `DictationTargetTest`, `TileContentTest`, `AgentsTileContentTest`, `ComplicationContentTest`.
