@@ -4,15 +4,48 @@
     "title": "Nombre",
     "detail": "¿Qué nombre nuevo quieres para note.txt?",
     "options": [
-      {"id": "opt-1", "label": "notes.txt Solo pasa a plural; la extensión no cambia", "role": "choice"},
-      {"id": "opt-2", "label": "hello.txt Nombrado por su primera línea", "role": "choice"},
-      {"id": "opt-3", "label": "README.md Lo convierte en el README del repo (pasa a Markdown)", "role": "choice"},
-      {"id": "opt-4", "label": "Type something.", "role": "choice"},
-      {"id": "opt-5", "label": "Chat about this", "role": "choice"}
+      {
+        "id": "opt-1",
+        "label": "notes.txt",
+        "description": "Solo pasa a plural; la extensión no cambia",
+        "role": "choice"
+      },
+      {
+        "id": "opt-2",
+        "label": "hello.txt",
+        "description": "Nombrado por su primera línea",
+        "role": "choice"
+      },
+      {
+        "id": "opt-3",
+        "label": "README.md",
+        "description": "Lo convierte en el README del repo (pasa a Markdown)",
+        "role": "choice"
+      },
+      {
+        "id": "opt-5",
+        "label": "Chat about this",
+        "role": "choice"
+      }
     ]
   },
-  "keys": {"opt-1": ["1"], "opt-2": ["2"], "opt-3": ["3"], "opt-4": ["4"], "opt-5": ["5"]},
-  "cancel_keys": ["esc"],
+  "keys": {
+    "opt-1": [
+      "1"
+    ],
+    "opt-2": [
+      "2"
+    ],
+    "opt-3": [
+      "3"
+    ],
+    "opt-5": [
+      "5"
+    ]
+  },
+  "cancel_keys": [
+    "esc"
+  ],
   "verified_keys": true,
-  "notes": "AskUserQuestion asked while in plan mode (captured in Phase 0 as plan-approval.txt; the real ExitPlanMode dialog is plan-approval.txt now). Digit selects immediately without Enter."
+  "notes": "AskUserQuestion asked while in plan mode (captured in Phase 0 as plan-approval.txt; the real ExitPlanMode dialog is plan-approval.txt now). Digit selects immediately without Enter. Since 2026-09-25 the line under each answer is its description, and \"Type something.\" (a free-text field the watch cannot fill) is left out; the other options keep their ids."
 }

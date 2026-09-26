@@ -92,6 +92,20 @@ func TestOmittedFields(t *testing.T) {
 	if !bytes.Contains(pData, []byte(`"options":[]`)) {
 		t.Errorf("Expected options:[], got: %s", string(pData))
 	}
+
+	// An option without a description omits the field; its text is the label alone.
+	plain := model.PromptOption{ID: "opt-1", Label: "Yes", Role: model.RoleAllowOnce}
+	oData, _ := json.Marshal(plain)
+	if bytes.Contains(oData, []byte(`"description"`)) {
+		t.Errorf("Expected description to be omitted, got: %s", string(oData))
+	}
+	if plain.Text() != "Yes" {
+		t.Errorf("Text() = %q", plain.Text())
+	}
+	described := model.PromptOption{ID: "opt-2", Label: "Verde", Description: "Green", Role: model.RoleChoice}
+	if described.Text() != "Verde Green" {
+		t.Errorf("Text() = %q, want the label, a space and the description", described.Text())
+	}
 }
 
 func TestRoundTrip(t *testing.T) {

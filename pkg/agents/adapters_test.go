@@ -95,13 +95,16 @@ func TestGoldenFixtures(t *testing.T) {
 				var goldenLabels []string
 				for i, wantOpt := range golden.Prompt.Options {
 					gotOpt := prompt.Public.Options[i]
-					goldenLabels = append(goldenLabels, wantOpt.Label)
+					goldenLabels = append(goldenLabels, wantOpt.Text())
 
 					if gotOpt.ID != wantOpt.ID {
 						t.Errorf("Option[%d].ID mismatch: got %q, want %q", i, gotOpt.ID, wantOpt.ID)
 					}
 					if gotOpt.Label != wantOpt.Label {
 						t.Errorf("Option[%d].Label mismatch: got %q, want %q", i, gotOpt.Label, wantOpt.Label)
+					}
+					if gotOpt.Description != wantOpt.Description {
+						t.Errorf("Option[%d].Description mismatch: got %q, want %q", i, gotOpt.Description, wantOpt.Description)
 					}
 					if gotOpt.Role != wantOpt.Role {
 						t.Errorf("Option[%d].Role mismatch: got %v, want %v", i, gotOpt.Role, wantOpt.Role)

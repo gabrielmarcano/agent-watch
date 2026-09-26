@@ -81,3 +81,12 @@ struct CancelRequest: Codable, Sendable {
     let expected_seq: UInt64
     let fingerprint: String?
 }
+
+// One option of a prompt (contracts.md §1.3); the legacy client does not show /v1 prompts yet (Phase 6).
+// description holds the lines printed under the label; nil when the JSON omits it.
+struct PromptOption: Codable, Sendable {
+    let id: String
+    let label: String
+    let description: String?
+    let role: String
+}

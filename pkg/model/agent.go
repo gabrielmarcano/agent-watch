@@ -57,10 +57,22 @@ const (
 )
 
 // PromptOption is a single selectable choice in an approval or question prompt.
+// Label is the option's first line; Description holds the lines printed under
+// it (Claude and OpenCode questions describe each answer), if any.
 type PromptOption struct {
-	ID    string     `json:"id"`
-	Label string     `json:"label"`
-	Role  OptionRole `json:"role"`
+	ID          string     `json:"id"`
+	Label       string     `json:"label"`
+	Description string     `json:"description,omitempty"`
+	Role        OptionRole `json:"role"`
+}
+
+// Text is the option's full text: Label, then a space and Description when
+// there is one. Roles are derived from it, and the fingerprint hashes it.
+func (o PromptOption) Text() string {
+	if o.Description == "" {
+		return o.Label
+	}
+	return o.Label + " " + o.Description
 }
 
 // PendingPrompt is the parsed prompt awaiting user interaction on a blocked agent.
@@ -122,7 +134,8 @@ func SortAgents(agents []AgentState) {
 }
 
 // Fingerprint implements contracts.md §1.3:
-// first 16 hex characters of sha256(kind + "\n" + title + "\n" + detail + "\n" + label_1 + "\n" + … + label_n).
+// first 16 hex characters of sha256(kind + "\n" + title + "\n" + detail + "\n" + text_1 + "\n" + … + text_n),
+// where text_i is option i's full text (PromptOption.Text).
 func Fingerprint(kind PromptKind, title, detail string, labels []string) string {
 	var b strings.Builder
 	b.WriteString(string(kind))

@@ -6,22 +6,20 @@
     "options": [
       {
         "id": "opt-1",
-        "label": "red Prefer red",
+        "label": "red",
+        "description": "Prefer red",
         "role": "choice"
       },
       {
         "id": "opt-2",
-        "label": "green Prefer green",
+        "label": "green",
+        "description": "Prefer green",
         "role": "choice"
       },
       {
         "id": "opt-3",
-        "label": "blue Prefer blue",
-        "role": "choice"
-      },
-      {
-        "id": "opt-4",
-        "label": "Type your own answer",
+        "label": "blue",
+        "description": "Prefer blue",
         "role": "choice"
       }
     ]
@@ -35,9 +33,6 @@
     ],
     "opt-3": [
       "3"
-    ],
-    "opt-4": [
-      "4"
     ]
   },
   "cancel_keys": [
@@ -45,5 +40,5 @@
   ],
   "verified_keys": true,
   "herdr_status": "blocked",
-  "notes": "OpenCode's question tool dialog (footer '↑↓ select  enter submit  esc dismiss'). Digits 1-9 pick an answer; for a single question the pick is submitted at once (digit 2 answered 'green'). esc dismisses (rejects) the question."
+  "notes": "OpenCode's question tool dialog (footer '↑↓ select  enter submit  esc dismiss'). Digits 1-9 pick an answer; for a single question the pick is submitted at once (digit 2 answered 'green'). esc dismisses (rejects) the question. Since 2026-09-25 the line under each answer is its description, and \"Type your own answer\" (a free-text field the watch cannot fill) is left out; the other options keep their ids."
 }

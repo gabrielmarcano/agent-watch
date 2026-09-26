@@ -211,10 +211,6 @@ func ocJoinDetail(first string, extra, patterns []string) string {
 
 func ocPrompt(title, detail string, opts []model.PromptOption, keys map[string][]string) Prompt {
 	detail = truncateRunes(detail, maxDetailRunes)
-	labels := make([]string, len(opts))
-	for i, o := range opts {
-		labels[i] = o.Label
-	}
 	kind := kindFor(opts)
 	return Prompt{
 		Public: model.PendingPrompt{
@@ -222,7 +218,7 @@ func ocPrompt(title, detail string, opts []model.PromptOption, keys map[string][
 			Title:       title,
 			Detail:      detail,
 			Options:     opts,
-			Fingerprint: model.Fingerprint(kind, title, detail, labels),
+			Fingerprint: model.Fingerprint(kind, title, detail, optionTexts(opts)),
 		},
 		Keys:       keys,
 		CancelKeys: []string{"esc"},
@@ -251,7 +247,10 @@ func ocParseQuestion(lines []string) (Prompt, bool) {
 			return Prompt{}, false
 		}
 		m.Title, m.Detail = extractTitleAndDetail(region, m.StartLine)
-		return buildPrompt(m, digitKeys), true
+		// "Type your own answer" opens a text field the watch cannot fill.
+		return withoutOptions(buildPrompt(m, digitKeys), func(o model.PromptOption) bool {
+			return o.Label == "Type your own answer"
+		}), true
 	}
 	return Prompt{}, false
 }

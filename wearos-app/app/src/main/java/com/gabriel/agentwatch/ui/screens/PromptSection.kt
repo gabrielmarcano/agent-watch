@@ -231,7 +231,11 @@ private fun TransformingLazyColumnScope.optionItem(option: PromptOption, spec: T
         val icon: (@Composable BoxScope.() -> Unit)? =
             if (warn) ({ ResIcon(R.drawable.ic_status_blocked, null, Amber, Modifier.size(20.dp)) }) else null
         val label: @Composable RowScope.() -> Unit =
-            { Text(option.label, maxLines = 3, overflow = TextOverflow.Ellipsis) }
+            { Text(option.label, maxLines = 2, overflow = TextOverflow.Ellipsis) }
+        // The answer's description (Claude and OpenCode questions print one under each option).
+        val description: (@Composable RowScope.() -> Unit)? = option.description?.takeIf { it.isNotBlank() }?.let {
+            { Text(it, maxLines = 3, overflow = TextOverflow.Ellipsis) }
+        }
         val modifier = Modifier.fillMaxWidth().transformedHeight(this, spec)
         if (tonal && !warn) {
             FilledTonalButton(
@@ -239,6 +243,7 @@ private fun TransformingLazyColumnScope.optionItem(option: PromptOption, spec: T
                 enabled = !controls.locked,
                 modifier = modifier,
                 transformation = SurfaceTransformation(spec),
+                secondaryLabel = description,
                 label = label
             )
         } else {
@@ -249,6 +254,7 @@ private fun TransformingLazyColumnScope.optionItem(option: PromptOption, spec: T
                 transformation = SurfaceTransformation(spec),
                 border = if (warn) ButtonDefaults.outlinedButtonBorder(enabled = !controls.locked, borderColor = Amber) else ButtonDefaults.outlinedButtonBorder(enabled = !controls.locked),
                 icon = icon,
+                secondaryLabel = description,
                 label = label
             )
         }

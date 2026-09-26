@@ -105,7 +105,10 @@ func (c *claudeAdapter) ParsePrompt(screen string) (Prompt, bool) {
 		m.Detail = strings.Join(detailLines, "\n") // buildPrompt caps it on a rune boundary
 	}
 
-	p := buildPrompt(m, digitKeys)
+	// "Type something." (AskUserQuestion) opens a text field the watch cannot fill.
+	p := withoutOptions(buildPrompt(m, digitKeys), func(o model.PromptOption) bool {
+		return o.Label == "Type something."
+	})
 	return p, true
 }
 

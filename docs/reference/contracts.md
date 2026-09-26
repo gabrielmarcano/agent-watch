@@ -123,9 +123,10 @@ const (
 )
 
 type PromptOption struct {
-    ID    string     `json:"id"`
-    Label string     `json:"label"`
-    Role  OptionRole `json:"role"`
+    ID          string     `json:"id"`
+    Label       string     `json:"label"`
+    Description string     `json:"description,omitempty"` // lines printed under the label, if any
+    Role        OptionRole `json:"role"`
 }
 
 type PendingPrompt struct {
@@ -146,7 +147,9 @@ type PendingPrompt struct {
 - **`id` is `opt-<n>`**, where `<n>` is the number printed in the menu. If the menu has no numbers, `<n>` is the 1-based position.
 - **`options` is never null.** For `unknown` it is an empty array `[]`.
 - **`raw_tail` is set only for `unknown`.** It holds the last 12 non-empty lines of the visible screen, each trimmed of trailing spaces.
-- **`fingerprint`** is the first 16 hex characters of `sha256(kind + "\n" + title + "\n" + detail + "\n" + label_1 + "\n" + … + label_n)`. It lets the bridge detect that the menu on screen changed between display and tap.
+- **`label` and `description`:** `label` is the option's first line; `description` holds the lines printed under it (the description Claude and OpenCode questions show for each answer, or the rest of a label that wrapped), joined with spaces. It is omitted when there are none. An option's **text** is `label`, plus a space and `description` when present: roles are derived from the text (a "don't ask again" on the second line still makes `allow_always`).
+- **Options the watch cannot answer are left out**: a free-text entry (Claude's "Type something.", OpenCode's "Type your own answer") opens a text field that keys cannot fill. The other options keep their ids.
+- **`fingerprint`** is the first 16 hex characters of `sha256(kind + "\n" + title + "\n" + detail + "\n" + text_1 + "\n" + … + text_n)`, with each option's text as defined above (the same value as before `description` existed). It lets the bridge detect that the menu on screen changed between display and tap.
 - **Keys are never part of this object.** The bridge keeps the option → keys map privately.
 
 ### 1.4 `HistoryItem`

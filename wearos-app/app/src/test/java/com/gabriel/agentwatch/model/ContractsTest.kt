@@ -58,6 +58,17 @@ class ContractsTest {
     }
 
     @Test
+    fun optionDescriptionIsOptional() {
+        // contracts §1.3: description is omitempty; the golden has none.
+        val options = Gson().fromJson(
+            """[{"id":"opt-1","label":"Verde","description":"Green","role":"choice"},{"id":"opt-2","label":"No","role":"deny"}]""",
+            Array<PromptOption>::class.java
+        )
+        assertEquals("Green", options[0].description)
+        assertEquals(null, options[1].description)
+    }
+
+    @Test
     fun testResolveTargetAgent() {
         val a1 = AgentState(pane_id = "p1", label = "Agent 1", status = "working", updated_at = "2026-09-23T10:00:00Z")
         val a2 = AgentState(pane_id = "p2", label = "Agent 2", status = "done", updated_at = "2026-09-23T11:00:00Z")

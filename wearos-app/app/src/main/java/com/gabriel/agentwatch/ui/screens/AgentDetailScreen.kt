@@ -240,7 +240,12 @@ fun AgentDetailScreen(
             })
         },
         title = { Text(stringResource(R.string.confirm_always_title)) },
-        text = { Text(askAlways?.label.orEmpty(), textAlign = TextAlign.Center) }
+        text = {
+            Text(
+                listOfNotNull(askAlways?.label, askAlways?.description?.takeIf { it.isNotBlank() }).joinToString(" "),
+                textAlign = TextAlign.Center
+            )
+        }
     )
 
     val confirmationText = confirmation?.let { stringResource(it) }.orEmpty()

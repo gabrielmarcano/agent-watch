@@ -6,6 +6,7 @@ import androidx.annotation.Keep
 data class PromptOption(
     val id: String = "",
     val label: String = "",
+    val description: String? = null, // lines printed under the label (omitempty)
     val role: String = "choice" // "allow_once" | "allow_always" | "deny" | "choice"
 )
 

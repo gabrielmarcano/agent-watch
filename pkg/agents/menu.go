@@ -125,7 +125,10 @@ func dialogAtBottom(lines []string, m parsedMenu, inputMarker string) bool {
 type menuOption struct {
 	Number int
 	Label  string
-	Cursor bool
+	// Description holds the option's continuation lines (the description a
+	// question prints under each answer, or a label that wrapped).
+	Description string
+	Cursor      bool
 }
 
 type parsedMenu struct {
@@ -262,12 +265,10 @@ func buildPrompt(m parsedMenu, keysFor func(o menuOption, idx int, m parsedMenu)
 		if opt.Number == 0 {
 			id = fmt.Sprintf("opt-%d", idx+1)
 		}
-		role := classify(opt.Label)
-		opts = append(opts, model.PromptOption{
-			ID:    id,
-			Label: opt.Label,
-			Role:  role,
-		})
+		public := model.PromptOption{ID: id, Label: opt.Label, Description: opt.Description}
+		// The role comes from the full text: "don't ask again" may sit on a continuation line.
+		public.Role = classify(public.Text())
+		opts = append(opts, public)
 		if keysFor != nil {
 			keys[id] = keysFor(opt, idx, m)
 		}
@@ -277,12 +278,8 @@ func buildPrompt(m parsedMenu, keysFor func(o menuOption, idx int, m parsedMenu)
 	}
 
 	kind := kindFor(opts)
-	var labels []string
-	for _, o := range opts {
-		labels = append(labels, o.Label)
-	}
 	detail := truncateRunes(m.Detail, maxDetailRunes)
-	fp := model.Fingerprint(kind, m.Title, detail, labels)
+	fp := model.Fingerprint(kind, m.Title, detail, optionTexts(opts))
 
 	return Prompt{
 		Public: model.PendingPrompt{
@@ -294,6 +291,33 @@ func buildPrompt(m parsedMenu, keysFor func(o menuOption, idx int, m parsedMenu)
 		},
 		Keys: keys,
 	}
+}
+
+// optionTexts lists the options' full texts, as the fingerprint hashes them.
+func optionTexts(opts []model.PromptOption) []string {
+	texts := make([]string, len(opts))
+	for i, o := range opts {
+		texts[i] = o.Text()
+	}
+	return texts
+}
+
+// withoutOptions drops the options drop matches (answers the watch cannot
+// give, such as a free-text entry) and recomputes the kind and fingerprint of
+// what remains. The other options keep their ids and keys.
+func withoutOptions(p Prompt, drop func(model.PromptOption) bool) Prompt {
+	kept := []model.PromptOption{}
+	for _, o := range p.Public.Options {
+		if drop(o) {
+			delete(p.Keys, o.ID)
+			continue
+		}
+		kept = append(kept, o)
+	}
+	p.Public.Options = kept
+	p.Public.Kind = kindFor(kept)
+	p.Public.Fingerprint = model.Fingerprint(p.Public.Kind, p.Public.Title, p.Public.Detail, optionTexts(kept))
+	return p
 }
 
 // findMenu scans screen text for the LAST numbered block of >= 2 options per agents.md §2.
@@ -347,7 +371,8 @@ func findMenu(screen string) (parsedMenu, bool) {
 						break
 					}
 					if !isKeyHint(content) {
-						currentOpts[len(currentOpts)-1].Label += " " + cleanBoxChars(content)
+						last := &currentOpts[len(currentOpts)-1]
+						last.Description = strings.TrimSpace(last.Description + " " + cleanBoxChars(content))
 					}
 					contCount++
 					i++

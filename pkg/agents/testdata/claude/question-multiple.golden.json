@@ -4,15 +4,48 @@
     "title": "Color",
     "detail": "¿Qué color prefieres?",
     "options": [
-      {"id": "opt-1", "label": "Rojo Red", "role": "choice"},
-      {"id": "opt-2", "label": "Verde Green", "role": "choice"},
-      {"id": "opt-3", "label": "Azul Blue", "role": "choice"},
-      {"id": "opt-4", "label": "Type something.", "role": "choice"},
-      {"id": "opt-5", "label": "Chat about this", "role": "choice"}
+      {
+        "id": "opt-1",
+        "label": "Rojo",
+        "description": "Red",
+        "role": "choice"
+      },
+      {
+        "id": "opt-2",
+        "label": "Verde",
+        "description": "Green",
+        "role": "choice"
+      },
+      {
+        "id": "opt-3",
+        "label": "Azul",
+        "description": "Blue",
+        "role": "choice"
+      },
+      {
+        "id": "opt-5",
+        "label": "Chat about this",
+        "role": "choice"
+      }
     ]
   },
-  "keys": {"opt-1": ["1"], "opt-2": ["2"], "opt-3": ["3"], "opt-4": ["4"], "opt-5": ["5"]},
-  "cancel_keys": ["esc"],
+  "keys": {
+    "opt-1": [
+      "1"
+    ],
+    "opt-2": [
+      "2"
+    ],
+    "opt-3": [
+      "3"
+    ],
+    "opt-5": [
+      "5"
+    ]
+  },
+  "cancel_keys": [
+    "esc"
+  ],
   "verified_keys": true,
-  "notes": "Digit selects immediately without Enter. Continuation lines appended with space."
+  "notes": "Digit selects immediately without Enter. Continuation lines appended with space. Since 2026-09-25 the line under each answer is its description, and \"Type something.\" (a free-text field the watch cannot fill) is left out; the other options keep their ids."
 }

@@ -183,11 +183,12 @@ func TestFindMenu_SyntheticCases(t *testing.T) {
 	if len(m.Options) != 2 {
 		t.Fatalf("expected 2 options, got %d", len(m.Options))
 	}
-	if m.Options[0].Label != "First choice with extra explanation on line two" {
-		t.Errorf("unexpected option 0 label: %q", m.Options[0].Label)
+	// The first line is the label; the continuation lines are its description.
+	if m.Options[0].Label != "First choice" || m.Options[0].Description != "with extra explanation on line two" {
+		t.Errorf("unexpected option 0: %q / %q", m.Options[0].Label, m.Options[0].Description)
 	}
-	if m.Options[1].Label != "Second choice also with more details" {
-		t.Errorf("unexpected option 1 label: %q", m.Options[1].Label)
+	if m.Options[1].Label != "Second choice" || m.Options[1].Description != "also with more details" {
+		t.Errorf("unexpected option 1: %q / %q", m.Options[1].Label, m.Options[1].Description)
 	}
 
 	// 3. Boxed menu
@@ -317,9 +318,16 @@ func TestFindMenu_IndentedFrameRealScreen(t *testing.T) {
 	if !ok {
 		t.Fatal("framed question: no menu found")
 	}
-	want := []string{"red Prefer red", "green Prefer green", "blue Prefer blue", "Type your own answer"}
+	want := []string{"red", "green", "blue", "Type your own answer"}
 	if got := labelsOf(m); !reflect.DeepEqual(got, want) {
 		t.Errorf("labels = %q, want %q", got, want)
+	}
+	var descriptions []string
+	for _, o := range m.Options {
+		descriptions = append(descriptions, o.Description)
+	}
+	if want := []string{"Prefer red", "Prefer green", "Prefer blue", ""}; !reflect.DeepEqual(descriptions, want) {
+		t.Errorf("descriptions = %q, want %q", descriptions, want)
 	}
 }
 
@@ -393,5 +401,55 @@ func TestDetailTruncationKeepsUTF8(t *testing.T) {
 	}
 	if built.Public.Fingerprint != model.Fingerprint(built.Public.Kind, "t", built.Public.Detail, []string{"Yes", "No"}) {
 		t.Error("buildPrompt: fingerprint not computed over the truncated detail")
+	}
+}
+
+// A wrapped option: "don't ask again" sits on the continuation line. The role
+// still comes from the full text, and the fingerprint hashes the full text, so
+// its value is the one the joined label had before descriptions existed.
+func TestBuildPrompt_RoleAndFingerprintUseTheFullText(t *testing.T) {
+	m := parsedMenu{
+		Title: "Bash command",
+		Options: []menuOption{
+			{Number: 1, Label: "Yes"},
+			{Number: 2, Label: "Yes, and don't ask", Description: "again for: mv *"},
+			{Number: 3, Label: "No"},
+		},
+	}
+	p := buildPrompt(m, digitKeys)
+	if got := p.Public.Options[1].Role; got != model.RoleAllowAlways {
+		t.Errorf("role of the wrapped option = %v, want allow_always", got)
+	}
+	want := model.Fingerprint(model.PromptPermission, "Bash command", "", []string{"Yes", "Yes, and don't ask again for: mv *", "No"})
+	if p.Public.Fingerprint != want {
+		t.Errorf("fingerprint = %s, want %s (the joined-label value)", p.Public.Fingerprint, want)
+	}
+}
+
+// withoutOptions drops an option, keeps the others' ids and keys, and
+// recomputes the kind and fingerprint from what remains.
+func TestWithoutOptions(t *testing.T) {
+	m := parsedMenu{
+		Title: "Color",
+		Options: []menuOption{
+			{Number: 1, Label: "Red", Description: "Warm"},
+			{Number: 2, Label: "Type something."},
+			{Number: 3, Label: "Chat about this"},
+		},
+	}
+	p := withoutOptions(buildPrompt(m, digitKeys), func(o model.PromptOption) bool { return o.Label == "Type something." })
+
+	var ids []string
+	for _, o := range p.Public.Options {
+		ids = append(ids, o.ID)
+	}
+	if !reflect.DeepEqual(ids, []string{"opt-1", "opt-3"}) {
+		t.Errorf("ids = %v", ids)
+	}
+	if !reflect.DeepEqual(p.Keys, map[string][]string{"opt-1": {"1"}, "opt-3": {"3"}}) {
+		t.Errorf("keys = %v", p.Keys)
+	}
+	if want := model.Fingerprint(model.PromptQuestion, "Color", "", []string{"Red Warm", "Chat about this"}); p.Public.Fingerprint != want {
+		t.Errorf("fingerprint not recomputed: %s", p.Public.Fingerprint)
 	}
 }
