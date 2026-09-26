@@ -35,6 +35,7 @@ import com.gabriel.agentwatch.ui.components.ResIcon
 import com.gabriel.agentwatch.ui.components.ScreenList
 import com.gabriel.agentwatch.ui.components.TextInput
 import com.gabriel.agentwatch.ui.components.transformedItem
+import com.gabriel.agentwatch.ui.logic.displayHost
 import com.gabriel.agentwatch.ui.logic.isAcceptableRelayUrl
 import com.gabriel.agentwatch.ui.logic.normalizeRelayUrl
 import com.gabriel.agentwatch.ui.theme.OnSurfaceVariant
@@ -113,12 +114,6 @@ fun PairingScreen(revoked: Boolean, onPaired: () -> Unit) {
                     )
                 }
                 Text(stringResource(R.string.pair_title), style = MaterialTheme.typography.titleMedium, textAlign = TextAlign.Center)
-                Text(
-                    stringResource(R.string.pair_hint),
-                    color = OnSurfaceVariant,
-                    style = MaterialTheme.typography.bodySmall,
-                    textAlign = TextAlign.Center
-                )
             }
         }
         item(key = "url") {
@@ -130,8 +125,8 @@ fun PairingScreen(revoked: Boolean, onPaired: () -> Unit) {
                 icon = { ResIcon(R.drawable.ic_edit, null, MaterialTheme.colorScheme.onSurface) },
                 secondaryLabel = {
                     Text(
-                        relayUrl.ifBlank { stringResource(R.string.relay_url_missing) },
-                        maxLines = 2,
+                        displayHost(relayUrl).ifBlank { stringResource(R.string.relay_url_missing) },
+                        maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
                 },

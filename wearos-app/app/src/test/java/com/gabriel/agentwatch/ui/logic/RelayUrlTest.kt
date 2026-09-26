@@ -42,4 +42,11 @@ class RelayUrlTest {
     fun debugBuildsMayUseTheEmulatorsHost() {
         assertTrue(isAcceptableRelayUrl("http://10.0.2.2:8090", allowCleartext = true))
     }
+
+    @Test
+    fun theHostIsShownWithoutTheScheme() {
+        assertEquals("relay.example.com", displayHost("https://relay.example.com"))
+        assertEquals("10.0.2.2:8090", displayHost("http://10.0.2.2:8090/"))
+        assertEquals("", displayHost(""))
+    }
 }

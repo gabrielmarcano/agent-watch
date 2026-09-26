@@ -161,7 +161,7 @@ private fun TransformingLazyColumnScope.previewItems(
                 onClick = { controls.onViewAll(full) },
                 modifier = Modifier.fillMaxWidth().transformedHeight(this, spec),
                 transformation = SurfaceTransformation(spec),
-                label = { Text(stringResource(R.string.view_all, preview.hiddenLines)) }
+                label = { Text(stringResource(R.string.view_all)) }
             )
         }
     }
@@ -219,7 +219,7 @@ private fun TransformingLazyColumnScope.unknownItems(spec: TransformationSpec, c
         Row(transformedItem(spec).padding(vertical = 4.dp), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
             ResIcon(R.drawable.ic_computer, null, OnSurfaceVariant, Modifier.size(18.dp))
             Spacer(Modifier.width(6.dp))
-            Text(stringResource(R.string.answer_on_mac), color = OnSurfaceVariant, style = MaterialTheme.typography.labelMedium)
+            Text(stringResource(R.string.answer_on_device), color = OnSurfaceVariant, style = MaterialTheme.typography.labelMedium)
         }
     }
     cancelItem(spec, controls)

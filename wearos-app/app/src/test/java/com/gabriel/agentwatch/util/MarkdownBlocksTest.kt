@@ -5,6 +5,7 @@ import com.gabriel.agentwatch.util.MdBlock.Heading
 import com.gabriel.agentwatch.util.MdBlock.ListItem
 import com.gabriel.agentwatch.util.MdBlock.Paragraph
 import com.gabriel.agentwatch.util.MdBlock.Quote
+import com.gabriel.agentwatch.util.MdBlock.Record
 import com.gabriel.agentwatch.util.MdBlock.Rule
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -61,9 +62,33 @@ class MarkdownBlocksTest {
     }
 
     @Test
-    fun tablesBecomeCodeSoColumnsStayAligned() {
-        val blocks = parseMarkdown("| a | b |\n|---|---|\n| 1 | 2 |")
-        assertEquals(listOf(Code("| a | b |\n|---|---|\n| 1 | 2 |")), blocks)
+    fun eachTableRowBecomesARecordOfHeaderAndValue() {
+        // A table does not fit 170 dp: every row is its own item, one "header: value" line per column.
+        val blocks = parseMarkdown("| File | Lines | Status |\n|:---|---:|:---:|\n| `app.ts` | 42 | **ok** |\n| auth.ts | 7 | failing |")
+        assertEquals(
+            listOf(
+                Record(listOf("File" to listOf(MdSpan("app.ts", code = true)), "Lines" to plain("42"), "Status" to listOf(MdSpan("ok", bold = true)))),
+                Record(listOf("File" to plain("auth.ts"), "Lines" to plain("7"), "Status" to plain("failing"))),
+            ),
+            blocks
+        )
+    }
+
+    @Test
+    fun missingCellsAreLeftOutAndExtraCellsKeepAPlainHeader() {
+        val blocks = parseMarkdown("| a | b |\n|---|---|\n| 1 |\n| 1 | 2 | 3 |")
+        assertEquals(
+            listOf(
+                Record(listOf("a" to plain("1"))),
+                Record(listOf("a" to plain("1"), "b" to plain("2"), "" to plain("3"))),
+            ),
+            blocks
+        )
+    }
+
+    @Test
+    fun pipeLinesWithoutASeparatorStayVerbatim() {
+        assertEquals(listOf(Code("| not | a table |")), parseMarkdown("| not | a table |"))
     }
 
     @Test

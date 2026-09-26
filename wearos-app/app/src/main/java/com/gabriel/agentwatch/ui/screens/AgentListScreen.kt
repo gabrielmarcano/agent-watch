@@ -1,7 +1,6 @@
 package com.gabriel.agentwatch.ui.screens
 
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -89,15 +88,12 @@ fun AgentListScreen(
                     }
                 }
                 null -> item(key = "empty") {
-                    Column(transformedItem(spec).padding(vertical = 8.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text(stringResource(R.string.no_agents), style = MaterialTheme.typography.titleMedium, textAlign = TextAlign.Center)
-                        Text(
-                            stringResource(R.string.no_agents_hint),
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = OnSurfaceVariant,
-                            textAlign = TextAlign.Center
-                        )
-                    }
+                    Text(
+                        stringResource(R.string.no_agents),
+                        modifier = transformedItem(spec).padding(vertical = 8.dp),
+                        style = MaterialTheme.typography.titleMedium,
+                        textAlign = TextAlign.Center
+                    )
                 }
                 else -> Unit // the notice says it all
             }
@@ -160,7 +156,7 @@ private fun Notice(notice: ListNotice, modifier: Modifier) {
     val (icon, text, color) = when (notice) {
         ListNotice.CONNECTING -> Triple(R.drawable.ic_sync, R.string.notice_connecting, OnSurfaceVariant)
         ListNotice.RELAY_UNREACHABLE -> Triple(R.drawable.ic_cloud_off, R.string.notice_relay_unreachable, Red)
-        ListNotice.MAC_OFFLINE -> Triple(R.drawable.ic_computer, R.string.notice_mac_offline, Amber)
+        ListNotice.MAC_OFFLINE -> Triple(R.drawable.ic_computer, R.string.notice_device_offline, Amber)
         ListNotice.HERDR_STOPPED -> Triple(R.drawable.ic_computer, R.string.notice_herdr_stopped, Amber)
     }
     Row(modifier, horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {

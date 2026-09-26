@@ -17,8 +17,10 @@ sealed interface MdBlock {
     data class Paragraph(val spans: List<MdSpan>) : MdBlock
     /** [marker] is "•" or "3."; [depth] 0 is top level. */
     data class ListItem(val marker: String, val spans: List<MdSpan>, val depth: Int) : MdBlock
-    /** Verbatim monospace text: fenced code, tables, or a terminal screen. */
+    /** Verbatim monospace text: fenced code, pipe lines that are not a table, or a terminal screen. */
     data class Code(val text: String) : MdBlock
+    /** One table row, as (column header, cell) pairs: a table does not fit a watch, a record does. */
+    data class Record(val fields: List<Pair<String, List<MdSpan>>>) : MdBlock
     data class Quote(val spans: List<MdSpan>) : MdBlock
     data object Rule : MdBlock
 }
@@ -61,7 +63,7 @@ fun parseMarkdown(source: String): List<MdBlock> {
                 flush()
                 val table = mutableListOf<String>()
                 while (i < lines.size && lines[i].trim().startsWith("|")) table += lines[i++].trim()
-                blocks += MdBlock.Code(table.joinToString("\n"))
+                blocks += tableBlocks(table)
                 continue
             }
             HEADING.matches(trimmed) -> {
@@ -96,6 +98,24 @@ fun parseMarkdown(source: String): List<MdBlock> {
     }
     flush()
     return blocks
+}
+
+private val TABLE_SEPARATOR = Regex("^\\|?\\s*:?-{2,}:?\\s*(\\|\\s*:?-{2,}:?\\s*)*\\|?$")
+
+private fun cells(line: String): List<String> =
+    line.trim().removePrefix("|").removeSuffix("|").split('|').map { it.trim() }
+
+/** A markdown table → one [MdBlock.Record] per row; pipe lines without a header separator stay verbatim. */
+private fun tableBlocks(lines: List<String>): List<MdBlock> {
+    if (lines.size < 2 || !TABLE_SEPARATOR.matches(lines[1])) return listOf(MdBlock.Code(lines.joinToString("\n")))
+    val headers = cells(lines[0])
+    return lines.drop(2).map { row ->
+        MdBlock.Record(
+            cells(row).mapIndexedNotNull { col, cell ->
+                if (cell.isEmpty()) null else headers.getOrElse(col) { "" } to parseInline(cell)
+            }
+        )
+    }
 }
 
 private fun depthOf(indent: String): Int = indent.replace("\t", "    ").length / 2

@@ -56,8 +56,8 @@ class CommandFeedbackTest {
             "focus may have moved on the Mac; answer it on the Mac (focused button is \"Reject\")",
             409
         )
-        assertFeedback(focus, "Answer it on the Mac", refresh = false)
-        assertFeedback(focus, "Answer it on the Mac", refresh = false, surface = NOTIFICATION)
+        assertFeedback(focus, "Answer on the device", refresh = false)
+        assertFeedback(focus, "Answer on the device", refresh = false, surface = NOTIFICATION)
     }
 
     @Test
@@ -83,10 +83,10 @@ class CommandFeedbackTest {
 
     @Test
     fun hostSideOutagesUseContractWording() {
-        assertFeedback(relay("host_offline", 503), "Mac is offline", refresh = false)
+        assertFeedback(relay("host_offline", 503), "Device offline", refresh = false)
         assertFeedback(relay("herdr_offline", 503), "herdr stopped", refresh = false)
         // The Mac may or may not have acted: refresh to learn the outcome.
-        assertFeedback(relay("timeout", 504), "No answer from the Mac", refresh = true)
+        assertFeedback(relay("timeout", 504), "No answer from device", refresh = true)
     }
 
     @Test
@@ -131,7 +131,7 @@ class CommandFeedbackTest {
         assertFeedback(relay("stale_state", 409), "Agent changed — open the app", refresh = true, surface = NOTIFICATION)
         assertFeedback(relay("prompt_changed", 409), "Prompt changed — open the app", refresh = true, surface = NOTIFICATION)
         // Not every failure is "Could not reach the relay".
-        assertFeedback(relay("host_offline", 503), "Mac is offline", refresh = false, surface = NOTIFICATION)
+        assertFeedback(relay("host_offline", 503), "Device offline", refresh = false, surface = NOTIFICATION)
         assertFeedback(relay("agent_busy", 409), "Agent is busy", refresh = true, surface = NOTIFICATION)
     }
 

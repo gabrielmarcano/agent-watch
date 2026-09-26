@@ -28,11 +28,14 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.wear.compose.foundation.lazy.rememberTransformingLazyColumnState
 import androidx.wear.compose.material3.AlertDialog
 import androidx.wear.compose.material3.AlertDialogDefaults
+import androidx.wear.compose.material3.Card
 import androidx.wear.compose.material3.ConfirmationDialogDefaults
 import androidx.wear.compose.material3.EdgeButton
 import androidx.wear.compose.material3.FilledTonalButton
+import androidx.wear.compose.material3.ListSubHeader
 import androidx.wear.compose.material3.MaterialTheme
 import androidx.wear.compose.material3.SuccessConfirmationDialog
 import androidx.wear.compose.material3.SurfaceTransformation
@@ -47,6 +50,7 @@ import com.gabriel.agentwatch.approval.commandErrorFeedback
 import com.gabriel.agentwatch.approval.isAwaitingUpdate
 import com.gabriel.agentwatch.approval.needsConfirmation
 import com.gabriel.agentwatch.model.AgentState
+import com.gabriel.agentwatch.model.HistoryItem
 import com.gabriel.agentwatch.model.PromptOption
 import com.gabriel.agentwatch.network.RelayRepository
 import com.gabriel.agentwatch.ui.components.RecognizerIntentFactory
@@ -56,11 +60,14 @@ import com.gabriel.agentwatch.ui.components.ageText
 import com.gabriel.agentwatch.ui.components.transformedItem
 import com.gabriel.agentwatch.ui.theme.OnSurfaceVariant
 import com.gabriel.agentwatch.ui.theme.statusStyle
+import com.gabriel.agentwatch.util.MarkdownFormatter
 import kotlinx.coroutines.launch
 
 @Composable
 fun AgentDetailScreen(
     agent: AgentState,
+    lastReply: HistoryItem?,
+    onReadReply: (HistoryItem) -> Unit,
     isTileTarget: Boolean,
     onTileTargetChange: (Boolean) -> Unit,
     onDictated: (text: String) -> Unit,
@@ -130,8 +137,16 @@ fun AgentDetailScreen(
     val dictationPrompt = stringResource(R.string.dictation_prompt, agent.label.ifBlank { agent.pane_id })
     val unavailable = stringResource(R.string.dictation_unavailable)
 
+    // The last reply arrives a moment after the screen opens, and a prompt can appear or change: items
+    // inserted above the anchor would push the name off screen, so go back to the top.
+    val listState = rememberTransformingLazyColumnState()
+    LaunchedEffect(lastReply?.id, agent.prompt?.fingerprint) {
+        if (listState.anchorItemIndex <= 3) listState.scrollToItem(0)
+    }
+
     val blocked = agent.status == "blocked"
     ScreenList(
+        state = listState,
         edgeButton = if (blocked) null else {
             {
                 EdgeButton(onClick = {
@@ -143,7 +158,7 @@ fun AgentDetailScreen(
                 }) {
                     ResIcon(R.drawable.ic_mic, null, MaterialTheme.colorScheme.onPrimary, Modifier.size(20.dp))
                     Spacer(Modifier.width(4.dp))
-                    Text(stringResource(R.string.dictate))
+                    Text(stringResource(R.string.reply))
                 }
             }
         }
@@ -176,6 +191,22 @@ fun AgentDetailScreen(
                     )
                 }
             }
+        }
+
+        // What the agent said last: the reason to open this screen, and what a reply answers.
+        lastReply?.let { reply ->
+            item(key = "reply-header") {
+                ListSubHeader(
+                    modifier = Modifier.fillMaxWidth().padding(top = 6.dp).transformedHeight(this, spec),
+                    transformation = SurfaceTransformation(spec)
+                ) {
+                    Text(
+                        listOf(stringResource(R.string.last_reply), ageText(reply.completed_at))
+                            .filter { it.isNotBlank() }.joinToString(" · ")
+                    )
+                }
+            }
+            item(key = "reply") { LastReplyCard(reply, { onReadReply(reply) }, Modifier.fillMaxWidth().transformedHeight(this, spec), SurfaceTransformation(spec)) }
         }
 
         item(key = "tile-target") {
@@ -221,7 +252,7 @@ fun AgentDetailScreen(
     )
 }
 
-/** Name first, anchored under the clock; then status, workspace and folder. */
+/** Name first, anchored under the clock; then one status line and one line of context. Kept short so the prompt or the last reply shows on open. */
 @Composable
 private fun AgentHeader(agent: AgentState, modifier: Modifier) {
     val style = statusStyle(agent.status)
@@ -236,29 +267,34 @@ private fun AgentHeader(agent: AgentState, modifier: Modifier) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center) {
             ResIcon(style.icon, null, style.accent, Modifier.size(16.dp))
             Spacer(Modifier.width(4.dp))
-            val statusLine = buildString {
-                append(stringResource(style.label))
-                if (agent.agent.isNotBlank()) append(" · ${agent.agent}")
-            }
+            val statusLine = listOfNotNull(
+                stringResource(style.label),
+                agent.agent.takeIf { it.isNotBlank() },
+                ageText(agent.updated_at).takeIf { it.isNotBlank() }
+            ).joinToString(" · ")
             Text(statusLine, color = style.accent, style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
-        // Where it runs and how long it has been in this state.
         val context = listOfNotNull(
-            agent.workspace?.takeIf { it.isNotBlank() },
-            agent.name?.takeIf { it.isNotBlank() && it != agent.label },
-            ageText(agent.updated_at).takeIf { it.isNotBlank() }
+            agent.workspace?.takeIf { it.isNotBlank() && it != agent.label },
+            agent.name?.takeIf { it.isNotBlank() && it != agent.label }
         ).joinToString(" · ")
         if (context.isNotBlank()) {
-            Text(context, color = OnSurfaceVariant, style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            Text(context, color = OnSurfaceVariant, style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
-        agent.cwd?.takeIf { it.isNotBlank() }?.let { cwd ->
-            Text(
-                "…/" + cwd.trimEnd('/').split('/').takeLast(2).joinToString("/"),
-                color = OnSurfaceVariant,
-                style = MaterialTheme.typography.bodySmall,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
+    }
+}
+
+private const val REPLY_PREVIEW_LINES = 8
+
+/** The last reply as plain text (markdown stripped), cut at [REPLY_PREVIEW_LINES]; tapping opens the reader. */
+@Composable
+private fun LastReplyCard(reply: HistoryItem, onClick: () -> Unit, modifier: Modifier, transformation: SurfaceTransformation) {
+    val preview = remember(reply.response) { MarkdownFormatter.clean(reply.response).replace(Regex("\n{2,}"), "\n") }
+    Card(onClick = onClick, modifier = modifier, transformation = transformation) {
+        reply.query?.takeIf { it.isNotBlank() }?.let { query ->
+            Text(query, color = OnSurfaceVariant, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
+        Text(preview, style = MaterialTheme.typography.bodyMedium, maxLines = REPLY_PREVIEW_LINES, overflow = TextOverflow.Ellipsis)
+        Text(stringResource(R.string.read_all), color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelSmall)
     }
 }

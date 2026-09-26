@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Agent Watch glyph: a terminal with a prompt. White so the watch face or the UI can tint it. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:fillType="evenOdd"
+        android:pathData="M4,3.5H20A2.5,2.5 0,0 1,22.5 6V18A2.5,2.5 0,0 1,20 20.5H4A2.5,2.5 0,0 1,1.5 18V6A2.5,2.5 0,0 1,4 3.5ZM4,5.5V18.5H20V5.5Z" />
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M6.2,9.2L7.6,7.8L11.8,12L7.6,16.2L6.2,14.8L9,12Z" />
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M12.5,14.6H18V16.4H12.5Z" />
+</vector>

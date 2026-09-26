@@ -30,6 +30,7 @@ import com.gabriel.agentwatch.network.RelayRepository
 import com.gabriel.agentwatch.ui.components.ResIcon
 import com.gabriel.agentwatch.ui.components.ScreenList
 import com.gabriel.agentwatch.ui.components.transformedItem
+import com.gabriel.agentwatch.ui.logic.displayHost
 import com.gabriel.agentwatch.ui.theme.OnSurfaceVariant
 import com.gabriel.agentwatch.ui.theme.Red
 
@@ -53,7 +54,7 @@ fun SettingsScreen(onPairAgain: () -> Unit) {
                 modifier = Modifier.fillMaxWidth().transformedHeight(this, spec),
                 transformation = SurfaceTransformation(spec),
                 icon = { ResIcon(R.drawable.ic_link, null, MaterialTheme.colorScheme.onSurface) },
-                secondaryLabel = { Text(prefs.relayUrl, maxLines = 2, overflow = TextOverflow.Ellipsis) },
+                secondaryLabel = { Text(displayHost(prefs.relayUrl), maxLines = 1, overflow = TextOverflow.Ellipsis) },
                 label = { Text(stringResource(R.string.pair_again)) }
             )
         }
@@ -88,7 +89,6 @@ fun SettingsScreen(onPairAgain: () -> Unit) {
                 RelayRepository.restart(context)
             })
         },
-        title = { Text(stringResource(R.string.unpair_confirm_title)) },
-        text = { Text(stringResource(R.string.unpair_confirm_text), textAlign = TextAlign.Center) }
+        title = { Text(stringResource(R.string.unpair_confirm_title)) }
     )
 }

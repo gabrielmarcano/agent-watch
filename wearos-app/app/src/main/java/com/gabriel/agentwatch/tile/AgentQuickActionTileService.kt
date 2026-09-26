@@ -94,7 +94,7 @@ class AgentQuickActionTileService : Material3TileService(allowDynamicTheme = fal
                     val (status, color) = statusWord(agent.status)
                     lines(
                         agent.label.ifBlank { agent.pane_id } to colorScheme.onSurface,
-                        (if (content.macOnline) status else getString(R.string.notice_mac_offline)) to
+                        (if (content.macOnline) status else getString(R.string.notice_device_offline)) to
                             (if (content.macOnline) color else Amber),
                         content.othersNeedingYou.takeIf { it > 0 }?.let { getString(R.string.tile_others_need_you, it) to Amber },
                         asOf() to colorScheme.onSurfaceVariant,

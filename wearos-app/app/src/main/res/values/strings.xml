@@ -16,11 +16,10 @@
     <string name="section_idle">Idle</string>
     <string name="section_unknown">Unknown state</string>
     <string name="notice_connecting">Connecting…</string>
-    <string name="notice_relay_unreachable">Can\'t reach the relay</string>
-    <string name="notice_mac_offline">Mac offline</string>
+    <string name="notice_relay_unreachable">Relay offline</string>
+    <string name="notice_device_offline">Device offline</string>
     <string name="notice_herdr_stopped">herdr stopped</string>
-    <string name="no_agents">No agents running</string>
-    <string name="no_agents_hint">Start one in herdr on your Mac</string>
+    <string name="no_agents">No agents</string>
     <string name="history">History</string>
     <string name="settings">Settings</string>
 
@@ -31,24 +30,25 @@
     <string name="age_days">%d d ago</string>
 
     <!-- Agent detail -->
-    <string name="agent_closed">This agent has closed</string>
+    <string name="agent_closed">Agent closed</string>
     <string name="dictate">Dictate</string>
+    <string name="reply">Reply</string>
     <string name="dictate_to">To: %s</string>
-    <string name="quick_dictate_target">Tile target</string>
-    <string name="quick_dictate_target_hint">Quick Dictate sends here</string>
+    <string name="quick_dictate_target">Pin to tile</string>
+    <string name="quick_dictate_target_hint">Quick Dictate</string>
     <string name="agent_history">History</string>
 
     <!-- Prompt -->
     <string name="prompt_permission">Permission</string>
     <string name="prompt_question">Question</string>
-    <string name="prompt_unknown">Waiting on the Mac</string>
-    <string name="view_all">View all · %d more lines</string>
+    <string name="prompt_unknown">Prompt</string>
+    <string name="view_all">View all</string>
     <string name="allow">Allow</string>
     <string name="deny">Deny</string>
     <string name="more_options">More options</string>
-    <string name="cancel_prompt">Cancel the question</string>
-    <string name="answer_on_mac">Answer it on the Mac</string>
-    <string name="sent_waiting">Sent · waiting for the agent</string>
+    <string name="cancel_prompt">Cancel</string>
+    <string name="answer_on_device">Answer on the device</string>
+    <string name="sent_waiting">Sent</string>
     <string name="confirm_always_title">Don\'t ask again?</string>
     <string name="confirm_always_text">%s</string>
     <string name="feedback_approved">Approved</string>
@@ -68,43 +68,56 @@
     <string name="open_app">Open Agent Watch</string>
     <string name="loading">Loading…</string>
 
+    <string name="last_reply">Last reply</string>
+    <string name="read_all">Read all</string>
+
     <!-- History and reader -->
     <string name="history_title">History</string>
     <string name="history_title_agent">History · %s</string>
     <string name="no_history">No answers yet</string>
     <string name="you_asked">You asked</string>
     <string name="reader_screen_source">Screen capture</string>
-    <string name="item_not_found">This answer is no longer here</string>
+    <string name="item_not_found">Not found</string>
 
     <!-- Pairing and settings -->
-    <string name="pair_title">Pair with your Mac</string>
-    <string name="pair_hint">On the Mac, run agent-watch-bridge pair</string>
+    <string name="pair_title">Pair this watch</string>
     <string name="session_expired">Session expired — pair again</string>
     <string name="relay_url">Relay URL</string>
-    <string name="relay_url_missing">Tap to enter</string>
+    <string name="relay_url_missing">Not set</string>
     <string name="relay_url_invalid">Use an https:// address</string>
     <string name="pair_code">Pairing code</string>
-    <string name="pair_code_missing">Tap to enter 6 digits</string>
-    <string name="pair_code_incomplete">Enter all 6 digits</string>
+    <string name="pair_code_missing">6 digits</string>
+    <string name="pair_code_incomplete">Needs 6 digits</string>
     <string name="pair">Pair</string>
     <string name="pairing">Pairing…</string>
     <string name="paired">Paired</string>
     <string name="pair_again">Pair again</string>
-    <string name="unpair">Unpair this watch</string>
+    <string name="unpair">Unpair</string>
     <string name="unpair_confirm_title">Unpair?</string>
-    <string name="unpair_confirm_text">The watch forgets its token. To revoke it on the relay too, run agent-watch-relay devices revoke.</string>
     <string name="version">Version %s</string>
     <string name="view_all_title">Full text</string>
 
     <!-- Content descriptions -->
     <string name="cd_status">Status: %s</string>
-    <!-- Complication (SHORT_TEXT: a few characters, plus a spoken description) -->
+    <!-- Complication: SHORT_TEXT (a few characters + title), LONG_TEXT, icon only; plus a spoken description -->
     <string name="complication_pair">Pair</string>
-    <string name="complication_unreachable">!</string>
-    <string name="complication_mac_off">Off</string>
+    <string name="complication_off">Off</string>
+    <string name="complication_relay">Relay</string>
+    <string name="complication_device">Device</string>
+    <string name="complication_agents">Agents</string>
+    <string name="complication_status_agent">%1$s · %2$s</string>
+    <string name="complication_status_more">%1$s · +%2$d more</string>
+    <plurals name="complication_working">
+        <item quantity="one">%d working</item>
+        <item quantity="other">%d working</item>
+    </plurals>
+    <plurals name="complication_idle">
+        <item quantity="one">%d idle</item>
+        <item quantity="other">%d idle</item>
+    </plurals>
     <string name="cd_complication_not_paired">Agent Watch: not paired</string>
-    <string name="cd_complication_unreachable">Agent Watch: can\'t reach the relay</string>
-    <string name="cd_complication_mac_offline">Agent Watch: Mac offline</string>
+    <string name="cd_complication_unreachable">Agent Watch: relay offline</string>
+    <string name="cd_complication_device_offline">Agent Watch: device offline</string>
     <string name="cd_complication_no_agents">Agent Watch: no agents running</string>
     <plurals name="cd_complication_needs_you">
         <item quantity="one">Agent Watch: %d agent needs you</item>

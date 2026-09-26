@@ -131,5 +131,26 @@ private fun MarkdownBlockView(block: MdBlock, modifier: Modifier) {
             Text(spansToAnnotated(block.spans), style = body, color = OnSurfaceVariant)
         }
         MdBlock.Rule -> Box(modifier.padding(vertical = 6.dp).height(1.dp).background(OutlineVariant))
+        // A table row: the first cell as the title, then one "header value" line per column.
+        is MdBlock.Record -> Column(
+            modifier
+                .background(SurfaceLow, RoundedCornerShape(12.dp))
+                .padding(horizontal = 12.dp, vertical = 8.dp)
+        ) {
+            block.fields.forEachIndexed { index, (header, value) ->
+                if (index == 0) {
+                    Text(spansToAnnotated(value), style = MaterialTheme.typography.titleSmall, color = OnSurface)
+                } else {
+                    val line = buildAnnotatedString {
+                        if (header.isNotBlank()) {
+                            withStyle(SpanStyle(color = OnSurfaceVariant)) { append(header) }
+                            append("  ")
+                        }
+                        append(spansToAnnotated(value))
+                    }
+                    Text(line, style = body, color = OnSurface)
+                }
+            }
+        }
     }
 }

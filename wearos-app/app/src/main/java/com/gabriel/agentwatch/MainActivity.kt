@@ -35,9 +35,11 @@ import androidx.wear.compose.navigation.composable
 import androidx.wear.compose.navigation.rememberSwipeDismissableNavController
 import com.gabriel.agentwatch.data.Prefs
 import com.gabriel.agentwatch.model.AgentState
+import com.gabriel.agentwatch.model.HistoryItem
 import com.gabriel.agentwatch.network.AuthState
 import com.gabriel.agentwatch.network.PushRegistration
 import com.gabriel.agentwatch.network.RelayRepository
+import com.gabriel.agentwatch.ui.components.rememberPaneHistory
 import com.gabriel.agentwatch.ui.screens.AgentDetailScreen
 import com.gabriel.agentwatch.ui.screens.AgentListScreen
 import com.gabriel.agentwatch.ui.screens.DictationFlow
@@ -168,6 +170,12 @@ private fun AgentWatchNavigation(
     // Values too long for a route argument, handed to the next screen.
     var fullText by remember { mutableStateOf("") }
     var dictatedText by remember { mutableStateOf("") }
+    // A pane's history can hold items the global state lacks: the reader gets the one tapped.
+    var readerItem by remember { mutableStateOf<HistoryItem?>(null) }
+    val openReader: (HistoryItem) -> Unit = { item ->
+        readerItem = item
+        nav.navigate(Routes.reader(item.id))
+    }
 
     SwipeDismissableNavHost(navController = nav, startDestination = if (startPaired) Routes.AGENTS else Routes.PAIRING) {
         composable(Routes.PAIRING) {
@@ -194,6 +202,8 @@ private fun AgentWatchNavigation(
             } else {
                 AgentDetailScreen(
                     agent = agent,
+                    lastReply = rememberPaneHistory(paneId).firstOrNull(),
+                    onReadReply = openReader,
                     isTileTarget = pinned == paneId,
                     onTileTargetChange = { on ->
                         prefs.pinnedPaneId = if (on) paneId else null
@@ -230,14 +240,14 @@ private fun AgentWatchNavigation(
             HistoryListScreen(
                 paneId = paneId,
                 agentLabel = paneId?.let { id -> state.agents.find { it.pane_id == id }?.label },
-                historyItems = state.history,
-                onSelectHistoryItem = { nav.navigate(Routes.reader(it.id)) }
+                historyItems = if (paneId == null) state.history else rememberPaneHistory(paneId),
+                onSelectHistoryItem = openReader
             )
         }
         composable(Routes.READER, arguments = listOf(navArgument("historyId") { type = NavType.StringType })) { entry ->
             val id = Uri.decode(entry.arguments?.getString("historyId").orEmpty())
             val state by RelayRepository.state.collectAsStateWithLifecycle()
-            val item = state.history.find { it.id == id }
+            val item = state.history.find { it.id == id } ?: readerItem?.takeIf { it.id == id }
             when {
                 item != null -> ResponseReaderScreen(item)
                 state.stale && state.history.isEmpty() -> Message(stringResource(R.string.notice_connecting))

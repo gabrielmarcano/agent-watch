@@ -54,7 +54,7 @@ fun commandErrorFeedback(error: Throwable, surface: FeedbackSurface = FeedbackSu
         is RelayError -> when (error.code) {
             "stale_state" -> changed("Agent changed")
             // OpenCode focus guard: nothing was pressed and the prompt is unchanged, so no refresh or retry.
-            "prompt_changed" -> if (error.isFocusRefusal()) problem("Answer it on the Mac") else changed("Prompt changed")
+            "prompt_changed" -> if (error.isFocusRefusal()) problem("Answer on the device") else changed("Prompt changed")
             "unknown_option" -> changed("Prompt changed")
             "unknown_pane" -> problem("Agent closed", refresh = true)
             "agent_busy" -> problem("Agent is busy", refresh = true)
@@ -62,9 +62,9 @@ fun commandErrorFeedback(error: Throwable, surface: FeedbackSurface = FeedbackSu
             "agent_state_unknown" -> problem("Agent state unknown", refresh = true)
             "unauthorized" -> sessionExpired
             "not_paired" -> problem("Not paired — pair again", needsPairing = true)
-            "host_offline" -> problem("Mac is offline")
+            "host_offline" -> problem("Device offline")
             "herdr_offline" -> problem("herdr stopped")
-            "timeout" -> problem("No answer from the Mac", refresh = true) // the Mac may still have acted
+            "timeout" -> problem("No answer from device", refresh = true) // the device may still have acted
             "rate_limited" -> problem("Try again later")
             "pair_code_invalid" -> problem("Invalid code")
             "invalid_request", "internal", "empty_response" -> somethingWrong

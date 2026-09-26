@@ -27,3 +27,6 @@ fun isAcceptableRelayUrl(url: String, allowCleartext: Boolean): Boolean {
     val schemeOk = uri.scheme == "https" || (allowCleartext && uri.scheme == "http")
     return schemeOk && !uri.host.isNullOrBlank()
 }
+
+/** The relay as one short line: host and port, without the scheme or a trailing slash. */
+fun displayHost(url: String): String = url.substringAfter("://").trimEnd('/')
