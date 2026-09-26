@@ -9,7 +9,7 @@ description: "Build, test and install the Wear OS app on the owner's Google Pixe
 
 ```bash
 cd wearos-app
-export JAVA_HOME="/Applications/Android Studio.app/Contents/jbr/Contents/Home"   # JDK 17 bundled with Android Studio
+export JAVA_HOME="$(/usr/libexec/java_home -v 17)"   # any installed JDK 17 (Android Studio's bundled JBR works too)
 ./gradlew :app:testDebugUnitTest :app:assembleDebug
 ```
 
