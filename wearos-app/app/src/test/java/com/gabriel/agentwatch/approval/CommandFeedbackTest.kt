@@ -49,6 +49,18 @@ class CommandFeedbackTest {
     }
 
     @Test
+    fun aFocusRefusalSendsTheUserToTheMacWithoutARetry() {
+        // OpenCode: the bridge pressed nothing because the Mac's focus moved; the prompt itself is unchanged.
+        val focus = RelayError(
+            "prompt_changed",
+            "focus may have moved on the Mac; answer it on the Mac (focused button is \"Reject\")",
+            409
+        )
+        assertFeedback(focus, "Answer it on the Mac", refresh = false)
+        assertFeedback(focus, "Answer it on the Mac", refresh = false, surface = NOTIFICATION)
+    }
+
+    @Test
     fun unknownPaneSaysAgentClosedAndRefreshes() {
         assertFeedback(relay("unknown_pane", 404), "Agent closed", refresh = true)
     }

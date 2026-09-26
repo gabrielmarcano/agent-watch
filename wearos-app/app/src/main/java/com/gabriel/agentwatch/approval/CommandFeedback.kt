@@ -43,6 +43,9 @@ fun commandErrorFeedback(error: Throwable, surface: FeedbackSurface = FeedbackSu
     fun problem(message: String, refresh: Boolean = false, needsPairing: Boolean = false) =
         CommandFeedback(message, isError = true, refresh = refresh, needsPairing = needsPairing)
 
+    // The relay has no separate code for it; the bridge's message says to answer on the Mac (contracts §2.4).
+    fun RelayError.isFocusRefusal() = message.contains("on the Mac", ignoreCase = true)
+
     val sessionExpired = problem("Session expired — pair again", needsPairing = true)
     val relayTimedOut = problem("Relay timed out", refresh = true) // the command may still have run
     val somethingWrong = problem("Something went wrong")
@@ -50,7 +53,9 @@ fun commandErrorFeedback(error: Throwable, surface: FeedbackSurface = FeedbackSu
     return when (error) {
         is RelayError -> when (error.code) {
             "stale_state" -> changed("Agent changed")
-            "prompt_changed", "unknown_option" -> changed("Prompt changed")
+            // OpenCode focus guard: nothing was pressed and the prompt is unchanged, so no refresh or retry.
+            "prompt_changed" -> if (error.isFocusRefusal()) problem("Answer it on the Mac") else changed("Prompt changed")
+            "unknown_option" -> changed("Prompt changed")
             "unknown_pane" -> problem("Agent closed", refresh = true)
             "agent_busy" -> problem("Agent is busy", refresh = true)
             "agent_blocked" -> problem("Answer the question first", refresh = true)
