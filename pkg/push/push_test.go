@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
 	"sort"
 	"strings"
 	"sync"
@@ -822,7 +823,7 @@ func TestDispatcher_ResolvedWithdrawsABlockedPush(t *testing.T) {
 			if len(got) != 2 {
 				t.Fatalf("fcm got %v, want blocked then one resolved", eventsOf(got))
 			}
-			if want := (Message{Event: EventResolved, PaneID: "p1", StateChangeSeq: 43}); got[1] != want {
+			if want := (Message{Event: EventResolved, PaneID: "p1", StateChangeSeq: 43}); !reflect.DeepEqual(got[1], want) {
 				t.Fatalf("resolved message = %+v, want %+v", got[1], want)
 			}
 			if n := len(ntfy.getMessages()); n != 1 {
@@ -1091,5 +1092,47 @@ func TestReplyPreview(t *testing.T) {
 	}
 	if got := replyPreview("  \n\n "); got != "" {
 		t.Errorf("blank reply preview = %q", got)
+	}
+}
+
+// A question offers its answers as one-tap notification actions: at most 4,
+// labels cut to 40 runes, never a "don't ask again" answer (a notification
+// cannot ask for the confirmation the app asks for).
+func TestBlockedMessage_QuestionChoices(t *testing.T) {
+	long := strings.Repeat("x", 60)
+	cur := model.AgentState{PaneID: "p1", Label: "api", Status: model.StatusBlocked, StateChangeSeq: 9, Prompt: &model.PendingPrompt{
+		Kind: model.PromptQuestion, Title: "Plan",
+		Options: []model.PromptOption{
+			{ID: "opt-1", Label: "Yes, and use auto mode", Role: model.RoleAllowAlways},
+			{ID: "opt-2", Label: "Yes, manually approve edits", Role: model.RoleAllowOnce},
+			{ID: "opt-3", Label: long, Description: "ignored", Role: model.RoleChoice},
+			{ID: "opt-4", Label: "c", Role: model.RoleChoice},
+			{ID: "opt-5", Label: "d", Role: model.RoleChoice},
+			{ID: "opt-6", Label: "e", Role: model.RoleChoice},
+		},
+	}}
+	m := blockedMessage(cur)
+	if m.Kind != "question" {
+		t.Errorf("kind = %q", m.Kind)
+	}
+	var ids []string
+	for _, c := range m.Options {
+		ids = append(ids, c.ID)
+	}
+	if fmt.Sprint(ids) != "[opt-2 opt-3 opt-4 opt-5]" {
+		t.Errorf("choices = %v, want the first 4 that are not allow_always", ids)
+	}
+	if got := m.Options[1].Label; utf8.RuneCountInString(got) != 40 || !strings.HasSuffix(got, "…") {
+		t.Errorf("long label not cut to 40 runes: %q", got)
+	}
+
+	perm := blockedMessage(model.AgentState{PaneID: "p2", Status: model.StatusBlocked, Prompt: &model.PendingPrompt{
+		Kind: model.PromptPermission, Options: []model.PromptOption{{ID: "opt-1", Label: "Yes", Role: model.RoleAllowOnce}, {ID: "opt-2", Label: "No", Role: model.RoleDeny}},
+	}})
+	if perm.Kind != "permission" || len(perm.Options) != 0 {
+		t.Errorf("permission: kind %q, %d choices; want permission and none (allow/deny cover it)", perm.Kind, len(perm.Options))
+	}
+	if unknown := blockedMessage(model.AgentState{PaneID: "p3", Status: model.StatusBlocked}); unknown.Kind != "unknown" {
+		t.Errorf("no prompt: kind = %q, want unknown", unknown.Kind)
 	}
 }

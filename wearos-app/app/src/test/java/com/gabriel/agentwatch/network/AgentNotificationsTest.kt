@@ -154,4 +154,65 @@ class AgentNotificationsTest {
         assertEquals("Approved", actionSuccessTitle(NotificationActionReceiver.ACTION_ANSWER, isDeny = false))
         assertEquals("Sent", actionSuccessTitle(NotificationActionReceiver.ACTION_PROMPT, isDeny = false))
     }
+
+    // ---- one-tap answers (contracts §4.1 kind / options)
+
+    private fun blocked(extra: Map<String, String>) = PushMessage.parse(blockedData() + extra) as PushMessage.Blocked
+
+    @Test
+    fun aQuestionOffersItsAnswersAndNoCancel() {
+        val msg = blocked(
+            mapOf(
+                "kind" to "question", "allow_option_id" to "", "deny_option_id" to "",
+                "options" to """[{"id":"opt-1","label":"Rojo"},{"id":"opt-2","label":"Verde"}]"""
+            )
+        )
+        assertEquals(listOf(PushChoice("opt-1", "Rojo"), PushChoice("opt-2", "Verde")), msg.options)
+        assertEquals(
+            listOf(
+                NotificationButton(NotificationButton.Kind.ANSWER, "Rojo", "opt-1"),
+                NotificationButton(NotificationButton.Kind.ANSWER, "Verde", "opt-2"),
+                NotificationButton(NotificationButton.Kind.OPEN, "Open")
+            ),
+            blockedButtons(msg)
+        )
+    }
+
+    @Test
+    fun aPermissionOffersAllowDenyAndOpen() {
+        val buttons = blockedButtons(blocked(mapOf("kind" to "permission", "options" to "")))
+        assertEquals(
+            listOf(
+                NotificationButton(NotificationButton.Kind.ANSWER, "Allow", "opt-1"),
+                NotificationButton(NotificationButton.Kind.DENY, "Deny", "opt-3"),
+                NotificationButton(NotificationButton.Kind.OPEN, "Open")
+            ),
+            buttons
+        )
+    }
+
+    @Test
+    fun anUnknownPromptOnlyOpensTheApp() {
+        val buttons = blockedButtons(blocked(mapOf("kind" to "unknown", "allow_option_id" to "", "deny_option_id" to "")))
+        assertEquals(listOf(NotificationButton(NotificationButton.Kind.OPEN, "Open")), buttons)
+    }
+
+    @Test
+    fun anOldRelayWithoutKindKeepsTheOldButtons() {
+        // No kind: allow when there is an allow option; deny, or cancel when there is no deny option.
+        val noDeny = blocked(mapOf("deny_option_id" to ""))
+        assertEquals(
+            listOf(
+                NotificationButton(NotificationButton.Kind.ANSWER, "Allow", "opt-1"),
+                NotificationButton(NotificationButton.Kind.CANCEL, "Cancel"),
+                NotificationButton(NotificationButton.Kind.OPEN, "Open")
+            ),
+            blockedButtons(noDeny)
+        )
+    }
+
+    @Test
+    fun malformedOptionsAreIgnored() {
+        assertEquals(emptyList<PushChoice>(), blocked(mapOf("kind" to "question", "options" to "[{oops")).options)
+    }
 }

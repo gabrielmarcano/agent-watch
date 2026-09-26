@@ -58,14 +58,31 @@ func TestFCM_Payload(t *testing.T) {
 				Event: EventBlocked, PaneID: "w5:pAE", Agent: "claude", Label: "bizum",
 				Title: "bizum needs approval", Body: "Bash command: go test ./...",
 				StateChangeSeq: 334, Fingerprint: "9f2c61d0a4b3e871",
-				AllowOptionID: "opt-1", DenyOptionID: "opt-3",
+				AllowOptionID: "opt-1", DenyOptionID: "opt-3", Kind: "permission",
 			},
-			// The example of docs/phases/3b-push.md, verbatim.
+			// The example of docs/phases/3b-push.md, plus kind and options (a
+			// permission has no one-tap options beyond allow and deny).
 			want: `{"message":{"token":"device-token-1",
 				"data":{"event":"blocked","pane_id":"w5:pAE","agent":"claude","label":"bizum",
 				        "title":"bizum needs approval","body":"Bash command: go test ./...",
 				        "state_change_seq":"334","fingerprint":"9f2c61d0a4b3e871",
-				        "allow_option_id":"opt-1","deny_option_id":"opt-3"},
+				        "allow_option_id":"opt-1","deny_option_id":"opt-3",
+				        "kind":"permission","options":""},
+				"android":{"priority":"high","ttl":"600s"}}}`,
+		},
+		{
+			name: "blocked question",
+			msg: Message{
+				Event: EventBlocked, PaneID: "w5:pAE", Agent: "claude", Label: "bizum",
+				Title: "bizum needs you", Body: "Color: ¿Qué color?", StateChangeSeq: 40, Fingerprint: "ab12",
+				Kind: "question", Options: []Choice{{ID: "opt-1", Label: "Rojo"}, {ID: "opt-2", Label: "Verde"}},
+			},
+			want: `{"message":{"token":"device-token-1",
+				"data":{"event":"blocked","pane_id":"w5:pAE","agent":"claude","label":"bizum",
+				        "title":"bizum needs you","body":"Color: ¿Qué color?",
+				        "state_change_seq":"40","fingerprint":"ab12",
+				        "allow_option_id":"","deny_option_id":"",
+				        "kind":"question","options":"[{\"id\":\"opt-1\",\"label\":\"Rojo\"},{\"id\":\"opt-2\",\"label\":\"Verde\"}]"},
 				"android":{"priority":"high","ttl":"600s"}}}`,
 		},
 		{

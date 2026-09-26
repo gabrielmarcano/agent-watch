@@ -7,6 +7,7 @@ import android.content.Intent
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.app.RemoteInput
+import com.gabriel.agentwatch.R
 import com.gabriel.agentwatch.approval.FeedbackSurface
 import com.gabriel.agentwatch.approval.commandErrorFeedback
 import kotlinx.coroutines.CancellationException
@@ -59,6 +60,7 @@ class NotificationActionReceiver : BroadcastReceiver() {
         if (action == ACTION_PROMPT && replyText.isNullOrBlank()) return
 
         val isDeny = intent.getBooleanExtra("is_deny", false)
+        val isChoice = intent.getBooleanExtra("is_choice", false)
         val pendingResult = goAsync()
 
         CoroutineScope(Dispatchers.IO).launch {
@@ -81,7 +83,7 @@ class NotificationActionReceiver : BroadcastReceiver() {
                 } ?: return@launch
                 result.fold(
                     onSuccess = {
-                        showFeedback(context, notifManager, notifId, paneId, actionSuccessTitle(action, isDeny), isSuccess = true)
+                        showFeedback(context, notifManager, notifId, paneId, actionSuccessTitle(action, isDeny, isChoice), isSuccess = true)
                     },
                     onFailure = { error ->
                         // Same mapping as the app screen (contracts §2.4), worded for a notification.
@@ -121,7 +123,7 @@ class NotificationActionReceiver : BroadcastReceiver() {
         val openPending = NotificationIntents.openApp(context, paneId)
 
         val builder = NotificationCompat.Builder(context, NotificationChannels.FEEDBACK)
-            .setSmallIcon(android.R.drawable.ic_dialog_info)
+            .setSmallIcon(R.drawable.ic_agent)
             .setContentTitle("Agent Watch")
             .setContentText(message)
             .setAutoCancel(true)
@@ -133,7 +135,7 @@ class NotificationActionReceiver : BroadcastReceiver() {
         if (isSuccess) {
             builder.setTimeoutAfter(SUCCESS_FEEDBACK_MS)
         } else {
-            builder.addAction(android.R.drawable.ic_menu_view, "Open", openPending)
+            builder.addAction(R.drawable.ic_agent, "Open", openPending)
         }
 
         manager.notify(notifId, builder.build())

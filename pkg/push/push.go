@@ -44,10 +44,26 @@ type Message struct {
 	Fingerprint    string
 	AllowOptionID  string
 	DenyOptionID   string
+	// Kind is the blocked prompt's kind (permission, question, unknown).
+	Kind string
+	// Options are a question's one-tap answers for the notification.
+	Options []Choice
 	// AnyBlocked is set on a digest that covers at least one blocked agent:
 	// it waits for an approval, so it is as urgent as a blocked push.
 	AnyBlocked bool
 }
+
+// Choice is one answer a notification may offer as a one-tap action.
+type Choice struct {
+	ID    string `json:"id"`
+	Label string `json:"label"`
+}
+
+// Limits of a notification's one-tap answers.
+const (
+	maxChoices     = 4
+	maxChoiceRunes = 40
+)
 
 // Sender delivers a push notification to a platform.
 type Sender interface {
@@ -343,8 +359,14 @@ func blockedMessage(cur model.AgentState) Message {
 	fingerprint := ""
 	allowOpt := ""
 	denyOpt := ""
+	kind := string(model.PromptUnknown)
+	var choices []Choice
 	if cur.Prompt != nil {
 		fingerprint = cur.Prompt.Fingerprint
+		kind = string(cur.Prompt.Kind)
+		if cur.Prompt.Kind == model.PromptQuestion {
+			choices = questionChoices(cur.Prompt.Options)
+		}
 		for _, opt := range cur.Prompt.Options {
 			if allowOpt == "" && opt.Role == model.RoleAllowOnce {
 				allowOpt = opt.ID
@@ -366,7 +388,26 @@ func blockedMessage(cur model.AgentState) Message {
 		Fingerprint:    fingerprint,
 		AllowOptionID:  allowOpt,
 		DenyOptionID:   denyOpt,
+		Kind:           kind,
+		Options:        choices,
 	}
+}
+
+// questionChoices are the answers a question's notification offers: the
+// first maxChoices options that are not allow_always ("don't ask again" needs
+// the confirmation only the app can ask for), labels cut to maxChoiceRunes.
+func questionChoices(options []model.PromptOption) []Choice {
+	var choices []Choice
+	for _, o := range options {
+		if o.Role == model.RoleAllowAlways {
+			continue
+		}
+		choices = append(choices, Choice{ID: o.ID, Label: TruncateRunes(o.Label, maxChoiceRunes)})
+		if len(choices) == maxChoices {
+			break
+		}
+	}
+	return choices
 }
 
 // doneMessage announces that cur finished its turn.

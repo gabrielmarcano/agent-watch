@@ -68,11 +68,12 @@ object NotificationIntents {
         action: NotificationAction,
         broadcastAction: String,
         mutable: Boolean = false,
+        optionId: String? = null,
         extras: Intent.() -> Unit
     ): PendingIntent {
         val intent = Intent(context, NotificationActionReceiver::class.java).apply {
             this.action = broadcastAction
-            data = Uri.parse(AgentNotifications.intentUri(paneId, action))
+            data = Uri.parse(AgentNotifications.intentUri(paneId, action, optionId))
             putExtra("pane_id", paneId)
             extras()
         }

@@ -1,6 +1,8 @@
 package com.gabriel.agentwatch.network
 
+import androidx.annotation.Keep
 import com.gabriel.agentwatch.model.AgentState
+import com.google.gson.Gson
 import com.google.gson.JsonObject
 import com.google.gson.JsonParseException
 import com.google.gson.JsonParser
@@ -20,7 +22,11 @@ sealed class PushMessage {
         val seq: Long,
         val fingerprint: String,
         val allowOptionId: String,
-        val denyOptionId: String
+        val denyOptionId: String,
+        /** The prompt's kind; blank from a relay older than `kind` (contracts §4.1). */
+        val kind: String = "",
+        /** A question's one-tap answers. */
+        val options: List<PushChoice> = emptyList()
     ) : PushMessage()
 
     data class Done(
@@ -66,7 +72,9 @@ sealed class PushMessage {
                         seq = seq ?: 0L,
                         fingerprint = data["fingerprint"].orEmpty(),
                         allowOptionId = data["allow_option_id"].orEmpty(),
-                        denyOptionId = data["deny_option_id"].orEmpty()
+                        denyOptionId = data["deny_option_id"].orEmpty(),
+                        kind = data["kind"].orEmpty(),
+                        options = parseChoices(data["options"])
                     )
                 "done", "agent_done" ->
                     if (paneId.isBlank()) Ignored("done without pane_id")
@@ -86,12 +94,59 @@ sealed class PushMessage {
     }
 }
 
+/** One answer a question's notification offers (contracts §4.1 `options`). */
+@Keep
+data class PushChoice(val id: String = "", val label: String = "")
+
+/** A JSON array string of choices; anything malformed means none. */
+private fun parseChoices(json: String?): List<PushChoice> {
+    if (json.isNullOrBlank()) return emptyList()
+    return try {
+        Gson().fromJson(json, Array<PushChoice>::class.java)?.filter { it.id.isNotBlank() && it.label.isNotBlank() }.orEmpty()
+    } catch (_: Exception) {
+        emptyList()
+    }
+}
+
+/** One button of a blocked notification. */
+data class NotificationButton(val kind: Kind, val label: String, val optionId: String? = null) {
+    enum class Kind { ANSWER, DENY, CANCEL, OPEN }
+}
+
+/**
+ * The buttons of a blocked notification: a question's answers, a permission's Allow and Deny, nothing
+ * for a prompt the watch cannot read, then Open. Cancel (esc) is never offered for a question: one
+ * mistaken tap would dismiss it. A push from a relay without `kind` keeps the old Allow / Deny-or-Cancel.
+ */
+fun blockedButtons(message: PushMessage.Blocked): List<NotificationButton> {
+    val buttons = mutableListOf<NotificationButton>()
+    fun allowDeny(cancelWithoutDeny: Boolean) {
+        if (message.allowOptionId.isNotBlank()) {
+            buttons += NotificationButton(NotificationButton.Kind.ANSWER, "Allow", message.allowOptionId)
+        }
+        when {
+            message.denyOptionId.isNotBlank() -> buttons += NotificationButton(NotificationButton.Kind.DENY, "Deny", message.denyOptionId)
+            cancelWithoutDeny -> buttons += NotificationButton(NotificationButton.Kind.CANCEL, "Cancel")
+        }
+    }
+    when (message.kind) {
+        "question" -> message.options.forEach { buttons += NotificationButton(NotificationButton.Kind.ANSWER, it.label, it.id) }
+        "unknown" -> Unit
+        "permission" -> allowDeny(cancelWithoutDeny = false)
+        else -> allowDeny(cancelWithoutDeny = true)
+    }
+    buttons += NotificationButton(NotificationButton.Kind.OPEN, "Open")
+    return buttons
+}
+
 /** The actions a pane's notification carries; each gets its own PendingIntent identity. */
 enum class NotificationAction(val path: String) {
     OPEN("open"),
     ALLOW("allow"),
     DENY("deny"),
-    REPLY("reply")
+    REPLY("reply"),
+    /** A question's answer; the option id makes each one's identity unique. */
+    ANSWER("answer")
 }
 
 object AgentNotifications {
@@ -114,8 +169,10 @@ object AgentNotifications {
      * and request code match (extras never count), so a URI unique per (pane, action) means a tap can
      * never pick up another pane's extras, whatever the request codes are. Pane ids are percent-encoded.
      */
-    fun intentUri(paneId: String, action: NotificationAction): String =
-        "agentwatch://notification/${action.path}/${URLEncoder.encode(paneId, "UTF-8")}"
+    fun intentUri(paneId: String, action: NotificationAction, optionId: String? = null): String {
+        val path = if (optionId.isNullOrBlank()) action.path else "${action.path}/${URLEncoder.encode(optionId, "UTF-8")}"
+        return "agentwatch://notification/$path/${URLEncoder.encode(paneId, "UTF-8")}"
+    }
 
     /** Distinct per action for one pane. Collisions across panes are harmless: [intentUri] tells them apart. */
     fun requestCode(paneId: String, action: NotificationAction): Int = idForPane(paneId) * 4 + action.ordinal
@@ -150,8 +207,12 @@ fun approvalsToDismiss(shown: List<ShownApproval>, update: AgentsUpdate): List<I
 }
 
 /** What the silent feedback notification says after a notification action succeeded. */
-fun actionSuccessTitle(action: String, isDeny: Boolean): String = when (action) {
-    NotificationActionReceiver.ACTION_ANSWER -> if (isDeny) "Denied" else "Approved"
+fun actionSuccessTitle(action: String, isDeny: Boolean, isChoice: Boolean = false): String = when (action) {
+    NotificationActionReceiver.ACTION_ANSWER -> when {
+        isDeny -> "Denied"
+        isChoice -> "Answered"
+        else -> "Approved"
+    }
     NotificationActionReceiver.ACTION_CANCEL -> "Canceled" // also used for questions: nothing was "denied"
     NotificationActionReceiver.ACTION_PROMPT -> "Sent"
     else -> "Done"

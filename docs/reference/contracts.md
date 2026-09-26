@@ -436,6 +436,8 @@ All values are strings (FCM data maps allow only strings). No `notification` blo
 | `fingerprint` | `fd6ff7388739252d` | Only for `blocked` |
 | `allow_option_id` | `opt-1` | First `allow_once` option, else empty |
 | `deny_option_id` | `opt-3` | First `deny` option, else empty (the app then calls `cancel`) |
+| `kind` | `question` | Only for `blocked`: the prompt's kind (`permission`, `question`, `unknown`) |
+| `options` | `[{"id":"opt-1","label":"Rojo"}]` | Only for `blocked`: a `question`'s one-tap answers as a JSON array string, `""` otherwise. At most 4, in menu order, never an `allow_always` option (the notification cannot ask for the confirmation the app asks for); labels ≤ 40 characters. The app shows one action per answer and no Cancel |
 
 **`resolved`: withdraw a `blocked` notification.**
 

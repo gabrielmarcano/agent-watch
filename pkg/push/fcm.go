@@ -174,7 +174,7 @@ func fcmData(m Message) map[string]string {
 			"state_change_seq": seq,
 		}
 	}
-	return map[string]string{
+	data := map[string]string{
 		"event":            string(m.Event),
 		"pane_id":          m.PaneID,
 		"agent":            m.Agent,
@@ -186,6 +186,17 @@ func fcmData(m Message) map[string]string {
 		"allow_option_id":  m.AllowOptionID,
 		"deny_option_id":   m.DenyOptionID,
 	}
+	if m.Event == EventBlocked {
+		// options is a JSON array string (data values are strings), "" when none.
+		data["kind"] = m.Kind
+		data["options"] = ""
+		if len(m.Options) > 0 {
+			if b, err := json.Marshal(m.Options); err == nil {
+				data["options"] = string(b)
+			}
+		}
+	}
+	return data
 }
 
 // sendToken delivers one message and retries it once after a transient
