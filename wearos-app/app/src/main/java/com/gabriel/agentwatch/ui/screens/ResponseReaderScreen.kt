@@ -1,189 +1,135 @@
 package com.gabriel.agentwatch.ui.screens
 
-import androidx.compose.foundation.focusable
-import androidx.compose.foundation.gestures.scrollBy
-import androidx.compose.foundation.layout.*
-import androidx.compose.runtime.*
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.focus.FocusRequester
-import androidx.compose.ui.focus.focusRequester
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.input.rotary.onRotaryScrollEvent
-import androidx.compose.ui.platform.LocalLifecycleOwner
-import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.LifecycleEventObserver
-import androidx.wear.compose.foundation.lazy.ScalingLazyColumn
-import androidx.wear.compose.foundation.lazy.rememberScalingLazyListState
-import androidx.wear.compose.material.*
+import androidx.wear.compose.foundation.lazy.itemsIndexed
+import androidx.wear.compose.material3.MaterialTheme
+import androidx.wear.compose.material3.Text
+import com.gabriel.agentwatch.R
 import com.gabriel.agentwatch.model.HistoryItem
-import com.gabriel.agentwatch.ui.theme.BrightGreen
-import com.gabriel.agentwatch.ui.theme.LightBlue
-import com.mikepenz.markdown.m2.Markdown
-import com.mikepenz.markdown.m2.markdownColor
-import com.mikepenz.markdown.m2.markdownTypography
-import kotlinx.coroutines.launch
+import com.gabriel.agentwatch.ui.components.ScreenList
+import com.gabriel.agentwatch.ui.components.ageText
+import com.gabriel.agentwatch.ui.components.transformedItem
+import com.gabriel.agentwatch.ui.theme.Blue
+import com.gabriel.agentwatch.ui.theme.OnSurface
+import com.gabriel.agentwatch.ui.theme.OnSurfaceVariant
+import com.gabriel.agentwatch.ui.theme.OutlineVariant
+import com.gabriel.agentwatch.ui.theme.SurfaceLow
+import com.gabriel.agentwatch.util.MdBlock
+import com.gabriel.agentwatch.util.MdSpan
+import com.gabriel.agentwatch.util.parseMarkdown
+import com.gabriel.agentwatch.util.screenBlocks
+
+/**
+ * One finished turn. A transcript answer is markdown, split into blocks so each is its own list item
+ * and the round edges never clip a long answer; a `screen` capture is verbatim monospace.
+ */
+@Composable
+fun ResponseReaderScreen(item: HistoryItem) {
+    val blocks = remember(item.response, item.source) {
+        if (item.source == "transcript") parseMarkdown(item.response) else screenBlocks(item.response)
+    }
+    ScreenList { spec ->
+        item(key = "header") {
+            Column(transformedItem(spec).padding(start = 18.dp, end = 18.dp, top = 6.dp, bottom = 4.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                Text(
+                    item.label.ifBlank { item.agent },
+                    style = MaterialTheme.typography.titleMedium,
+                    textAlign = TextAlign.Center,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
+                )
+                val meta = listOfNotNull(
+                    item.agent.takeIf { it.isNotBlank() },
+                    ageText(item.completed_at).takeIf { it.isNotBlank() },
+                    if (item.source == "screen") stringResource(R.string.reader_screen_source) else null
+                ).joinToString(" · ")
+                Text(meta, color = OnSurfaceVariant, style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center)
+            }
+        }
+        item.query?.takeIf { it.isNotBlank() }?.let { query ->
+            item(key = "query") {
+                Column(
+                    transformedItem(spec)
+                        .background(SurfaceLow, RoundedCornerShape(12.dp))
+                        .padding(horizontal = 12.dp, vertical = 8.dp)
+                ) {
+                    Text(stringResource(R.string.you_asked), color = Blue, style = MaterialTheme.typography.labelSmall)
+                    Text(query, color = OnSurface, style = MaterialTheme.typography.bodyMedium)
+                }
+            }
+        }
+        itemsIndexed(blocks) { _, block -> MarkdownBlockView(block, transformedItem(spec)) }
+    }
+}
+
+private val codeStyle = SpanStyle(fontFamily = FontFamily.Monospace, background = SurfaceLow)
+
+private fun spansToAnnotated(spans: List<MdSpan>): AnnotatedString = buildAnnotatedString {
+    spans.forEach { span ->
+        val style = SpanStyle(
+            fontWeight = if (span.bold) FontWeight.Bold else null,
+            fontStyle = if (span.italic) FontStyle.Italic else null
+        ).let { if (span.code) it.merge(codeStyle) else it }
+        withStyle(style) { append(span.text) }
+    }
+}
 
 @Composable
-fun ResponseReaderScreen(
-    item: HistoryItem,
-    onBackClick: () -> Unit
-) {
-    val listState = rememberScalingLazyListState()
-    val focusRequester = remember { FocusRequester() }
-    val coroutineScope = rememberCoroutineScope()
-    val lifecycleOwner = LocalLifecycleOwner.current
-
-    DisposableEffect(lifecycleOwner) {
-        val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_RESUME) {
-                coroutineScope.launch {
-                    kotlinx.coroutines.delay(50)
-                    try { focusRequester.requestFocus() } catch (_: Exception) {}
-                }
-            }
+private fun MarkdownBlockView(block: MdBlock, modifier: Modifier) {
+    val body = MaterialTheme.typography.bodyMedium
+    when (block) {
+        is MdBlock.Heading -> Text(
+            spansToAnnotated(block.spans),
+            modifier = modifier.padding(top = 6.dp),
+            style = if (block.level <= 2) MaterialTheme.typography.titleMedium else MaterialTheme.typography.titleSmall,
+            color = OnSurface
+        )
+        is MdBlock.Paragraph -> Text(spansToAnnotated(block.spans), modifier = modifier, style = body, color = OnSurface)
+        is MdBlock.ListItem -> Row(modifier.padding(start = (block.depth * 10).dp)) {
+            Text(block.marker, style = body, color = OnSurfaceVariant)
+            Spacer(Modifier.width(6.dp))
+            Text(spansToAnnotated(block.spans), style = body, color = OnSurface)
         }
-        lifecycleOwner.lifecycle.addObserver(observer)
-        onDispose {
-            lifecycleOwner.lifecycle.removeObserver(observer)
+        is MdBlock.Code -> Text(
+            block.text,
+            modifier = modifier
+                .background(SurfaceLow, RoundedCornerShape(8.dp))
+                .padding(horizontal = 10.dp, vertical = 6.dp),
+            style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = 13.sp, lineHeight = 17.sp),
+            color = OnSurface
+        )
+        is MdBlock.Quote -> Row(modifier.height(IntrinsicSize.Min)) {
+            Box(Modifier.width(3.dp).fillMaxHeight().background(OutlineVariant))
+            Spacer(Modifier.width(8.dp))
+            Text(spansToAnnotated(block.spans), style = body, color = OnSurfaceVariant)
         }
-    }
-
-    Scaffold(
-        timeText = { TimeText() },
-        vignette = { Vignette(vignettePosition = VignettePosition.TopAndBottom) },
-        positionIndicator = { PositionIndicator(scalingLazyListState = listState) }
-    ) {
-        ScalingLazyColumn(
-            modifier = Modifier
-                .fillMaxSize()
-                .onRotaryScrollEvent { event ->
-                    coroutineScope.launch {
-                        listState.scrollBy(event.verticalScrollPixels)
-                    }
-                    true
-                }
-                .focusRequester(focusRequester)
-                .focusable(),
-            state = listState,
-            horizontalAlignment = Alignment.CenterHorizontally,
-            contentPadding = PaddingValues(top = 28.dp, start = 10.dp, end = 10.dp, bottom = 28.dp)
-        ) {
-            // Header / Agent label
-            item {
-                Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(bottom = 4.dp)) {
-                    Text(
-                        text = item.label.uppercase(),
-                        style = MaterialTheme.typography.caption1.copy(fontWeight = FontWeight.ExtraBold, letterSpacing = 1.sp),
-                        color = LightBlue,
-                        textAlign = TextAlign.Center
-                    )
-                    Text(
-                        text = "${item.agent} · ${item.source}",
-                        style = MaterialTheme.typography.caption2.copy(fontSize = 9.sp),
-                        color = Color.White.copy(alpha = 0.5f)
-                    )
-                }
-            }
-
-            // Query Card if available
-            if (!item.query.isNullOrBlank()) {
-                item {
-                    Card(
-                        onClick = {},
-                        modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
-                        backgroundPainter = CardDefaults.cardBackgroundPainter(
-                            startBackgroundColor = Color(0x188AB4F8),
-                            endBackgroundColor = Color(0x048AB4F8)
-                        )
-                    ) {
-                        Column {
-                            Text(
-                                text = "QUERY",
-                                style = MaterialTheme.typography.caption2.copy(fontSize = 8.5.sp, fontWeight = FontWeight.Bold),
-                                color = LightBlue
-                            )
-                            Spacer(modifier = Modifier.height(2.dp))
-                            Text(
-                                text = item.query,
-                                style = MaterialTheme.typography.body2.copy(fontSize = 11.sp),
-                                color = Color.White
-                            )
-                        }
-                    }
-                }
-            }
-
-            // Response Label
-            item {
-                Spacer(modifier = Modifier.height(2.dp))
-                Text(
-                    text = "RESPONSE",
-                    style = MaterialTheme.typography.caption2.copy(fontWeight = FontWeight.ExtraBold, fontSize = 8.5.sp, letterSpacing = 1.sp),
-                    color = BrightGreen
-                )
-            }
-
-            // Response Body: Markdown if transcript, plain text if screen
-            item {
-                Card(
-                    onClick = {},
-                    modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
-                    backgroundPainter = CardDefaults.cardBackgroundPainter(
-                        startBackgroundColor = Color(0x1010B981),
-                        endBackgroundColor = Color(0x0210B981)
-                    )
-                ) {
-                    if (item.source == "transcript") {
-                        Markdown(
-                            content = item.response,
-                            colors = markdownColor(
-                                text = Color.White,
-                                codeText = Color.LightGray,
-                                codeBackground = Color(0xFF2B2B2B)
-                            ),
-                            typography = markdownTypography(
-                                text = TextStyle(fontSize = 12.sp, lineHeight = 15.sp, color = Color.White),
-                                code = TextStyle(fontSize = 10.sp, lineHeight = 13.sp),
-                                h1 = TextStyle(fontSize = 16.sp, fontWeight = FontWeight.Bold),
-                                h2 = TextStyle(fontSize = 14.sp, fontWeight = FontWeight.Bold),
-                                h3 = TextStyle(fontSize = 13.sp, fontWeight = FontWeight.Bold),
-                                paragraph = TextStyle(fontSize = 12.sp, lineHeight = 15.sp)
-                            ),
-                            modifier = Modifier.fillMaxWidth()
-                        )
-                    } else {
-                        Text(
-                            text = item.response,
-                            style = MaterialTheme.typography.body2.copy(fontSize = 11.sp, lineHeight = 14.sp),
-                            color = Color.White
-                        )
-                    }
-                }
-            }
-
-            // Done Button
-            item {
-                Spacer(modifier = Modifier.height(4.dp))
-                Chip(
-                    onClick = onBackClick,
-                    label = {
-                        Text(
-                            text = "DONE READING",
-                            fontSize = 11.sp,
-                            textAlign = TextAlign.Center,
-                            modifier = Modifier.fillMaxWidth()
-                        )
-                    },
-                    colors = ChipDefaults.chipColors(backgroundColor = Color(0x26FFFFFF)),
-                    modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)
-                )
-            }
-        }
+        MdBlock.Rule -> Box(modifier.padding(vertical = 6.dp).height(1.dp).background(OutlineVariant))
     }
 }

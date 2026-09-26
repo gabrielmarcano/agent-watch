@@ -92,6 +92,31 @@ class PromptActionsTest {
         }
     }
 
+    @Test
+    fun moreOptionsAreEverythingButAllowAndDenyInMenuOrder() {
+        val prompt = permission(
+            opt("opt-1", "allow_once"),
+            opt("opt-2", "allow_always"),
+            opt("opt-3", "allow_always"),
+            opt("opt-4", "deny")
+        )
+        assertEquals(listOf("opt-2", "opt-3"), morePermissionOptions(prompt).map { it.id })
+    }
+
+    @Test
+    fun withoutAllowOnceTheAlwaysOptionIsOnlyUnderMore() {
+        val prompt = permission(opt("opt-1", "allow_always"), opt("opt-2", "deny"))
+        assertEquals(listOf("opt-1"), morePermissionOptions(prompt).map { it.id })
+    }
+
+    @Test
+    fun onlyDontAskAgainOptionsNeedConfirmation() {
+        assertTrue(opt("a", "allow_always").needsConfirmation())
+        assertFalse(opt("b", "allow_once").needsConfirmation())
+        assertFalse(opt("c", "deny").needsConfirmation())
+        assertFalse(opt("d", "choice").needsConfirmation())
+    }
+
     private fun orderedSubsets(items: List<String>): List<List<String>> {
         if (items.isEmpty()) return listOf(emptyList())
         val result = mutableListOf<List<String>>()

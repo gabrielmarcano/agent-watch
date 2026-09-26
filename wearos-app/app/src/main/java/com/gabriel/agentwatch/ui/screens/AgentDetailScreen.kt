@@ -1,321 +1,264 @@
 package com.gabriel.agentwatch.ui.screens
 
 import android.app.Activity
-import android.content.Intent
+import android.content.ActivityNotFoundException
 import android.speech.RecognizerIntent
 import android.view.HapticFeedbackConstants
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.focusable
-import androidx.compose.foundation.gestures.scrollBy
-import androidx.compose.foundation.layout.*
-import androidx.compose.runtime.*
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.focus.FocusRequester
-import androidx.compose.ui.focus.focusRequester
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.input.rotary.onRotaryScrollEvent
-import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.platform.LocalView
-import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.LifecycleEventObserver
-import androidx.wear.compose.foundation.lazy.ScalingLazyColumn
-import androidx.wear.compose.foundation.lazy.rememberScalingLazyListState
-import androidx.wear.compose.material.*
+import androidx.wear.compose.material3.AlertDialog
+import androidx.wear.compose.material3.AlertDialogDefaults
+import androidx.wear.compose.material3.ConfirmationDialogDefaults
+import androidx.wear.compose.material3.EdgeButton
+import androidx.wear.compose.material3.FilledTonalButton
+import androidx.wear.compose.material3.MaterialTheme
+import androidx.wear.compose.material3.SuccessConfirmationDialog
+import androidx.wear.compose.material3.SurfaceTransformation
+import androidx.wear.compose.material3.SwitchButton
+import androidx.wear.compose.material3.Text
+import androidx.wear.compose.material3.confirmationDialogCurvedText
+import androidx.wear.compose.material3.lazy.transformedHeight
+import com.gabriel.agentwatch.R
 import com.gabriel.agentwatch.approval.CommandFeedback
 import com.gabriel.agentwatch.approval.SentAnswer
 import com.gabriel.agentwatch.approval.commandErrorFeedback
 import com.gabriel.agentwatch.approval.isAwaitingUpdate
-import com.gabriel.agentwatch.data.Prefs
+import com.gabriel.agentwatch.approval.needsConfirmation
 import com.gabriel.agentwatch.model.AgentState
+import com.gabriel.agentwatch.model.PromptOption
 import com.gabriel.agentwatch.network.RelayRepository
-import com.gabriel.agentwatch.ui.theme.BrightGreen
-import com.gabriel.agentwatch.ui.theme.BrightYellow
-import com.gabriel.agentwatch.ui.theme.LightBlue
-import com.gabriel.agentwatch.ui.theme.Red400
-import com.gabriel.agentwatch.ui.theme.statusColor
+import com.gabriel.agentwatch.ui.components.RecognizerIntentFactory
+import com.gabriel.agentwatch.ui.components.ResIcon
+import com.gabriel.agentwatch.ui.components.ScreenList
+import com.gabriel.agentwatch.ui.components.ageText
+import com.gabriel.agentwatch.ui.components.transformedItem
+import com.gabriel.agentwatch.ui.theme.OnSurfaceVariant
+import com.gabriel.agentwatch.ui.theme.statusStyle
 import kotlinx.coroutines.launch
 
 @Composable
 fun AgentDetailScreen(
     agent: AgentState,
-    onHistoryClick: (paneId: String) -> Unit,
-    onBackClick: () -> Unit
+    isTileTarget: Boolean,
+    onTileTargetChange: (Boolean) -> Unit,
+    onDictated: (text: String) -> Unit,
+    onHistoryClick: () -> Unit,
+    onViewAll: (text: String) -> Unit
 ) {
-    val context = LocalContext.current
-    val prefs = remember { Prefs(context) }
-    val coroutineScope = rememberCoroutineScope()
-    val listState = rememberScalingLazyListState()
-    val focusRequester = remember { FocusRequester() }
-    val lifecycleOwner = LocalLifecycleOwner.current
-
+    val scope = rememberCoroutineScope()
     val view = LocalView.current
 
-    var actionInFlight by remember { mutableStateOf(false) }
-    var feedback by remember { mutableStateOf<CommandFeedback?>(null) }
+    var inFlight by remember { mutableStateOf(false) }
+    var error by remember(agent.pane_id) { mutableStateOf<CommandFeedback?>(null) }
+    var confirmation by remember { mutableStateOf<Int?>(null) }
+    var askAlways by remember { mutableStateOf<PromptOption?>(null) }
 
-    // After a successful answer/cancel, the prompt stays locked ("Sent…") until the relay
-    // reports a new seq or fingerprint, or the agent leaves blocked. Prevents a double send.
+    // After a successful answer or cancel the prompt stays locked until the relay reports a new seq or
+    // fingerprint, or the agent leaves blocked. Prevents a double send.
     var sentAnswer by remember(agent.pane_id) { mutableStateOf<SentAnswer?>(null) }
     val awaitingUpdate = isAwaitingUpdate(agent, sentAnswer)
     LaunchedEffect(sentAnswer, awaitingUpdate) {
         if (sentAnswer != null && !awaitingUpdate) sentAnswer = null
     }
+    // A new prompt makes the last error meaningless.
+    LaunchedEffect(agent.state_change_seq, agent.prompt?.fingerprint) { error = null }
 
-    // Opening this screen pins this agent for quick dictation
-    LaunchedEffect(agent.pane_id) {
-        prefs.pinnedPaneId = agent.pane_id
+    fun send(successMessage: Int, command: suspend (SentAnswer) -> Result<Unit>) {
+        val prompt = agent.prompt ?: return
+        if (inFlight || awaitingUpdate) return
+        // The seq and fingerprint of the prompt on screen at tap time.
+        val target = SentAnswer(agent.pane_id, agent.state_change_seq, prompt.fingerprint)
+        inFlight = true
+        error = null
+        scope.launch {
+            command(target).fold(
+                onSuccess = {
+                    sentAnswer = target
+                    view.performHapticFeedback(HapticFeedbackConstants.CONFIRM)
+                    confirmation = successMessage
+                },
+                onFailure = {
+                    view.performHapticFeedback(HapticFeedbackConstants.REJECT)
+                    error = commandErrorFeedback(it)
+                }
+            )
+            inFlight = false
+        }
     }
 
-    // Voice dictation launcher
-    val dictateLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.StartActivityForResult()
-    ) { result ->
+    fun answer(option: PromptOption) = send(
+        when (option.role) {
+            "allow_once", "allow_always" -> R.string.feedback_approved
+            "deny" -> R.string.feedback_denied
+            else -> R.string.feedback_answered
+        }
+    ) { t -> RelayRepository.answer(t.paneId, option.id, t.seq, t.fingerprint) }
+
+    fun cancel() = send(R.string.feedback_canceled) { t ->
+        RelayRepository.cancel(t.paneId, t.seq, fingerprint = t.fingerprint)
+    }
+
+    val dictate = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
         if (result.resultCode == Activity.RESULT_OK) {
-            val spokenText = result.data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)?.firstOrNull()
-            if (!spokenText.isNullOrBlank()) {
-                actionInFlight = true
-                feedback = null
-                coroutineScope.launch {
-                    val res = RelayRepository.prompt(
-                        paneId = agent.pane_id,
-                        text = spokenText,
-                        expectedSeq = agent.state_change_seq
-                    )
-                    actionInFlight = false
-                    res.fold(
-                        onSuccess = { feedback = CommandFeedback.success("Prompt sent") },
-                        onFailure = { err -> feedback = commandErrorFeedback(err) }
-                    )
-                }
-            }
+            result.data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)?.firstOrNull()
+                ?.takeIf { it.isNotBlank() }
+                ?.let(onDictated)
         }
     }
+    val dictationPrompt = stringResource(R.string.dictation_prompt, agent.label.ifBlank { agent.pane_id })
+    val unavailable = stringResource(R.string.dictation_unavailable)
 
-    DisposableEffect(lifecycleOwner) {
-        val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_RESUME) {
-                coroutineScope.launch {
-                    kotlinx.coroutines.delay(50)
-                    try { focusRequester.requestFocus() } catch (_: Exception) {}
-                }
-            }
-        }
-        lifecycleOwner.lifecycle.addObserver(observer)
-        onDispose {
-            lifecycleOwner.lifecycle.removeObserver(observer)
-        }
-    }
-
-    Scaffold(
-        timeText = { TimeText() },
-        vignette = { Vignette(vignettePosition = VignettePosition.TopAndBottom) },
-        positionIndicator = { PositionIndicator(scalingLazyListState = listState) }
-    ) {
-        ScalingLazyColumn(
-            modifier = Modifier
-                .fillMaxSize()
-                .onRotaryScrollEvent { event ->
-                    coroutineScope.launch {
-                        listState.scrollBy(event.verticalScrollPixels)
+    val blocked = agent.status == "blocked"
+    ScreenList(
+        edgeButton = if (blocked) null else {
+            {
+                EdgeButton(onClick = {
+                    try {
+                        dictate.launch(RecognizerIntentFactory.freeForm(dictationPrompt))
+                    } catch (_: ActivityNotFoundException) {
+                        error = CommandFeedback(unavailable, isError = true)
                     }
-                    true
+                }) {
+                    ResIcon(R.drawable.ic_mic, null, MaterialTheme.colorScheme.onPrimary, Modifier.size(20.dp))
+                    Spacer(Modifier.width(4.dp))
+                    Text(stringResource(R.string.dictate))
                 }
-                .focusRequester(focusRequester)
-                .focusable(),
-            state = listState,
-            horizontalAlignment = Alignment.CenterHorizontally,
-            contentPadding = PaddingValues(top = 28.dp, start = 10.dp, end = 10.dp, bottom = 28.dp)
-        ) {
-            // Agent Label & Kind Header
-            item {
-                Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(bottom = 4.dp)) {
+            }
+        }
+    ) { spec ->
+        // Narrower at the top of the round screen, where the chord is short.
+        item(key = "header") { AgentHeader(agent, transformedItem(spec).padding(start = 18.dp, end = 18.dp, top = 6.dp, bottom = 6.dp)) }
+
+        val prompt = agent.prompt
+        if (blocked && prompt != null) {
+            promptItems(
+                prompt, spec,
+                PromptControls(
+                    locked = inFlight || awaitingUpdate,
+                    sent = awaitingUpdate,
+                    error = error,
+                    onAnswer = { option -> if (option.needsConfirmation()) askAlways = option else answer(option) },
+                    onCancel = ::cancel,
+                    onViewAll = onViewAll
+                )
+            )
+        } else {
+            error?.let { fb ->
+                item(key = "error") {
                     Text(
-                        text = agent.label.ifBlank { agent.pane_id }.uppercase(),
-                        style = MaterialTheme.typography.caption1.copy(fontWeight = FontWeight.ExtraBold, letterSpacing = 1.sp),
-                        color = Color.White,
+                        fb.message,
+                        modifier = transformedItem(spec),
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.labelMedium,
                         textAlign = TextAlign.Center
                     )
-                    val contextLine = buildString {
-                        if (!agent.workspace.isNullOrBlank()) {
-                            append(agent.workspace)
-                        }
-                        if (!agent.name.isNullOrBlank() && agent.name != agent.label) {
-                            if (isNotEmpty()) append(" · ")
-                            append(agent.name)
-                        }
-                    }
-                    if (contextLine.isNotBlank()) {
-                        Text(
-                            text = contextLine,
-                            style = MaterialTheme.typography.caption2.copy(fontSize = 9.sp, fontWeight = FontWeight.SemiBold),
-                            color = Color.White.copy(alpha = 0.6f),
-                            textAlign = TextAlign.Center
-                        )
-                    }
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            text = "● ",
-                            color = statusColor(agent.status),
-                            fontSize = 10.sp
-                        )
-                        Text(
-                            text = "${agent.agent} · ${agent.status.uppercase()}",
-                            style = MaterialTheme.typography.caption2.copy(fontSize = 9.sp),
-                            color = statusColor(agent.status)
-                        )
-                    }
-                    if (!agent.cwd.isNullOrBlank()) {
-                        val shortCwd = agent.cwd.split("/").takeLast(2).joinToString("/")
-                        Text(
-                            text = "~/$shortCwd",
-                            style = MaterialTheme.typography.caption2.copy(fontSize = 8.5.sp),
-                            color = Color.White.copy(alpha = 0.5f)
-                        )
-                    }
                 }
             }
+        }
 
-            // Feedback banner (e.g. "Prompt changed — refreshed"); errors are always red
-            feedback?.let { fb ->
-                item {
-                    Text(
-                        text = fb.message,
-                        style = MaterialTheme.typography.caption2.copy(fontSize = 9.5.sp, fontWeight = FontWeight.Bold),
-                        color = if (fb.isError) Red400 else BrightGreen,
-                        textAlign = TextAlign.Center,
-                        modifier = Modifier.padding(vertical = 2.dp)
-                    )
-                }
-            }
+        item(key = "tile-target") {
+            SwitchButton(
+                checked = isTileTarget,
+                onCheckedChange = onTileTargetChange,
+                modifier = Modifier.fillMaxWidth().padding(top = 8.dp).transformedHeight(this, spec),
+                transformation = SurfaceTransformation(spec),
+                secondaryLabel = { Text(stringResource(R.string.quick_dictate_target_hint), maxLines = 2) },
+                label = { Text(stringResource(R.string.quick_dictate_target)) }
+            )
+        }
+        item(key = "history") {
+            FilledTonalButton(
+                onClick = onHistoryClick,
+                modifier = Modifier.fillMaxWidth().transformedHeight(this, spec),
+                transformation = SurfaceTransformation(spec),
+                icon = { ResIcon(R.drawable.ic_history, null, MaterialTheme.colorScheme.onSurface) },
+                label = { Text(stringResource(R.string.agent_history)) }
+            )
+        }
+    }
 
-            // Prompt Card if blocked
-            if (agent.status == "blocked" && agent.prompt != null) {
-                item {
-                    // What the command is sent against; also what locks the card on success.
-                    val target = SentAnswer(agent.pane_id, agent.state_change_seq, agent.prompt.fingerprint)
-                    PromptCard(
-                        agent = agent,
-                        isActionInFlight = actionInFlight || awaitingUpdate,
-                        isSent = awaitingUpdate,
-                        onAnswerClick = { optionId ->
-                            if (!actionInFlight && !awaitingUpdate) {
-                                actionInFlight = true
-                                feedback = null
-                                coroutineScope.launch {
-                                    val res = RelayRepository.answer(
-                                        paneId = target.paneId,
-                                        optionId = optionId,
-                                        expectedSeq = target.seq,
-                                        fingerprint = target.fingerprint
-                                    )
-                                    res.fold(
-                                        onSuccess = {
-                                            sentAnswer = target
-                                            view.performHapticFeedback(HapticFeedbackConstants.CONFIRM)
-                                            feedback = CommandFeedback.success("Sent answer")
-                                        },
-                                        onFailure = { err -> feedback = commandErrorFeedback(err) }
-                                    )
-                                    actionInFlight = false
-                                }
-                            }
-                        },
-                        onCancelClick = {
-                            if (!actionInFlight && !awaitingUpdate) {
-                                actionInFlight = true
-                                feedback = null
-                                coroutineScope.launch {
-                                    val res = RelayRepository.cancel(
-                                        paneId = target.paneId,
-                                        expectedSeq = target.seq
-                                    )
-                                    res.fold(
-                                        onSuccess = {
-                                            sentAnswer = target
-                                            view.performHapticFeedback(HapticFeedbackConstants.CONFIRM)
-                                            feedback = CommandFeedback.success("Canceled")
-                                        },
-                                        onFailure = { err -> feedback = commandErrorFeedback(err) }
-                                    )
-                                    actionInFlight = false
-                                }
-                            }
-                        }
-                    )
-                }
-            }
+    AlertDialog(
+        visible = askAlways != null,
+        onDismissRequest = { askAlways = null },
+        confirmButton = {
+            AlertDialogDefaults.ConfirmButton(onClick = {
+                askAlways?.let(::answer)
+                askAlways = null
+            })
+        },
+        title = { Text(stringResource(R.string.confirm_always_title)) },
+        text = { Text(askAlways?.label.orEmpty(), textAlign = TextAlign.Center) }
+    )
 
-            // Voice Dictate Button
-            item {
-                val canDictate = agent.status != "blocked"
-                Chip(
-                    onClick = {
-                        val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-                            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-                            putExtra(RecognizerIntent.EXTRA_PROMPT, "To: ${agent.label.ifBlank { agent.pane_id }}")
-                        }
-                        dictateLauncher.launch(intent)
-                    },
-                    enabled = canDictate && !actionInFlight,
-                    label = {
-                        Text(
-                            text = "DICTATE",
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 11.sp
-                        )
-                    },
-                    secondaryLabel = {
-                        Text(
-                            text = "To: ${agent.label.ifBlank { agent.pane_id }}",
-                            fontSize = 9.sp
-                        )
-                    },
-                    icon = { MicrophoneIcon(modifier = Modifier.size(16.dp), color = Color.White) },
-                    colors = ChipDefaults.chipColors(backgroundColor = Color(0xFF2563EB)),
-                    modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)
-                )
-            }
+    val confirmationText = confirmation?.let { stringResource(it) }.orEmpty()
+    val curvedStyle = ConfirmationDialogDefaults.curvedTextStyle
+    SuccessConfirmationDialog(
+        visible = confirmation != null,
+        onDismissRequest = { confirmation = null },
+        curvedText = { confirmationDialogCurvedText(confirmationText, curvedStyle) }
+    )
+}
 
-            // History Button for this Agent
-            item {
-                Chip(
-                    onClick = { onHistoryClick(agent.pane_id) },
-                    label = {
-                        Text(
-                            text = "HISTORY",
-                            fontSize = 10.sp,
-                            textAlign = TextAlign.Center,
-                            modifier = Modifier.fillMaxWidth()
-                        )
-                    },
-                    colors = ChipDefaults.chipColors(backgroundColor = Color(0x26FFFFFF)),
-                    modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)
-                )
+/** Name first, anchored under the clock; then status, workspace and folder. */
+@Composable
+private fun AgentHeader(agent: AgentState, modifier: Modifier) {
+    val style = statusStyle(agent.status)
+    Column(modifier, horizontalAlignment = Alignment.CenterHorizontally) {
+        Text(
+            agent.label.ifBlank { agent.pane_id },
+            style = MaterialTheme.typography.titleMedium,
+            textAlign = TextAlign.Center,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis
+        )
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center) {
+            ResIcon(style.icon, null, style.accent, Modifier.size(16.dp))
+            Spacer(Modifier.width(4.dp))
+            val statusLine = buildString {
+                append(stringResource(style.label))
+                if (agent.agent.isNotBlank()) append(" · ${agent.agent}")
             }
-
-            // Back Button
-            item {
-                Chip(
-                    onClick = onBackClick,
-                    label = {
-                        Text(
-                            text = "BACK",
-                            fontSize = 10.sp,
-                            textAlign = TextAlign.Center,
-                            modifier = Modifier.fillMaxWidth()
-                        )
-                    },
-                    colors = ChipDefaults.chipColors(backgroundColor = Color(0x14FFFFFF)),
-                    modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)
-                )
-            }
+            Text(statusLine, color = style.accent, style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+        // Where it runs and how long it has been in this state.
+        val context = listOfNotNull(
+            agent.workspace?.takeIf { it.isNotBlank() },
+            agent.name?.takeIf { it.isNotBlank() && it != agent.label },
+            ageText(agent.updated_at).takeIf { it.isNotBlank() }
+        ).joinToString(" · ")
+        if (context.isNotBlank()) {
+            Text(context, color = OnSurfaceVariant, style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center, maxLines = 2, overflow = TextOverflow.Ellipsis)
+        }
+        agent.cwd?.takeIf { it.isNotBlank() }?.let { cwd ->
+            Text(
+                "…/" + cwd.trimEnd('/').split('/').takeLast(2).joinToString("/"),
+                color = OnSurfaceVariant,
+                style = MaterialTheme.typography.bodySmall,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
         }
     }
 }

@@ -1,300 +1,179 @@
 package com.gabriel.agentwatch.ui.screens
 
-import android.app.Activity
-import android.content.Intent
 import android.os.Build
-import android.speech.RecognizerIntent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.border
-import androidx.compose.foundation.focusable
-import androidx.compose.foundation.gestures.scrollBy
-import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.runtime.*
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.focus.FocusRequester
-import androidx.compose.ui.focus.focusRequester
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.input.rotary.onRotaryScrollEvent
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalLifecycleOwner
-import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.LifecycleEventObserver
-import androidx.wear.compose.foundation.lazy.ScalingLazyColumn
-import androidx.wear.compose.foundation.lazy.rememberScalingLazyListState
-import androidx.wear.compose.material.*
+import androidx.wear.compose.material3.EdgeButton
+import androidx.wear.compose.material3.FilledTonalButton
+import androidx.wear.compose.material3.MaterialTheme
+import androidx.wear.compose.material3.SurfaceTransformation
+import androidx.wear.compose.material3.Text
+import androidx.wear.compose.material3.lazy.transformedHeight
+import com.gabriel.agentwatch.BuildConfig
+import com.gabriel.agentwatch.R
+import com.gabriel.agentwatch.approval.commandErrorFeedback
 import com.gabriel.agentwatch.data.Prefs
 import com.gabriel.agentwatch.network.RelayClient
 import com.gabriel.agentwatch.network.RelayRepository
-import com.gabriel.agentwatch.ui.theme.BrightGreen
-import com.gabriel.agentwatch.ui.theme.BrightYellow
-import com.gabriel.agentwatch.ui.theme.LightBlue
-import com.gabriel.agentwatch.ui.theme.Red400
+import com.gabriel.agentwatch.ui.components.ResIcon
+import com.gabriel.agentwatch.ui.components.ScreenList
+import com.gabriel.agentwatch.ui.components.TextInput
+import com.gabriel.agentwatch.ui.components.transformedItem
+import com.gabriel.agentwatch.ui.logic.isAcceptableRelayUrl
+import com.gabriel.agentwatch.ui.logic.normalizeRelayUrl
+import com.gabriel.agentwatch.ui.theme.OnSurfaceVariant
 import kotlinx.coroutines.launch
 
+private const val CODE_LENGTH = 6
+
+/**
+ * Pairing with a 6-digit code from `agent-watch-bridge pair`. The relay URL starts from the saved one
+ * or the build's shared-config default ([BuildConfig.DEFAULT_RELAY_URL], may be empty) and is edited
+ * with the system keyboard. [revoked]: the relay rejected the old token.
+ */
 @Composable
-fun PairingScreen(
-    onPairedSuccess: () -> Unit
-) {
+fun PairingScreen(revoked: Boolean, onPaired: () -> Unit) {
     val context = LocalContext.current
     val prefs = remember { Prefs(context) }
-    val coroutineScope = rememberCoroutineScope()
-    val listState = rememberScalingLazyListState()
-    val focusRequester = remember { FocusRequester() }
-    val lifecycleOwner = LocalLifecycleOwner.current
+    val scope = rememberCoroutineScope()
 
-    var relayUrl by remember {
-        mutableStateOf(prefs.relayUrl.ifBlank { "https://relay.example.com" })
+    var relayUrl by remember { mutableStateOf(prefs.relayUrl.ifBlank { BuildConfig.DEFAULT_RELAY_URL }) }
+    var code by remember { mutableStateOf("") }
+    var pairing by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf<String?>(null) }
+
+    val urlOk = isAcceptableRelayUrl(relayUrl, allowCleartext = BuildConfig.DEBUG)
+    val urlLabel = stringResource(R.string.relay_url)
+    val codeLabel = stringResource(R.string.pair_code)
+
+    val urlInput = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        TextInput.result(result.data)?.let {
+            relayUrl = normalizeRelayUrl(it)
+            error = null
+        }
     }
-    var pairCode by remember { mutableStateOf("") }
-    var isLoading by remember { mutableStateOf(false) }
-    var errorMessage by remember { mutableStateOf<String?>(null) }
+    val codeInput = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        TextInput.result(result.data)?.let {
+            code = it.filter(Char::isDigit).take(CODE_LENGTH)
+            error = null
+        }
+    }
 
-    // Speech input launcher for Relay URL
-    val urlLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.StartActivityForResult()
-    ) { result ->
-        if (result.resultCode == Activity.RESULT_OK) {
-            val spokenText = result.data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)?.firstOrNull()
-            if (!spokenText.isNullOrBlank()) {
-                var clean = spokenText.trim().lowercase().replace(" ", "")
-                if (!clean.startsWith("http://") && !clean.startsWith("https://")) {
-                    clean = "https://$clean"
-                }
-                relayUrl = clean
+    fun pair() {
+        pairing = true
+        error = null
+        scope.launch {
+            val deviceName = "${Build.MANUFACTURER.replaceFirstChar { it.uppercase() }} ${Build.MODEL}"
+            RelayClient(baseUrl = relayUrl).pair(code = code, deviceName = deviceName).fold(
+                onSuccess = { resp ->
+                    prefs.relayUrl = relayUrl
+                    prefs.deviceId = resp.device_id
+                    prefs.deviceToken = resp.device_token
+                    // FcmRegistrar registers push when the new stream opens.
+                    RelayRepository.restart(context)
+                    onPaired()
+                },
+                onFailure = { error = commandErrorFeedback(it).message }
+            )
+            pairing = false
+        }
+    }
+
+    ScreenList(
+        edgeButton = {
+            EdgeButton(onClick = ::pair, enabled = !pairing && urlOk && code.length == CODE_LENGTH) {
+                Text(stringResource(if (pairing) R.string.pairing else R.string.pair))
             }
         }
-    }
-
-    // Speech input launcher for Pairing Code
-    val codeLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.StartActivityForResult()
-    ) { result ->
-        if (result.resultCode == Activity.RESULT_OK) {
-            val spokenText = result.data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)?.firstOrNull()
-            if (!spokenText.isNullOrBlank()) {
-                val digitsOnly = spokenText.filter { it.isDigit() }
-                pairCode = digitsOnly.take(6)
-            }
-        }
-    }
-
-    DisposableEffect(lifecycleOwner) {
-        val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_RESUME) {
-                coroutineScope.launch {
-                    kotlinx.coroutines.delay(50)
-                    try { focusRequester.requestFocus() } catch (_: Exception) {}
-                }
-            }
-        }
-        lifecycleOwner.lifecycle.addObserver(observer)
-        onDispose {
-            lifecycleOwner.lifecycle.removeObserver(observer)
-        }
-    }
-
-    Scaffold(
-        timeText = { TimeText() },
-        vignette = { Vignette(vignettePosition = VignettePosition.TopAndBottom) },
-        positionIndicator = { PositionIndicator(scalingLazyListState = listState) }
-    ) {
-        ScalingLazyColumn(
-            modifier = Modifier
-                .fillMaxSize()
-                .onRotaryScrollEvent { event ->
-                    coroutineScope.launch {
-                        listState.scrollBy(event.verticalScrollPixels)
-                    }
-                    true
-                }
-                .focusRequester(focusRequester)
-                .focusable(),
-            state = listState,
-            horizontalAlignment = Alignment.CenterHorizontally,
-            contentPadding = PaddingValues(top = 28.dp, start = 12.dp, end = 12.dp, bottom = 28.dp)
-        ) {
-            // Header
-            item {
-                Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(bottom = 6.dp)) {
+    ) { spec ->
+        item(key = "title") {
+            Column(transformedItem(spec).padding(start = 18.dp, end = 18.dp, top = 6.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                if (revoked) {
                     Text(
-                        text = "PAIR WATCH",
-                        style = MaterialTheme.typography.caption1.copy(
-                            letterSpacing = 1.5.sp,
-                            fontWeight = FontWeight.ExtraBold
-                        ),
-                        color = LightBlue
+                        stringResource(R.string.session_expired),
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.labelMedium,
+                        textAlign = TextAlign.Center
                     )
+                }
+                Text(stringResource(R.string.pair_title), style = MaterialTheme.typography.titleMedium, textAlign = TextAlign.Center)
+                Text(
+                    stringResource(R.string.pair_hint),
+                    color = OnSurfaceVariant,
+                    style = MaterialTheme.typography.bodySmall,
+                    textAlign = TextAlign.Center
+                )
+            }
+        }
+        item(key = "url") {
+            FilledTonalButton(
+                onClick = { urlInput.launch(TextInput.intent(urlLabel)) },
+                enabled = !pairing,
+                modifier = Modifier.fillMaxWidth().padding(top = 6.dp).transformedHeight(this, spec),
+                transformation = SurfaceTransformation(spec),
+                icon = { ResIcon(R.drawable.ic_edit, null, MaterialTheme.colorScheme.onSurface) },
+                secondaryLabel = {
                     Text(
-                        text = "Connect to Agent Watch Relay",
-                        style = MaterialTheme.typography.caption2.copy(fontSize = 9.sp),
-                        color = Color.White.copy(alpha = 0.5f)
+                        relayUrl.ifBlank { stringResource(R.string.relay_url_missing) },
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis
                     )
-                }
-            }
-
-            // Error message banner
-            if (errorMessage != null) {
-                item {
+                },
+                label = { Text(urlLabel) }
+            )
+        }
+        item(key = "code") {
+            FilledTonalButton(
+                onClick = { codeInput.launch(TextInput.intent(codeLabel)) },
+                enabled = !pairing,
+                modifier = Modifier.fillMaxWidth().transformedHeight(this, spec),
+                transformation = SurfaceTransformation(spec),
+                icon = { ResIcon(R.drawable.ic_link, null, MaterialTheme.colorScheme.onSurface) },
+                secondaryLabel = {
                     Text(
-                        text = errorMessage ?: "",
-                        style = MaterialTheme.typography.caption2.copy(fontSize = 9.5.sp, fontWeight = FontWeight.Bold),
-                        color = Red400,
-                        textAlign = TextAlign.Center,
-                        modifier = Modifier.padding(vertical = 4.dp)
+                        if (code.isEmpty()) stringResource(R.string.pair_code_missing)
+                        else code.chunked(3).joinToString(" ")
                     )
-                }
+                },
+                label = { Text(codeLabel) }
+            )
+        }
+        val badUrl = relayUrl.isNotBlank() && !urlOk
+        if (error != null || badUrl) {
+            item(key = "error") {
+                Text(
+                    error ?: stringResource(R.string.relay_url_invalid),
+                    modifier = transformedItem(spec),
+                    color = MaterialTheme.colorScheme.error,
+                    style = MaterialTheme.typography.labelMedium,
+                    textAlign = TextAlign.Center
+                )
             }
-
-            // Relay URL Card
-            item {
-                Card(
-                    onClick = {
-                        val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-                            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-                            putExtra(RecognizerIntent.EXTRA_PROMPT, "Dictate Relay URL")
-                        }
-                        urlLauncher.launch(intent)
-                    },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .border(BorderStroke(1.dp, Color(0x338AB4F8)), shape = RoundedCornerShape(16.dp))
-                        .padding(vertical = 2.dp),
-                    backgroundPainter = CardDefaults.cardBackgroundPainter(
-                        startBackgroundColor = Color(0x188AB4F8),
-                        endBackgroundColor = Color(0x048AB4F8)
-                    )
-                ) {
-                    Column(modifier = Modifier.fillMaxWidth()) {
-                        Text(
-                            text = "RELAY URL",
-                            style = MaterialTheme.typography.caption2.copy(fontSize = 8.5.sp, fontWeight = FontWeight.Bold),
-                            color = LightBlue
-                        )
-                        Spacer(modifier = Modifier.height(2.dp))
-                        Text(
-                            text = relayUrl.ifBlank { "Tap to set" },
-                            style = MaterialTheme.typography.body2.copy(fontSize = 11.sp),
-                            color = Color.White,
-                            maxLines = 1
-                        )
-                    }
-                }
-            }
-
-            // Pairing Code Card
-            item {
-                Card(
-                    onClick = {
-                        val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-                            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-                            putExtra(RecognizerIntent.EXTRA_PROMPT, "Say the 6-digit pairing code")
-                        }
-                        codeLauncher.launch(intent)
-                    },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .border(BorderStroke(1.dp, Color(0x338AB4F8)), shape = RoundedCornerShape(16.dp))
-                        .padding(vertical = 2.dp),
-                    backgroundPainter = CardDefaults.cardBackgroundPainter(
-                        startBackgroundColor = Color(0x188AB4F8),
-                        endBackgroundColor = Color(0x048AB4F8)
-                    )
-                ) {
-                    Column(modifier = Modifier.fillMaxWidth()) {
-                        Text(
-                            text = "6-DIGIT PAIRING CODE",
-                            style = MaterialTheme.typography.caption2.copy(fontSize = 8.5.sp, fontWeight = FontWeight.Bold),
-                            color = LightBlue
-                        )
-                        Spacer(modifier = Modifier.height(2.dp))
-                        val formattedCode = if (pairCode.length == 6) {
-                            "${pairCode.take(3)} · ${pairCode.takeLast(3)}"
-                        } else if (pairCode.isNotEmpty()) {
-                            pairCode
-                        } else {
-                            "Tap to dictate code"
-                        }
-                        Text(
-                            text = formattedCode,
-                            style = MaterialTheme.typography.body1.copy(fontSize = 14.sp, fontWeight = FontWeight.Bold),
-                            color = if (pairCode.length == 6) BrightGreen else Color.White
-                        )
-                    }
-                }
-            }
-
-            // Pair Button
-            item {
-                Spacer(modifier = Modifier.height(4.dp))
-                Chip(
-                    onClick = {
-                        if (pairCode.length != 6) {
-                            errorMessage = "Please enter all 6 digits"
-                            return@Chip
-                        }
-                        if (relayUrl.isBlank()) {
-                            errorMessage = "Relay URL cannot be empty"
-                            return@Chip
-                        }
-
-                        isLoading = true
-                        errorMessage = null
-
-                        coroutineScope.launch {
-                            val client = RelayClient(baseUrl = relayUrl)
-                            val deviceName = "${Build.MANUFACTURER.replaceFirstChar { it.uppercase() }} ${Build.MODEL}"
-                            val result = client.pair(code = pairCode, deviceName = deviceName)
-
-                            result.fold(
-                                onSuccess = { resp ->
-                                    prefs.relayUrl = relayUrl
-                                    prefs.deviceId = resp.device_id
-                                    prefs.deviceToken = resp.device_token
-                                    isLoading = false
-
-                                    // Register FCM token if already obtained
-                                    val fcm = prefs.fcmToken
-                                    if (!fcm.isNullOrBlank()) {
-                                        launch {
-                                            val authedClient = RelayClient(relayUrl, resp.device_token)
-                                            authedClient.registerPush(fcm)
-                                            prefs.fcmRegisteredToken = fcm
-                                        }
-                                    }
-
-                                    RelayRepository.resetClient()
-                                    RelayRepository.start(context)
-                                    onPairedSuccess()
-                                },
-                                onFailure = { error ->
-                                    isLoading = false
-                                    errorMessage = error.message ?: "Pairing failed"
-                                }
-                            )
-                        }
-                    },
-                    enabled = !isLoading && pairCode.length == 6,
-                    label = {
-                        Text(
-                            text = if (isLoading) "PAIRING..." else "PAIR WATCH",
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 11.sp,
-                            textAlign = TextAlign.Center,
-                            modifier = Modifier.fillMaxWidth()
-                        )
-                    },
-                    colors = ChipDefaults.chipColors(
-                        backgroundColor = if (pairCode.length == 6) BrightGreen else Color(0xFF2563EB)
-                    ),
-                    modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)
+        }
+        if (code.isNotEmpty() && code.length < CODE_LENGTH && error == null) {
+            item(key = "incomplete") {
+                Text(
+                    stringResource(R.string.pair_code_incomplete),
+                    modifier = transformedItem(spec),
+                    color = OnSurfaceVariant,
+                    style = MaterialTheme.typography.labelMedium,
+                    textAlign = TextAlign.Center
                 )
             }
         }

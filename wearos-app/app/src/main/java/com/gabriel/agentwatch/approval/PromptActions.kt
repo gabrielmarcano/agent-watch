@@ -31,6 +31,15 @@ fun permissionButtons(prompt: PendingPrompt): PermissionButtons {
     return PermissionButtons(allow, deny, hasMore)
 }
 
+/** The options shown under "More options": every option that is not the ALLOW or DENY button, in menu order. */
+fun morePermissionOptions(prompt: PendingPrompt): List<PromptOption> {
+    val buttons = permissionButtons(prompt)
+    return prompt.options.filter { it.id != buttons.allow?.id && it.id != buttons.deny?.id }
+}
+
+/** "Don't ask again" options change the agent's rules for good, so the wrist asks before sending them. */
+fun PromptOption.needsConfirmation(): Boolean = role == "allow_always"
+
 /** A command the relay accepted (HTTP 200) for one prompt: the pane plus the seq and fingerprint it was sent with. */
 data class SentAnswer(
     val paneId: String,

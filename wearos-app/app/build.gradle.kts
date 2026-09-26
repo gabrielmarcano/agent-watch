@@ -82,16 +82,13 @@ kotlin {
 }
 
 dependencies {
-    // Wear OS Compose. Material 3 is the target; Material 2 stays only until every screen is migrated.
-    // 1.6.x is the newest line that builds with AGP 8 (1.7 needs AGP 9.1 and compileSdk 37).
+    // Wear OS Compose Material 3. 1.6.x is the newest line that builds with AGP 8
+    // (1.7 needs AGP 9.1 and compileSdk 37).
     implementation("androidx.wear.compose:compose-material3:1.6.2")
     implementation("androidx.wear.compose:compose-foundation:1.6.2")
     implementation("androidx.wear.compose:compose-navigation:1.6.2")
-    implementation("androidx.wear.compose:compose-material:1.6.2")
-
-    // Markdown renderer (phone Material 2): replaced by the block renderer with the reader screen
-    implementation("androidx.compose.material:material:1.9.0")
-    implementation("com.mikepenz:multiplatform-markdown-renderer-m2:0.25.0")
+    // System text input (keyboard / handwriting / voice) for the relay URL and pairing code
+    implementation("androidx.wear:wear-input:1.2.0")
 
     // Activity and lifecycle
     implementation("androidx.activity:activity-compose:1.12.4")

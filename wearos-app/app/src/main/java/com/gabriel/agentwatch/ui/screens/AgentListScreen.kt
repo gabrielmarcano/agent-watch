@@ -1,20 +1,21 @@
 package com.gabriel.agentwatch.ui.screens
 
-import androidx.compose.foundation.background
-import androidx.compose.foundation.border
-import androidx.compose.foundation.focusable
-import androidx.compose.foundation.gestures.scrollBy
-import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.runtime.*
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.focus.FocusRequester
-import androidx.compose.ui.focus.focusRequester
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.input.rotary.onRotaryScrollEvent
-import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
@@ -22,282 +23,180 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.LifecycleEventObserver
-import androidx.wear.compose.foundation.lazy.ScalingLazyColumn
 import androidx.wear.compose.foundation.lazy.items
-import androidx.wear.compose.foundation.lazy.rememberScalingLazyListState
-import androidx.wear.compose.material.*
+import androidx.wear.compose.foundation.lazy.rememberTransformingLazyColumnState
+import androidx.wear.compose.material3.Button
+import androidx.wear.compose.material3.ButtonDefaults
+import androidx.wear.compose.material3.CircularProgressIndicator
+import androidx.wear.compose.material3.FilledTonalButton
+import androidx.wear.compose.material3.ListSubHeader
+import androidx.wear.compose.material3.MaterialTheme
+import androidx.wear.compose.material3.OutlinedButton
+import androidx.wear.compose.material3.SurfaceTransformation
+import androidx.wear.compose.material3.Text
+import androidx.wear.compose.material3.lazy.transformedHeight
+import com.gabriel.agentwatch.R
 import com.gabriel.agentwatch.model.AgentState
-import com.gabriel.agentwatch.network.Connection
 import com.gabriel.agentwatch.network.UiState
-import com.gabriel.agentwatch.ui.theme.BrightGreen
-import com.gabriel.agentwatch.ui.theme.BrightYellow
-import com.gabriel.agentwatch.ui.theme.LightBlue
-import com.gabriel.agentwatch.ui.theme.Red400
-import com.gabriel.agentwatch.ui.theme.statusColor
-import kotlinx.coroutines.launch
+import com.gabriel.agentwatch.ui.components.ResIcon
+import com.gabriel.agentwatch.ui.components.ScreenList
+import com.gabriel.agentwatch.ui.components.transformedItem
+import com.gabriel.agentwatch.ui.logic.AttentionSection
+import com.gabriel.agentwatch.ui.logic.ListNotice
+import com.gabriel.agentwatch.ui.logic.attentionSections
+import com.gabriel.agentwatch.ui.logic.listStatus
+import com.gabriel.agentwatch.ui.theme.Amber
+import com.gabriel.agentwatch.ui.theme.OnSurfaceVariant
+import com.gabriel.agentwatch.ui.theme.Red
+import com.gabriel.agentwatch.ui.theme.statusStyle
+
+private const val DIMMED_ALPHA = 0.6f
 
 @Composable
 fun AgentListScreen(
-    uiState: UiState,
+    state: UiState,
     onAgentClick: (paneId: String) -> Unit,
     onHistoryClick: () -> Unit,
     onSettingsClick: () -> Unit
 ) {
-    val listState = rememberScalingLazyListState()
-    val focusRequester = remember { FocusRequester() }
-    val coroutineScope = rememberCoroutineScope()
-    val lifecycleOwner = LocalLifecycleOwner.current
+    // The last notice shown, so a retry after a failure keeps saying "Can't reach the relay".
+    val lastNotice = remember { arrayOfNulls<ListNotice>(1) }
+    val status = listStatus(state, lastNotice[0])
+    SideEffect { lastNotice[0] = status.notice }
+    val sections = remember(state.agents) { attentionSections(state.agents) }
 
-    val groupedAgents = remember(uiState.agents) {
-        uiState.agents.groupBy { it.workspace?.ifBlank { null } ?: it.workspace_id }
+    // The notice is always item 0; when it changes or the first agents arrive, show the top again
+    // unless the user has scrolled down the list.
+    val listState = rememberTransformingLazyColumnState()
+    LaunchedEffect(status.notice) {
+        if (listState.anchorItemIndex <= 2) listState.scrollToItem(0)
+    }
+    val hasAgents = sections.isNotEmpty()
+    LaunchedEffect(hasAgents) {
+        if (hasAgents) listState.scrollToItem(0)
     }
 
-    DisposableEffect(lifecycleOwner) {
-        val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_RESUME) {
-                coroutineScope.launch {
-                    kotlinx.coroutines.delay(50)
-                    try { focusRequester.requestFocus() } catch (_: Exception) {}
+    ScreenList(state = listState) { spec ->
+        item(key = "notice") {
+            status.notice?.let { Notice(it, transformedItem(spec).padding(start = 20.dp, end = 20.dp, bottom = 4.dp)) }
+        }
+
+        if (state.agents.isEmpty()) {
+            when (status.notice) {
+                ListNotice.CONNECTING -> item(key = "progress") {
+                    Row(transformedItem(spec), horizontalArrangement = Arrangement.Center) {
+                        CircularProgressIndicator(Modifier.size(32.dp))
+                    }
                 }
+                null -> item(key = "empty") {
+                    Column(transformedItem(spec).padding(vertical = 8.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(stringResource(R.string.no_agents), style = MaterialTheme.typography.titleMedium, textAlign = TextAlign.Center)
+                        Text(
+                            stringResource(R.string.no_agents_hint),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = OnSurfaceVariant,
+                            textAlign = TextAlign.Center
+                        )
+                    }
+                }
+                else -> Unit // the notice says it all
             }
         }
-        lifecycleOwner.lifecycle.addObserver(observer)
-        onDispose {
-            lifecycleOwner.lifecycle.removeObserver(observer)
+
+        sections.forEach { section ->
+            item(key = "section-${section.section}") {
+                ListSubHeader(
+                    modifier = Modifier.fillMaxWidth().transformedHeight(this, spec),
+                    transformation = SurfaceTransformation(spec)
+                ) {
+                    Text("${stringResource(section.section.title)} · ${section.agents.size}")
+                }
+            }
+            items(section.agents, key = { it.pane_id }) { agent ->
+                AgentRow(
+                    agent = agent,
+                    onClick = { onAgentClick(agent.pane_id) },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .transformedHeight(this, spec)
+                        .alpha(if (status.dimmed) DIMMED_ALPHA else 1f),
+                    transformation = SurfaceTransformation(spec)
+                )
+            }
         }
-    }
 
-    Scaffold(
-        timeText = { TimeText() },
-        vignette = { Vignette(vignettePosition = VignettePosition.TopAndBottom) },
-        positionIndicator = { PositionIndicator(scalingLazyListState = listState) }
-    ) {
-        ScalingLazyColumn(
-            modifier = Modifier
-                .fillMaxSize()
-                .onRotaryScrollEvent { event ->
-                    coroutineScope.launch {
-                        listState.scrollBy(event.verticalScrollPixels)
-                    }
-                    true
-                }
-                .focusRequester(focusRequester)
-                .focusable(),
-            state = listState,
-            horizontalAlignment = Alignment.CenterHorizontally,
-            contentPadding = PaddingValues(top = 28.dp, start = 10.dp, end = 10.dp, bottom = 28.dp)
-        ) {
-            // Header: Status indicator
-            item {
-                Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(bottom = 4.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        val statusDotColor = when (uiState.connection) {
-                            is Connection.Live -> BrightGreen
-                            is Connection.Connecting -> BrightYellow
-                            is Connection.Offline -> Red400
-                        }
-                        Text(
-                            text = "●",
-                            color = statusDotColor,
-                            fontSize = 10.sp,
-                            modifier = Modifier.padding(end = 4.dp)
-                        )
-                        Text(
-                            text = "AGENTS (${uiState.agents.size})",
-                            style = MaterialTheme.typography.caption1.copy(
-                                fontWeight = FontWeight.ExtraBold,
-                                letterSpacing = 1.sp
-                            ),
-                            color = Color.White
-                        )
-                    }
-                }
-            }
-
-            // Warning Banners (Host Offline / Herdr Stopped)
-            if (!uiState.hostOnline) {
-                item {
-                    Text(
-                        text = "⚠ Mac is offline",
-                        style = MaterialTheme.typography.caption2.copy(fontSize = 9.5.sp, fontWeight = FontWeight.Bold),
-                        color = BrightYellow,
-                        modifier = Modifier.padding(vertical = 2.dp)
-                    )
-                }
-            } else if (!uiState.herdrOnline) {
-                item {
-                    Text(
-                        text = "⚠ Herdr stopped",
-                        style = MaterialTheme.typography.caption2.copy(fontSize = 9.5.sp, fontWeight = FontWeight.Bold),
-                        color = BrightYellow,
-                        modifier = Modifier.padding(vertical = 2.dp)
-                    )
-                }
-            }
-
-            // Agent Chips grouped by workspace
-            if (uiState.agents.isEmpty()) {
-                item {
-                    Text(
-                        text = if (uiState.connection is Connection.Connecting) "Connecting..." else "No active agents",
-                        style = MaterialTheme.typography.caption2.copy(fontSize = 11.sp),
-                        color = Color.White.copy(alpha = 0.5f),
-                        modifier = Modifier.padding(vertical = 12.dp)
-                    )
-                }
-            } else {
-                groupedAgents.forEach { (workspaceName, agentsInWorkspace) ->
-                    item(key = "ws_$workspaceName") {
-                        ListHeader(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(top = 8.dp, bottom = 2.dp)
-                        ) {
-                            Text(
-                                text = workspaceName.uppercase(),
-                                style = MaterialTheme.typography.caption2.copy(
-                                    fontWeight = FontWeight.Bold,
-                                    letterSpacing = 0.8.sp
-                                ),
-                                color = Color.White.copy(alpha = 0.65f),
-                                textAlign = TextAlign.Start,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(horizontal = 4.dp)
-                            )
-                        }
-                    }
-                    items(agentsInWorkspace, key = { it.pane_id }) { agent ->
-                        AgentChip(
-                            agent = agent,
-                            onClick = { onAgentClick(agent.pane_id) }
-                        )
-                    }
-                }
-            }
-
-            // History Button
-            item {
-                Spacer(modifier = Modifier.height(4.dp))
-                Chip(
-                    onClick = onHistoryClick,
-                    label = {
-                        Text(
-                            text = "HISTORY",
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold,
-                            textAlign = TextAlign.Center,
-                            modifier = Modifier.fillMaxWidth()
-                        )
-                    },
-                    colors = ChipDefaults.chipColors(backgroundColor = Color(0x26FFFFFF)),
-                    modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)
-                )
-            }
-
-            // Settings / Pair Button
-            item {
-                Chip(
-                    onClick = onSettingsClick,
-                    label = {
-                        Text(
-                            text = "SETTINGS",
-                            fontSize = 10.sp,
-                            textAlign = TextAlign.Center,
-                            modifier = Modifier.fillMaxWidth()
-                        )
-                    },
-                    colors = ChipDefaults.chipColors(backgroundColor = Color(0x14FFFFFF)),
-                    modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)
-                )
-            }
+        item(key = "history") {
+            FilledTonalButton(
+                onClick = onHistoryClick,
+                modifier = Modifier.fillMaxWidth().padding(top = 8.dp).transformedHeight(this, spec),
+                transformation = SurfaceTransformation(spec),
+                icon = { ResIcon(R.drawable.ic_history, null, MaterialTheme.colorScheme.onSurface) },
+                label = { Text(stringResource(R.string.history)) }
+            )
+        }
+        item(key = "settings") {
+            OutlinedButton(
+                onClick = onSettingsClick,
+                modifier = Modifier.fillMaxWidth().transformedHeight(this, spec),
+                transformation = SurfaceTransformation(spec),
+                icon = { ResIcon(R.drawable.ic_settings, null, OnSurfaceVariant) },
+                label = { Text(stringResource(R.string.settings)) }
+            )
         }
     }
 }
 
-@Composable
-private fun AgentChip(
-    agent: AgentState,
-    onClick: () -> Unit
-) {
-    val isBlocked = agent.status == "blocked"
-    val color = statusColor(agent.status)
-
-    // Status-specific background and border tint
-    val (backgroundColor, borderColor) = when (agent.status) {
-        "blocked" -> Pair(BrightYellow.copy(alpha = 0.2f), BrightYellow.copy(alpha = 0.7f))
-        "working" -> Pair(LightBlue.copy(alpha = 0.15f), LightBlue.copy(alpha = 0.5f))
-        "done" -> Pair(BrightGreen.copy(alpha = 0.12f), BrightGreen.copy(alpha = 0.4f))
-        else -> Pair(Color(0x22FFFFFF), Color.Transparent)
+private val AttentionSection.title: Int
+    get() = when (this) {
+        AttentionSection.NEEDS_YOU -> R.string.section_needs_you
+        AttentionSection.DONE -> R.string.section_done
+        AttentionSection.WORKING -> R.string.section_working
+        AttentionSection.IDLE -> R.string.section_idle
+        AttentionSection.UNKNOWN -> R.string.section_unknown
     }
 
-    Chip(
+@Composable
+private fun Notice(notice: ListNotice, modifier: Modifier) {
+    val (icon, text, color) = when (notice) {
+        ListNotice.CONNECTING -> Triple(R.drawable.ic_sync, R.string.notice_connecting, OnSurfaceVariant)
+        ListNotice.RELAY_UNREACHABLE -> Triple(R.drawable.ic_cloud_off, R.string.notice_relay_unreachable, Red)
+        ListNotice.MAC_OFFLINE -> Triple(R.drawable.ic_computer, R.string.notice_mac_offline, Amber)
+        ListNotice.HERDR_STOPPED -> Triple(R.drawable.ic_computer, R.string.notice_herdr_stopped, Amber)
+    }
+    Row(modifier, horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
+        ResIcon(icon, null, color, Modifier.size(18.dp))
+        Spacer(Modifier.width(6.dp))
+        Text(stringResource(text), color = color, style = MaterialTheme.typography.labelMedium, textAlign = TextAlign.Center)
+    }
+}
+
+/** One agent: status icon, name (2 lines), then the status word first so it is never cut, agent and workspace. */
+@Composable
+fun AgentRow(
+    agent: AgentState,
+    onClick: () -> Unit,
+    modifier: Modifier,
+    transformation: SurfaceTransformation?
+) {
+    val style = statusStyle(agent.status)
+    val statusWord = stringResource(style.label)
+    val secondary = buildAnnotatedString {
+        withStyle(SpanStyle(color = style.accent, fontWeight = FontWeight.SemiBold)) { append(statusWord) }
+        agent.agent.takeIf { it.isNotBlank() }?.let { append(" · $it") }
+        agent.workspace?.takeIf { it.isNotBlank() }?.let { append(" · $it") }
+    }
+    Button(
         onClick = onClick,
-        icon = {
-            Box(
-                modifier = Modifier.size(16.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                if (isBlocked) {
-                    Text(
-                        text = "⚠",
-                        color = BrightYellow,
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                } else {
-                    Box(
-                        modifier = Modifier
-                            .size(7.dp)
-                            .background(color, CircleShape)
-                    )
-                }
-            }
-        },
-        label = {
-            Text(
-                text = agent.label.ifBlank { agent.name ?: agent.pane_id },
-                fontWeight = FontWeight.Bold,
-                fontSize = 12.sp,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-        },
-        secondaryLabel = {
-            val secondaryText = buildAnnotatedString {
-                if (!agent.name.isNullOrBlank() && agent.name != agent.label) {
-                    append("${agent.name} · ")
-                }
-                append("${agent.agent} · ")
-                withStyle(SpanStyle(color = color, fontWeight = FontWeight.Bold)) {
-                    append(agent.status.uppercase())
-                }
-            }
-            Text(
-                text = secondaryText,
-                fontSize = 9.5.sp,
-                color = Color.White.copy(alpha = 0.65f),
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-        },
-        colors = ChipDefaults.chipColors(
-            backgroundColor = backgroundColor
+        modifier = modifier,
+        transformation = transformation,
+        colors = ButtonDefaults.buttonColors(
+            containerColor = style.container,
+            contentColor = style.onContainer,
+            secondaryContentColor = style.onContainer,
+            iconColor = style.accent
         ),
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 2.dp)
-            .then(
-                if (borderColor != Color.Transparent) {
-                    Modifier.border(1.dp, borderColor, RoundedCornerShape(18.dp))
-                } else {
-                    Modifier
-                }
-            )
+        icon = { ResIcon(style.icon, stringResource(R.string.cd_status, statusWord), style.accent) },
+        secondaryLabel = { Text(secondary, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+        label = { Text(agent.label.ifBlank { agent.pane_id }, maxLines = 2, overflow = TextOverflow.Ellipsis) }
     )
 }

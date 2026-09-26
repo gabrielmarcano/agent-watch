@@ -1,177 +1,164 @@
 package com.gabriel.agentwatch.tile
 
 import android.app.Activity
+import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.os.Bundle
 import android.speech.RecognizerIntent
-import android.util.Log
-import android.widget.Toast
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.lifecycleScope
-import androidx.wear.compose.material.CircularProgressIndicator
-import androidx.wear.compose.material.MaterialTheme
-import androidx.wear.compose.material.Text
+import androidx.wear.compose.material3.AppScaffold
+import androidx.wear.compose.material3.CircularProgressIndicator
+import androidx.wear.compose.material3.FilledTonalButton
+import androidx.wear.compose.material3.MaterialTheme
+import androidx.wear.compose.material3.ScreenScaffold
+import androidx.wear.compose.material3.Text
+import com.gabriel.agentwatch.MainActivity
+import com.gabriel.agentwatch.R
+import com.gabriel.agentwatch.approval.commandErrorFeedback
 import com.gabriel.agentwatch.data.Prefs
 import com.gabriel.agentwatch.model.AgentState
-import com.gabriel.agentwatch.model.resolveTargetAgent
 import com.gabriel.agentwatch.network.RelayClient
+import com.gabriel.agentwatch.network.RelayRepository
+import com.gabriel.agentwatch.ui.components.RecognizerIntentFactory
+import com.gabriel.agentwatch.ui.screens.DictationFlow
+import com.gabriel.agentwatch.ui.theme.AgentWatchTheme
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
+/**
+ * Quick Dictate, opened by the tile with the `pane_id` it displayed: fetch that agent (fresh seq),
+ * listen, show what was understood, send on confirmation. Errors stay on screen, mapped by
+ * [commandErrorFeedback]; nothing is sent to an agent other than the one the tile named.
+ */
 class QuickDictateActivity : ComponentActivity() {
 
     companion object {
-        private const val TAG = "QuickDictate"
-    }
-
-    private var targetAgent: AgentState? = null
-    private var statusText by mutableStateOf("Connecting...")
-
-    private val voiceLauncher = registerForActivityResult(
-        ActivityResultContracts.StartActivityForResult()
-    ) { result ->
-        if (result.resultCode == Activity.RESULT_OK) {
-            val spokenText = result.data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)?.firstOrNull()
-            if (!spokenText.isNullOrEmpty()) {
-                val agent = targetAgent
-                if (agent != null) {
-                    sendPromptToAgent(agent, spokenText)
-                } else {
-                    finish()
-                }
-            } else {
-                finish()
-            }
-        } else {
-            finish()
-        }
+        const val EXTRA_PANE_ID = "pane_id"
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-
-        val prefs = Prefs(this)
-        if (!prefs.isPaired) {
-            Toast.makeText(this, "Not paired with relay", Toast.LENGTH_SHORT).show()
-            finish()
-            return
-        }
-
+        RelayRepository.init(this) // commands and 401 handling go through the process-wide engine
+        val launchPaneId = intent?.getStringExtra(EXTRA_PANE_ID)
         setContent {
-            MaterialTheme {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .background(Color.Black),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        modifier = Modifier.padding(16.dp)
-                    ) {
-                        CircularProgressIndicator()
-                        Spacer(modifier = Modifier.height(12.dp))
-                        Text(
-                            text = statusText,
-                            style = MaterialTheme.typography.body2,
-                            color = Color.White
-                        )
-                    }
-                }
-            }
-        }
-
-        resolveAndLaunchDictation(prefs)
-    }
-
-    private fun resolveAndLaunchDictation(prefs: Prefs) {
-        lifecycleScope.launch {
-            try {
-                val client = RelayClient(prefs.relayUrl, prefs.deviceToken)
-                val result = withContext(Dispatchers.IO) { client.agents() }
-
-                result.fold(
-                    onSuccess = { snapshot ->
-                        val target = resolveTargetAgent(snapshot.agents, prefs.pinnedPaneId)
-                        if (target == null) {
-                            Toast.makeText(this@QuickDictateActivity, "No active agents", Toast.LENGTH_SHORT).show()
-                            finish()
-                            return@fold
-                        }
-                        targetAgent = target
-
-                        val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-                            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-                            putExtra(RecognizerIntent.EXTRA_PROMPT, "To: ${target.label}")
-                        }
-                        try {
-                            voiceLauncher.launch(intent)
-                        } catch (e: Exception) {
-                            Log.e(TAG, "Voice dictation not available", e)
-                            Toast.makeText(this@QuickDictateActivity, "Voice dictation not available", Toast.LENGTH_SHORT).show()
-                            finish()
-                        }
-                    },
-                    onFailure = { error ->
-                        Log.e(TAG, "Failed to resolve target agent", error)
-                        Toast.makeText(this@QuickDictateActivity, "Relay unreachable: ${error.message}", Toast.LENGTH_SHORT).show()
-                        finish()
-                    }
-                )
-            } catch (e: Exception) {
-                Log.e(TAG, "Error resolving target agent", e)
-                Toast.makeText(this@QuickDictateActivity, "Error: ${e.message}", Toast.LENGTH_SHORT).show()
-                finish()
+            AgentWatchTheme {
+                AppScaffold { QuickDictate(Prefs(this@QuickDictateActivity), launchPaneId, onFinish = ::finish) }
             }
         }
     }
+}
 
-    private fun sendPromptToAgent(agent: AgentState, text: String) {
-        statusText = "Sending to ${agent.label}..."
-        val prefs = Prefs(this)
-        lifecycleScope.launch {
-            try {
-                val client = RelayClient(prefs.relayUrl, prefs.deviceToken)
-                val freshSeq = withContext(Dispatchers.IO) {
-                    val freshAgents = client.agents().getOrNull()?.agents
-                    val freshAgent = freshAgents?.find { it.pane_id == agent.pane_id }
-                    freshAgent?.state_change_seq ?: agent.state_change_seq
-                }
+private sealed interface Phase {
+    data object Loading : Phase
+    data class Message(val text: String) : Phase
+    data class Listening(val target: AgentState) : Phase
+    data class Confirm(val target: AgentState, val text: String) : Phase
+}
 
-                val sendResult = withContext(Dispatchers.IO) {
-                    client.prompt(agent.pane_id, text, freshSeq)
-                }
+@Composable
+private fun QuickDictate(prefs: Prefs, launchPaneId: String?, onFinish: () -> Unit) {
+    var phase by remember { mutableStateOf<Phase>(Phase.Loading) }
+    val notPaired = stringResource(R.string.dictation_not_paired)
+    val closed = stringResource(R.string.dictation_agent_closed)
+    val noTarget = stringResource(R.string.dictation_no_target)
+    val unavailable = stringResource(R.string.dictation_unavailable)
 
-                sendResult.fold(
-                    onSuccess = {
-                        Toast.makeText(this@QuickDictateActivity, "Sent to ${agent.label}", Toast.LENGTH_SHORT).show()
-                    },
-                    onFailure = { error ->
-                        Toast.makeText(this@QuickDictateActivity, "Failed: ${error.message}", Toast.LENGTH_LONG).show()
-                    }
-                )
-            } catch (e: Exception) {
-                Toast.makeText(this@QuickDictateActivity, "Error: ${e.message}", Toast.LENGTH_SHORT).show()
-            } finally {
-                finish()
-            }
+    LaunchedEffect(Unit) {
+        if (!prefs.isPaired) {
+            phase = Phase.Message(notPaired)
+            return@LaunchedEffect
         }
+        val result = withContext(Dispatchers.IO) { RelayClient(prefs.relayUrl, prefs.deviceToken).agents() }
+        phase = result.fold(
+            onSuccess = { snapshot ->
+                when (val target = dictationTarget(snapshot.agents, launchPaneId, prefs.pinnedPaneId)) {
+                    is DictationTarget.Found -> Phase.Listening(target.agent)
+                    DictationTarget.Closed -> Phase.Message(closed)
+                    DictationTarget.None -> Phase.Message(noTarget)
+                }
+            },
+            onFailure = { Phase.Message(commandErrorFeedback(it).message) }
+        )
+    }
+
+    when (val p = phase) {
+        Phase.Loading -> Centered {
+            CircularProgressIndicator(Modifier.size(36.dp))
+            Text(stringResource(R.string.loading), style = MaterialTheme.typography.bodyMedium)
+        }
+        is Phase.Message -> MessageWithOpenApp(p.text)
+        is Phase.Listening -> {
+            val prompt = stringResource(R.string.dictation_prompt, p.target.label.ifBlank { p.target.pane_id })
+            val listen = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+                val text = result.data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)?.firstOrNull()
+                if (result.resultCode == Activity.RESULT_OK && !text.isNullOrBlank()) {
+                    phase = Phase.Confirm(p.target, text)
+                } else {
+                    onFinish()
+                }
+            }
+            LaunchedEffect(p) {
+                try {
+                    listen.launch(RecognizerIntentFactory.freeForm(prompt))
+                } catch (_: ActivityNotFoundException) {
+                    phase = Phase.Message(unavailable)
+                }
+            }
+            Centered { CircularProgressIndicator(Modifier.size(36.dp)) }
+        }
+        is Phase.Confirm -> DictationFlow(
+            target = p.target,
+            text = p.text,
+            onTextChange = { phase = p.copy(text = it) },
+            onFinished = onFinish
+        )
+    }
+}
+
+@Composable
+private fun Centered(content: @Composable () -> Unit) {
+    ScreenScaffold {
+        Column(
+            Modifier.fillMaxSize().padding(24.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterVertically),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) { content() }
+    }
+}
+
+@Composable
+private fun MessageWithOpenApp(text: String) {
+    val context = LocalContext.current
+    Centered {
+        Text(text, style = MaterialTheme.typography.bodyLarge, textAlign = TextAlign.Center)
+        FilledTonalButton(
+            onClick = {
+                context.startActivity(Intent(context, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                (context as? Activity)?.finish()
+            },
+            modifier = Modifier.fillMaxWidth(),
+            label = { Text(stringResource(R.string.open_app)) }
+        )
     }
 }
