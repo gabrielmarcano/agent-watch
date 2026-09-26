@@ -98,9 +98,7 @@ dependencies {
     implementation("androidx.wear.watchface:watchface-complications-data-source-ktx:1.2.1")
     implementation("androidx.wear.tiles:tiles:1.6.2")
     implementation("androidx.wear.protolayout:protolayout:1.4.2")
-    implementation("androidx.wear.protolayout:protolayout-material:1.4.2")
     implementation("androidx.wear.protolayout:protolayout-material3:1.4.2")
-    implementation("androidx.concurrent:concurrent-futures:1.1.0")
 
     // HTTP / SSE client
     implementation("com.squareup.okhttp3:okhttp:4.12.0")

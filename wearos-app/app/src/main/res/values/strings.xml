@@ -59,7 +59,6 @@
 
     <!-- Dictation -->
     <string name="dictation_prompt">To: %s</string>
-    <string name="dictation_confirm_title">Send to %s?</string>
     <string name="send">Send</string>
     <string name="speak_again">Speak again</string>
     <string name="dictation_unavailable">Voice input isn\'t available</string>
@@ -99,4 +98,36 @@
 
     <!-- Content descriptions -->
     <string name="cd_status">Status: %s</string>
+    <!-- Complication (SHORT_TEXT: a few characters, plus a spoken description) -->
+    <string name="complication_pair">Pair</string>
+    <string name="complication_unreachable">!</string>
+    <string name="complication_mac_off">Off</string>
+    <string name="cd_complication_not_paired">Agent Watch: not paired</string>
+    <string name="cd_complication_unreachable">Agent Watch: can\'t reach the relay</string>
+    <string name="cd_complication_mac_offline">Agent Watch: Mac offline</string>
+    <string name="cd_complication_no_agents">Agent Watch: no agents running</string>
+    <plurals name="cd_complication_needs_you">
+        <item quantity="one">Agent Watch: %d agent needs you</item>
+        <item quantity="other">Agent Watch: %d agents need you</item>
+    </plurals>
+    <plurals name="cd_complication_done">
+        <item quantity="one">Agent Watch: %d agent finished</item>
+        <item quantity="other">Agent Watch: %d agents finished</item>
+    </plurals>
+    <plurals name="cd_complication_working">
+        <item quantity="one">Agent Watch: %d agent working</item>
+        <item quantity="other">Agent Watch: %d agents working</item>
+    </plurals>
+    <plurals name="cd_complication_idle">
+        <item quantity="one">Agent Watch: %d agent idle</item>
+        <item quantity="other">Agent Watch: %d agents idle</item>
+    </plurals>
+
+    <!-- Tile -->
+    <string name="tile_title">Quick Dictate</string>
+    <string name="tile_others_need_you">%d more need you</string>
+    <string name="tile_as_of">As of %s</string>
+    <string name="tile_open">Open</string>
+    <string name="tile_no_target">No agent to dictate to</string>
+    <string name="tile_needing_you">%d need you</string>
 </resources>

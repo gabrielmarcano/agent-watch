@@ -8,7 +8,6 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -28,7 +27,8 @@ import androidx.compose.ui.unit.dp
 import androidx.wear.compose.material3.ConfirmationDialogDefaults
 import androidx.wear.compose.material3.EdgeButton
 import androidx.wear.compose.material3.MaterialTheme
-import androidx.wear.compose.material3.OutlinedButton
+import androidx.wear.compose.material3.ButtonDefaults
+import androidx.wear.compose.material3.CompactButton
 import androidx.wear.compose.material3.SuccessConfirmationDialog
 import androidx.wear.compose.material3.SurfaceTransformation
 import androidx.wear.compose.material3.Text
@@ -70,13 +70,15 @@ fun DictationConfirmScreen(
             }
         }
     ) { spec ->
+        // Kept short so Send stays on screen for a typical dictation.
         item(key = "target") {
             Text(
-                stringResource(R.string.dictation_confirm_title, targetLabel),
-                modifier = transformedItem(spec),
-                style = MaterialTheme.typography.titleMedium,
+                stringResource(R.string.dictation_prompt, targetLabel),
+                modifier = transformedItem(spec).padding(horizontal = 24.dp),
+                color = OnSurfaceVariant,
+                style = MaterialTheme.typography.labelMedium,
                 textAlign = TextAlign.Center,
-                maxLines = 3,
+                maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
         }
@@ -102,12 +104,13 @@ fun DictationConfirmScreen(
             }
         }
         item(key = "again") {
-            OutlinedButton(
+            CompactButton(
                 onClick = onSpeakAgain,
                 enabled = !sending,
-                modifier = Modifier.fillMaxWidth().transformedHeight(this, spec),
+                modifier = Modifier.transformedHeight(this, spec),
                 transformation = SurfaceTransformation(spec),
-                icon = { ResIcon(R.drawable.ic_mic, null, OnSurfaceVariant, Modifier.size(20.dp)) },
+                colors = ButtonDefaults.filledTonalButtonColors(),
+                icon = { ResIcon(R.drawable.ic_mic, null, OnSurfaceVariant, Modifier.size(18.dp)) },
                 label = { Text(stringResource(R.string.speak_again)) }
             )
         }
