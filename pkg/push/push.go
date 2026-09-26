@@ -96,6 +96,11 @@ type Dispatcher struct {
 	Logger           *slog.Logger
 	DebounceDuration time.Duration
 	WindowDuration   time.Duration
+	// ReplyWait is how long a done push waits for its pane's reply (the
+	// history item the bridge sends right after the transition), so the
+	// notification shows the reply instead of "Task finished". 0 pushes at
+	// once, without it. The relay sets DefaultReplyWait.
+	ReplyWait time.Duration
 
 	mu        sync.Mutex
 	afterFunc func(time.Duration, func()) stopper // time.AfterFunc; tests fake it
@@ -115,7 +120,20 @@ type Dispatcher struct {
 	// a pane removed while blocked is never seen leaving blocked.
 	blockedShown map[string]shownPrompt
 
+	// pendingDone holds the done pushes waiting for their pane's reply.
+	pendingDone map[string]*pendingDone
+
 	wg sync.WaitGroup
+}
+
+// DefaultReplyWait is how long the relay lets a done push wait for its reply.
+const DefaultReplyWait = 3 * time.Second
+
+// pendingDone is a done push waiting for its pane's reply.
+type pendingDone struct {
+	msg   Message
+	cur   model.AgentState
+	timer stopper
 }
 
 // stopper is the part of *time.Timer the Dispatcher uses.
@@ -175,6 +193,9 @@ func (d *Dispatcher) initLocked() {
 	if d.blockedShown == nil {
 		d.blockedShown = make(map[string]shownPrompt)
 	}
+	if d.pendingDone == nil {
+		d.pendingDone = make(map[string]*pendingDone)
+	}
 }
 
 // TruncateRunes cuts s to at most maxRunes on a rune boundary and appends "…" when cut.
@@ -218,9 +239,75 @@ func (d *Dispatcher) OnAgentUpdate(prev *model.AgentState, cur model.AgentState)
 		d.dispatchLocked(Message{Event: EventResolved, PaneID: cur.PaneID, StateChangeSeq: cur.StateChangeSeq})
 	}
 
-	if shouldPush {
-		d.enqueueLocked(msg, cur)
+	// A done push waiting for its reply follows the pane's newest state.
+	if p, ok := d.pendingDone[cur.PaneID]; ok {
+		p.cur = cur
 	}
+
+	if shouldPush {
+		if msg.Event == EventDone && d.ReplyWait > 0 {
+			d.waitForReplyLocked(msg, cur)
+		} else {
+			d.enqueueLocked(msg, cur)
+		}
+	}
+}
+
+// OnHistoryItem implements relay.Notifier: a pane's new reply. A done push
+// waiting for it goes out now, with the reply as its body.
+func (d *Dispatcher) OnHistoryItem(item model.HistoryItem) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.initLocked()
+
+	p, ok := d.pendingDone[item.PaneID]
+	if !ok {
+		return
+	}
+	p.timer.Stop()
+	delete(d.pendingDone, item.PaneID)
+	if body := replyPreview(item.Response); body != "" {
+		p.msg.Body = body
+	}
+	d.enqueueLocked(p.msg, p.cur)
+}
+
+// waitForReplyLocked holds done push m until its pane's reply arrives or
+// ReplyWait ends. A newer done for the same pane replaces it.
+func (d *Dispatcher) waitForReplyLocked(m Message, cur model.AgentState) {
+	if old, ok := d.pendingDone[m.PaneID]; ok {
+		old.timer.Stop()
+	}
+	p := &pendingDone{msg: m, cur: cur}
+	p.timer = d.afterFunc(d.ReplyWait, func() { d.releaseDone(m.PaneID, p) })
+	d.pendingDone[m.PaneID] = p
+}
+
+// releaseDone is the reply-wait timer's callback: no reply came, so the done
+// push goes out with its generic body. It does nothing if the reply came first
+// or a newer done replaced p.
+func (d *Dispatcher) releaseDone(pane string, p *pendingDone) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.pendingDone[pane] != p {
+		return
+	}
+	delete(d.pendingDone, pane)
+	d.enqueueLocked(p.msg, p.cur)
+}
+
+// replyPreview turns an agent's reply into one line of notification text:
+// markdown markers dropped, lines joined, at most 240 runes.
+func replyPreview(response string) string {
+	text := strings.NewReplacer("**", "", "__", "", "`", "").Replace(response)
+	var parts []string
+	for _, line := range strings.Split(text, "\n") {
+		line = strings.TrimSpace(strings.TrimLeft(strings.TrimSpace(line), "#>*-•"))
+		if line != "" {
+			parts = append(parts, line)
+		}
+	}
+	return TruncateRunes(strings.Join(parts, " "), 240)
 }
 
 // buildMessage determines if a transition should push, and formats the message.

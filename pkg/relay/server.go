@@ -113,7 +113,10 @@ func NewServer(cfg *Config) (_ *Server, err error) {
 
 	var notifier Notifier
 	if len(senders) > 0 {
-		notifier = push.NewDispatcher(senders, nil, nil)
+		dispatcher := push.NewDispatcher(senders, nil, nil)
+		// A "finished" push shows the agent's reply when it arrives in time.
+		dispatcher.ReplyWait = push.DefaultReplyWait
+		notifier = dispatcher
 	} else {
 		slog.Info("push disabled")
 	}

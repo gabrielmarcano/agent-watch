@@ -431,7 +431,7 @@ All values are strings (FCM data maps allow only strings). No `notification` blo
 | `agent` | `claude` | |
 | `label` | `bizum` | |
 | `title` | `bizum needs approval` | Ready to display |
-| `body` | `Bash: go test ./...` | ≤ 240 chars |
+| `body` | `Bash: go test ./...` | ≤ 240 chars. For `done`: the agent's reply as one line (markdown markers dropped), or `Task finished` when no reply arrived in time (§4.3) |
 | `state_change_seq` | `334` | Decimal string, always a number (`0` for `digest`) |
 | `fingerprint` | `fd6ff7388739252d` | Only for `blocked` |
 | `allow_option_id` | `opt-1` | First `allow_once` option, else empty |
@@ -497,6 +497,7 @@ ntfy never gets `resolved`: it cannot withdraw a notification it already deliver
   - A pane that leaves `blocked` through a `snapshot` gets its `resolved` with its next `agent_update`.
   - A pane removed while blocked (`agent_removed`, or missing from a `snapshot`) gets none; its notification stays until dismissed.
 
+- **`done` waits for the reply:** the bridge sends the turn's `history_item` right after the transition. The relay holds the `done` push up to 3 s for that pane's next new history item and uses its response as the body; when none arrives, it pushes with `Task finished`. The debounce and the window below apply when it goes out.
 - **Debounce** (the same pane pushed the same event less than 5 s ago):
   - `done`: skip it. The pane's notification already says it finished.
   - `blocked`: **hold it** until the window ends (trailing edge), never drop it. A new prompt right after an answer is never lost.

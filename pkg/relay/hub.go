@@ -32,6 +32,9 @@ const (
 // Notifier receives agent update notifications for push dispatching.
 type Notifier interface {
 	OnAgentUpdate(prev *model.AgentState, cur model.AgentState)
+	// OnHistoryItem reports a pane's new reply (never a resent duplicate), so
+	// a "finished" push can show it.
+	OnHistoryItem(item model.HistoryItem)
 }
 
 // NoopNotifier is a placeholder notifier that does nothing.
@@ -39,6 +42,9 @@ type NoopNotifier struct{}
 
 // OnAgentUpdate is a no-op implementation.
 func (NoopNotifier) OnAgentUpdate(prev *model.AgentState, cur model.AgentState) {}
+
+// OnHistoryItem is a no-op implementation.
+func (NoopNotifier) OnHistoryItem(item model.HistoryItem) {}
 
 // hostConnection is one bridge WebSocket. gone is closed exactly once, as soon
 // as the connection stops being the current host (replaced, disconnected or
@@ -324,6 +330,7 @@ func (h *Hub) handleWireMessage(msg any) {
 		// Duplicates (the bridge resends after a reconnect) are not news.
 		if h.store.AddHistory(m.Item) {
 			h.state.BroadcastHistory(m.Item)
+			h.notifier.OnHistoryItem(m.Item)
 		}
 	case model.HerdrStatusMsg:
 		h.state.SetHost(true, m.HerdrOnline)

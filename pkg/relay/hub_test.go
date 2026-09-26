@@ -276,6 +276,33 @@ func TestHub_HistoryBroadcastOnlyWhenStored(t *testing.T) {
 	}
 }
 
+// historyNotifier records the replies the hub reports.
+type historyNotifier struct {
+	NoopNotifier
+	items []string
+}
+
+func (n *historyNotifier) OnHistoryItem(item model.HistoryItem) { n.items = append(n.items, item.ID) }
+
+// The notifier hears about each new reply once: a "finished" push waits for it.
+// A resent duplicate is not news.
+func TestHub_NotifierGetsNewRepliesOnce(t *testing.T) {
+	store, err := NewStore(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	defer store.Close()
+	notifier := &historyNotifier{}
+	hub := NewHub(NewAuthManager("valid-host-token", store, ClientIPPolicy{}), NewState(), store, notifier)
+
+	item := model.HistoryItem{ID: "h-1", PaneID: "w1:p1", CompletedAt: time.Now().UTC().Format(time.RFC3339)}
+	hub.handleWireMessage(model.HistoryItemMsg{Type: model.WireHistoryItem, Item: item})
+	hub.handleWireMessage(model.HistoryItemMsg{Type: model.WireHistoryItem, Item: item}) // bridge resend
+	if fmt.Sprint(notifier.items) != "[h-1]" {
+		t.Fatalf("notified = %v, want [h-1]", notifier.items)
+	}
+}
+
 // hubHarness is a Hub served over httptest, for host-lifecycle tests.
 type hubHarness struct {
 	state *State

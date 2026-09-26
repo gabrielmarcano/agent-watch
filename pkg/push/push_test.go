@@ -1018,3 +1018,78 @@ func TestTruncateRunes(t *testing.T) {
 		t.Errorf("got %q, want '日本語テ…'", got)
 	}
 }
+
+// With ReplyWait set, a done push waits for the pane's reply (the history item
+// the bridge sends right after the transition) and shows it as its body.
+func TestDispatcher_DoneWaitsForTheReply(t *testing.T) {
+	sender := &mockSender{name: "mock"}
+	d, _, timers := newTestDispatcher(sender)
+	d.ReplyWait = 3 * time.Second
+
+	finish(d, "p1", "api", 5)
+	d.Wait()
+	if got := sender.getMessages(); len(got) != 0 {
+		t.Fatalf("pushed before the reply: %v", eventsOf(got))
+	}
+
+	d.OnHistoryItem(model.HistoryItem{PaneID: "p2", Response: "another pane"})
+	d.OnHistoryItem(model.HistoryItem{PaneID: "p1", Response: "## Done\n\nI fixed **the login loop** in `auth.ts`.\n- added a test"})
+	d.Wait()
+	got := sender.getMessages()
+	if len(got) != 1 || got[0].Event != EventDone {
+		t.Fatalf("pushes = %v, want one done", eventsOf(got))
+	}
+	if want := "Done I fixed the login loop in auth.ts. added a test"; got[0].Body != want {
+		t.Errorf("body = %q, want %q", got[0].Body, want)
+	}
+
+	// The reply-wait timer that no longer matters does nothing when it fires.
+	flushWindow(d, timers)
+	if n := len(sender.getMessages()); n != 1 {
+		t.Errorf("pushes after the timers = %d, want 1", n)
+	}
+}
+
+// No reply within ReplyWait: the done push goes out with the generic body.
+func TestDispatcher_DoneWithoutAReply(t *testing.T) {
+	sender := &mockSender{name: "mock"}
+	d, _, timers := newTestDispatcher(sender)
+	d.ReplyWait = 3 * time.Second
+
+	finish(d, "p1", "api", 5)
+	timers.Fire() // the reply wait ends
+	d.Wait()
+	got := sender.getMessages()
+	if len(got) != 1 || got[0].Body != "Task finished" {
+		t.Fatalf("pushes = %+v, want one done with the generic body", got)
+	}
+
+	// A reply after the push changes nothing.
+	d.OnHistoryItem(model.HistoryItem{PaneID: "p1", Response: "late"})
+	d.Wait()
+	if n := len(sender.getMessages()); n != 1 {
+		t.Errorf("pushes = %d, want 1", n)
+	}
+}
+
+// ReplyWait 0 (the zero value) keeps the old behaviour: done pushes at once.
+func TestDispatcher_DoneAtOnceWithoutReplyWait(t *testing.T) {
+	sender := &mockSender{name: "mock"}
+	d, _, _ := newTestDispatcher(sender)
+
+	finish(d, "p1", "api", 5)
+	d.Wait()
+	if got := sender.getMessages(); len(got) != 1 || got[0].Body != "Task finished" {
+		t.Fatalf("pushes = %+v", got)
+	}
+}
+
+func TestReplyPreview(t *testing.T) {
+	long := strings.Repeat("word ", 100)
+	if got := replyPreview(long); utf8.RuneCountInString(got) != 240 || !strings.HasSuffix(got, "…") {
+		t.Errorf("preview not cut to 240 runes: %d", utf8.RuneCountInString(got))
+	}
+	if got := replyPreview("  \n\n "); got != "" {
+		t.Errorf("blank reply preview = %q", got)
+	}
+}
