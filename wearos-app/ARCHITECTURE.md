@@ -2,11 +2,13 @@
 
 The Wear OS app is the primary client of the relay's `/v1` API (`docs/reference/contracts.md` §1, §2, §4.1). It never talks to the computer directly and never sends raw keys. Build, install and device checks: `docs/phases/4-wearos.md` and `.agents/skills/wearos-deploy/SKILL.md`.
 
-> **State on 2026-09-25:** the data layer below was reworked and is covered by 105 JVM tests. **The UI (`ui/screens/`) is the first alpha and is being redesigned in a separate session**; that session must adopt the data-layer API listed in §4. Nothing from the rework is re-verified on the watch yet.
+> **State on 2026-09-25:** the data layer below was reworked in the Phase 4 review, and the UI was rebuilt on Wear Compose Material 3 in Phase 4b (`docs/phases/4b-wearos-ui.md`). 173 JVM tests. Verified on the emulator (round, 192 dp) against a local relay; **not yet on the watch**.
 
 ## 1. Stack
 
-- Kotlin, Jetpack Compose for Wear OS (`androidx.wear.compose`), rotary input.
+- Kotlin 2.2, Jetpack Compose for Wear OS **Material 3** 1.6.2 (`androidx.wear.compose.material3`): `AppScaffold`, `ScreenScaffold` + `TransformingLazyColumn` (native rotary, the clock scrolls away), `EdgeButton`, confirmation and alert dialogs. 1.6 is the newest line on AGP 8; 1.7 needs AGP 9.1 and compileSdk 37.
+- Tile on ProtoLayout Material 3 (`Material3TileService`); text entry through `androidx.wear:wear-input` (system keyboard, handwriting or voice).
+- Toolchain: AGP 8.13.2, Gradle 8.14.3, compileSdk 36, targetSdk 34.
 - OkHttp + `okhttp-sse`, Gson (models with `@Keep`, snake_case field names, for R8).
 - Firebase Cloud Messaging (data-only messages).
 - `minSdk 30` (Wear OS 3+), `targetSdk 34`, JDK 17. Verified only on a Google Pixel Watch 2.
@@ -19,9 +21,13 @@ The Wear OS app is the primary client of the relay's `/v1` API (`docs/reference/
 | `data/` | `Prefs` (`SharedPreferences`: relay URL, device token and id, FCM token, `fcm_registration`, pinned pane); `AgentStore` (merges SSE and refreshes); `HistoryMerge` (dedup by `id`, newest first, max 200); `FcmRegistration` (which FCM token the relay accepted for which pairing) |
 | `network/` | `RelayClient` (stateless `/v1` client) and `RelayHttpClients`; `RelayEngine` (the relay link, no Android); `RelayRepository` (Android façade); `UiState`; `FcmRegistrar` + `PushRegistration`; `MyFirebaseMessagingService`, `AgentNotifications`, `NotificationSupport`, `NotificationActionReceiver`; `SurfaceUpdates` |
 | `approval/` | `PromptActions` (primary buttons by role: ALLOW only ever maps to `allow_once`; the answered-prompt lock); `CommandFeedback` (relay error code → short wrist message) |
-| `ui/screens/`, `ui/theme/` | Alpha UI: pairing, agent list, agent detail with `PromptCard`, history, markdown reader |
-| `complication/`, `tile/` | Status complication; Quick Dictate tile + `QuickDictateActivity` |
-| `util/` | `MarkdownFormatter` (plain previews) |
+| `ui/theme/` | Fixed palette (no dynamic colour; every text pair ≥ 6.6:1) and `statusStyle()`: icon, word and colours per herdr status |
+| `ui/logic/` | Pure presentation logic with JVM tests: `attentionSections` (list order), `headPreview`/`tailPreview`, `ageOf`, `listStatus` (the list's notice and dimming), relay URL checks |
+| `ui/components/` | `ScreenList` (`ScreenScaffold` + `TransformingLazyColumn`), `transformedItem`, age text, voice and text input intents |
+| `ui/screens/` | Agent list, agent screen + `PromptSection`, dictation confirm (`DictationFlow`), full text, history, reader, pairing, settings |
+| `complication/` | `complicationContent` (state → icon and count) and the SHORT_TEXT data source |
+| `tile/` | `tileContent`, `dictationTarget`, the Material 3 tile and `QuickDictateActivity` |
+| `util/` | `MarkdownFormatter` (plain previews), `MarkdownBlocks` (the reader's block parser) |
 
 ## 3. Data flow
 
@@ -69,7 +75,19 @@ commandErrorFeedback(error, surface)             // the message to show for a fa
 - **`stale`:** the list is not backed by a live stream (before the first snapshot, reconnecting, stopped): dim it or say "Reconnecting…".
 - **Commands:** use the `state_change_seq` and `fingerprint` of the `AgentState` shown at tap time; disable the buttons while in flight and, after a success, until the agent's state changes (`isAwaitingUpdate`); never auto-retry after a 409.
 - **Pairing:** save the token, then `RelayRepository.restart(context)`. Do not call `registerPush` or write `fcmRegisteredToken` (ignored); `FcmRegistrar` registers when the stream opens and records it only after the relay accepts it.
-- **Known gaps in the alpha UI** (tracked in `docs/STATUS.md`, Phase 4): it ignores `auth` and `stale`, pairs with `resetClient()` + `start()`, sends no fingerprint on the in-app Cancel, registers push by hand after pairing, and Quick Dictate shows raw exception messages.
+- **How the UI uses it:** `MainActivity` observes `auth` at runtime (anything but `PAIRED` → pairing; `REVOKED` says "Session expired"); the list shows `listStatus(state)` (while `stale`: "Connecting…" or "Can't reach the relay", never "Mac offline") and dims the last known agents; each screen collects only its own slice of `state`; the agent screen sends the shown `state_change_seq` and fingerprint (cancel included) and locks the prompt until the agent moves; pairing saves the token and calls `restart`; every command error goes through `commandErrorFeedback`, including Quick Dictate.
+
+## 4a. Screens
+
+| Route | Screen |
+|---|---|
+| `pairing` | Relay URL (default `BuildConfig.DEFAULT_RELAY_URL`, edited with the system keyboard) and the 6-digit code |
+| `agents` | Sections by attention (Needs you · Done · Working · Idle · Unknown) across workspaces; notice line; History and Settings |
+| `agent/{paneId}` | Name first; the prompt as items (command head or `unknown` tail, View all, Deny · Allow, extra options with a confirmation for `allow_always`); Dictate as the edge button; tile-target switch |
+| `dictation/{paneId}` | What the recognizer understood and the target, then Send |
+| `history?paneId=`, `reader/{id}` | Cards with age; the answer rendered block by block (`screen` captures as monospace) |
+| `settings` | Pair again, unpair, version |
+| `text` | A command or screen tail in full |
 
 ## 5. Notifications
 
@@ -80,4 +98,4 @@ commandErrorFeedback(error, surface)             // the message to show for a fa
 
 ## 6. Tests
 
-`./gradlew :app:testDebugUnitTest` (JVM, no device): `RelayEngine*Test` against `FakeRelay` (auth, restart, silence, merging), `RelayClientTest`, `FcmRegistrarTest`, `AgentStoreTest`, `HistoryMergeTest`, `AgentNotificationsTest`, `SurfaceUpdatesTest`, the `approval/` tests, and `ContractsTest` (parses `pkg/model/testdata/agent_state.json`).
+`./gradlew :app:testDebugUnitTest` (JVM, no device): `RelayEngine*Test` against `FakeRelay` (auth, restart, silence, merging), `RelayClientTest`, `FcmRegistrarTest`, `AgentStoreTest`, `HistoryMergeTest`, `AgentNotificationsTest`, `SurfaceUpdatesTest`, the `approval/` tests, `ContractsTest` (parses `pkg/model/testdata/agent_state.json`), and the presentation tests: `ui/logic/*Test`, `MarkdownBlocksTest`, `DictationTargetTest`, `TileContentTest`, `ComplicationContentTest`.

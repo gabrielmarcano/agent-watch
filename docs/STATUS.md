@@ -184,7 +184,7 @@ Keep entries short, and use absolute dates (YYYY-MM-DD).
 - [x] complication + tile (target-agent rule)
 - [x] release build (R8) parses JSON
 - [x] verified on the Pixel Watch 2 (alpha UI, 2026-09-24, before the review fixes)
-- [ ] data-layer review fixes adopted by the UI (separate UI-redesign session; list below)
+- [x] data-layer review fixes adopted by the UI (Phase 4b, 2026-09-25; list below)
 - [ ] re-verified on the Pixel Watch 2 after the review fixes and the UI redesign
 - Notes:
   - UI State Note: The UI is currently in an alpha state and verified functional on the Google Pixel Watch 2 (pairing, live SSE list with workspace grouping, 2-line chips with herdr status colors, detail screen, dictation, and history). The app is technically usable but not yet final or optimized for everyday real-world utility; it will require subsequent design refinement focused on user usage ergonomics and objective readability rules.
@@ -209,17 +209,22 @@ Keep entries short, and use absolute dates (YYYY-MM-DD).
     - map `QuickDictateActivity`'s toast errors through `CommandFeedback` (it shows raw exception messages);
     - show the relay `message` for a `prompt_changed` focus refusal ("answer it on the Mac") instead of the generic "Prompt changed — refreshed", and don't invite a retry (the prompt is unchanged);
     - drop the owner's relay domain pre-filled in `PairingScreen` (personal data if the repo goes public; a wrong default for anyone else).
+  - Done 2026-09-25 in Phase 4b: every item of this list (the default URL is now `BuildConfig.DEFAULT_RELAY_URL`).
   - Done 2026-09-25: the app ignores a `blocked` push whose seq is ≤ the last `resolved` seq for its pane (`contracts.md` §4.1), a prerequisite for `AW_PUSH_RESOLVED`.
 
 ## Phase 4b — Wear OS UI redesign
 - Claimed by: claude (Opus 5.5), 2026-09-25
-- [ ] data-layer API adopted (the Phase 4 "UI-redesign session must" list)
-- [ ] review findings fixed or deferred with a reason (`docs/phases/4b-wearos-ui.md`)
-- [ ] unit tests + debug/release builds green
+- [x] data-layer API adopted (the Phase 4 "UI-redesign session must" list)
+- [ ] review findings fixed or deferred with a reason (`docs/phases/4b-wearos-ui.md`): all fixed except notifications (below)
+- [x] unit tests + debug/release builds green (173 JVM tests)
 - [ ] emulator screenshots of every screen and state, reviewed with the owner
 - [ ] checked on the Pixel Watch 2 with the owner
 - Notes:
   - 2026-09-25: every screen and state audited on a new round emulator (`aw-wear-small-round`, fake host on a local relay, no real agents); design approved by the owner (M3 1.6.2, block markdown, confirmed dictation, attention-ordered list, fixed palette). Decisions and order: `docs/phases/4b-wearos-ui.md` § Design decisions.
+  - 2026-09-25: UI rebuilt on Wear Compose Material 3 1.6.2 (toolchain: AGP 8.13.2, Kotlin 2.2.21, Gradle 8.14.3, compileSdk 36). Every screen, the tile (ProtoLayout Material 3) and the complication; strings in `strings.xml`; nothing below 12 sp; Deny · Allow 81.5 × 52 dp, 8 dp apart; all text pairs ≥ 6.6:1. Verified on the emulator: every state of the list, all prompt kinds, answer/cancel/focus-refusal feedback, dictation from the app and from the tile, revoke → pairing → pair with the keyboard, unpair, font scale 1.24, crown scrolling, the complication (blocked state). Not yet on the watch.
+  - Not changed, pending an owner decision: **notifications** (`network/MyFirebaseMessagingService`: question/unknown only offer Cancel, generic icon, no `BigTextStyle`, no grouping). The guide forbids changing `network/` in 4b.
+  - Reported, outside 4b: option label and description arrive glued, and Claude's "Type something." option cannot be completed from the watch (adapter, or a `PromptOption.description` / role); `screen` history is raw TUI (bridge); the `done` push body is always "Task finished" (relay); the focus refusal is recognised by its message text, a dedicated code would be sturdier; the `wearos-deploy` skill's JAVA_HOME points to an Android Studio that is not installed (`$(/usr/libexec/java_home -v 17)` works).
+  - The emulator was paired only with a local relay: no device was registered on the production relay.
 
 ## Phase 5 — End-to-end + docs (release gate)
 - Claimed by: agy, 2026-09-24 — **reopened 2026-09-25**
