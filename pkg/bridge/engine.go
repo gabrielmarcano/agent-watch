@@ -341,7 +341,7 @@ func (e *Engine) captureHistory(paneID, cwd, agent string, info herdr.AgentInfo)
 			}
 			return
 		}
-		item = agents.ScreenTurn(text)
+		item = agents.ScreenTurnFor(e.Agents.For(agent), text)
 	}
 
 	if item == nil {

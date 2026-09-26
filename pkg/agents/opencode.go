@@ -26,6 +26,62 @@ func newOpenCodeAdapter(cfg Config) *opencodeAdapter {
 	}
 }
 
+// SplitScreenTurn implements ScreenTurnReader: OpenCode draws the user's
+// message inside a "┃" frame, then the reply between a "Thought · …" line and
+// a footer "▣  <mode> · <model> · <time>", neither of which is part of it. A
+// sidebar on the right (session title, tokens, cost, LSP) shares the lines.
+func (o *opencodeAdapter) SplitScreenTurn(lines []string) (string, []string, bool) {
+	end := -1
+	for i := len(lines) - 1; i >= 0; i-- {
+		if isFramedLine(strings.TrimSpace(lines[i])) {
+			end = i
+			break
+		}
+	}
+	if end < 0 {
+		return "", nil, false
+	}
+	start := end
+	for start > 0 && isFramedLine(strings.TrimSpace(lines[start-1])) {
+		start--
+	}
+	var parts []string
+	for _, l := range lines[start : end+1] {
+		frame := strings.Index(l, "┃")
+		if text := strings.TrimSpace(ocMainText(l[frame+len("┃"):])); text != "" {
+			parts = append(parts, text)
+		}
+	}
+	if len(parts) == 0 {
+		return "", nil, false
+	}
+	var reply []string
+	for _, l := range lines[end+1:] {
+		text := ocMainText(l)
+		if t := strings.TrimSpace(text); strings.HasPrefix(t, "Thought · ") || strings.HasPrefix(t, "▣ ") {
+			continue
+		}
+		reply = append(reply, text)
+	}
+	return strings.Join(parts, " "), reply, true
+}
+
+// ocSidebarIndent: text that starts this far right is the sidebar's.
+const ocSidebarIndent = 40
+
+// ocMainText drops the sidebar from a line of OpenCode's screen: text after a
+// gap of 4 or more spaces, or a line whose text starts at the sidebar's column.
+func ocMainText(line string) string {
+	indent := len(line) - len(strings.TrimLeft(line, " "))
+	if indent >= ocSidebarIndent {
+		return ""
+	}
+	if gap := strings.Index(line[indent:], "    "); gap >= 0 {
+		line = line[:indent+gap]
+	}
+	return strings.TrimRight(line, " ")
+}
+
 func (o *opencodeAdapter) Name() string {
 	return "opencode"
 }

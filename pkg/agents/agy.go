@@ -22,6 +22,12 @@ func newAgyAdapter(cfg Config) *agyAdapter {
 	}
 }
 
+// SplitScreenTurn implements ScreenTurnReader: agy echoes the user's message
+// as "> text", wrapped lines indented by 2, and prints its reply under it.
+func (a *agyAdapter) SplitScreenTurn(lines []string) (string, []string, bool) {
+	return echoedMessage(lines, "> ")
+}
+
 func (a *agyAdapter) Name() string {
 	return "agy"
 }

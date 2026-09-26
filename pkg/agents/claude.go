@@ -112,6 +112,24 @@ func (c *claudeAdapter) ParsePrompt(screen string) (Prompt, bool) {
 	return p, true
 }
 
+// SplitScreenTurn implements ScreenTurnReader: Claude echoes the user's
+// message as "❯ text" (wrapped lines indented by 2), marks its reply with "⏺"
+// and ends the turn with a status line such as "✻ Worked for 1s · done 10:25 AM".
+func (c *claudeAdapter) SplitScreenTurn(lines []string) (string, []string, bool) {
+	query, rest, ok := echoedMessage(lines, "❯ ")
+	if !ok {
+		return "", nil, false
+	}
+	var reply []string
+	for _, l := range rest {
+		if strings.HasPrefix(l, "✻ ") {
+			continue
+		}
+		reply = append(reply, strings.Replace(l, "⏺ ", "  ", 1))
+	}
+	return query, reply, true
+}
+
 type claudeLine struct {
 	Type        string          `json:"type"`
 	UUID        string          `json:"uuid"`

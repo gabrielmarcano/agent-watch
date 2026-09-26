@@ -197,9 +197,14 @@ Used when an agent has no transcript reader, or when its reader returns an error
 
 1. `agent.read {target: pane_id, source: "recent_unwrapped", lines: 200, format: "text"}`.
 2. Trim trailing blank lines.
-3. Drop the agent's input box: cut everything from the last line that contains only box-drawing characters or a prompt marker (`❯`, `>`) downwards, if found within the last 15 lines.
-4. Keep the last 80 lines.
-5. `HistoryItem{Source: "screen", Query: "", Response: <text>}`.
+3. Drop the agent's input box: cut everything from the last run of lines that contain only box-drawing characters (light or heavy: `─ │ ┃ ╹ ▀ …`), a prompt marker (`❯`, `>`) or a `┃` frame downwards, if found within the last 15 lines. The status lines under the box go with it.
+4. **Last turn only** when the adapter recognises the user's message (`ScreenTurnReader`): the message becomes `query` and only what follows it the `response`, dedented:
+   - **claude:** the message is echoed as `❯ text` (wrapped lines indented by 2); `⏺` marks the reply; the `✻ Worked for …` status line is dropped.
+   - **agy:** the message is echoed as `> text` (wrapped lines indented by 2).
+   - **opencode:** the message is the last `┃`-framed block; the `Thought · …` line and the `▣  <mode> · <model> · <time>` footer are dropped, and so is the sidebar on the right (text after a gap of 4+ spaces, or starting at column 40 or further).
+   Otherwise the whole screen above the input box is kept.
+5. Keep the last 80 lines.
+6. `HistoryItem{Source: "screen", Query: <message or "">, Response: <text>}`.
 
 ---
 

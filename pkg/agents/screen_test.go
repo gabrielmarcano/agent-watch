@@ -1,6 +1,8 @@
 package agents
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -57,5 +59,54 @@ func TestScreenTurn_Truncation(t *testing.T) {
 	}
 	if !strings.HasSuffix(item.Response, "\n\n…[truncated]") {
 		t.Errorf("expected response to end with truncation marker")
+	}
+}
+
+// Real idle screens: with the adapter's help the history item holds the last
+// turn only, the user's message as the query and the reply without the TUI.
+func TestScreenTurnFor_RealScreens(t *testing.T) {
+	const query = `Without using any tools, reply with a numbered list of exactly three short options for a new name for note.txt, one per line, like "1. notes.txt". Nothing else.`
+	cases := []struct {
+		agent, fixture, response string
+	}{
+		{"claude", "claude/no-menu-idle-numbered-list.txt", "1. notes.txt\n2. scratch-notes.txt\n3. todo-notes.txt"},
+		{"agy", "agy/no-menu-idle-numbered-list.txt", "1. notes.txt\n2. memo.txt\n3. scratchpad.txt"},
+		{"opencode", "opencode/no-menu-idle-numbered-list.txt", "1. notes.txt\n2. memo.txt\n3. todo.txt"},
+	}
+	registry := NewRegistry(Config{})
+	for _, c := range cases {
+		data, err := os.ReadFile(filepath.Join("testdata", c.fixture))
+		if err != nil {
+			t.Fatal(err)
+		}
+		item := ScreenTurnFor(registry.For(c.agent), string(data))
+		if item.Source != "screen" {
+			t.Errorf("%s: source = %q", c.agent, item.Source)
+		}
+		if item.Query != query {
+			t.Errorf("%s: query = %q", c.agent, item.Query)
+		}
+		if item.Response != c.response {
+			t.Errorf("%s: response = %q, want %q", c.agent, item.Response, c.response)
+		}
+	}
+}
+
+// Without an adapter that knows the screen, the whole screen above the input
+// box is kept; OpenCode's heavy frame (┃, ╹▀▀▀) counts as the input box too.
+func TestScreenTurn_OpenCodeInputBoxIsCut(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("testdata", "opencode", "no-menu-idle-numbered-list.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	item := ScreenTurn(string(data))
+	lines := strings.Split(item.Response, "\n")
+	if got := strings.TrimSpace(lines[len(lines)-1]); got != "▣  Build · Muse Spark 1.3 Free · 3.5s" {
+		t.Errorf("last line = %q", got)
+	}
+	for _, gone := range []string{"OpenCode Zen", "▀", "ctrl+p commands"} {
+		if strings.Contains(item.Response, gone) {
+			t.Errorf("response still has %q", gone)
+		}
 	}
 }
