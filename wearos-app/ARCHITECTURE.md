@@ -23,9 +23,9 @@ The Wear OS app is the primary client of the relay's `/v1` API (`docs/reference/
 | `approval/` | `PromptActions` (primary buttons by role: ALLOW only ever maps to `allow_once`; the answered-prompt lock); `CommandFeedback` (relay error code → short wrist message) |
 | `ui/theme/` | Fixed palette (no dynamic colour; every text pair ≥ 6.6:1) and `statusStyle()`: icon, word and colours per herdr status |
 | `ui/logic/` | Pure presentation logic with JVM tests: `attentionSections` (list order), `headPreview`/`tailPreview`, `ageOf`, `listStatus` (the list's notice and dimming), relay URL checks |
-| `ui/components/` | `ScreenList` (`ScreenScaffold` + `TransformingLazyColumn`), `transformedItem`, age text, voice and text input intents |
+| `ui/components/` | `ScreenList` (`ScreenScaffold` + `TransformingLazyColumn`), `transformedItem`, age text, voice and text input intents, `rememberPaneHistory` (the state's items merged with one `GET /v1/history?pane_id=`) |
 | `ui/screens/` | Agent list, agent screen + `PromptSection`, dictation confirm (`DictationFlow`), full text, history, reader, pairing, settings |
-| `complication/` | `complicationContent` (state → icon and count) and the SHORT_TEXT data source |
+| `complication/` | `complicationContent` (state → count and the agent a tap opens) and the data source: SHORT_TEXT, LONG_TEXT and MONOCHROMATIC_IMAGE, with the app's terminal glyph |
 | `tile/` | `tileContent`, `dictationTarget`, the Material 3 tile and `QuickDictateActivity` |
 | `util/` | `MarkdownFormatter` (plain previews), `MarkdownBlocks` (the reader's block parser) |
 
@@ -83,7 +83,7 @@ commandErrorFeedback(error, surface)             // the message to show for a fa
 |---|---|
 | `pairing` | Relay URL (default `BuildConfig.DEFAULT_RELAY_URL`, edited with the system keyboard) and the 6-digit code |
 | `agents` | Sections by attention (Needs you · Done · Working · Idle · Unknown) across workspaces; notice line; History and Settings |
-| `agent/{paneId}` | Name first; the prompt as items (command head or `unknown` tail, View all, Deny · Allow, extra options with a confirmation for `allow_always`); Dictate as the edge button; tile-target switch |
+| `agent/{paneId}` | Name first; the prompt as items (command head or `unknown` tail, View all, Deny · Allow, options with their description, a confirmation for `allow_always`); the last reply with Read all; Reply (dictation) as the edge button; "Pin to tile" |
 | `dictation/{paneId}` | What the recognizer understood and the target, then Send |
 | `history?paneId=`, `reader/{id}` | Cards with age; the answer rendered block by block (`screen` captures as monospace) |
 | `settings` | Pair again, unpair, version |
