@@ -238,6 +238,26 @@ Task.detached {
 _ = sem.wait(timeout: .now() + 5)
 check(box.get() == 42, "runInBackground returns the value")
 
+// Status dot: green connected, yellow on its way, red broken, gray off on purpose.
+let dotCases: [(BarState, StatusDot, String)] = [
+    (.connected, .green, "connected"),
+    (.connecting, .yellow, "connecting"),
+    (.herdrOffline(""), .yellow, "herdr offline"),
+    (.relayError("401 unauthorized"), .red, "relay error"),
+    (.stale(40), .red, "stale status"),
+    (.stopped("load config: missing host_token"), .red, "failed start"),
+    (.statusUnavailable("timeout"), .red, "status unavailable"),
+    (.binaryMissing, .red, "binary missing"),
+    (.stopped(""), .gray, "stopped on purpose"),
+    (.notInstalled, .gray, "not installed"),
+    (.notConfigured(""), .gray, "not configured"),
+]
+for (state, want, name) in dotCases {
+    let got = present(state: state, status: st { _ in }).dot
+    check(got == want, "dot for \(name): got \(got), want \(want)")
+}
+check(present(state: .connected, status: st { $0.blocked = 2 }).dot == .green, "blocked agents keep the green dot")
+
 try? FileManager.default.removeItem(at: tmp)
 print("\(checks) checks, \(failures) failures")
 exit(failures == 0 ? 0 : 1)

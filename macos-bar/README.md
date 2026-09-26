@@ -39,18 +39,20 @@ If neither exists the icon shows `?` and the menu says how to build it.
 
 ## What the icon says
 
-| Icon | Text | State | What to do |
-|---|---|---|---|
-| watch with waves | *(none)* | Running and connected, no agent blocked | Nothing |
-| watch with waves | **`2`** (orange) | Connected; 2 agents are blocked waiting for you | Answer them |
-| watch | `…` | Running, connecting to the relay | Wait |
-| watch with `!` | `!` | Relay error (for example the host token was rejected); the menu shows the error | Fix the cause; it keeps retrying |
-| watch | `no herdr` | Connected to the relay, but herdr is not running | Start herdr |
-| watch with `!` | `stale` | The bridge process exists but has not written its status for more than 15 s | Restart |
-| crossed watch | `off` | Installed but stopped (the menu shows why, if it failed to start) | Start |
-| crossed watch | `install` | Configured, but the LaunchAgent is not installed yet | Start |
-| crossed watch | `setup` | No valid config; Start is disabled | Run `agent-watch-bridge configure --relay-url wss://… --host-token …` in a terminal |
-| watch with `!` | `?` | The bridge binary was not found, or its status could not be read | See the menu |
+The icon carries a small status circle: **green** connected, **yellow** running but not fully connected yet, **red** it should be working and is not, **gray** off on purpose.
+
+| Icon | Dot | Text | State | What to do |
+|---|---|---|---|---|
+| watch with waves | green | *(none)* | Running and connected, no agent blocked | Nothing |
+| watch with waves | green | **`2`** (orange) | Connected; 2 agents are blocked waiting for you | Answer them |
+| watch | yellow | `…` | Running, connecting to the relay | Wait |
+| watch | yellow | `no herdr` | Connected to the relay, but herdr is not running | Start herdr |
+| watch with `!` | red | `!` | Relay error (for example the host token was rejected); the menu shows the error | Fix the cause; it keeps retrying |
+| watch with `!` | red | `stale` | The bridge process exists but has not written its status for more than 15 s | Restart |
+| crossed watch | gray, or red if it failed to start | `off` | Installed but stopped (the menu shows why, if it failed to start) | Start |
+| crossed watch | gray | `install` | Configured, but the LaunchAgent is not installed yet | Start |
+| crossed watch | gray | `setup` | No valid config; Start is disabled | Run `make configure-bridge` (or `agent-watch-bridge configure …`) in a terminal |
+| watch with `!` | red | `?` | The bridge binary was not found, or its status could not be read | See the menu |
 
 The tooltip repeats the state with the agent and blocked counts.
 

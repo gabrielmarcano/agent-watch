@@ -8,6 +8,43 @@ import Foundation
 // process call runs off the main thread (runInBackground) and hands back a
 // Sendable value that is applied on the main actor.
 
+/// The menu bar icon with a small status circle in its bottom-right corner.
+/// The symbol is tinted with the menu bar's text colour when it is drawn, so it
+/// follows light and dark menu bars like a template image; the circle keeps its
+/// own colour and is separated from the symbol by a thin transparent ring.
+func statusIcon(symbolName: String, dot: StatusDot) -> NSImage? {
+    guard let probe = NSImage(systemSymbolName: symbolName, accessibilityDescription: nil)
+        ?? NSImage(systemSymbolName: Symbols.neutral, accessibilityDescription: nil) else { return nil }
+    let diameter: CGFloat = 5
+    let ring: CGFloat = 1.25
+    let symbolSize = probe.size
+    let size = NSSize(width: symbolSize.width + diameter / 2, height: symbolSize.height)
+    let image = NSImage(size: size, flipped: false) { rect in
+        guard let symbol = NSImage(systemSymbolName: symbolName, accessibilityDescription: nil)
+            ?? NSImage(systemSymbolName: Symbols.neutral, accessibilityDescription: nil) else { return false }
+        let symbolRect = NSRect(origin: .zero, size: symbolSize)
+        symbol.draw(in: symbolRect)
+        NSColor.labelColor.set()
+        symbolRect.fill(using: .sourceAtop)
+
+        let dotRect = NSRect(x: rect.maxX - diameter, y: 0, width: diameter, height: diameter)
+        NSGraphicsContext.current?.compositingOperation = .clear
+        NSBezierPath(ovalIn: dotRect.insetBy(dx: -ring, dy: -ring)).fill()
+        NSGraphicsContext.current?.compositingOperation = .sourceOver
+        switch dot {
+        case .green: NSColor.systemGreen.setFill()
+        case .yellow: NSColor.systemYellow.setFill()
+        case .red: NSColor.systemRed.setFill()
+        case .gray: NSColor.systemGray.setFill()
+        }
+        NSBezierPath(ovalIn: dotRect).fill()
+        return true
+    }
+    image.isTemplate = false
+    image.accessibilityDescription = "Agent Watch, status \(dot.rawValue)"
+    return image
+}
+
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var statusItem: NSStatusItem?
@@ -152,10 +189,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         lastPresentation = p
 
         if let button = statusItem?.button {
-            let image = NSImage(systemSymbolName: p.symbolName, accessibilityDescription: "Agent Watch")
-                ?? NSImage(systemSymbolName: Symbols.neutral, accessibilityDescription: "Agent Watch")
-            image?.isTemplate = true
-            button.image = image
+            button.image = statusIcon(symbolName: p.symbolName, dot: p.dot)
             if p.emphasize {
                 button.attributedTitle = NSAttributedString(string: p.title, attributes: [
                     .foregroundColor: NSColor.systemOrange,

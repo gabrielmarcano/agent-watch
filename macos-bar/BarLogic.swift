@@ -143,8 +143,16 @@ func deriveState(binaryFound: Bool, status: LocalStatus?, pollError: String?) ->
 
 // MARK: - Presentation
 
+/// The small status circle drawn on the menu bar icon.
+/// green: connected · yellow: running, not fully connected yet ·
+/// red: should be working and is not · gray: off on purpose.
+enum StatusDot: String, Equatable, Sendable {
+    case green, yellow, red, gray
+}
+
 struct Presentation: Equatable, Sendable {
     var symbolName: String
+    var dot: StatusDot
     var title: String       // text next to the icon
     var emphasize: Bool     // blocked agents: draw the title in the alert colour
     var tooltip: String
@@ -183,7 +191,7 @@ func present(state: BarState, status: LocalStatus?, busy: String? = nil) -> Pres
     let s = status ?? LocalStatus()
     let host = s.relayHost.isEmpty ? "the relay" : s.relayHost
     var p = Presentation(
-        symbolName: Symbols.neutral, title: "", emphasize: false, tooltip: "", headline: "", details: [],
+        symbolName: Symbols.neutral, dot: .gray, title: "", emphasize: false, tooltip: "", headline: "", details: [],
         hint: nil,
         canStart: false, canStop: s.installed, canRestart: s.installed && s.configured,
         canPair: s.configured, canOpenLogs: !s.logPath.isEmpty, canRevealConfig: !s.configPath.isEmpty
@@ -192,6 +200,7 @@ func present(state: BarState, status: LocalStatus?, busy: String? = nil) -> Pres
     switch state {
     case .binaryMissing:
         p.symbolName = Symbols.problem
+        p.dot = .red
         p.title = " ?"
         p.headline = "agent-watch-bridge not found"
         p.details = ["No installed LaunchAgent names it, and it is not next to this app."]
@@ -200,6 +209,7 @@ func present(state: BarState, status: LocalStatus?, busy: String? = nil) -> Pres
         p.canOpenLogs = false; p.canRevealConfig = false
     case .statusUnavailable(let err):
         p.symbolName = Symbols.problem
+        p.dot = .red
         p.title = " ?"
         p.headline = "Bridge status unavailable"
         p.details = [err]
@@ -218,33 +228,39 @@ func present(state: BarState, status: LocalStatus?, busy: String? = nil) -> Pres
         p.canStart = true
     case .stopped(let err):
         p.symbolName = Symbols.off
+        p.dot = err.isEmpty ? .gray : .red // an error means it failed to start
         p.title = " off"
         p.headline = "Bridge stopped"
         p.details = err.isEmpty ? ["Your watch shows this Mac as offline."] : [err]
         p.canStart = true
     case .stale(let age):
         p.symbolName = Symbols.problem
+        p.dot = .red
         p.title = " stale"
         p.headline = "Bridge not responding"
         p.details = [age >= 0 ? "No status update for \(age) s (it writes every 5 s)." : "Its status file has no valid timestamp."]
         p.hint = "Try Restart; if it persists, check the log."
     case .relayError(let err):
         p.symbolName = Symbols.problem
+        p.dot = .red
         p.title = " !"
         p.headline = "Relay error"
         p.details = [err, "Retrying \(host) in the background."]
     case .connecting:
         p.symbolName = Symbols.neutral
+        p.dot = .yellow
         p.title = " …"
         p.headline = "Connecting to \(host)…"
         p.details = []
     case .herdrOffline(let err):
         p.symbolName = Symbols.neutral
+        p.dot = .yellow
         p.title = " no herdr"
         p.headline = "herdr is not running"
         p.details = [err.isEmpty ? "The bridge cannot reach the herdr socket." : err, "Connected to \(host)."]
     case .connected:
         p.symbolName = Symbols.connected
+        p.dot = .green
         p.title = s.blocked > 0 ? " \(s.blocked)" : ""
         p.emphasize = s.blocked > 0
         p.headline = s.blocked > 0
