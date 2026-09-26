@@ -138,7 +138,9 @@ private fun rememberAgent(paneId: String): AgentState? {
     val flow = remember(paneId) {
         RelayRepository.state.map { s -> s.agents.find { it.pane_id == paneId } }.distinctUntilChanged()
     }
-    val agent by flow.collectAsStateWithLifecycle(RelayRepository.state.value.agents.find { it.pane_id == paneId })
+    // The current value only seeds the first frame; the collection keeps it up to date.
+    val initial = remember(paneId) { RelayRepository.state.value.agents.find { it.pane_id == paneId } }
+    val agent by flow.collectAsStateWithLifecycle(initial)
     return agent
 }
 
@@ -151,7 +153,7 @@ private fun AgentWatchNavigation(
 ) {
     val nav = rememberSwipeDismissableNavController()
     val authFlow = remember { RelayRepository.state.map { it.auth }.distinctUntilChanged() }
-    val auth by authFlow.collectAsStateWithLifecycle(RelayRepository.state.value.auth)
+    val auth by authFlow.collectAsStateWithLifecycle(remember { RelayRepository.state.value.auth })
 
     // Checked at runtime, not only at start: a 401 anywhere (REVOKED) or an unpair (UNPAIRED) sends the
     // user to pairing, never to "Mac offline" or an empty list.
@@ -197,7 +199,7 @@ private fun AgentWatchNavigation(
             if (agent == null) {
                 // No snapshot yet (cold start, reconnecting) is not the same as a closed agent.
                 val stale by remember { RelayRepository.state.map { it.stale }.distinctUntilChanged() }
-                    .collectAsStateWithLifecycle(RelayRepository.state.value.stale)
+                    .collectAsStateWithLifecycle(remember { RelayRepository.state.value.stale })
                 Message(stringResource(if (stale) R.string.notice_connecting else R.string.agent_closed))
             } else {
                 AgentDetailScreen(

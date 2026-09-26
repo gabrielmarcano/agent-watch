@@ -13,7 +13,12 @@
         android:label="Agent Watch"
         android:supportsRtl="true"
         android:theme="@android:style/Theme.DeviceDefault">
-        
+
+        <!-- Standalone: the app talks to the relay itself and needs no phone app. -->
+        <meta-data
+            android:name="com.google.android.wearable.standalone"
+            android:value="true" />
+
         <activity
             android:name=".MainActivity"
             android:exported="true"

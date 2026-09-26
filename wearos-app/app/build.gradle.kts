@@ -70,8 +70,9 @@ android {
         }
     }
     lint {
-        abortOnError = false
-        checkReleaseBuilds = false
+        // Errors fail `lint`, and release builds run the fatal checks (lintVital).
+        abortOnError = true
+        checkReleaseBuilds = true
     }
 }
 
@@ -110,6 +111,12 @@ dependencies {
     // Firebase Cloud Messaging
     implementation(platform("com.google.firebase:firebase-bom:32.7.2"))
     implementation("com.google.firebase:firebase-messaging-ktx")
+
+    constraints {
+        // watchface-complications-data-source 1.2.1 pulls Fragment 1.1.0 (preference → appcompat); the
+        // Activity Result API (the notification permission request) needs 1.3.0 or newer.
+        implementation("androidx.fragment:fragment:1.8.9")
+    }
 
     // Testing
     testImplementation("junit:junit:4.13.2")
