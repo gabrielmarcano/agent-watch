@@ -73,6 +73,21 @@
                 android:resource="@mipmap/ic_launcher" />
         </service>
 
+        <!-- Agents tile: the agents that need the user most -->
+        <service
+            android:name=".tile.AgentsTileService"
+            android:exported="true"
+            android:label="Agents"
+            android:icon="@mipmap/ic_launcher"
+            android:permission="com.google.android.wearable.permission.BIND_TILE_PROVIDER">
+            <intent-filter>
+                <action android:name="androidx.wear.tiles.action.BIND_TILE_PROVIDER" />
+            </intent-filter>
+            <meta-data
+                android:name="androidx.wear.tiles.PREVIEW"
+                android:resource="@mipmap/ic_launcher" />
+        </service>
+
         <!-- Exported because the tile opens it with a LaunchAction from the system tile renderer,
              which can only start exported activities. -->
         <activity

@@ -25,7 +25,15 @@ class SurfaceUpdatesTest {
     fun theSignatureTracksWhatTheComplicationAndTileShow() {
         val sig = surfaceSignature(base, pinnedPaneId = null)
 
-        assertEquals(SurfaceSignature(paired = true, hostOnline = true, blocked = 1, working = 1, agents = 2, targetLabel = "B"), sig)
+        assertEquals(SurfaceSignature(paired = true, hostOnline = true, blocked = 1, working = 1, agents = 2, targetLabel = "B", done = 0), sig)
+    }
+
+    @Test
+    fun aFinishedAgentChangesTheSignature() {
+        // The Agents tile lists finished agents; the complication's tap opens the latest one.
+        val finished = base.copy(agents = base.agents.map { if (it.pane_id == "B") it.copy(status = "done") else it })
+        assertEquals(1, surfaceSignature(finished, null).done)
+        assertNotEquals(surfaceSignature(base, null), surfaceSignature(finished, null))
     }
 
     @Test

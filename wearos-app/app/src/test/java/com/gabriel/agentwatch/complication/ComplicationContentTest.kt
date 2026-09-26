@@ -46,4 +46,20 @@ class ComplicationContentTest {
     fun noAgents() {
         assertEquals(ComplicationContent(ComplicationKind.NO_AGENTS, 0), complicationContent(true, loaded()))
     }
+
+    // Style B (owner's choice, 2026-09-25): the glyph and how many agents need the user, no words.
+    @Test
+    fun theBadgeIsTheGlyphAndHowManyNeedTheUser() {
+        assertEquals(ComplicationBadge(BadgeIcon.ALERT, "2"), complicationBadge(ComplicationContent(ComplicationKind.NEEDS_YOU, 2)))
+        for (kind in listOf(ComplicationKind.DONE, ComplicationKind.WORKING, ComplicationKind.IDLE, ComplicationKind.NO_AGENTS)) {
+            assertEquals("$kind", ComplicationBadge(BadgeIcon.AGENT, "0"), complicationBadge(ComplicationContent(kind, 3)))
+        }
+    }
+
+    @Test
+    fun problemsShowTheirOwnGlyphAndADash() {
+        assertEquals(ComplicationBadge(BadgeIcon.NOT_PAIRED, "–"), complicationBadge(ComplicationContent(ComplicationKind.NOT_PAIRED, 0)))
+        assertEquals(ComplicationBadge(BadgeIcon.UNREACHABLE, "–"), complicationBadge(ComplicationContent(ComplicationKind.UNREACHABLE, 0)))
+        assertEquals(ComplicationBadge(BadgeIcon.DEVICE_OFFLINE, "–"), complicationBadge(ComplicationContent(ComplicationKind.DEVICE_OFFLINE, 0)))
+    }
 }

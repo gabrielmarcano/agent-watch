@@ -33,7 +33,6 @@
     <string name="agent_closed">Agent closed</string>
     <string name="dictate">Dictate</string>
     <string name="reply">Reply</string>
-    <string name="dictate_to">To: %s</string>
     <string name="quick_dictate_target">Pin to tile</string>
     <string name="quick_dictate_target_hint">Quick Dictate</string>
     <string name="agent_history">History</string>
@@ -50,7 +49,6 @@
     <string name="answer_on_device">Answer on the device</string>
     <string name="sent_waiting">Sent</string>
     <string name="confirm_always_title">Don\'t ask again?</string>
-    <string name="confirm_always_text">%s</string>
     <string name="feedback_approved">Approved</string>
     <string name="feedback_denied">Denied</string>
     <string name="feedback_answered">Answered</string>
@@ -90,7 +88,6 @@
     <string name="pair_code_incomplete">Needs 6 digits</string>
     <string name="pair">Pair</string>
     <string name="pairing">Pairing…</string>
-    <string name="paired">Paired</string>
     <string name="pair_again">Pair again</string>
     <string name="unpair">Unpair</string>
     <string name="unpair_confirm_title">Unpair?</string>
@@ -100,11 +97,6 @@
     <!-- Content descriptions -->
     <string name="cd_status">Status: %s</string>
     <!-- Complication: SHORT_TEXT (a few characters + title), LONG_TEXT, icon only; plus a spoken description -->
-    <string name="complication_pair">Pair</string>
-    <string name="complication_off">Off</string>
-    <string name="complication_relay">Relay</string>
-    <string name="complication_device">Device</string>
-    <string name="complication_agents">Agents</string>
     <string name="complication_status_agent">%1$s · %2$s</string>
     <string name="complication_status_more">%1$s · +%2$d more</string>
     <plurals name="complication_working">
@@ -143,4 +135,6 @@
     <string name="tile_open">Open</string>
     <string name="tile_no_target">No agent to dictate to</string>
     <string name="tile_needing_you">%d need you</string>
+    <string name="tile_agents_title">Agents</string>
+    <string name="tile_agents_title_more">Agents · +%d</string>
 </resources>

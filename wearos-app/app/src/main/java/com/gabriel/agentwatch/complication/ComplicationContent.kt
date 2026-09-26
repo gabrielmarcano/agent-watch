@@ -38,3 +38,22 @@ fun complicationContent(paired: Boolean, result: Result<AgentsSnapshot>?): Compl
         else -> ComplicationContent(ComplicationKind.NO_AGENTS, 0)
     }
 }
+
+/** The glyph a badge shows. */
+enum class BadgeIcon { ALERT, AGENT, NOT_PAIRED, UNREACHABLE, DEVICE_OFFLINE }
+
+/** Style B: a glyph and a number, no words. */
+data class ComplicationBadge(val icon: BadgeIcon, val text: String)
+
+/**
+ * The short complication in style B: the alert glyph and how many agents need the user, else the
+ * agent glyph and 0; a problem shows its own glyph and a dash.
+ */
+fun complicationBadge(content: ComplicationContent): ComplicationBadge = when (content.kind) {
+    ComplicationKind.NEEDS_YOU -> ComplicationBadge(BadgeIcon.ALERT, "${content.count}")
+    ComplicationKind.DONE, ComplicationKind.WORKING, ComplicationKind.IDLE, ComplicationKind.NO_AGENTS ->
+        ComplicationBadge(BadgeIcon.AGENT, "0")
+    ComplicationKind.NOT_PAIRED -> ComplicationBadge(BadgeIcon.NOT_PAIRED, "–")
+    ComplicationKind.UNREACHABLE -> ComplicationBadge(BadgeIcon.UNREACHABLE, "–")
+    ComplicationKind.DEVICE_OFFLINE -> ComplicationBadge(BadgeIcon.DEVICE_OFFLINE, "–")
+}

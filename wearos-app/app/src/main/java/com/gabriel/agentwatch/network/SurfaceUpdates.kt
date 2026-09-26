@@ -9,6 +9,7 @@ import androidx.wear.watchface.complications.datasource.ComplicationDataSourceUp
 import com.gabriel.agentwatch.complication.AgentStatusComplicationService
 import com.gabriel.agentwatch.model.resolveTargetAgent
 import com.gabriel.agentwatch.tile.AgentQuickActionTileService
+import com.gabriel.agentwatch.tile.AgentsTileService
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -16,8 +17,9 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 /**
- * What the complication (host offline / blocked / working counts) and the tile (dictation target label)
- * render, reduced to the fields that change their output. Equal signatures need no refresh.
+ * What the complication (host offline / blocked / working / done counts) and the tiles (dictation target
+ * label, the most urgent agents) render, reduced to the fields that change their output. Equal
+ * signatures need no refresh.
  */
 data class SurfaceSignature(
     val paired: Boolean,
@@ -25,7 +27,8 @@ data class SurfaceSignature(
     val blocked: Int,
     val working: Int,
     val agents: Int,
-    val targetLabel: String?
+    val targetLabel: String?,
+    val done: Int = 0
 )
 
 fun surfaceSignature(state: UiState, pinnedPaneId: String?): SurfaceSignature = SurfaceSignature(
@@ -34,7 +37,8 @@ fun surfaceSignature(state: UiState, pinnedPaneId: String?): SurfaceSignature = 
     blocked = state.agents.count { it.status == "blocked" },
     working = state.agents.count { it.status == "working" },
     agents = state.agents.size,
-    targetLabel = resolveTargetAgent(state.agents, pinnedPaneId)?.label
+    targetLabel = resolveTargetAgent(state.agents, pinnedPaneId)?.label,
+    done = state.agents.count { it.status == "done" }
 )
 
 /**
@@ -113,6 +117,7 @@ object SurfaceUpdates {
         }
         try {
             TileService.getUpdater(context).requestUpdate(AgentQuickActionTileService::class.java)
+            TileService.getUpdater(context).requestUpdate(AgentsTileService::class.java)
         } catch (e: RuntimeException) {
             Log.w(TAG, "Tile update request failed: ${e.javaClass.simpleName}")
         }

@@ -20,8 +20,8 @@ import com.gabriel.agentwatch.network.RelayClient
 import kotlinx.coroutines.CancellationException
 
 /**
- * The most urgent agent on the watch face, from one `GET /v1/agents`: short text (count + status),
- * long text (the agent and its status) or the glyph alone. A tap opens that agent (the first blocked
+ * The most urgent agent on the watch face, from one `GET /v1/agents`: short text (the glyph and how
+ * many agents need the user), long text (the agent and its status) or the glyph alone. A tap opens that agent (the first blocked
  * one, or the latest to finish), otherwise the list.
  */
 class AgentStatusComplicationService : SuspendingComplicationDataSourceService() {
@@ -54,10 +54,8 @@ class AgentStatusComplicationService : SuspendingComplicationDataSourceService()
         return build(request.complicationType, complicationContent(prefs.isPaired, result))
     }
 
-    /** What each complication type shows for one state. */
+    /** What the long text and the image types show for one state (the short type is [complicationBadge]). */
     private data class Texts(
-        val short: String,
-        val title: String?,
         val longTitle: String,
         val longText: String,
         val icon: Int,
@@ -76,35 +74,35 @@ class AgentStatusComplicationService : SuspendingComplicationDataSourceService()
         fun plural(id: Int) = resources.getQuantityString(id, n, n)
         return when (c.kind) {
             ComplicationKind.NOT_PAIRED -> Texts(
-                getString(R.string.complication_pair), null, app, getString(R.string.dictation_not_paired),
+                app, getString(R.string.dictation_not_paired),
                 R.drawable.ic_link, getString(R.string.cd_complication_not_paired)
             )
             ComplicationKind.UNREACHABLE -> Texts(
-                getString(R.string.complication_off), getString(R.string.complication_relay), app, getString(R.string.notice_relay_unreachable),
+                app, getString(R.string.notice_relay_unreachable),
                 R.drawable.ic_cloud_off, getString(R.string.cd_complication_unreachable)
             )
             ComplicationKind.DEVICE_OFFLINE -> Texts(
-                getString(R.string.complication_off), getString(R.string.complication_device), app, getString(R.string.notice_device_offline),
+                app, getString(R.string.notice_device_offline),
                 R.drawable.ic_computer, getString(R.string.cd_complication_device_offline)
             )
             ComplicationKind.NEEDS_YOU -> Texts(
-                "$n", getString(R.string.status_blocked), c.label ?: app, status(R.string.status_blocked),
+                c.label ?: app, status(R.string.status_blocked),
                 R.drawable.ic_agent_alert, plural(R.plurals.cd_complication_needs_you)
             )
             ComplicationKind.DONE -> Texts(
-                "$n", getString(R.string.status_done), c.label ?: app, status(R.string.status_done),
+                c.label ?: app, status(R.string.status_done),
                 R.drawable.ic_agent, plural(R.plurals.cd_complication_done)
             )
             ComplicationKind.WORKING -> Texts(
-                "$n", getString(R.string.status_working), app, plural(R.plurals.complication_working),
+                app, plural(R.plurals.complication_working),
                 R.drawable.ic_agent, plural(R.plurals.cd_complication_working)
             )
             ComplicationKind.IDLE -> Texts(
-                "$n", getString(R.string.status_idle), app, plural(R.plurals.complication_idle),
+                app, plural(R.plurals.complication_idle),
                 R.drawable.ic_agent, plural(R.plurals.cd_complication_idle)
             )
             ComplicationKind.NO_AGENTS -> Texts(
-                "0", getString(R.string.complication_agents), app, getString(R.string.no_agents),
+                app, getString(R.string.no_agents),
                 R.drawable.ic_agent, getString(R.string.cd_complication_no_agents)
             )
         }
@@ -124,13 +122,24 @@ class AgentStatusComplicationService : SuspendingComplicationDataSourceService()
             ComplicationType.MONOCHROMATIC_IMAGE -> MonochromaticImageComplicationData.Builder(image, description)
                 .setTapAction(tap)
                 .build()
-            else -> ShortTextComplicationData.Builder(PlainComplicationText.Builder(t.short).build(), description)
-                .apply { t.title?.let { setTitle(PlainComplicationText.Builder(it).build()) } }
-                .setMonochromaticImage(image)
-                .setTapAction(tap)
-                .build()
+            // Style B: the glyph and a number, no title.
+            else -> complicationBadge(content).let { badge ->
+                ShortTextComplicationData.Builder(PlainComplicationText.Builder(badge.text).build(), description)
+                    .setMonochromaticImage(MonochromaticImage.Builder(Icon.createWithResource(this, badge.icon.drawable)).build())
+                    .setTapAction(tap)
+                    .build()
+            }
         }
     }
+
+    private val BadgeIcon.drawable: Int
+        get() = when (this) {
+            BadgeIcon.ALERT -> R.drawable.ic_agent_alert
+            BadgeIcon.AGENT -> R.drawable.ic_agent
+            BadgeIcon.NOT_PAIRED -> R.drawable.ic_link
+            BadgeIcon.UNREACHABLE -> R.drawable.ic_cloud_off
+            BadgeIcon.DEVICE_OFFLINE -> R.drawable.ic_computer
+        }
 
     /** Opens [paneId]'s screen (its prompt or last reply) when there is one, else the list. */
     private fun tapAction(paneId: String?): PendingIntent {
