@@ -42,6 +42,16 @@ cd wearos-app
 adb shell am start -n com.gabriel.agentwatch/.MainActivity
 ```
 
+**Release signing:** the release build is signed with the Mac's debug key (`~/.android/debug.keystore`), like the debug build. Either one installs over the other and keeps the pairing. An app signed with any other key fails with `INSTALL_FAILED_UPDATE_INCOMPATIBLE`: it must be uninstalled first, which deletes the pairing, and the watch must be paired again. Check before installing:
+
+```bash
+adb shell dumpsys package com.gabriel.agentwatch | grep -A1 signatures
+```
+
+The release build allows no cleartext HTTP, so it cannot reach a local `http://` relay; test it against HTTPS.
+
+After installing, open the app once. A force-stop cancels the complication's tap action until the app refreshes it (seen on the emulator; an update likely does the same).
+
 ## Logs
 
 ```bash

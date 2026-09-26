@@ -217,7 +217,7 @@ Keep entries short, and use absolute dates (YYYY-MM-DD).
 - [x] data-layer API adopted (the Phase 4 "UI-redesign session must" list)
 - [x] review findings fixed or deferred with a reason (`docs/phases/4b-wearos-ui.md`): all fixed; notification grouping deferred (one notification per pane plus the digest already bound how many there are)
 - [x] unit tests + debug/release builds green (189 JVM tests)
-- [ ] emulator screenshots of every screen and state, reviewed with the owner
+- [x] emulator screenshots of every screen and state, reviewed with the owner (2026-09-26)
 - [ ] checked on the Pixel Watch 2 with the owner
 - Notes:
   - 2026-09-25: every screen and state audited on a new round emulator (`aw-wear-small-round`, fake host on a local relay, no real agents); design approved by the owner (M3 1.6.2, block markdown, confirmed dictation, attention-ordered list, fixed palette). Decisions and order: `docs/phases/4b-wearos-ui.md` § Design decisions.
@@ -226,6 +226,7 @@ Keep entries short, and use absolute dates (YYYY-MM-DD).
   - Reported, outside 4b, then fixed on the owner's request (2026-09-25, round 2): option label and description are separate (`PromptOption.description`, contract change); free-text options ("Type something.", "Type your own answer") are left out by the adapters; `screen` history holds the last turn without the TUI (`ScreenTurnReader`); the `done` push shows the agent's reply (relay waits up to 3 s for it); the `wearos-deploy` skill finds JDK 17 with `java_home`. Still open: the focus refusal is recognised by its message text (a dedicated code would be sturdier). **Deployed 2026-09-25:** relay `0.2.0-c8aa72e` (healthy) and the bridge rebuilt and restarted (connected).
   - Round 2 on the watch (owner's review of the screenshots): the agent screen shows the last reply with Reply as its edge button; "Device offline" instead of Mac; short one-line labels; no relay or bridge administration advice; tables as one record per row; complication with the app's glyph, short/long/icon types and a tap that opens the urgent agent; "Pin to tile" replaces "Tile target".
   - Round 3 (owner's choices): the short complication is the glyph and how many agents need the user, no words (style B); a second tile, **Agents**, shows the two agents that need the user most, each opening its screen, and counts the rest in its title. Verified on the emulator: both surfaces, a tap on a tile agent and on the complication opening that agent. **The watch still runs the old app:** installing it needs the owner.
+  - 2026-09-26: lint errors cleared (standalone flag, `StateFlow.value` in composition, Fragment 1.1.0 pulled by the complications library); lint errors now fail the build and release builds run `lintVital`. The release build (R8) verified on the emulator: list, agent screen, Allow, a notification's answers (Deny reached the host with seq and fingerprint), both tiles, the complication, history and the reader.
   - The emulator was paired only with a local relay: no device was registered on the production relay.
 
 ## Phase 5 — End-to-end + docs (release gate)
