@@ -7,19 +7,32 @@ plugins {
     id("com.google.gms.google-services")
 }
 
-// Shared configuration: agent-watch.env at the repo root (see
-// agent-watch.env.example). Optional: without it the defaults apply. Same
-// rules as every other reader: KEY=value, '#' starts a comment, values are
-// trimmed and literal, the last assignment wins; other lines are ignored.
-val agentWatchEnv: Map<String, String> = run {
-    val file = rootProject.layout.projectDirectory.file("../agent-watch.env")
-    val text = providers.fileContents(file).asText.orNull ?: return@run emptyMap()
-    text.lines().mapNotNull { raw ->
+// Reads a KEY=value file at the repo root with the rules every reader shares
+// (make's): '#' starts a comment, values are trimmed and literal, the last
+// assignment wins; other lines are ignored. null when the file is missing.
+fun readRepoKeyValues(name: String): Map<String, String>? {
+    val file = rootProject.layout.projectDirectory.file("../$name")
+    val text = providers.fileContents(file).asText.orNull ?: return null
+    return text.lines().mapNotNull { raw ->
         val line = raw.substringBefore('#').trim()
         val eq = line.indexOf('=')
         if (eq <= 0) null else line.substring(0, eq).trim() to line.substring(eq + 1).trim()
     }.toMap()
 }
+
+// Shared configuration: agent-watch.env at the repo root (see
+// agent-watch.env.example). Optional: without it the defaults apply.
+val agentWatchEnv: Map<String, String> = readRepoKeyValues("agent-watch.env") ?: emptyMap()
+
+// Component versions: VERSIONS at the repo root (committed). The app's are
+// WEAROS_VERSION_NAME and WEAROS_VERSION_CODE; the code must always increase.
+val versions: Map<String, String> = readRepoKeyValues("VERSIONS")
+    ?: error("VERSIONS not found at the repo root: it is committed, restore it (git checkout VERSIONS)")
+val wearVersionName: String = versions["WEAROS_VERSION_NAME"].orEmpty().also {
+    require(it.isNotEmpty()) { "WEAROS_VERSION_NAME is not set in VERSIONS" }
+}
+val wearVersionCode: Int = versions["WEAROS_VERSION_CODE"]?.toIntOrNull()?.takeIf { it > 0 }
+    ?: error("WEAROS_VERSION_CODE in VERSIONS must be a positive integer (got \"${versions["WEAROS_VERSION_CODE"].orEmpty()}\")")
 
 // The pairing screen's default relay URL: https://<AW_RELAY_DOMAIN>, or ""
 // (the user types it) when the file or the key is missing.
@@ -38,8 +51,8 @@ android {
         applicationId = "com.gabriel.agentwatch"
         minSdk = 30
         targetSdk = 34
-        versionCode = 1
-        versionName = "1.0.0"
+        versionCode = wearVersionCode
+        versionName = wearVersionName
         vectorDrawables {
             useSupportLibrary = true
         }
