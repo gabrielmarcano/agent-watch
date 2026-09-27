@@ -9,7 +9,7 @@ object MarkdownFormatter {
     fun clean(input: String?): String {
         if (input.isNullOrBlank()) return ""
 
-        return input
+        return tableRows(input)
             // Remove code block markers but keep code content formatted
             .replace(Regex("```(?:[a-zA-Z]*)\\n?"), "")
             .replace(Regex("```"), "")
@@ -31,6 +31,28 @@ object MarkdownFormatter {
             // Reduce multiple consecutive blank lines to a single blank line
             .replace(Regex("\\n{3,}"), "\n\n")
             .trim()
+    }
+
+    /**
+     * A markdown table as one line per row, "first cell: other cells · …", without its header and
+     * separator: a grid of pipes does not fit a preview.
+     */
+    private fun tableRows(input: String): String {
+        val lines = input.replace("\r\n", "\n").split('\n')
+        val out = mutableListOf<String>()
+        var i = 0
+        while (i < lines.size) {
+            if (!isTableStart(lines, i)) {
+                out += lines[i++]
+                continue
+            }
+            i += 2
+            while (i < lines.size && lines[i].trim().startsWith("|")) {
+                val cells = tableCells(lines[i++]).filter { it.isNotEmpty() }
+                if (cells.isNotEmpty()) out += cells.first() + cells.drop(1).joinToString(" · ", prefix = if (cells.size > 1) ": " else "")
+            }
+        }
+        return out.joinToString("\n")
     }
 
     /**

@@ -2,7 +2,7 @@
 
 The Wear OS app is the primary client of the relay's `/v1` API (`docs/reference/contracts.md` §1, §2, §4.1). It never talks to the computer directly and never sends raw keys. Build, install and device checks: `docs/phases/4-wearos.md` and `.agents/skills/wearos-deploy/SKILL.md`.
 
-> **State on 2026-09-25:** the data layer below was reworked in the Phase 4 review, and the UI was rebuilt on Wear Compose Material 3 in Phase 4b (`docs/phases/4b-wearos-ui.md`). 189 JVM tests. Verified on the emulator (round, 192 dp) against a local relay, and checked by the owner on the Pixel Watch 2 (release build, 2026-09-26). Open: tables drawn with box characters (`docs/STATUS.md`, Phase 4b).
+> **State on 2026-09-25:** the data layer below was reworked in the Phase 4 review, and the UI was rebuilt on Wear Compose Material 3 in Phase 4b (`docs/phases/4b-wearos-ui.md`). 193 JVM tests. Verified on the emulator (round, 192 dp) against a local relay, and checked by the owner on the Pixel Watch 2 (release build, 2026-09-26). Tables (markdown or drawn with box characters) read as records and preview as one line per row since 2026-09-26: verified on the emulator, not yet on the watch.
 
 ## 1. Stack
 
@@ -27,7 +27,7 @@ The Wear OS app is the primary client of the relay's `/v1` API (`docs/reference/
 | `ui/screens/` | Agent list, agent screen + `PromptSection`, dictation confirm (`DictationFlow`), full text, history, reader, pairing, settings |
 | `complication/` | `complicationContent` (state → count and the agent a tap opens), `complicationBadge` (the short type: glyph and how many need the user, a problem's own glyph and a dash) and the data source: SHORT_TEXT, LONG_TEXT and MONOCHROMATIC_IMAGE |
 | `tile/` | Quick Dictate (`tileContent`, `dictationTarget`, `QuickDictateActivity`); Agents (`agentsTile`: the two most urgent agents, each opening its screen, and how many more); `TileCommon` (palette, the 3 s fetch, launching into the app) |
-| `util/` | `MarkdownFormatter` (plain previews), `MarkdownBlocks` (the reader's block parser) |
+| `util/` | `MarkdownFormatter` (plain previews; a table becomes one line per row, `first cell: other cells · …`), `MarkdownBlocks` (the reader's block parser; tables become one record per row, also inside a `screen` capture) |
 
 ## 3. Data flow
 
@@ -85,7 +85,7 @@ commandErrorFeedback(error, surface)             // the message to show for a fa
 | `agents` | Sections by attention (Needs you · Done · Working · Idle · Unknown) across workspaces; notice line; History and Settings |
 | `agent/{paneId}` | Name first; the prompt as items (command head or `unknown` tail, View all, Deny · Allow, options with their description, a confirmation for `allow_always`); the last reply with Read all; Reply (dictation) as the edge button; "Pin to tile" |
 | `dictation/{paneId}` | What the recognizer understood and the target, then Send |
-| `history?paneId=`, `reader/{id}` | Cards with age; the answer rendered block by block (`screen` captures as monospace) |
+| `history?paneId=`, `reader/{id}` | Cards with age; the answer rendered block by block (`screen` captures as monospace, except their tables, which the bridge sends as markdown and the reader shows as records) |
 | `settings` | Pair again, unpair, version |
 | `text` | A command or screen tail in full |
 

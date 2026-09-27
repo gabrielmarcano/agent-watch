@@ -102,16 +102,26 @@ fun parseMarkdown(source: String): List<MdBlock> {
 
 private val TABLE_SEPARATOR = Regex("^\\|?\\s*:?-{2,}:?\\s*(\\|\\s*:?-{2,}:?\\s*)*\\|?$")
 
-private fun cells(line: String): List<String> =
-    line.trim().removePrefix("|").removeSuffix("|").split('|').map { it.trim() }
+private val UNESCAPED_PIPE = Regex("(?<!\\\\)\\|")
+
+/** The cells of a "| a | b |" line, split on its unescaped pipes (`\|` is a literal pipe). */
+internal fun tableCells(line: String): List<String> {
+    var s = line.trim().removePrefix("|")
+    if (s.endsWith("|") && !s.endsWith("\\|")) s = s.dropLast(1)
+    return s.split(UNESCAPED_PIPE).map { it.trim().replace("\\|", "|") }
+}
+
+/** Whether a markdown table (a pipe line, then a `|---|` separator) starts at [lines]`[i]`. */
+internal fun isTableStart(lines: List<String>, i: Int): Boolean =
+    lines[i].trim().startsWith("|") && i + 1 < lines.size && TABLE_SEPARATOR.matches(lines[i + 1].trim())
 
 /** A markdown table → one [MdBlock.Record] per row; pipe lines without a header separator stay verbatim. */
 private fun tableBlocks(lines: List<String>): List<MdBlock> {
     if (lines.size < 2 || !TABLE_SEPARATOR.matches(lines[1])) return listOf(MdBlock.Code(lines.joinToString("\n")))
-    val headers = cells(lines[0])
+    val headers = tableCells(lines[0])
     return lines.drop(2).map { row ->
         MdBlock.Record(
-            cells(row).mapIndexedNotNull { col, cell ->
+            tableCells(row).mapIndexedNotNull { col, cell ->
                 if (cell.isEmpty()) null else headers.getOrElse(col) { "" } to parseInline(cell)
             }
         )
@@ -122,14 +132,36 @@ private fun depthOf(indent: String): Int = indent.replace("\t", "    ").length /
 
 /**
  * A terminal screen (`source: "screen"`), which is not markdown: verbatim monospace blocks split on
- * blank lines.
+ * blank lines. Tables are the exception: the bridge turns the ones the agent drew with box
+ * characters into markdown tables, and they become one [MdBlock.Record] per row, as in an answer.
  */
-fun screenBlocks(screen: String): List<MdBlock> =
-    screen.replace("\r\n", "\n")
-        .split(Regex("\n\\s*\n"))
-        .map { it.trimEnd() }
-        .filter { it.isNotBlank() }
-        .map { MdBlock.Code(it.trim('\n')) }
+fun screenBlocks(screen: String): List<MdBlock> {
+    val blocks = mutableListOf<MdBlock>()
+    val text = mutableListOf<String>()
+    fun flushText() {
+        text.joinToString("\n")
+            .split(Regex("\n\\s*\n"))
+            .map { it.trimEnd() }
+            .filter { it.isNotBlank() }
+            .forEach { blocks += MdBlock.Code(it.trim('\n')) }
+        text.clear()
+    }
+
+    val lines = screen.replace("\r\n", "\n").split('\n')
+    var i = 0
+    while (i < lines.size) {
+        if (isTableStart(lines, i)) {
+            flushText()
+            val table = mutableListOf<String>()
+            while (i < lines.size && lines[i].trim().startsWith("|")) table += lines[i++].trim()
+            blocks += tableBlocks(table)
+        } else {
+            text += lines[i++]
+        }
+    }
+    flushText()
+    return blocks
+}
 
 /**
  * Inline markdown: `code`, **bold** / __bold__, *italic* / _italic_, [text](url) (the text only),

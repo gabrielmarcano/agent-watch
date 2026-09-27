@@ -137,6 +137,29 @@ class MarkdownBlocksTest {
     }
 
     @Test
+    fun anEscapedPipeStaysInItsCell() {
+        assertEquals(
+            listOf(Record(listOf("Op" to plain("a|b"), "Allowed" to plain("never")))),
+            parseMarkdown("| Op | Allowed |\n| --- | --- |\n| a\\|b | never |")
+        )
+    }
+
+    @Test
+    fun aTableInScreenTextBecomesRecordsAndTheRestStaysVerbatim() {
+        // The bridge rewrites a table drawn with box characters as a markdown table.
+        val blocks = screenBlocks("Two lanes:\n\n| Lane | Hours |\n| --- | --- |\n| API | 20 |\n| Web | 24 |\n\n  done in 3s")
+        assertEquals(
+            listOf(
+                Code("Two lanes:"),
+                Record(listOf("Lane" to plain("API"), "Hours" to plain("20"))),
+                Record(listOf("Lane" to plain("Web"), "Hours" to plain("24"))),
+                Code("  done in 3s"),
+            ),
+            blocks
+        )
+    }
+
+    @Test
     fun screenTextSplitsOnBlankLinesAndStaysVerbatim() {
         val blocks = screenBlocks("✦ Done.\n  ran 3 migrations\n\n\n  > Type your message\n")
         assertEquals(listOf(Code("✦ Done.\n  ran 3 migrations"), Code("  > Type your message")), blocks)
