@@ -203,8 +203,9 @@ Used when an agent has no transcript reader, or when its reader returns an error
    - **agy:** the message is echoed as `> text` (wrapped lines indented by 2).
    - **opencode:** the message is the last `┃`-framed block; the `Thought · …` line and the `▣  <mode> · <model> · <time>` footer are dropped, and so is the sidebar on the right (text after a gap of 4+ spaces, or starting at column 40 or further).
    Otherwise the whole screen above the input box is kept.
-5. Keep the last 80 lines.
-6. `HistoryItem{Source: "screen", Query: <message or "">, Response: <text>}`.
+5. **Tables drawn with box characters become markdown tables** (`pkg/agents/boxtable.go`), so clients handle one table form. A grid needs a top border with at least one junction (`┌─┬─┐`, also rounded, heavy or double) and rows whose cells match it; anything else, such as a one-column dialog box, stays as it is. Claude Code draws a separator under every row, so each group of lines between separators is one row, its wrapped lines joined per column. With a separator under the header only (or none), each line is a row, and a line with an empty first cell continues the row above. A missing bottom border (cut with the input box) ends the table at its last row. Fixture: `testdata/claude/table-box.txt`.
+6. Keep the last 80 lines.
+7. `HistoryItem{Source: "screen", Query: <message or "">, Response: <text>}`.
 
 ---
 

@@ -312,18 +312,99 @@ func (d *Dispatcher) releaseDone(pane string, p *pendingDone) {
 	d.enqueueLocked(p.msg, p.cur)
 }
 
-// replyPreview turns an agent's reply into one line of notification text:
-// markdown markers dropped, lines joined, at most 240 runes.
+// replyPreview turns an agent's reply into notification text: markdown
+// markers dropped, lines joined, at most 240 runes. A markdown table becomes
+// one line per row, "first cell: other cells · …", without its header.
 func replyPreview(response string) string {
 	text := strings.NewReplacer("**", "", "__", "", "`", "").Replace(response)
-	var parts []string
-	for _, line := range strings.Split(text, "\n") {
-		line = strings.TrimSpace(strings.TrimLeft(strings.TrimSpace(line), "#>*-•"))
+	lines := strings.Split(text, "\n")
+	var b strings.Builder
+	ownLine := false // the last part was a table row
+	add := func(part string, row bool) {
+		if b.Len() > 0 {
+			if row || ownLine {
+				b.WriteByte('\n')
+			} else {
+				b.WriteByte(' ')
+			}
+		}
+		b.WriteString(part)
+		ownLine = row
+	}
+	for i := 0; i < len(lines); i++ {
+		if rows, n := tableRows(lines[i:]); n > 0 {
+			for _, r := range rows {
+				add(r, true)
+			}
+			i += n - 1
+			continue
+		}
+		line := strings.TrimSpace(strings.TrimLeft(strings.TrimSpace(lines[i]), "#>*-•"))
 		if line != "" {
-			parts = append(parts, line)
+			add(line, false)
 		}
 	}
-	return TruncateRunes(strings.Join(parts, " "), 240)
+	return TruncateRunes(b.String(), 240)
+}
+
+// tableRows reads the markdown table lines starts with (a header, a "|---|"
+// separator, then rows) and returns each row as preview text and how many
+// lines the table spans; n is 0 when lines does not start with a table.
+func tableRows(lines []string) (rows []string, n int) {
+	if len(lines) < 2 || !strings.HasPrefix(strings.TrimSpace(lines[0]), "|") || !isTableSeparator(lines[1]) {
+		return nil, 0
+	}
+	n = 2
+	for ; n < len(lines) && strings.HasPrefix(strings.TrimSpace(lines[n]), "|"); n++ {
+		var cells []string
+		for _, c := range tableCells(lines[n]) {
+			if c != "" {
+				cells = append(cells, c)
+			}
+		}
+		switch len(cells) {
+		case 0:
+		case 1:
+			rows = append(rows, cells[0])
+		default:
+			rows = append(rows, cells[0]+": "+strings.Join(cells[1:], " · "))
+		}
+	}
+	return rows, n
+}
+
+func isTableSeparator(line string) bool {
+	cells := tableCells(line)
+	for _, c := range cells {
+		if strings.Trim(c, ":-") != "" || !strings.Contains(c, "--") {
+			return false
+		}
+	}
+	return len(cells) > 0
+}
+
+// tableCells splits a "| a | b |" line on its unescaped pipes.
+func tableCells(line string) []string {
+	s := strings.TrimSpace(line)
+	s = strings.TrimPrefix(s, "|")
+	if strings.HasSuffix(s, "|") && !strings.HasSuffix(s, `\|`) {
+		s = s[:len(s)-1]
+	}
+	var cells []string
+	var b strings.Builder
+	for i := 0; i < len(s); i++ {
+		switch {
+		case s[i] == '\\' && i+1 < len(s) && s[i+1] == '|':
+			b.WriteByte('|')
+			i++
+		case s[i] == '|':
+			cells = append(cells, strings.TrimSpace(b.String()))
+			b.Reset()
+		default:
+			b.WriteByte(s[i])
+		}
+	}
+	return append(cells, strings.TrimSpace(b.String()))
 }
 
 // buildMessage determines if a transition should push, and formats the message.

@@ -1095,6 +1095,20 @@ func TestReplyPreview(t *testing.T) {
 	}
 }
 
+// A table reads as one line per row, the first cell leading, without the
+// header or the separator; the prose around it stays joined.
+func TestReplyPreview_Table(t *testing.T) {
+	reply := "Two lanes:\n\n| Lane | Tasks | Hours |\n|---|:---:|---|\n| **API** | CRUD, errors | 20 |\n| a\\|b | | 3 |\n\nDatabase first."
+	want := "Two lanes:\nAPI: CRUD, errors · 20\na|b: 3\nDatabase first."
+	if got := replyPreview(reply); got != want {
+		t.Errorf("preview = %q, want %q", got, want)
+	}
+	// Pipe lines without a separator are not a table.
+	if got := replyPreview("| not | a table |\nnext"); got != "| not | a table | next" {
+		t.Errorf("preview = %q", got)
+	}
+}
+
 // A question offers its answers as one-tap notification actions: at most 4,
 // labels cut to 40 runes, never a "don't ask again" answer (a notification
 // cannot ask for the confirmation the app asks for).

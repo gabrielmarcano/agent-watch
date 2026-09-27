@@ -37,6 +37,7 @@ func ScreenTurn(text string) *model.HistoryItem {
 }
 
 func screenItem(query string, lines []string) *model.HistoryItem {
+	lines = boxTables(lines)
 	// Keep the last 80 lines
 	if len(lines) > 80 {
 		lines = lines[len(lines)-80:]

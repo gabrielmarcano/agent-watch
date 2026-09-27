@@ -171,7 +171,7 @@ type HistoryItem struct {
 - **`response`** is truncated to 16 384 bytes on a UTF-8 boundary, with `\n\n…[truncated]` appended when cut.
 - **`source`:**
   - `"transcript"` means `response` is the agent's own markdown.
-  - `"screen"` means `response` is plain terminal text, so clients must not render it as markdown.
+  - `"screen"` means `response` is plain terminal text, so clients must not render it as markdown. One exception: a table the agent drew with box characters arrives as a markdown pipe table (header, `| --- |` separator, one line per row), and clients render those lines as a table (agents.md §6).
 
 ### 1.5 `AgentsSnapshot`
 
@@ -431,7 +431,7 @@ All values are strings (FCM data maps allow only strings). No `notification` blo
 | `agent` | `claude` | |
 | `label` | `bizum` | |
 | `title` | `bizum needs approval` | Ready to display |
-| `body` | `Bash: go test ./...` | ≤ 240 chars. For `done`: the agent's reply as one line (markdown markers dropped), or `Task finished` when no reply arrived in time (§4.3) |
+| `body` | `Bash: go test ./...` | ≤ 240 chars. For `done`: the agent's reply as one line (markdown markers dropped; a markdown table becomes one line per row, `first cell: other cells · …`, without its header), or `Task finished` when no reply arrived in time (§4.3) |
 | `state_change_seq` | `334` | Decimal string, always a number (`0` for `digest`) |
 | `fingerprint` | `fd6ff7388739252d` | Only for `blocked` |
 | `allow_option_id` | `opt-1` | First `allow_once` option, else empty |
