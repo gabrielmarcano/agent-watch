@@ -2,7 +2,7 @@
 
 The Wear OS app is the primary client of the relay's `/v1` API (`docs/reference/contracts.md` §1, §2, §4.1). It never talks to the computer directly and never sends raw keys. Build, install and device checks: `docs/phases/4-wearos.md` and `.agents/skills/wearos-deploy/SKILL.md`.
 
-> **State on 2026-09-25:** the data layer below was reworked in the Phase 4 review, and the UI was rebuilt on Wear Compose Material 3 in Phase 4b (`docs/phases/4b-wearos-ui.md`). 189 JVM tests. Verified on the emulator (round, 192 dp) against a local relay; **not yet on the watch**.
+> **State on 2026-09-25:** the data layer below was reworked in the Phase 4 review, and the UI was rebuilt on Wear Compose Material 3 in Phase 4b (`docs/phases/4b-wearos-ui.md`). 189 JVM tests. Verified on the emulator (round, 192 dp) against a local relay, and checked by the owner on the Pixel Watch 2 (release build, 2026-09-26). Open: tables drawn with box characters (`docs/STATUS.md`, Phase 4b).
 
 ## 1. Stack
 
