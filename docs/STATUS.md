@@ -269,7 +269,8 @@ Keep entries short, and use absolute dates (YYYY-MM-DD).
 - Notes:
 
 ## macOS menu bar app (`macos-bar/`, not a numbered phase)
-- 2026-09-25: driven entirely by the bridge CLI (`status --json --local` every 2.5 s, `start`, `stop`, `restart`, `pair --json`); distinct icon states and the blocked count; `make bar`, `make bar-test` (decision logic, with a temp HOME; never touches launchd or the real home). Docs: `macos-bar/README.md`.
+- 2026-09-25: driven entirely by the bridge CLI (`status --json --local` every 2.5 s, `start`, `stop`, `restart`, `pair --json`); distinct icon states; `make bar`, `make bar-test` (decision logic, with a temp HOME; never touches launchd or the real home). Docs: `macos-bar/README.md`.
+- 2026-09-26: a status circle on the icon (green / yellow / red / gray) and nothing else next to it; the bar no longer shows agents or blocked counts (the watch does); a Versions menu section (this app and the bridge).
 - Verified with `make bar-test` only; the app itself on the owner's Mac is not recorded as verified.
 
 ---

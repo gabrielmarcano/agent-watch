@@ -53,6 +53,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     // Built once; render() only updates titles, visibility and enablement.
     private let headlineItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
     private var detailItems: [NSMenuItem] = []
+    private var versionItems: [NSMenuItem] = []
+    private let barVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? ""
     private let hintItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
     private var startItem = NSMenuItem()
     private var stopItem = NSMenuItem()
@@ -75,7 +77,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        item.button?.imagePosition = .imageLeading
+        item.button?.imagePosition = .imageOnly
         statusItem = item
         buildMenu()
         item.menu = menu
@@ -118,6 +120,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(.separator())
         logsItem = addAction("Open Bridge Log", #selector(openLogs), "l")
         configItem = addAction("Show Configuration in Finder", #selector(revealConfig), ",")
+        menu.addItem(.separator())
+        let versionsHeader = NSMenuItem(title: "Versions", action: nil, keyEquivalent: "")
+        versionsHeader.isEnabled = false
+        menu.addItem(versionsHeader)
+        for _ in 0..<2 {
+            let v = NSMenuItem(title: "", action: nil, keyEquivalent: "")
+            v.isEnabled = false
+            v.isHidden = true
+            versionItems.append(v)
+            menu.addItem(v)
+        }
         menu.addItem(.separator())
         _ = addAction("Quit Agent Watch Menu", #selector(quit), "q")
     }
@@ -184,26 +197,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private func render() {
         let state = deriveState(binaryFound: binary != nil, status: status, pollError: pollError)
-        let p = present(state: state, status: status, busy: busy)
+        let p = present(state: state, status: status, busy: busy, barVersion: barVersion)
         guard p != lastPresentation else { return }
         lastPresentation = p
 
         if let button = statusItem?.button {
+            // Only the icon and its status dot: no text next to it.
             button.image = statusIcon(symbolName: p.symbolName, dot: p.dot)
-            if p.emphasize {
-                button.attributedTitle = NSAttributedString(string: p.title, attributes: [
-                    .foregroundColor: NSColor.systemOrange,
-                    .font: NSFont.monospacedDigitSystemFont(ofSize: NSFont.systemFontSize, weight: .bold),
-                ])
-            } else {
-                button.attributedTitle = NSAttributedString(string: p.title)
-            }
+            button.title = ""
             button.toolTip = p.tooltip
         }
 
         headlineItem.title = p.headline
         for (i, item) in detailItems.enumerated() {
             let text = i < p.details.count ? p.details[i] : ""
+            item.title = "   " + text
+            item.isHidden = text.isEmpty
+        }
+        for (i, item) in versionItems.enumerated() {
+            let text = i < p.versions.count ? p.versions[i] : ""
             item.title = "   " + text
             item.isHidden = text.isEmpty
         }

@@ -12,7 +12,7 @@ This document outlines the milestones achieved in the Herdr-native architecture 
 - **Strict Safety Verification:** Before any key press the bridge re-lists the agent, re-reads the screen and checks `pane_id`, the agent, `expected_seq` and the prompt `fingerprint`, for `answer` and `cancel`. Commands act at most once; dictation is refused while a menu is on screen.
 - **Herdr Plugin Integration:** Bridge control as a Herdr plugin (`herdr-plugin.toml`) with the actions `start`, `restart`, `stop`, `status` and `pair`; `configure` is a CLI command. Static, version-stamped plugin build.
 - **Daemon Lifecycle:** Supervised by `launchd` on macOS and `systemd --user` on Linux; `start` keeps the installed service's values, `restart` never rewrites them. `status --json --local` for tools.
-- **macOS Menu Bar App:** status, blocked count, start/stop/restart and pairing through the bridge CLI.
+- **macOS Menu Bar App:** bridge and relay health as a status circle, versions, start/stop/restart and pairing through the bridge CLI.
 
 ### Cloud Relay & Security
 - **Cloud Relay Server:** Static Go binary `agent-watch-relay` with SSE broadcast, in-memory state aggregation, and history persisted in one atomically written JSON file (`store.json`).

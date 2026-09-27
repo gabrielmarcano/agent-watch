@@ -1,8 +1,8 @@
 # Agent Watch menu bar app (macOS)
 
 A small menu bar companion for the host bridge. It shows at a glance whether
-the bridge is running and connected, and how many agents are **blocked**
-waiting for you, and it starts, stops, restarts and pairs through the
+the bridge is running and connected to the relay (a status circle on its icon),
+and it starts, stops, restarts and pairs through the
 `agent-watch-bridge` CLI. It holds no logic of its own about paths or
 services: every 2.5 s it runs `agent-watch-bridge status --json --local`
 (local files only, no network) and shows what that says.
@@ -39,22 +39,21 @@ If neither exists the icon shows `?` and the menu says how to build it.
 
 ## What the icon says
 
-The icon carries a small status circle: **green** connected, **yellow** running but not fully connected yet, **red** it should be working and is not, **gray** off on purpose.
+The bar reports the health of the bridge and the relay, and pairs watches. It never shows agents or blocked counts: that is the watch's job. Next to the clock there is only the icon and a small status circle: **green** connected, **yellow** running but not fully connected yet, **red** it should be working and is not, **gray** off on purpose. The menu's first line says which state it is.
 
-| Icon | Dot | Text | State | What to do |
-|---|---|---|---|---|
-| watch with waves | green | *(none)* | Running and connected, no agent blocked | Nothing |
-| watch with waves | green | **`2`** (orange) | Connected; 2 agents are blocked waiting for you | Answer them |
-| watch | yellow | `…` | Running, connecting to the relay | Wait |
-| watch | yellow | `no herdr` | Connected to the relay, but herdr is not running | Start herdr |
-| watch with `!` | red | `!` | Relay error (for example the host token was rejected); the menu shows the error | Fix the cause; it keeps retrying |
-| watch with `!` | red | `stale` | The bridge process exists but has not written its status for more than 15 s | Restart |
-| crossed watch | gray, or red if it failed to start | `off` | Installed but stopped (the menu shows why, if it failed to start) | Start |
-| crossed watch | gray | `install` | Configured, but the LaunchAgent is not installed yet | Start |
-| crossed watch | gray | `setup` | No valid config; Start is disabled | Run `make configure-bridge` (or `agent-watch-bridge configure …`) in a terminal |
-| watch with `!` | red | `?` | The bridge binary was not found, or its status could not be read | See the menu |
+| Icon | Dot | Menu says | What to do |
+|---|---|---|---|
+| watch with waves | green | Connected to *relay* | Nothing |
+| watch | yellow | Connecting to *relay*… | Wait |
+| watch | yellow | herdr is not running | Start herdr |
+| watch with `!` | red | Relay error (for example the host token was rejected), with the error | Fix the cause; it keeps retrying |
+| watch with `!` | red | Bridge not responding (no status for more than 15 s) | Restart |
+| crossed watch | gray, or red if it failed to start | Bridge stopped (and why, if it failed) | Start |
+| crossed watch | gray | Bridge service not installed | Start |
+| crossed watch | gray | Bridge not configured; Start is disabled | Run `make configure-bridge` (or `agent-watch-bridge configure …`) in a terminal |
+| watch with `!` | red | agent-watch-bridge not found, or status unavailable | See the menu |
 
-The tooltip repeats the state with the agent and blocked counts.
+The tooltip repeats the state. The **Versions** section of the menu shows this app's version and the bridge's (the running daemon's, or the CLI's when it is stopped).
 
 ## Menu actions
 

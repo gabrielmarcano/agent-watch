@@ -178,7 +178,7 @@ The release build (`assembleRelease`, R8 on) is signed with the debug key: fine 
 
 ### 5. Optional: macOS Menu Bar App
 
-A small menu bar companion that shows whether the bridge runs and is connected, and how many agents are blocked, and starts, stops, restarts and pairs through the bridge CLI:
+A small menu bar companion that shows whether the bridge runs and is connected to the relay (a status circle on its icon), shows the versions, and starts, stops, restarts and pairs through the bridge CLI. It never shows agents; that is the watch's job:
 
 ```bash
 make bar && open bin/AgentWatchBar.app

@@ -118,15 +118,15 @@ for (name, status, err, found, want) in cases {
 
 // MARK: presentation
 
+// The bar reports bridge/relay health only: never agents or blocked counts.
 let connected2 = st { $0.blocked = 2 }
 let p2 = present(state: .connected, status: connected2)
-check(p2.title == " 2" && p2.emphasize, "blocked count is the title and emphasized: \(p2.title)")
-check(p2.headline.contains("2 agents waiting"), "headline leads with blocked: \(p2.headline)")
-check(p2.tooltip.contains("2 blocked") && !p2.tooltip.lowercased().contains("active"), "tooltip: \(p2.tooltip)")
+let p2Text = ([p2.headline, p2.tooltip, p2.hint ?? ""] + p2.details).joined(separator: " ").lowercased()
+check(!p2Text.contains("block") && !p2Text.contains("agents") && !p2Text.contains("waiting"), "no agent/blocked talk: \(p2Text)")
+check(p2.headline == "Connected to relay.example.com", "connected headline: \(p2.headline)")
 
 let p0 = present(state: .connected, status: st { _ in })
-check(p0.title == "" && !p0.emphasize, "no blocked: icon only")
-check(p0.tooltip.contains("9 agents") && !p0.tooltip.lowercased().contains("active"), "tooltip never says active: \(p0.tooltip)")
+check(p0.tooltip == "Agent Watch: connected to relay.example.com", "tooltip: \(p0.tooltip)")
 check(p0.canStop && p0.canRestart && p0.canPair && !p0.canStart, "running: stop/restart/pair, no start")
 
 let pNC = present(state: .notConfigured("config missing"), status: st { $0.running = false; $0.configured = false })
@@ -166,8 +166,8 @@ let glance: [(String, BarState, LocalStatus)] = [
 var seen: [String: String] = [:]
 for (name, state, status) in glance {
     let p = present(state: state, status: status)
-    let key = p.symbolName + "|" + p.title
-    if let other = seen[key] { check(false, "\(name) looks like \(other): \(key)") }
+    let key = p.headline
+    if let other = seen[key] { check(false, "\(name) reads like \(other) in the menu: \(key)") }
     seen[key] = name
 }
 
@@ -237,6 +237,15 @@ Task.detached {
 }
 _ = sem.wait(timeout: .now() + 5)
 check(box.get() == 42, "runInBackground returns the value")
+
+// Versions section: the bar's own version and the bridge's (daemon when running, else the CLI).
+let vRun = versionLines(barVersion: "0.2.1", status: st { $0.version = "0.2.1"; $0.daemonVersion = "0.2.1-abc1234" })
+check(vRun == ["Menu bar 0.2.1", "Bridge 0.2.1-abc1234"], "versions while running: \(vRun)")
+let vOff = versionLines(barVersion: "0.2.1", status: st { $0.running = false; $0.daemonVersion = ""; $0.version = "0.2.1" })
+check(vOff == ["Menu bar 0.2.1", "Bridge 0.2.1"], "versions while stopped: \(vOff)")
+check(versionLines(barVersion: "", status: nil) == ["Menu bar unknown"], "no bridge status, no bundle version")
+check(present(state: .connected, status: st { $0.daemonVersion = "0.2.1-abc1234" }, barVersion: "0.2.1").versions
+      == ["Menu bar 0.2.1", "Bridge 0.2.1-abc1234"], "present carries the versions")
 
 // Status dot: green connected, yellow on its way, red broken, gray off on purpose.
 let dotCases: [(BarState, StatusDot, String)] = [
