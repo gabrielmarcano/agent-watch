@@ -88,6 +88,12 @@ Prebuilt bridge, relay and menu bar binaries are on the [releases page](https://
 
 ---
 
+## Support
+
+If Agent Watch saves you trips to the keyboard, you can [buy me a coffee on Ko-fi](https://ko-fi.com/gabrielmarcano120). Bug reports and ideas are welcome as [issues](https://github.com/gabrielmarcano/agent-watch/issues).
+
+---
+
 ## License
 
 Copyright 2026 Gabriel Marcano. Licensed under the [Apache License, Version 2.0](LICENSE); see also [`NOTICE`](NOTICE).
