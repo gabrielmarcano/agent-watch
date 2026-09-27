@@ -67,7 +67,7 @@ When two disagree, the higher one wins, and the lower one must be fixed in the s
      │        ├── 2b ── 2c ──┐
      ├── 3a ──┬── 3b ────────┤
      │        └── 3c ────────┤
-     └── 4 ──────────────────┴── 5 ──┬── 6
+     └── 4 ── 4b ────────────┴── 5 ──┬── 6
                                      └── 7
 ```
 
