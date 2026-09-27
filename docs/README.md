@@ -1,5 +1,7 @@
 # Agent Watch — Implementation Guides
 
+> Looking for how to install and use Agent Watch? See the [full guide](GUIDE.md). The guides below are for building it.
+
 These guides turn [`HERDR_REFACTOR_PLAN.md`](../HERDR_REFACTOR_PLAN.md) into executable work. They are written so that **any** coding agent can pick one up and finish it without guessing. That includes smaller models without the design context.
 
 **Order of authority:**
