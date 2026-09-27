@@ -404,18 +404,26 @@ func (s *Server) handleConn(conn net.Conn) {
 	}
 	s.mu.Unlock()
 
+	// A one-shot answer is computed before Received fires: a test that
+	// changes the state once the call has arrived must not change the answer.
+	subscribe := method == "events.subscribe" && !failing
+	var resp map[string]any
+	switch {
+	case failing:
+		resp = errorResp(idStr, fail.code, fail.message)
+	case !subscribe:
+		resp = s.respond(idStr, method, params)
+	}
+
 	if hold != nil {
 		close(hold.received)
 	}
 
-	switch {
-	case failing:
-		s.answer(conn, errorResp(idStr, fail.code, fail.message), hold, stopped)
-	case method == "events.subscribe":
+	if subscribe {
 		s.handleSubscribe(conn, idStr, params, hold, stopped)
-	default:
-		s.answer(conn, s.respond(idStr, method, params), hold, stopped)
+		return
 	}
+	s.answer(conn, resp, hold, stopped)
 }
 
 // answer writes resp once the hold (if any) is released, then closes conn:
