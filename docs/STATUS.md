@@ -254,6 +254,14 @@ Keep entries short, and use absolute dates (YYYY-MM-DD).
 - Notes:
   - `watchos-app/` is still the legacy LAN/Tailscale client. Its only `/v1` code is the `CancelRequest` struct appended to `Models/AgentState.swift` on 2026-09-25.
 
+## Phase 7 — Android phone client
+- Claimed by: —
+- [ ] decisions confirmed with the owner (`docs/phases/7-android-mobile.md`)
+- [ ] step 1: `android/{core,wear}` restructure merged alone; Wear OS unchanged on the watch
+- [ ] `:mobile` screens, notifications (local-only, unlock to approve) and push
+- [ ] verified on the owner's phone with the watch paired (no duplicate notifications)
+- Notes:
+
 ## macOS menu bar app (`macos-bar/`, not a numbered phase)
 - 2026-09-25: driven entirely by the bridge CLI (`status --json --local` every 2.5 s, `start`, `stop`, `restart`, `pair --json`); distinct icon states and the blocked count; `make bar`, `make bar-test` (decision logic, with a temp HOME; never touches launchd or the real home). Docs: `macos-bar/README.md`.
 - Verified with `make bar-test` only; the app itself on the owner's Mac is not recorded as verified.

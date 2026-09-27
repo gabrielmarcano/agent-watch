@@ -52,13 +52,13 @@ This document outlines the milestones achieved in the Herdr-native architecture 
 - Replace `docs/e2e-report.md`; several rows of the first run were asserted from code.
 
 ### 3. Enable the `resolved` Push
-- Once the new watch app is installed: make it ignore a `blocked` push older than the last `resolved` for its pane, set `AW_PUSH_RESOLVED=1` on the relay, and verify that answered approvals disappear from the watch.
+- The watch app already ignores a `blocked` push older than the last `resolved` for its pane. With the new app on the watch, set `AW_PUSH_RESOLVED=1` on the relay and verify that answered approvals disappear from the watch.
 
-### 4. Close the herdr Dialog-Status Gap
-- herdr 0.9.1 reports Antigravity's permission dialog and Claude's WebFetch dialog as `done`/`working`, so the watch cannot answer them. Report it upstream, or decide how the bridge may publish a parsed menu against herdr's status (a custom PreToolUse hook for Antigravity is another option).
+### 4. Close the herdr Dialog-Status Gap Upstream
+- herdr 0.9.1 misses Antigravity 1.2.x permission dialogs and Claude dialogs after a relaunch in the same pane. Mitigated with temporary local detection overrides (`tools/herdr-overrides/`); remove them once herdr fixes it (draft issues in `tools/herdr-overrides/UPSTREAM-ISSUES.md`).
 
-### 5. OpenCode Focus Detection
-- Read which OpenCode button has the focus (a styled/ANSI screen read) instead of assuming `Allow once`.
+### 5. Android Phone Client (Phase 7)
+- A native phone app as a first-class relay client next to the watch, sharing the Wear OS data layer through a `:core` module; phone notifications stay local-only and approving from a locked phone requires unlock. Guide: `docs/phases/7-android-mobile.md`.
 
 ### 6. watchOS Client (Phase 6)
 - Rewrite the SwiftUI app against the `/v1` contracts, copying the validated Wear OS UX; verified in the simulator only.
@@ -66,4 +66,3 @@ This document outlines the milestones achieved in the Herdr-native architecture 
 ### 7. Later Ideas
 - **Multi-Channel Notifiers:** a Telegram bot with inline approval buttons as a fallback when the watch is charging; Discord webhook summaries.
 - **Extended Agent Adapters:** dedicated adapters for Codex, Pi, Amp and other CLI agents.
-- **Phone Companion App (optional):** easier pairing and Bluetooth tethering when the watch has no Wi-Fi.

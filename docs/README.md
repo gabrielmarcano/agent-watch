@@ -59,6 +59,7 @@ When two disagree, the higher one wins, and the lower one must be fixed in the s
 | 4b | [Wear OS UI redesign](phases/4b-wearos-ui.md) | 4 | Everyday-usable UI on the Pixel Watch 2 |
 | 5 | [End-to-end + docs](phases/5-e2e.md) | 2c, 3b, 3c, 4, 4b | Release gate, README |
 | 6 | [watchOS client](phases/6-watchos.md) | 5 | Simulator-verified app (best-effort) |
+| 7 | [Android phone client](phases/7-android-mobile.md) | 5 | Phone app on the relay, sharing the Wear OS data layer |
 
 ```
  0 ───────────────┐
@@ -66,7 +67,8 @@ When two disagree, the higher one wins, and the lower one must be fixed in the s
      │        ├── 2b ── 2c ──┐
      ├── 3a ──┬── 3b ────────┤
      │        └── 3c ────────┤
-     └── 4 ──────────────────┴── 5 ── 6
+     └── 4 ──────────────────┴── 5 ──┬── 6
+                                     └── 7
 ```
 
 ### What can run in parallel, and why
@@ -80,6 +82,8 @@ When two disagree, the higher one wins, and the lower one must be fixed in the s
 | 3b and 3c | ✅ | 3c only writes `deploy/relay` |
 | 5 and anything | ❌ | 5 is the release gate; it tests the whole system |
 | 6 and 4 | ⚠️ | Technically disjoint, but 6 copies a UX that 4 must validate first |
+| 7 and 6 | ✅ | Disjoint directories (`android/` vs `watchos-app/`) |
+| 7's step 1 and anything touching the Android tree | ❌ | Step 1 moves `wearos-app/` into `android/{core,wear}` and rewrites path references: it touches most of the Android index |
 
 **Changing a contract after Phase 1** is a cross-cutting change:
 - Stop the parallel work.

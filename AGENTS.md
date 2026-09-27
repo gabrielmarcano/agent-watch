@@ -102,7 +102,7 @@ This document defines the development rules, architectural boundaries, and codin
   - voice dictation
   - history
   - complications/tiles
-- **Phone companion app** is deferred until Bluetooth tethering is needed.
+- **Android phone client** is planned as Phase 7: a first-class relay client, not a watch companion (Wear OS already reaches the relay through the phone's Bluetooth connection).
 - **watchOS push** uses ntfy (free). No APNs until a paid Apple Developer account exists.
 
 ---

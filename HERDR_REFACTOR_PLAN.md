@@ -28,6 +28,7 @@
 | 16 | The socket's `agent.read` source is `recent_unwrapped` (underscore) | Verified: the hyphenated CLI spelling fails on the socket with `invalid_request` |
 | 17 | Review batch (2026-09-25): `prompt` is refused while a menu is on screen; `cancel` re-reads the screen and may carry `fingerprint`; commands are idempotent; the relay pings the host too | herdr 0.9.1 reports some open dialogs as `done`/`working`; a stale cached prompt or a double tap must never type into a live menu |
 | 18 | Relay client IP comes from `AW_TRUSTED_PROXIES` (+ optional `AW_CLIENT_IP_HEADER`); `AW_TRUST_CF_IP` removed. FCM `resolved` push added, off until `AW_PUSH_RESOLVED` | Forwarding headers are client-controlled unless a trusted proxy wrote them; older watch apps show an unknown push as a bogus approval |
+| 19 | Android phone client planned as Phase 7: a relay client sharing the Wear OS data layer (`:core`), phone notifications local-only, approvals need unlock | The owner wants a phone app as a real project; the relay already serves any paired client, so no backend change is required |
 
 ---
 
@@ -48,7 +49,7 @@
    - push dispatch
    - pairing and auth
 5. **Outbound relay networking.** The bridge dials `wss://relay.<domain>/v1/host`. Watches use HTTPS + SSE on the relay. No inbound ports on the Mac, no VPN on the watch.
-6. **Wrist-first scope.** Status, approvals, dictation, history, complications/tiles. No terminal emulator (Moshi covers that). A phone companion is deferred until Bluetooth tethering is needed.
+6. **Wrist-first scope.** Status, approvals, dictation, history, complications/tiles. No terminal emulator (Moshi covers that). A phone app is planned as a separate client (Phase 7), not as a watch companion: Wear OS already routes the watch's traffic through the phone over Bluetooth.
 7. **Wear OS first, watchOS as extra support.**
    - **Wear OS is the primary client and reference implementation.** Every feature ships there first and is verified end-to-end on the daily-driver device: a **Google Pixel Watch 2**.
    - **watchOS is best-effort.** It follows the same `/v1` API and its models stay in sync with `pkg/model`, so it always compiles. Its UI features may lag behind Wear OS.
@@ -499,12 +500,14 @@ Starts after Wear OS is verified. Sync the model and network layer first so the 
 | **4. Wear OS** | [4-wearos](docs/phases/4-wearos.md) | Models, network, pairing, list/detail, prompt card, notifications, history, tile/complication (§13.1) | 1 (can start against a relay stub) |
 | **5. End-to-end + docs** | [5-e2e](docs/phases/5-e2e.md) | E2E checklist **on the Pixel Watch 2**, README rewrite, ROADMAP refresh | 2c, 3b, 3c, 4 |
 | **6. watchOS (best-effort)** | [6-watchos](docs/phases/6-watchos.md) | Model + network sync first, then UI parity (§13.2); simulator only | 5 (off the critical path; never blocks a release) |
+| **7. Android phone** | [7-android-mobile](docs/phases/7-android-mobile.md) | `:core` module shared with Wear OS, phone app on the same `/v1` API | 5 |
 
 **What can run in parallel:**
 - **0 ∥ 1:** Phase 0 writes only `pkg/agents/testdata` and docs.
 - **1 runs alone** among code phases: it deletes legacy and creates the module root, touching most of the git index.
 - **2a ∥ 2b ∥ 3a ∥ 4** after Phase 1: disjoint directories, sharing only the frozen `pkg/model`. Caveat: 2b and 3a/3b may both edit `go.mod`/`go.sum`, so commit one before the other runs `go get`.
 - **6 (watchOS)** could technically run in parallel with 4 (no shared files), but it goes last on purpose: Wear OS is the priority, and watchOS should copy a UI that has already been validated on a real device.
+- **7 (Android phone)** can run in parallel with 6, except its step 1 (the Android module restructure), which runs alone.
 - **Git discipline:** parallel agents commit only their own paths (`git add <paths>`, never `-A`).
 
 **Verification per phase:**
