@@ -341,3 +341,11 @@ For claude, agy and opencode a menu counts only while its dialog is open, so a n
 - [`docs/README.md`](docs/README.md): phase guides and references; [`docs/STATUS.md`](docs/STATUS.md): what is done and verified.
 - [`docs/reference/contracts.md`](docs/reference/contracts.md): every JSON shape, the relay's and the bridge's configuration, and `agent-watch.env` (§7).
 - [`ROADMAP.md`](ROADMAP.md): what comes next, including an Android phone client on the same relay ([Phase 7](docs/phases/7-android-mobile.md)).
+
+---
+
+## License
+
+Copyright 2026 Gabriel Marcano. Licensed under the [Apache License, Version 2.0](LICENSE); see also [`NOTICE`](NOTICE).
+
+Contributions are accepted under the same license. The license does not grant rights to the "Agent Watch" name (section 6).
