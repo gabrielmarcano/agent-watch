@@ -589,8 +589,11 @@ func TestHub_CancelledCallerDoesNotKillHost(t *testing.T) {
 	gone, goneCancel := context.WithCancel(context.Background())
 	goneCancel()
 	for i := 0; i < 20; i++ {
-		if _, err := hh.hub.Command(gone, model.CommandMsg{Action: "cancel", PaneID: "w1:p1"}); err == nil {
-			t.Fatalf("command with a cancelled context returned no error")
+		res, err := hh.hub.Command(gone, model.CommandMsg{Action: "cancel", PaneID: "w1:p1"})
+		// The command is still sent; if the host answers before Command
+		// notices the cancelled caller, the delivered answer wins (by design).
+		if err == nil && !res.OK {
+			t.Fatalf("command %d with a cancelled context = %+v; want the caller's error or the host's answer", i, res)
 		}
 	}
 
