@@ -264,3 +264,38 @@ func TestOpenCodeLastTurn_SkipsReasoningText(t *testing.T) {
 		t.Errorf("response = %q", item.Response)
 	}
 }
+
+// A real turn with four tool calls: the user's message lies ~20 KB before the
+// end. LastTurn grows its read until it reaches the message; if even the
+// largest window misses it, the item keeps the answer without the query.
+func TestClaudeLastTurn_LongTurnGrowsTheRead(t *testing.T) {
+	path := filepath.Join("testdata", "claude", "transcript-long-turn.jsonl")
+	b, err := os.ReadFile(filepath.Join("testdata", "claude", "transcript-long-turn.expected.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var want expectedTranscript
+	if err := json.Unmarshal(b, &want); err != nil {
+		t.Fatal(err)
+	}
+	ref := SessionRef{Agent: "claude", Kind: "path", Value: path}
+
+	c := newClaudeAdapter(Config{})
+	c.tailWindows = []int64{4 << 10, 64 << 10}
+	item, err := c.LastTurn(context.Background(), ref)
+	if err != nil {
+		t.Fatalf("LastTurn: %v", err)
+	}
+	if item.Query != want.Query || item.Response != want.Response {
+		t.Errorf("got query %q, response %q", item.Query, item.Response)
+	}
+
+	c.tailWindows = []int64{4 << 10}
+	item, err = c.LastTurn(context.Background(), ref)
+	if err != nil {
+		t.Fatalf("LastTurn, one small window: %v", err)
+	}
+	if item.Query != "" || item.Response != want.Response {
+		t.Errorf("one small window: got query %q, response %q", item.Query, item.Response)
+	}
+}

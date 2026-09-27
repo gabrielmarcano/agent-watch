@@ -103,9 +103,9 @@ type FocusGuard interface {
 | `assistant` | `tool_use`, `thinking` | Not answer text |
 
 **`LastTurn` algorithm:**
-1. Tail-read the last 256 KB of the file. Drop the first, partial line. If the file is smaller, read all of it.
+1. Tail-read the file in growing windows, 256 KiB, then 1 MiB, then 4 MiB, until the window holds the query (step 3) or the whole file. Drop the first, partial line. A turn with many tool calls can put the query megabytes before the end (seen: 1.4 MB).
 2. Skip lines with `isSidechain == true` (sub-agents).
-3. **Query** = the last `user` line whose content is a string, or an array containing at least one `text` block, and that is not a command wrapper (text starting with `<command-`, `<local-command-`, `<bash-` or `<system-reminder>`). Join its `text` blocks with `\n`.
+3. **Query** = the last `user` line whose content is a string, or an array containing at least one `text` block, and that is not a command wrapper (text starting with `<command-`, `<local-command-`, `<bash-` or `<system-reminder>`). Join its `text` blocks with `\n`. If even the 4 MiB window holds none, the query is empty and step 4 walks the whole window.
 4. **Response** = walk forward from the query line and collect `text` blocks from `assistant` lines. Whenever a `tool_use` block appears, reset the collection. Join the remaining blocks with `\n\n`. This yields the **final** answer segment after the last tool call.
 5. If the response is empty, return `ErrNoTranscript` (fall back to screen).
 6. `LastTurn` fills only `query`, `response` and `source`. The bridge computes `HistoryItem.id` with `SessionRef.Value` as `session_value` (the UUID for `kind="id"`, the path for `kind="path"`).

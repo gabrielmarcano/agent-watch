@@ -13,12 +13,17 @@ import (
 type claudeAdapter struct {
 	*genericAdapter
 	cfg Config
+	// tailWindows are the transcript tail sizes LastTurn reads, smallest
+	// first: a turn with many tool calls can put the user's message
+	// megabytes before the end of the file.
+	tailWindows []int64
 }
 
 func newClaudeAdapter(cfg Config) *claudeAdapter {
 	return &claudeAdapter{
 		genericAdapter: newGenericAdapter(),
 		cfg:            cfg,
+		tailWindows:    []int64{256 << 10, 1 << 20, 4 << 20},
 	}
 }
 
@@ -148,17 +153,48 @@ type claudeContentBlock struct {
 	Text string `json:"text"`
 }
 
+// LastTurn reads the transcript's tail, growing the read through tailWindows
+// until the user's last message is in it. If even the largest window does
+// not reach it, the item holds the final answer without its query.
 func (c *claudeAdapter) LastTurn(ctx context.Context, ref SessionRef) (*model.HistoryItem, error) {
 	path := c.resolvePath(ref)
 	if path == "" {
 		return nil, ErrNoTranscript
 	}
-
-	content, err := TailFile(path, 256*1024)
+	fi, err := os.Stat(path)
 	if err != nil {
 		return nil, ErrNoTranscript
 	}
 
+	for i, window := range c.tailWindows {
+		content, err := TailFile(path, window)
+		if err != nil {
+			return nil, ErrNoTranscript
+		}
+		query, response, found, err := claudeLastTurn(ctx, content)
+		if err != nil {
+			return nil, err
+		}
+		if !found && fi.Size() > window && i < len(c.tailWindows)-1 {
+			continue
+		}
+		if response == "" {
+			return nil, ErrNoTranscript
+		}
+		return &model.HistoryItem{
+			Query:    query,
+			Response: model.TruncateUTF8(response, 16384),
+			Source:   "transcript",
+		}, nil
+	}
+	return nil, ErrNoTranscript
+}
+
+// claudeLastTurn finds, in a transcript tail, the user's last message and the
+// answer after the last tool call that follows it. found is false when no
+// message of the user is in content; the answer is then the text after the
+// last tool call in all of content.
+func claudeLastTurn(ctx context.Context, content string) (query, response string, found bool, err error) {
 	lines := strings.Split(content, "\n")
 	type parsedEntry struct {
 		isUser    bool
@@ -171,7 +207,7 @@ func (c *claudeAdapter) LastTurn(ctx context.Context, ref SessionRef) (*model.Hi
 
 	for _, l := range lines {
 		if err := ctx.Err(); err != nil {
-			return nil, err
+			return "", "", false, err
 		}
 		trimmed := strings.TrimSpace(l)
 		if trimmed == "" {
@@ -253,13 +289,12 @@ func (c *claudeAdapter) LastTurn(ctx context.Context, ref SessionRef) (*model.Hi
 			break
 		}
 	}
-	if lastUserIdx < 0 {
-		return nil, ErrNoTranscript
+	if lastUserIdx >= 0 {
+		query, found = entries[lastUserIdx].queryText, true
 	}
 
-	query := entries[lastUserIdx].queryText
-
-	// Walk forward from lastUserIdx and collect assistant text blocks, resetting on tool_use
+	// Walk forward from lastUserIdx (from the start without one) and collect
+	// assistant text blocks, resetting on tool_use
 	var responseBlocks []string
 	for i := lastUserIdx + 1; i < len(entries); i++ {
 		e := entries[i]
@@ -275,18 +310,7 @@ func (c *claudeAdapter) LastTurn(ctx context.Context, ref SessionRef) (*model.Hi
 		}
 	}
 
-	response := strings.TrimSpace(strings.Join(responseBlocks, "\n\n"))
-	if response == "" {
-		return nil, ErrNoTranscript
-	}
-
-	response = model.TruncateUTF8(response, 16384)
-
-	return &model.HistoryItem{
-		Query:    query,
-		Response: response,
-		Source:   "transcript",
-	}, nil
+	return query, strings.TrimSpace(strings.Join(responseBlocks, "\n\n")), found, nil
 }
 
 func (c *claudeAdapter) resolvePath(ref SessionRef) string {

@@ -1,0 +1,4 @@
+{
+  "query": "Use the Bash tool once per step, one command per call, in /tmp/aw-sandbox: 1) seq 1 3000 > big.txt  2) cat big.txt  3) wc -l big.txt  4) tail -3 big.txt. Then reply only with a markdown table with 2 columns (Paso, Resultado) and 4 rows summarizing each step.",
+  "response": "| Paso | Resultado |\n|---|---|\n| 1) `seq 1 3000 > big.txt` | Se creó `big.txt` sin salida ni errores |\n| 2) `cat big.txt` | Imprimió los números del 1 al 3000, uno por línea |\n| 3) `wc -l big.txt` | **3000** líneas |\n| 4) `tail -3 big.txt` | Las últimas 3 líneas son `2998`, `2999` y `3000` |"
+}
