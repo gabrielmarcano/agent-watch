@@ -5,7 +5,7 @@
 **Date:** 2026-09-24 / 2026-09-25  
 **Environment:**
 - **Host:** macOS (Mac Studio / MacBook), Herdr 0.9.1 (protocol 22).
-- **Relay:** Linux VPS (`relay.example.com`) deployed behind Cloudflare (WSS + HTTPS + SSE).
+- **Relay:** Linux VPS (`relay.<domain>`) deployed behind Cloudflare (WSS + HTTPS + SSE).
 - **Bridge:** `agent-watch-bridge` v0.2.0 supervised by `launchd` (`com.gabrielmarcano.agent-watch-bridge`).
 - **Primary Client:** Google Pixel Watch 2 (Wear OS 4 / Android 13, build target 34), debug APK installed over wireless debugging.
 - **Testers:** Gabriel Marcano (Watch gestures and interaction) & Antigravity CLI (herdr orchestration and logs audit).
@@ -41,8 +41,8 @@
 
 | Check | Expected | Actual | Result |
 |---|---|---|---|
-| `curl https://relay.example.com/v1/agents` (no auth header) | `401 Unauthorized` | `{"error":{"code":"unauthorized","message":"missing bearer token"}}` | ✅ PASS |
-| `curl "https://relay.example.com/v1/agents?token=..."` (query param token) | `401 Unauthorized` | `401 Unauthorized` (query parameters ignored for auth) | ✅ PASS |
+| `curl https://relay.<domain>/v1/agents` (no auth header) | `401 Unauthorized` | `{"error":{"code":"unauthorized","message":"missing bearer token"}}` | ✅ PASS |
+| `curl "https://relay.<domain>/v1/agents?token=..."` (query param token) | `401 Unauthorized` | `401 Unauthorized` (query parameters ignored for auth) | ✅ PASS |
 | Relay VPS Journal (`journalctl -u agent-watch-relay`) | 0 secrets, 0 prompt text | No tokens, no credentials, no prompt bodies in logs | ✅ PASS |
 | Host Bridge Log (`agent-watch-bridge.log`) | 0 prompt text, 0 tokens | Only `action=answer text_len=0` and IDs logged | ✅ PASS |
 
