@@ -74,7 +74,10 @@ type FocusGuard interface {
 
 // Config specifies host paths for reading agent transcripts.
 type Config struct {
-	ClaudeConfigDirs []string // expanded (no "~")
+	// Home is where Claude profiles are discovered (~/.claude, ~/.claude-*);
+	// NewRegistry defaults it to the user's home, "" discovers none.
+	Home             string
+	ClaudeConfigDirs []string // extra Claude profiles, searched first; expanded (no "~")
 	OpenCodeDBPath   string   // default ~/.local/share/opencode/opencode.db
 	AgyBrainDir      string   // default ~/.gemini/antigravity-cli/brain
 }
@@ -88,10 +91,8 @@ type Registry struct {
 // NewRegistry initializes an agent registry with configured paths and default adapters.
 func NewRegistry(cfg Config) *Registry {
 	home, _ := os.UserHomeDir()
-
-	// Default Claude config dirs if none provided
-	if len(cfg.ClaudeConfigDirs) == 0 && home != "" {
-		cfg.ClaudeConfigDirs = []string{filepath.Join(home, ".claude")}
+	if cfg.Home == "" {
+		cfg.Home = home
 	}
 	// Default OpenCode DB path if not provided
 	if cfg.OpenCodeDBPath == "" && home != "" {

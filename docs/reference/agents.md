@@ -88,7 +88,7 @@ type FocusGuard interface {
 | herdr session ref | ✅ | `agent_session.kind = "id"`, `value` = session UUID. A current integration (v10) may report `kind="path"` instead. Support both |
 | File location | ✅ | `<config_dir>/projects/<slug>/<session_uuid>.jsonl` |
 | Slug | ✅ | The session's cwd with every `/` and `.` replaced by `-` (e.g. `/Users/me/Code/app` → `-Users-me-Code-app`) |
-| Config dirs | ✅ | From `claude_config_dirs` in the bridge config (default `~/.claude`). Users with `CLAUDE_CONFIG_DIR` add theirs. Try each dir in order. If the slug dir does not match, glob `<config_dir>/projects/*/<uuid>.jsonl` |
+| Config dirs | ✅ | `claude_config_dirs` from the bridge config first, then `~/.claude` and every `~/.claude-*` holding a `projects` dir (a user's `CLAUDE_CONFIG_DIR` profiles), listed again on each lookup so a new profile needs no restart. `claude_config_dirs` is only for profiles outside that pattern. Try `<dir>/projects/<slug>/<uuid>.jsonl` in every dir; if none exists, glob `<dir>/projects/*/<uuid>.jsonl`. Several matches (a session copied into a backup profile): the most recently modified wins. An id with `/`, `\`, `*`, `?` or `[` is refused |
 | Format | ✅ | JSONL. Each line has `type`, `uuid`, `timestamp`, `sessionId`, `isSidechain`, `message` |
 
 **Line kinds seen** (`type`): `user`, `assistant`, `attachment`, `system`, `queue-operation`, `last-prompt`, plus others. Ignore every type except `user` and `assistant`.

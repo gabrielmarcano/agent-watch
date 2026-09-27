@@ -69,7 +69,7 @@ config:
 
 # Write the bridge config (relay URL + host token) from agent-watch.env, then
 # `make restart`. configure rewrites the whole config.toml: pass the optional
-# settings again, e.g. make configure-bridge ARGS="--claude-config-dir ~/.claude-work".
+# settings again, e.g. make configure-bridge ARGS="--claude-config-dir ~/work/claude-profile".
 configure-bridge: _need-bridge-env bridge
 	./bin/agent-watch-bridge configure --env-file $(AW_ENV_FILE) $(ARGS)
 

@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 	"unicode/utf8"
 
 	"github.com/gabrielmarcano/agent-monitor/pkg/model"
@@ -297,5 +298,82 @@ func TestClaudeLastTurn_LongTurnGrowsTheRead(t *testing.T) {
 	}
 	if item.Query != "" || item.Response != want.Response {
 		t.Errorf("one small window: got query %q, response %q", item.Query, item.Response)
+	}
+}
+
+// Claude profiles are found without configuration: ~/.claude and every
+// ~/.claude-* with a projects dir, read on each lookup. The newest copy of a
+// session wins over one in a backup profile; ids that could leave projects/
+// or act as a glob are refused.
+func TestClaudeResolvePath_DiscoversProfiles(t *testing.T) {
+	home := t.TempDir()
+	write := func(path string, age time.Duration) {
+		t.Helper()
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte("{}\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		when := time.Now().Add(-age)
+		if err := os.Chtimes(path, when, when); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(home, ".claude.json"), []byte("{}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	c := newClaudeAdapter(Config{Home: home})
+	ref := func(id string) SessionRef {
+		return SessionRef{Agent: "claude", Kind: "id", Value: id, CWD: "/tmp/aw-sandbox"}
+	}
+
+	// A profile made after the adapter: found on the next lookup.
+	live := filepath.Join(home, ".claude-work-2", "projects", "-tmp-aw-sandbox", "s1.jsonl")
+	write(live, 0)
+	if got := c.resolvePath(ref("s1")); got != live {
+		t.Errorf("new profile: got %q, want %q", got, live)
+	}
+
+	// An older copy in a backup profile does not shadow it.
+	write(filepath.Join(home, ".claude-work-2.bak", "projects", "-tmp-aw-sandbox", "s1.jsonl"), time.Hour)
+	if got := c.resolvePath(ref("s1")); got != live {
+		t.Errorf("with a backup copy: got %q, want %q", got, live)
+	}
+
+	// The session's cwd moved: any project of any profile.
+	moved := filepath.Join(home, ".claude", "projects", "-old-cwd", "s2.jsonl")
+	write(moved, 0)
+	if got := c.resolvePath(ref("s2")); got != moved {
+		t.Errorf("moved cwd: got %q, want %q", got, moved)
+	}
+
+	// A configured profile outside the ~/.claude* pattern.
+	other := t.TempDir()
+	extra := filepath.Join(other, "projects", "-tmp-aw-sandbox", "s3.jsonl")
+	write(extra, 0)
+	if got := newClaudeAdapter(Config{Home: home, ClaudeConfigDirs: []string{other}}).resolvePath(ref("s3")); got != extra {
+		t.Errorf("configured dir: got %q, want %q", got, extra)
+	}
+
+	for _, id := range []string{"*", "s?", "../s1", "..", `a\b`, "[s]1"} {
+		if got := c.resolvePath(ref(id)); got != "" {
+			t.Errorf("id %q resolved to %q", id, got)
+		}
+	}
+
+	// End to end: a real transcript in a discovered profile, read by id.
+	data, err := os.ReadFile(filepath.Join("testdata", "claude", "transcript-long-turn.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	profiled := filepath.Join(home, ".claude-work-3", "projects", "-tmp-aw-sandbox", "s4.jsonl")
+	write(profiled, 0)
+	if err := os.WriteFile(profiled, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	item, err := c.LastTurn(context.Background(), ref("s4"))
+	if err != nil || !strings.HasPrefix(item.Response, "| Paso | Resultado |") {
+		t.Errorf("LastTurn by id in a discovered profile: %v, %+v", err, item)
 	}
 }

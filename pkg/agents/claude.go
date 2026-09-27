@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/gabrielmarcano/agent-monitor/pkg/model"
 )
@@ -318,23 +319,73 @@ func (c *claudeAdapter) resolvePath(ref SessionRef) string {
 		return ref.Value
 	}
 
-	if ref.Kind == "id" && ref.Value != "" {
+	// A session id is a UUID: anything that could leave projects/ or act as
+	// a glob pattern is refused.
+	if ref.Kind == "id" && ref.Value != "" && !strings.ContainsAny(ref.Value, `/\*?[`) && ref.Value != ".." {
 		slug := ref.CWD
 		slug = strings.ReplaceAll(slug, "/", "-")
 		slug = strings.ReplaceAll(slug, ".", "-")
 
-		for _, dir := range c.cfg.ClaudeConfigDirs {
+		dirs := c.configDirs()
+		var found []string
+		for _, dir := range dirs {
 			target := filepath.Join(dir, "projects", slug, ref.Value+".jsonl")
 			if fi, err := os.Stat(target); err == nil && fi.Mode().IsRegular() {
-				return target
-			}
-			// Glob fallback
-			pattern := filepath.Join(dir, "projects", "*", ref.Value+".jsonl")
-			if matches, _ := filepath.Glob(pattern); len(matches) > 0 {
-				return matches[0]
+				found = append(found, target)
 			}
 		}
+		if len(found) == 0 { // the session's cwd moved: any project of the profile
+			for _, dir := range dirs {
+				matches, _ := filepath.Glob(filepath.Join(dir, "projects", "*", ref.Value+".jsonl"))
+				found = append(found, matches...)
+			}
+		}
+		return newestFile(found)
 	}
 
 	return ""
+}
+
+// configDirs returns the Claude profiles to search: the configured ones,
+// then ~/.claude and every ~/.claude-* holding a projects dir (each
+// CLAUDE_CONFIG_DIR the user made that way). It is read on every lookup, so
+// a new profile works without restarting the bridge.
+func (c *claudeAdapter) configDirs() []string {
+	var dirs []string
+	seen := map[string]bool{}
+	add := func(d string) {
+		if d = filepath.Clean(d); !seen[d] {
+			seen[d] = true
+			dirs = append(dirs, d)
+		}
+	}
+	for _, d := range c.cfg.ClaudeConfigDirs {
+		add(d)
+	}
+	if c.cfg.Home != "" {
+		matches, _ := filepath.Glob(filepath.Join(c.cfg.Home, ".claude*"))
+		for _, m := range matches {
+			if fi, err := os.Stat(filepath.Join(m, "projects")); err == nil && fi.IsDir() {
+				add(m)
+			}
+		}
+	}
+	return dirs
+}
+
+// newestFile returns the most recently modified of paths: a session copied
+// into a backup profile must not shadow the live one.
+func newestFile(paths []string) string {
+	newest := ""
+	var newestTime time.Time
+	for _, p := range paths {
+		fi, err := os.Stat(p)
+		if err != nil || !fi.Mode().IsRegular() {
+			continue
+		}
+		if newest == "" || fi.ModTime().After(newestTime) {
+			newest, newestTime = p, fi.ModTime()
+		}
+	}
+	return newest
 }

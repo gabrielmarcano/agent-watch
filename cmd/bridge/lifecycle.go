@@ -39,7 +39,7 @@ func (a *app) cmdConfigure(args []string) error {
 	hostName := fs.String("host-name", "", "Optional host name override")
 	configPath := fs.String("config", "", "Config file path")
 	var claudeDirs stringSlice
-	fs.Var(&claudeDirs, "claude-config-dir", "Claude config directory (can be repeated)")
+	fs.Var(&claudeDirs, "claude-config-dir", "Claude config directory outside ~/.claude and ~/.claude-*, which are found without it (can be repeated)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}

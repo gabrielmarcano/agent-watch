@@ -574,7 +574,7 @@ The relay reads them from `/etc/agent-watch-relay/env` (systemd `EnvironmentFile
 relay_url  = "wss://relay.example.com/v1/host"   # https:// is derived for /v1/host/* calls
 host_token = "…64 hex chars…"
 host_name  = ""                          # empty → os.Hostname()
-claude_config_dirs = ["~/.claude"]       # where to resolve Claude session ids; add custom CLAUDE_CONFIG_DIR values
+claude_config_dirs = []                  # extra Claude profiles; ~/.claude and every ~/.claude-* are found without it
 ```
 
 ### 6.1 `status.json` (written by `agent-watch-bridge run`)

@@ -294,7 +294,7 @@ type Prompt struct {
 
 | Agent | Source | Extraction |
 |---|---|---|
-| `claude` | `kind: path` → transcript JSONL (sent by the current integration). `kind: id` → resolve `<id>.jsonl` under the configured `claude_config_dirs` (supports custom `CLAUDE_CONFIG_DIR`) | Last `user` text + last `assistant` text blocks (logic from legacy `parseTranscript`) |
+| `claude` | `kind: path` → transcript JSONL (sent by the current integration). `kind: id` → resolve `<id>.jsonl` under `~/.claude`, every `~/.claude-*` profile and the configured `claude_config_dirs` (custom `CLAUDE_CONFIG_DIR` elsewhere) | Last `user` text + last `assistant` text blocks (logic from legacy `parseTranscript`) |
 | `agy` | `kind: path` → `…/brain/<id>/.system_generated/logs/transcript_full.jsonl` | Last `USER_INPUT` + last `PLANNER_RESPONSE` without `tool_calls` (logic from legacy sidecar) |
 | `opencode` | `kind: id` → read-only SQLite `~/.local/share/opencode/opencode.db` (`message` / `part` tables keyed by `session_id`, JSON `data`) via pure-Go `modernc.org/sqlite`, `mode=ro` | Last user message text + last assistant text parts |
 | generic / any failure | `agent.read` with `source: "recent_unwrapped"`, `format: "text"` | Screen text, `Source = "screen"` |

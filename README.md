@@ -130,7 +130,7 @@ On the machine that runs herdr:
    make configure-bridge
    # = ./bin/agent-watch-bridge configure --env-file agent-watch.env
    ```
-   - `configure` rewrites the whole `config.toml`. Pass optional settings every time, e.g. `make configure-bridge ARGS="--claude-config-dir ~/.claude-work --host-name my-mac"`; it warns when it drops one the old config had.
+   - `configure` rewrites the whole `config.toml`. Pass optional settings every time, e.g. `make configure-bridge ARGS="--claude-config-dir ~/work/claude-profile --host-name my-mac"`; it warns when it drops one the old config had.
    - It is a CLI command, not a plugin action. The file is `~/.config/herdr/plugins/config/herdr-agent-watch/config.toml` by default.
    - Without the file: `./bin/agent-watch-bridge configure --relay-url wss://relay.<domain> --host-token <64-hex-token>` (the token then shows in `ps`).
 4. Start the bridge service (a LaunchAgent on macOS, a `systemd --user` unit on Linux):
