@@ -13,11 +13,19 @@ import (
 
 	"github.com/gabrielmarcano/agent-monitor/pkg/agents"
 	"github.com/gabrielmarcano/agent-monitor/pkg/bridge"
+	"github.com/gabrielmarcano/agent-monitor/pkg/buildinfo"
 	"github.com/gabrielmarcano/agent-monitor/pkg/herdr"
 	"github.com/gabrielmarcano/agent-monitor/pkg/relayclient"
 )
 
-var version = "0.2.0"
+// version is BRIDGE_VERSION from VERSIONS, stamped by the Makefile and the
+// plugin's [[build]] (-ldflags "-X main.version=…"); "dev" for a plain go build.
+var version = "dev"
+
+// fullVersion is what every output reports (version command, status.json,
+// status --json, the hello to the relay): version plus the commit the binary
+// was built from, e.g. "0.3.0 (c8aa72e)".
+var fullVersion = buildinfo.String(version)
 
 func main() {
 	os.Exit(realMain(os.Args[1:]))
@@ -32,7 +40,7 @@ func realMain(argv []string) int {
 
 	switch subcmd {
 	case "version":
-		fmt.Println(version)
+		fmt.Println(fullVersion)
 		return 0
 	case "-h", "--help", "help":
 		printUsage()
@@ -102,7 +110,7 @@ environment is kept from the installed service definition.
 restart restarts the installed service without rewriting it.
 status --json --local reads local files only (no network).
 
-`, version)
+`, fullVersion)
 }
 
 func runDaemon(args []string) error {
@@ -123,7 +131,7 @@ func runDaemon(args []string) error {
 	cfg, err := bridge.CheckConfig(targetConfig)
 	if err != nil {
 		// Leave the reason where status readers (the menu bar) look for it.
-		_ = bridge.WriteStatus(statusPath, bridge.StoppedStatus(version, err.Error()))
+		_ = bridge.WriteStatus(statusPath, bridge.StoppedStatus(fullVersion, err.Error()))
 		return err
 	}
 
@@ -147,7 +155,7 @@ func runDaemon(args []string) error {
 		Logger: logger,
 	}
 
-	engine := bridge.NewEngine(hClient, syncer, reg, rClient, version, cfg.HostName, statusPath, logger)
+	engine := bridge.NewEngine(hClient, syncer, reg, rClient, fullVersion, cfg.HostName, statusPath, logger)
 	syncer.Listener = engine
 	rClient.OnConnect = engine.ConnectMessages
 	rClient.OnMessage = engine.HandleRelayMessage
@@ -155,7 +163,7 @@ func runDaemon(args []string) error {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 
-	logger.Info("starting agent-watch-bridge", "version", version, "socket", hClient.SocketPath, "config", targetConfig, "status", statusPath)
+	logger.Info("starting agent-watch-bridge", "version", fullVersion, "socket", hClient.SocketPath, "config", targetConfig, "status", statusPath)
 
 	writerDone := engine.StartStatusWriter(ctx, 5*time.Second)
 

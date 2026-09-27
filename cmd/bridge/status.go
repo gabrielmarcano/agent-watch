@@ -31,7 +31,7 @@ func (a *app) localStatus() bridge.LocalStatus {
 		StateDir:       r.spec.StateDir,
 		StatusPath:     statusPath,
 		LogPath:        a.svc.LogHint(r.spec),
-		Version:        version,
+		Version:        fullVersion,
 	}
 	if r.installErr != nil {
 		ls.DefinitionError = r.installErr.Error()

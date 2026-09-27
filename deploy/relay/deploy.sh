@@ -22,9 +22,10 @@
 #   AW_ENV_FILE   the config file (default: agent-watch.env at the repo root).
 #
 # The SSH user must be able to write /usr/local/bin and /etc/agent-watch-relay
-# and run systemctl (root). The box needs curl. The binary is stamped
-# VERSION=<Makefile version>-<short sha>, and the one it replaces is kept as
-# /usr/local/bin/agent-watch-relay.prev.
+# and run systemctl (root). The box needs curl. The binary is built with
+# RELAY_VERSION from VERSIONS and reports the commit it was built from on its
+# own (`agent-watch-relay version` -> "0.3.0 (c8aa72e)"); the one it replaces
+# is kept as /usr/local/bin/agent-watch-relay.prev.
 set -euo pipefail
 
 usage() {
@@ -105,11 +106,21 @@ if [ -n "$(git status --porcelain)" ]; then
 	exit 1
 fi
 
-base_version="$(sed -n 's/^VERSION ?= *//p' Makefile)"
-version="${base_version:-dev}-$(git rev-parse --short HEAD)"
-make relay-linux VERSION="$version"
+[ -f VERSIONS ] || {
+	echo "deploy.sh: $repo/VERSIONS not found" >&2
+	exit 1
+}
+version="$(sed -n 's/^RELAY_VERSION=//p' VERSIONS)"
+[ -n "$version" ] || {
+	echo "deploy.sh: RELAY_VERSION is not set in VERSIONS" >&2
+	exit 1
+}
+# Display only: the binary finds its commit itself (the tree is clean, so
+# it reports "<version> (<commit>)" with no "modified").
+commit="$(git rev-parse HEAD | cut -c1-7)"
+make relay-linux RELAY_VERSION="$version"
 
-echo "deploying $version to $VPS"
+echo "deploying agent-watch-relay $version ($commit) to $VPS"
 cp bin/agent-watch-relay-linux-amd64 "$local_tmp/agent-watch-relay"
 files=("$local_tmp/agent-watch-relay")
 if [ "$sync_env" = 1 ]; then
@@ -120,11 +131,11 @@ remote_dir="$(ssh ${SSH_ARGS[@]+"${SSH_ARGS[@]}"} "$VPS" 'mktemp -d /tmp/agent-w
 scp -q ${SSH_ARGS[@]+"${SSH_ARGS[@]}"} "${files[@]}" "$VPS:$remote_dir/"
 
 # shellcheck disable=SC2087 # the remote script is quoted on purpose; its args follow bash -s
-ssh ${SSH_ARGS[@]+"${SSH_ARGS[@]}"} "$VPS" bash -s -- "$remote_dir" "$version" "$sync_env" <<'REMOTE'
+ssh ${SSH_ARGS[@]+"${SSH_ARGS[@]}"} "$VPS" bash -s -- "$remote_dir" "$version" "$commit" "$sync_env" <<'REMOTE'
 set -euo pipefail
 remote_dir="$1"
-version="$2"
-sync_env="$3"
+version="$2 ($3)" # the arguments carry no spaces: ssh joins them into one command line
+sync_env="$4"
 bin=/usr/local/bin/agent-watch-relay
 prev="$bin.prev"
 env_file=/etc/agent-watch-relay/env

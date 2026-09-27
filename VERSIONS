@@ -1,0 +1,25 @@
+# Component versions: the only place they are written.
+#
+# Each component has its own version, and they may diverge: bump only the one
+# you change. Read by the Makefile (bridge and relay ldflags, `make bar`),
+# macos-bar/build.sh, deploy/relay/deploy.sh and the Wear OS Gradle build.
+# herdr-plugin.toml cannot read files: keep its `version` equal to
+# BRIDGE_VERSION (`make check-versions` fails when they differ).
+#
+# The Go binaries add the commit they were built from on their own, e.g.
+# "0.3.0 (c8aa72e)": never write a commit here.
+#
+# WEAROS_VERSION_CODE must always increase: Android refuses to update an
+# installed app to a lower or equal code.
+#
+# GitHub releases are date-tagged snapshots of the whole repo (vYYYY.MM.DD)
+# whose notes list the versions below.
+#
+# Syntax (make's, like agent-watch.env): bare KEY=value lines, no quotes, no
+# spaces, comments on their own line.
+
+BRIDGE_VERSION=0.3.0
+RELAY_VERSION=0.3.0
+MENUBAR_VERSION=0.3.0
+WEAROS_VERSION_NAME=1.1.0
+WEAROS_VERSION_CODE=2

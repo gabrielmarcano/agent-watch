@@ -1,9 +1,14 @@
-.PHONY: build bridge relay relay-linux bar bar-test restart test vet fmt check clean
+.PHONY: build bridge relay relay-linux bar bar-test restart test vet fmt check check-versions clean
 .PHONY: config configure-bridge deploy-relay watchos-config _need-bridge-env _need-deploy-env _need-watchos-env
 
-# Keep VERSION in sync with herdr-plugin.toml (version and the [[build]] ldflags).
-VERSION ?= 0.2.0
-LDFLAGS := -s -w -X main.version=$(VERSION)
+# ── Component versions: VERSIONS ──────────────────────────────────────────
+# One version per component, written only there (bump the one you change).
+# The Go binaries add the commit they were built from on their own. A value
+# given on the command line wins, e.g. make bridge BRIDGE_VERSION=0.0.0-test.
+-include VERSIONS
+need-version = $(if $(strip $($(1))),,$(error $(1) is not set: VERSIONS is missing or incomplete))
+BRIDGE_LDFLAGS = -s -w -X main.version=$(BRIDGE_VERSION)
+RELAY_LDFLAGS = -s -w -X main.version=$(RELAY_VERSION)
 UNAME_S := $(shell uname -s)
 
 # ── Shared configuration: agent-watch.env ─────────────────────────────────
@@ -21,19 +26,24 @@ need-domain = $(call need-key,AW_RELAY_DOMAIN)$(if $(filter relay.example.com,$(
 
 build: bridge relay
 
+# herdr-plugin.toml's [[build]] runs the same build (BRIDGE_VERSION from VERSIONS).
 bridge:
-	CGO_ENABLED=0 go build -ldflags "$(LDFLAGS)" -o bin/agent-watch-bridge ./cmd/bridge
+	@:$(call need-version,BRIDGE_VERSION)
+	CGO_ENABLED=0 go build -ldflags "$(BRIDGE_LDFLAGS)" -o bin/agent-watch-bridge ./cmd/bridge
 
 relay:
-	CGO_ENABLED=0 go build -ldflags "$(LDFLAGS)" -o bin/agent-watch-relay ./cmd/relay
+	@:$(call need-version,RELAY_VERSION)
+	CGO_ENABLED=0 go build -ldflags "$(RELAY_LDFLAGS)" -o bin/agent-watch-relay ./cmd/relay
 
 relay-linux:
-	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags "$(LDFLAGS)" -o bin/agent-watch-relay-linux-amd64 ./cmd/relay
+	@:$(call need-version,RELAY_VERSION)
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags "$(RELAY_LDFLAGS)" -o bin/agent-watch-relay-linux-amd64 ./cmd/relay
 
-# macOS menu bar companion (bin/AgentWatchBar.app).
+# macOS menu bar companion (bin/AgentWatchBar.app), stamped with MENUBAR_VERSION.
 bar:
 ifeq ($(UNAME_S),Darwin)
-	VERSION=$(VERSION) ./macos-bar/build.sh
+	@:$(call need-version,MENUBAR_VERSION)
+	MENUBAR_VERSION=$(MENUBAR_VERSION) ./macos-bar/build.sh
 else
 	@echo "bar: the menu bar app only builds on macOS" >&2; exit 1
 endif
@@ -103,7 +113,12 @@ vet:
 fmt:
 	gofmt -l -w cmd pkg
 
-check: fmt vet test
+# VERSIONS is well formed and herdr-plugin.toml's version equals BRIDGE_VERSION
+# (the manifest cannot read the file). Also part of `make test`.
+check-versions:
+	go test -count=1 -run 'TestVersionsFile|TestPluginManifestMatchesVersions' ./pkg/buildinfo/
+
+check: fmt vet check-versions test
 
 clean:
 	rm -rf bin

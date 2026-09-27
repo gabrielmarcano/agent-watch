@@ -14,10 +14,11 @@
     <string>Agent Watch</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
+    <!-- Placeholders: build.sh writes MENUBAR_VERSION from VERSIONS into the built app. -->
     <key>CFBundleShortVersionString</key>
-    <string>0.2.0</string>
+    <string>0.0.0</string>
     <key>CFBundleVersion</key>
-    <string>0.2.0</string>
+    <string>0.0.0</string>
     <key>LSMinimumSystemVersion</key>
     <string>13.0</string>
     <key>LSUIElement</key>
