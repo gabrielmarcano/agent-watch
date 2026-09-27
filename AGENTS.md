@@ -46,7 +46,7 @@ This document defines the development rules, architectural boundaries, and codin
 ## 1. Prime Directives & Architectural Rules
 
 ### 1.1 Herdr-Native Control Plane (Zero Legacy Policy)
-- **Strictly prohibited on `feat/herdr-focus`:**
+- **Strictly prohibited:**
   - Warp-specific code
   - AppleScript keystrokes (`osascript`)
   - the Claude Code plugin and hook webhooks (`claude-plugin/`, `/webhook`)

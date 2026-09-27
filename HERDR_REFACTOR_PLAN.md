@@ -2,7 +2,7 @@
 
 **Status:** Revised — verified against herdr 0.9.1 (socket protocol 22) on 2026-09-23.
 **Scope:** `cmd/bridge/`, `cmd/relay/`, `pkg/`, `herdr-agent-watch` plugin, `wearos-app/`, `watchos-app/`.
-**Branch Rule:** All work on `feat/herdr-focus`. Zero legacy code kept (no Warp, no AppleScript, no Claude Code plugin, no tailing sidecars, no Node.js runtime).
+**Legacy Rule:** Zero legacy code kept (no Warp, no AppleScript, no Claude Code plugin, no tailing sidecars, no Node.js runtime).
 
 ---
 

@@ -68,8 +68,8 @@ cmd 'git add .' 2 "add . refused"
 cmd 'git add docs/STATUS.md pkg/model' 0 "explicit add allowed"
 cmd 'git commit --amend --no-edit' 2 "amend refused"
 cmd 'git commit --no-verify -m x' 2 "no-verify refused"
-cmd 'git push origin feat/herdr-focus' 2 "push refused without approval"
-cmd 'AW_OWNER_APPROVED_PUSH=1 git push origin feat/herdr-focus' 0 "approved push allowed"
+cmd 'git push origin main' 2 "push refused without approval"
+cmd 'AW_OWNER_APPROVED_PUSH=1 git push origin main' 0 "approved push allowed"
 
 # ── paths ──
 write "$ROOT/bridge/server.js" 2 "legacy bridge/ refused"
