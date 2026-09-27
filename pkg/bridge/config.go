@@ -38,8 +38,12 @@ type StatusFile struct {
 	LastError      string `json:"last_error"`  // relay_error and herdr_error joined; "" when healthy
 	RelayError     string `json:"relay_error"` // why the relay is not connected
 	HerdrError     string `json:"herdr_error"` // why herdr is offline
-	Version        string `json:"version"`     // version of the running bridge
-	UpdatedAt      string `json:"updated_at"`
+	Version        string `json:"version"`     // the running bridge, e.g. "0.3.0 (c8aa72e)"
+	// RelayVersion is the relay's version from the last successful handshake
+	// (kept while disconnected); "" before the first connection or from a
+	// relay that does not report one.
+	RelayVersion string `json:"relay_version"`
+	UpdatedAt    string `json:"updated_at"`
 }
 
 // DefaultConfigPath returns the config file path according to herdr conventions:

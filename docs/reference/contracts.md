@@ -343,6 +343,10 @@ Every non-200 response carries an `ErrorResponse`.
 
 URL: `wss://relay.<domain>/v1/host`, with the header `Authorization: Bearer <host_token>`.
 
+**Handshake response:** once the host token is verified, the relay's `101 Switching Protocols` carries its version in `X-Agent-Watch-Relay-Version: <version>` (format below; absent from a relay that predates it). A rejected handshake (`401`) never carries it, and no watch-facing endpoint exposes it (`/v1/healthz` stays `{"ok":true}`). The bridge keeps the value of its last successful handshake and reports it as `relay_version` (§6.1, §6.2).
+
+**Version strings** (`hello.version`, the relay header, `status.json`, `status --json`, the `version` commands): the component's version from `VERSIONS` at the repo root, plus the commit the binary was built from, which Go stamps on its own: `0.3.0 (c8aa72e)`, `0.3.0 (c8aa72e, modified)` for a build with uncommitted changes, or just `0.3.0` for a build without the VCS stamp. A plain `go build` without the Makefile's ldflags reports `dev (…)`. They are display strings: never parse or compare them for ordering.
+
 - Every frame is one JSON text message with a `type` field.
 - To decode, first unmarshal into `struct{ Type string \`json:"type"\` }`, then unmarshal again into the concrete type.
 - **Only one host may be connected.** A second connection replaces the first: the relay closes the old one with status 4000 `replaced`.
@@ -350,7 +354,7 @@ URL: `wss://relay.<domain>/v1/host`, with the header `Authorization: Bearer <hos
 ```go
 type HelloMsg struct {
     Type          string `json:"type"` // "hello"
-    Version       string `json:"version"`        // bridge version, e.g. "0.2.0"
+    Version       string `json:"version"`        // bridge version with its commit, e.g. "0.3.0 (c8aa72e)"
     Host          string `json:"host"`           // host_name or os.Hostname()
     HerdrVersion  string `json:"herdr_version"`  // from herdr "ping"
     HerdrProtocol int    `json:"herdr_protocol"` // from herdr "ping"
@@ -585,8 +589,8 @@ claude_config_dirs = []                  # extra Claude profiles; ~/.claude and 
 
 ```json
 { "pid": 4242, "relay_connected": true, "herdr_online": true, "agents": 11, "blocked": 1,
-  "last_error": "", "relay_error": "", "herdr_error": "", "version": "0.2.0",
-  "updated_at": "2026-09-23T17:04:05Z" }
+  "last_error": "", "relay_error": "", "herdr_error": "", "version": "0.3.0 (c8aa72e)",
+  "relay_version": "0.3.0 (5a32851)", "updated_at": "2026-09-23T17:04:05Z" }
 ```
 
 | Key | Meaning |
@@ -597,7 +601,8 @@ claude_config_dirs = []                  # extra Claude profiles; ~/.claude and 
 | `relay_error` | Why the relay is not connected (a rejected token, a failed dial). Never contains the token |
 | `herdr_error` | Why herdr is offline |
 | `last_error` | `relay_error` and `herdr_error` joined with `; `, or the start failure. `""` when healthy |
-| `version` | Version of the bridge that wrote the file |
+| `version` | Version of the bridge that wrote the file, with its commit (§3 version strings). Before 0.3.0 it was the bare version (`0.2.0`) |
+| `relay_version` | The relay's version from the last successful handshake (§3), kept while the relay is unreachable. `""` before the first connection, from a relay that does not send it, and in the stopped status (`pid: 0`) |
 
 A reader must not trust `pid` alone: a file left by a crash names a dead pid. `status` checks that the pid is alive and that the file is fresh (15 s).
 
@@ -615,7 +620,8 @@ A reader must not trust `pid` alone: a file left by a crash names a dead pid. `s
   "last_error": "", "relay_error": "", "herdr_error": "",
   "relay_host": "relay.example.com",
   "pid": 4242, "updated_at": "2026-09-23T17:04:05Z", "age_seconds": 3,
-  "version": "0.2.0", "daemon_version": "0.2.0",
+  "version": "0.3.0 (c8aa72e)", "daemon_version": "0.3.0 (c8aa72e)",
+  "relay_version": "0.3.0 (5a32851)",
   "service": "launchd",
   "definition_path": "/Users/me/Library/LaunchAgents/com.gabrielmarcano.agent-watch-bridge.plist",
   "binary": "/Users/me/Code/agent-watch/bin/agent-watch-bridge",
@@ -626,9 +632,9 @@ A reader must not trust `pid` alone: a file left by a crash names a dead pid. `s
 }
 ```
 
-- **`running`:** `status.json` names a live pid. While not running, `relay_connected`, `herdr_online`, `agents` and `blocked` are reported as `false` / `0`, whatever the file says.
+- **`running`:** `status.json` names a live pid. While not running, `relay_connected`, `relay_version`, `herdr_online`, `agents` and `blocked` are reported as `false` / `""` / `0`, whatever the file says.
 - **`stale`:** running, but `status.json` is older than 15 s.
-- **`age_seconds`:** `-1` when unknown. **`version`** is the CLI; **`daemon_version`** is the bridge that wrote `status.json`.
+- **`age_seconds`:** `-1` when unknown. **`version`** is the CLI; **`daemon_version`** is the bridge that wrote `status.json`. Both carry the commit (§3 version strings), so a CLI and a daemon built from different commits differ even with the same `BRIDGE_VERSION`.
 - **`relay_host`:** `host[:port]` of `relay_url`, never a token. **`service`:** `launchd` or `systemd`; on Linux `log_path` is a `journalctl` command.
 - **Without `--local`** the output adds `relay_status` (the relay's `HostStatusResponse`, §2.2) or `relay_status_error`.
 - The human form (no `--json`) exits with status 1 when the bridge is not running.

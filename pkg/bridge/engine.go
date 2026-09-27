@@ -562,11 +562,13 @@ func (e *Engine) Status() StatusFile {
 
 	relayConnected := false
 	relayErr := ""
+	relayVersion := ""
 	if e.Relay != nil {
 		relayConnected = e.Relay.Connected()
 		if !relayConnected {
 			relayErr = e.Relay.LastError()
 		}
+		relayVersion = e.Relay.RelayVersion()
 	}
 
 	blocked := 0
@@ -594,6 +596,7 @@ func (e *Engine) Status() StatusFile {
 		RelayError:     relayErr,
 		HerdrError:     e.herdrErr,
 		Version:        e.Version,
+		RelayVersion:   relayVersion,
 		UpdatedAt:      model.Now(),
 	}
 }

@@ -50,7 +50,7 @@ func TestStatusLocal_ReadsInstalledStateDir(t *testing.T) {
 	})
 	writeStatus(t, stateDir, bridge.StatusFile{
 		PID: os.Getpid(), RelayConnected: true, HerdrOnline: true, Agents: 5, Blocked: 2,
-		Version: "0.2.0", UpdatedAt: model.Now(),
+		Version: "0.3.0 (c8aa72e)", RelayVersion: "0.3.0 (5a32851)", UpdatedAt: model.Now(),
 	})
 	// A decoy at the default state dir must be ignored.
 	writeStatus(t, ta.defaults().StateDir, bridge.StatusFile{PID: os.Getpid(), Agents: 99, UpdatedAt: model.Now()})
@@ -67,6 +67,9 @@ func TestStatusLocal_ReadsInstalledStateDir(t *testing.T) {
 	}
 	if ls.Service != "launchd" || ls.LogPath != filepath.Join(ta.home, "bridge.log") {
 		t.Errorf("service=%q log=%q", ls.Service, ls.LogPath)
+	}
+	if ls.DaemonVersion != "0.3.0 (c8aa72e)" || ls.RelayVersion != "0.3.0 (5a32851)" || ls.Version != fullVersion {
+		t.Errorf("daemon_version=%q relay_version=%q version=%q", ls.DaemonVersion, ls.RelayVersion, ls.Version)
 	}
 	if strings.Contains(ta.out.String(), testToken) {
 		t.Error("status output contains the host token")

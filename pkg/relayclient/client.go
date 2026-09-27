@@ -26,7 +26,14 @@ const (
 	historyCap = 50
 	// sendBuffer is how many frames may wait for the writer of a live connection.
 	sendBuffer = 100
+	// maxRelayVersionLen bounds the relay's version as kept and reported.
+	maxRelayVersionLen = 100
 )
+
+// RelayVersionHeader is the handshake response header in which the relay
+// reports its version (pkg/relay sends it once the host token is verified;
+// contracts.md §3).
+const RelayVersionHeader = "X-Agent-Watch-Relay-Version"
 
 // Client manages an outbound WebSocket connection from the bridge to the cloud relay.
 type Client struct {
@@ -44,6 +51,7 @@ type Client struct {
 	flushCh   chan struct{} // wakes the writer to flush historyQ (cap 1)
 	historyQ  []model.HistoryItemMsg
 	lastErr   string
+	relayVer  string // from the last successful handshake
 }
 
 // outMsg is one encoded frame plus what the logs and the history queue need.
@@ -68,6 +76,16 @@ func (c *Client) LastError() string {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.lastErr
+}
+
+// RelayVersion is the version the relay reported in the handshake of the
+// current or last connection, e.g. "0.3.0 (c8aa72e)". It is kept while the
+// relay is unreachable, and is "" before the first connection or when the
+// relay did not report one (an older relay).
+func (c *Client) RelayVersion() string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.relayVer
 }
 
 func (c *Client) setLastError(msg string) {
@@ -307,11 +325,20 @@ func (c *Client) connectAndServe(ctx context.Context) (connectedAt time.Time, er
 	sendCh := make(chan outMsg, sendBuffer)
 	flushCh := make(chan struct{}, 1)
 
+	relayVer := ""
+	if resp != nil {
+		relayVer = resp.Header.Get(RelayVersionHeader)
+		if len(relayVer) > maxRelayVersionLen {
+			relayVer = relayVer[:maxRelayVersionLen]
+		}
+	}
+
 	c.mu.Lock()
 	c.connected = true
 	c.sendCh = sendCh
 	c.flushCh = flushCh
 	c.lastErr = ""
+	c.relayVer = relayVer
 	c.mu.Unlock()
 
 	defer func() {

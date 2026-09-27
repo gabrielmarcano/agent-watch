@@ -8,9 +8,11 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/coder/websocket"
 	"github.com/gabrielmarcano/agent-monitor/pkg/herdr"
 	"github.com/gabrielmarcano/agent-monitor/pkg/relayclient"
 )
@@ -106,6 +108,71 @@ func TestEngine_StatusReportsRelayAuthFailure(t *testing.T) {
 	}
 	if !strings.Contains(st.LastError, "401") {
 		t.Errorf("last_error = %q, want the relay auth failure", st.LastError)
+	}
+}
+
+// The relay's version (from the handshake) reaches status.json: empty before
+// any connection, then the relay's, and it stays while the relay is down.
+func TestEngine_StatusReportsRelayVersion(t *testing.T) {
+	const relayVersion = "0.3.0 (5a32851)"
+	var down atomic.Bool
+	kick := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if down.Load() {
+			w.WriteHeader(http.StatusBadGateway)
+			return
+		}
+		w.Header().Set(relayclient.RelayVersionHeader, relayVersion)
+		conn, err := websocket.Accept(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer conn.CloseNow()
+		ctx, cancel := context.WithCancel(r.Context())
+		defer cancel()
+		go func() {
+			defer cancel()
+			for {
+				if _, _, err := conn.Read(ctx); err != nil {
+					return
+				}
+			}
+		}()
+		select {
+		case <-kick:
+		case <-ctx.Done():
+		}
+	}))
+	defer srv.Close()
+
+	rc := &relayclient.Client{
+		URL:        "ws" + strings.TrimPrefix(srv.URL, "http") + "/v1/host",
+		Token:      "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+		MinBackoff: 10 * time.Millisecond,
+		MaxBackoff: 20 * time.Millisecond,
+	}
+	e := NewEngine(nil, nil, nil, rc, "0.3.0 (c8aa72e)", "h", "", nil)
+	if st := e.Status(); st.RelayVersion != "" {
+		t.Errorf("before any connection: relay_version = %q, want empty", st.RelayVersion)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { defer close(done); _ = rc.Run(ctx) }()
+	defer func() { cancel(); <-done }()
+
+	pollUntil(t, 3*time.Second, "connected", func() bool { return e.Status().RelayConnected })
+	if st := e.Status(); st.RelayVersion != relayVersion || st.Version != "0.3.0 (c8aa72e)" {
+		t.Errorf("relay_version = %q, version = %q; want %q and the bridge's", st.RelayVersion, st.Version, relayVersion)
+	}
+
+	down.Store(true)
+	close(kick)
+	pollUntil(t, 3*time.Second, "disconnected", func() bool {
+		st := e.Status()
+		return !st.RelayConnected && strings.Contains(st.RelayError, "502")
+	})
+	if st := e.Status(); st.RelayVersion != relayVersion {
+		t.Errorf("relay down: relay_version = %q, want the last known %q", st.RelayVersion, relayVersion)
 	}
 }
 

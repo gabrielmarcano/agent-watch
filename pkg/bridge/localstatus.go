@@ -28,8 +28,9 @@ type LocalStatus struct {
 	PID             int    `json:"pid"`
 	UpdatedAt       string `json:"updated_at"`
 	AgeSeconds      int    `json:"age_seconds"`    // age of status.json; -1 when unknown
-	Version         string `json:"version"`        // this CLI
+	Version         string `json:"version"`        // this CLI, e.g. "0.3.0 (c8aa72e)"
 	DaemonVersion   string `json:"daemon_version"` // the bridge that wrote status.json
+	RelayVersion    string `json:"relay_version"`  // the relay the running bridge last connected to; "" when unknown
 	Service         string `json:"service"`        // launchd | systemd
 	DefinitionPath  string `json:"definition_path"`
 	Binary          string `json:"binary"`
@@ -72,6 +73,7 @@ func (ls *LocalStatus) ApplyStatusFile(st *StatusFile, now time.Time, alive func
 	}
 	ls.Stale = age < 0 || age > StaleAfter
 	ls.RelayConnected = st.RelayConnected
+	ls.RelayVersion = st.RelayVersion
 	ls.HerdrOnline = st.HerdrOnline
 	ls.Agents = st.Agents
 	ls.Blocked = st.Blocked

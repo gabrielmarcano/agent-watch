@@ -612,3 +612,75 @@ func TestClient_RequeuesUnsentHistoryOnDisconnect(t *testing.T) {
 		t.Errorf("history queue = %v, want [unsent queued]", got)
 	}
 }
+
+// The relay's version comes from each connection's handshake response. It
+// stays while the relay is unreachable, and the next connection replaces it
+// ("" from a relay that sends none).
+func TestClient_RelayVersionFromHandshake(t *testing.T) {
+	const v1 = "0.3.0 (c8aa72e)"
+	var version atomic.Value
+	version.Store(v1)
+	var reject atomic.Bool
+	var conns atomic.Int32
+	kick := make(chan struct{}, 1)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if reject.Load() {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		if v := version.Load().(string); v != "" {
+			w.Header().Set(RelayVersionHeader, v)
+		}
+		conn, err := websocket.Accept(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer conn.CloseNow()
+		conns.Add(1)
+		ctx, cancel := context.WithCancel(r.Context())
+		defer cancel()
+		go func() { // discard hello, snapshot and the rest
+			defer cancel()
+			for {
+				if _, _, err := conn.Read(ctx); err != nil {
+					return
+				}
+			}
+		}()
+		select {
+		case <-kick:
+		case <-ctx.Done():
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	token := "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+	c := &Client{
+		URL: "ws" + strings.TrimPrefix(srv.URL, "http") + "/v1/host", Token: token,
+		OnConnect: helloSnapshot, MinBackoff: 5 * time.Millisecond, MaxBackoff: 20 * time.Millisecond,
+	}
+	if got := c.RelayVersion(); got != "" {
+		t.Fatalf("RelayVersion before any connection = %q, want empty", got)
+	}
+	runClient(t, c)
+	waitFor(t, 3*time.Second, "first connection", c.Connected)
+	if got := c.RelayVersion(); got != v1 {
+		t.Errorf("RelayVersion = %q, want %q", got, v1)
+	}
+
+	reject.Store(true)
+	kick <- struct{}{}
+	waitFor(t, 3*time.Second, "a refused reconnect", func() bool {
+		return !c.Connected() && strings.Contains(c.LastError(), "503")
+	})
+	if got := c.RelayVersion(); got != v1 {
+		t.Errorf("RelayVersion while disconnected = %q, want the last relay's %q", got, v1)
+	}
+
+	version.Store("") // an older relay: no header
+	reject.Store(false)
+	waitFor(t, 3*time.Second, "second connection", func() bool { return c.Connected() && conns.Load() == 2 })
+	if got := c.RelayVersion(); got != "" {
+		t.Errorf("RelayVersion from a relay without the header = %q, want empty", got)
+	}
+}

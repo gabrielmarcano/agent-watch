@@ -82,6 +82,49 @@ func TestLocalStatus_JSONKeys(t *testing.T) {
 	for _, k := range []string{
 		"installed", "configured", "running", "stale", "relay_connected", "herdr_online",
 		"agents", "blocked", "last_error", "relay_host", "updated_at", "version", "binary",
+		"relay_version",
+	} {
+		if _, ok := m[k]; !ok {
+			t.Errorf("missing key %q", k)
+		}
+	}
+}
+
+// relay_version is what the running bridge last heard from the relay; a
+// bridge that is not running reports none.
+func TestLocalStatus_RelayVersionOnlyWhileRunning(t *testing.T) {
+	now := time.Date(2026, 9, 26, 12, 0, 0, 0, time.UTC)
+	st := StatusFile{
+		PID: 4242, RelayConnected: true, Version: "0.3.0 (c8aa72e)",
+		RelayVersion: "0.3.0 (5a32851)", UpdatedAt: now.Add(-2 * time.Second).Format(time.RFC3339),
+	}
+
+	var running LocalStatus
+	running.ApplyStatusFile(&st, now, func(pid int) bool { return pid == 4242 })
+	if running.RelayVersion != "0.3.0 (5a32851)" {
+		t.Errorf("running: relay_version = %q, want the status file's", running.RelayVersion)
+	}
+
+	var dead LocalStatus
+	dead.ApplyStatusFile(&st, now, func(int) bool { return false })
+	if dead.RelayVersion != "" {
+		t.Errorf("dead pid: relay_version = %q, want empty", dead.RelayVersion)
+	}
+}
+
+// Every status.json key is always written, relay_version included.
+func TestStatusFile_JSONKeys(t *testing.T) {
+	data, err := json.Marshal(StatusFile{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var m map[string]any
+	if err := json.Unmarshal(data, &m); err != nil {
+		t.Fatal(err)
+	}
+	for _, k := range []string{
+		"pid", "relay_connected", "herdr_online", "agents", "blocked", "last_error",
+		"relay_error", "herdr_error", "version", "relay_version", "updated_at",
 	} {
 		if _, ok := m[k]; !ok {
 			t.Errorf("missing key %q", k)
