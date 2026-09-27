@@ -23,13 +23,15 @@ This document defines the development rules, architectural boundaries, and codin
    - `wearos-deploy`
    - `relay-deploy`
    - `herdr-probe`
-5. **Guards:** one implementation in `tools/guards/guards.py`, wired in three places:
+5. **Guards:** one implementation in `tools/guards/guards.py`, wired in four places:
    - `.agents/hooks.json` for Antigravity CLI;
    - `.opencode/plugins/agent-watch-guards.js` for OpenCode;
+   - `.claude/settings.json` for Claude Code;
    - `.githooks/pre-commit` for every tool and humans.
 
    They block:
-   - input to herdr panes outside the `aw-sandbox` workspace;
+   - input to herdr panes outside the `aw-sandbox` workspace, except launching a new session with `pane run` in a fresh `aw-session-*` tab (`tools/guards/README.md`);
+   - renaming a workspace to `aw-sandbox` or a tab into `aw-session-*`;
    - owner-only herdr commands;
    - `git add -A`, `--amend`, `--no-verify` and unapproved `git push`;
    - writes to legacy or secret paths;

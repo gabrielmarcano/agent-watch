@@ -101,6 +101,7 @@ When two disagree, the higher one wins, and the lower one must be fixed in the s
 | Guards (logic) | `tools/guards/guards.py` | — |
 | Guards (Antigravity) | `.agents/hooks.json` | Antigravity CLI `PreToolUse` + `Stop` |
 | Guards (OpenCode) | `.opencode/plugins/agent-watch-guards.js` | OpenCode `tool.execute.before/after` |
+| Guards (Claude Code) | `.claude/settings.json` | Claude Code `PreToolUse` (Bash and file edits) |
 | Guards (git) | `.githooks/pre-commit` | git, for every tool and humans (enable once: `git config core.hooksPath .githooks`) |
 
 Agents without hooks (Codex, Cursor, …) still get the git pre-commit hook. They must read `AGENTS.md` and the matching rules as plain documents. Setup and tests of the guards: [`tools/guards/README.md`](../tools/guards/README.md).

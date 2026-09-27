@@ -20,6 +20,7 @@ agy() { # json expected_decision description
   expect "$2" "$dec" "agy: $3"
 }
 oc() { printf '%s' "$1" | python3 "$G" opencode-before >/dev/null 2>&1; expect "$2" $? "opencode: $3"; }
+cc() { printf '%s' "$1" | python3 "$G" claude-pretool >/dev/null 2>&1; expect "$2" $? "claude: $3"; }
 j() { python3 -c 'import json,sys; print(json.dumps(sys.argv[1]))' "$1"; }  # JSON-quote a string
 
 OWNER_PANE="$(herdr agent list 2>/dev/null | python3 -c 'import json,sys
@@ -47,6 +48,19 @@ cmd 'grep -rn "herdr agent send-keys" docs' 0 "quoted mention allowed"
 cmd $'git commit -q -F - <<\'EOF\'\nnever run herdr agent prompt on owner panes\nEOF' 0 "heredoc commit message allowed"
 cmd $'python3 - <<\'EOF\'\ns.connect("herdr.sock"); send({"method":"agent.send_keys"})\nEOF' 2 "raw socket send_keys refused"
 cmd $'python3 - <<\'EOF\'\ns.connect("herdr.sock"); send({"method":"ping"})\nEOF' 0 "raw socket ping allowed"
+
+# ── renames that would fake the sandbox or a session tab ──
+cmd 'herdr workspace rename w9 aw-sandbox' 2 "workspace renamed to the sandbox label"
+cmd "herdr workspace rename w9 'aw-sandbox'" 2 "quoted sandbox label"
+cmd 'herdr workspace rename w9 my-project' 0 "ordinary workspace rename"
+cmd 'herdr tab rename w9:t1 aw-session-ui' 2 "tab renamed into the session prefix"
+cmd 'herdr tab rename w9:t1 notes' 0 "ordinary tab rename"
+cmd 'herdr tab create --workspace w9 --label aw-session-ui --no-focus' 0 "creating a session tab"
+cmd "python3 -c 'import socket; s=socket.socket(socket.AF_UNIX); s.connect(\"/x/herdr.sock\"); s.sendall(b\"workspace.rename\")'" 2 "raw socket workspace.rename"
+cmd "python3 -c 'import socket; s=socket.socket(socket.AF_UNIX); s.connect(\"/x/herdr.sock\"); s.sendall(b\"tab.rename\")'" 2 "raw socket tab.rename"
+
+# ── session-launch exception (pane run in an aw-session-* tab), with a fake herdr ──
+python3 "$DIR/test_session_launch.py" >/dev/null 2>&1; expect 0 $? "session launch exception unit tests"
 
 # ── git ──
 cmd 'git add -A' 2 "add -A refused"
@@ -82,6 +96,15 @@ oc "{\"tool\":\"edit\",\"args\":{\"filePath\":$(j "$ROOT/agent-watch.env")}}" 2 
 oc "{\"tool\":\"edit\",\"args\":{\"filePath\":$(j "$ROOT/pkg/model/agent.go")}}" 0 "edit pkg/model allowed"
 oc '{"tool":"apply_patch","args":{"patchText":"*** Begin Patch\n*** Add File: claude-plugin/x.sh\n+x\n*** End Patch"}}' 2 "patch into legacy blocked"
 oc '{"tool":"read","args":{"filePath":".env"}}' 0 "read is not a write"
+
+# ── Claude Code adapter (PreToolUse: {tool_name, tool_input} → exit 2 blocks) ──
+cc '{"tool_name":"Bash","tool_input":{"command":"git add -A"}}' 2 "git add -A"
+cc '{"tool_name":"Bash","tool_input":{"command":"git status"}}' 0 "git status"
+cc '{"tool_name":"Bash","tool_input":{"command":"herdr workspace rename w9 aw-sandbox"}}' 2 "sandbox rename"
+cc "{\"tool_name\":\"Write\",\"tool_input\":{\"file_path\":\"$ROOT/agent-watch.env\",\"content\":\"x\"}}" 2 "write agent-watch.env"
+cc "{\"tool_name\":\"Edit\",\"tool_input\":{\"file_path\":\"$ROOT/README.md\",\"old_string\":\"a\",\"new_string\":\"b\"}}" 0 "edit README"
+cc "{\"tool_name\":\"Read\",\"tool_input\":{\"file_path\":\"$ROOT/README.md\"}}" 0 "read is never blocked"
+cc 'not json' 0 "unparseable input fails open to the normal permission flow"
 
 # ── pre-commit in a throw-away repo ──
 TMP="$(mktemp -d)"; (

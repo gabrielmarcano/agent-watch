@@ -10,7 +10,8 @@ description: "Safety and protocol rules for talking to herdr (live owner session
 Full reference: `docs/reference/herdr-socket-api.md` (verified on herdr 0.9.1, protocol 22).
 
 ## Safety (non-negotiable)
-- The herdr on this Mac runs the **owner's real agent sessions**. Never call `agent.prompt`, `agent.send_keys`, `pane.send_*`, `agent.start` or `pane.close` against a pane you did not create in the `aw-sandbox` workspace. The guards (`tools/guards/guards.py`, wired into agy and OpenCode) enforce this for the CLI and block raw socket writes.
+- The herdr on this Mac runs the **owner's real agent sessions**. Never call `agent.prompt`, `agent.send_keys`, `pane.send_*`, `agent.start` or `pane.close` against a pane you did not create in the `aw-sandbox` workspace. The guards (`tools/guards/guards.py`, wired into agy, OpenCode and Claude Code) enforce this for the CLI, block raw socket writes, and refuse renaming a workspace to `aw-sandbox` or a tab into `aw-session-*`.
+- To start a new agent session for the owner, create a tab labelled `aw-session-<name>` and `herdr pane run` the agent with its whole task once (`tools/guards/README.md`); after that the pane is closed to input.
 - Tests never touch the real socket: use `pkg/herdrtest`.
 
 ## Protocol facts that break code when forgotten

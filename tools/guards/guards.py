@@ -8,11 +8,13 @@ One implementation, several entry points:
   guards.py agy-pretool                  → Antigravity CLI PreToolUse hook (stdin/stdout JSON)
   guards.py agy-stop                     → Antigravity CLI Stop hook (contract drift)
   guards.py opencode-before              → OpenCode plugin bridge (stdin JSON {tool,args})
+  guards.py claude-pretool               → Claude Code PreToolUse hook (stdin JSON, exit 2 blocks)
   guards.py precommit                    → git pre-commit: secrets, gofmt, contract sync
 
 Wired from:
   .agents/hooks.json                     (agy)
   .opencode/plugins/agent-watch-guards.js (opencode)
+  .claude/settings.json                  (Claude Code)
   .githooks/pre-commit                   (git, every tool and humans)
 
 What is blocked, and why:
@@ -20,8 +22,13 @@ What is blocked, and why:
    sessions; sending "1" to one of them approves whatever it asked. Mutating
    herdr commands are allowed only when the target pane belongs to the
    workspace labelled "aw-sandbox" (checked live with `herdr pane get` +
-   `herdr workspace list`, so an env marker cannot bypass it).
-2. Raw writes to the herdr socket with mutating methods.
+   `herdr workspace list`, so an env marker cannot bypass it). Renaming a
+   workspace to "aw-sandbox" (or a tab into "aw-session-*") is blocked, since it
+   would fake that check. One narrow exception launches new sessions: `herdr
+   pane run` into a pane of a tab labelled "aw-session-*" that has no agent and
+   only a shell in the foreground (create the tab with `herdr tab create
+   --label aw-session-<name>`; run e.g. `claude "<task>"` in it once).
+2. Raw writes to the herdr socket with mutating methods (including renames).
 3. Owner-only herdr operations: server stop, integration install/uninstall,
    closing a non-sandbox workspace.
 4. Unsafe git in a shared worktree: add -A/--all/., commit --amend, and push
@@ -40,6 +47,9 @@ import sys
 
 ROOT = os.environ.get("AW_REPO_ROOT") or os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 SANDBOX_LABEL = "aw-sandbox"
+# Tabs an agent creates to launch a new session (see session_launch_problem).
+SESSION_TAB_PREFIX = "aw-session-"
+SHELLS = {"zsh", "bash", "fish", "sh", "dash", "ksh", "tcsh", "nu"}
 
 # ─────────────────────────────── herdr ───────────────────────────────
 
@@ -59,7 +69,7 @@ OWNER_ONLY = {
 }
 MUTATING_SOCKET_METHODS = re.compile(
     r"agent\.(prompt|send_keys|start|rename|focus)|pane\.(send_|close|split|run|report_|release_agent)"
-    r"|server\.stop|workspace\.close|integration\.(install|uninstall)"
+    r"|server\.stop|workspace\.(close|rename)|tab\.rename|integration\.(install|uninstall)"
 )
 CODE_RUNNERS = {"python", "python3", "node", "bun", "deno", "nc", "socat", "go", "ruby", "perl"}
 
@@ -146,6 +156,42 @@ def sandbox_problem(target):
     return f"target {target} is in workspace {label!r}, not {SANDBOX_LABEL!r}"
 
 
+def session_launch_problem(target):
+    """None if `herdr pane run` may start a new session in target: a pane of a tab
+    labelled aw-session-*, with no agent and only a shell in the foreground.
+    Otherwise the reason. Fails closed on anything it cannot read."""
+    pane = herdr_json(["pane", "get", target]) or {}
+    info = (pane.get("result") or {}).get("pane")
+    if not info:
+        return f"cannot resolve pane {target!r} in herdr"
+    tabs = herdr_json(["tab", "list", "--workspace", str(info.get("workspace_id") or "")]) or {}
+    label = next((t.get("label") for t in (tabs.get("result") or {}).get("tabs", [])
+                  if t.get("tab_id") == info.get("tab_id")), None)
+    if not str(label or "").startswith(SESSION_TAB_PREFIX):
+        return f"its tab is labelled {label!r}, not {SESSION_TAB_PREFIX}*"
+    if info.get("agent"):
+        return f"an agent ({info.get('agent')}) already runs in it"
+    proc = herdr_json(["pane", "process-info", "--pane", target]) or {}
+    fg = ((proc.get("result") or {}).get("process_info") or {}).get("foreground_processes") or []
+    names = {os.path.basename(str(p.get("name") or "")).lstrip("-") for p in fg}
+    if not names or not names <= SHELLS:
+        return f"its foreground is {sorted(names) or 'unknown'}, not an idle shell"
+    return None
+
+
+def positionals(args):
+    out, skip_next = [], False
+    for a in args:
+        if skip_next:
+            skip_next = False
+            continue
+        if a.startswith("--"):
+            skip_next = "=" not in a
+            continue
+        out.append(a)
+    return out
+
+
 def first_positional(args):
     skip_next = False
     for a in args:
@@ -166,6 +212,15 @@ def check_herdr(tokens):
     if len(rest) < 2 or any(a in ("--help", "-h", "help") for a in rest):
         return
     key = (rest[0], rest[1])
+    if key in (("workspace", "rename"), ("tab", "rename")):
+        label = " ".join(positionals(rest[2:])[1:]).strip()
+        if key == ("workspace", "rename") and label == SANDBOX_LABEL:
+            raise Blocked(f"renaming a workspace to {SANDBOX_LABEL!r} would make the guard treat the owner's "
+                          f"panes as the sandbox. Create a new workspace labelled {SANDBOX_LABEL!r} instead.")
+        if key == ("tab", "rename") and label.startswith(SESSION_TAB_PREFIX):
+            raise Blocked(f"renaming a tab into {SESSION_TAB_PREFIX}* would let `pane run` type into it. "
+                          f"Create a new tab with that label instead (herdr tab create --label ...).")
+        return
     if key == ("workspace", "close"):
         target = first_positional(rest[2:])
         if target and workspace_label(target) == SANDBOX_LABEL:
@@ -177,8 +232,14 @@ def check_herdr(tokens):
         if not target:
             raise Blocked(f"`herdr {' '.join(key)}` without an explicit target would hit the focused pane, "
                           f"which is the owner's. Pass a pane id from the {SANDBOX_LABEL!r} workspace.")
+        if key == ("pane", "run"):
+            launch = session_launch_problem(target)
+            if launch is None:
+                return
         reason = sandbox_problem(target)
         if reason:
+            if key == ("pane", "run"):
+                reason += f"; and it is no session tab to launch in ({launch})"
             raise Blocked(f"`herdr {' '.join(key)}` refused: {reason}. The owner's panes are live agent "
                           f"sessions. Create panes in a workspace labelled {SANDBOX_LABEL!r} "
                           f"(see .agents/skills/capture-fixture/SKILL.md) and target those.")
@@ -424,6 +485,31 @@ def cmd_opencode_before(_argv):
     return 0
 
 
+CLAUDE_WRITE_TOOLS = {"Write", "Edit", "MultiEdit", "NotebookEdit"}
+
+
+def cmd_claude_pretool(_argv):
+    """Claude Code PreToolUse: stdin {"tool_name", "tool_input"} → exit 2 + stderr blocks the call."""
+    try:
+        data = json.load(sys.stdin)
+    except Exception:
+        return 0
+    tool = str(data.get("tool_name") or "")
+    inp = data.get("tool_input") or {}
+    try:
+        if tool == "Bash":
+            check_command(str(inp.get("command") or ""))
+        elif tool in CLAUDE_WRITE_TOOLS:
+            for key in ("file_path", "notebook_path"):
+                path = inp.get(key)
+                if isinstance(path, str) and path:
+                    check_write(path)
+    except Blocked as e:
+        print(f"BLOCKED: {e}", file=sys.stderr)
+        return 2
+    return 0
+
+
 def cmd_precommit(_argv):
     problems = precommit_problems()
     if problems:
@@ -438,6 +524,7 @@ COMMANDS = {
     "agy-pretool": cmd_agy_pretool,
     "agy-stop": cmd_agy_stop,
     "opencode-before": cmd_opencode_before,
+    "claude-pretool": cmd_claude_pretool,
     "precommit": cmd_precommit,
 }
 

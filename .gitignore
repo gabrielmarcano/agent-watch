@@ -17,6 +17,9 @@ store.json
 google-services.json
 local.properties
 
+# Python bytecode (tools/guards tests)
+__pycache__/
+
 # OS generated files
 .DS_Store
 .DS_Store?
