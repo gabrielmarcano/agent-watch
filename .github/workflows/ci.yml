@@ -1,0 +1,54 @@
+# Go code and repo tools, on every push to main and every pull request.
+# Linux runners only (the cheapest minutes on GitHub Free).
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  go:
+    name: Go (fmt, vet, race tests, builds)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: gofmt
+        run: |
+          out="$(gofmt -l pkg cmd)"
+          if [ -n "$out" ]; then echo "not gofmt-ed:"; echo "$out"; exit 1; fi
+      - run: go vet ./...
+      - run: go test -race -count=1 ./...
+      - name: Static builds (bridge for macOS and Linux, relay for Linux)
+        env:
+          CGO_ENABLED: "0"
+        run: |
+          GOOS=darwin GOARCH=arm64 go build -o /dev/null ./cmd/bridge
+          GOOS=linux GOARCH=amd64 go build -o /dev/null ./cmd/bridge
+          GOOS=linux GOARCH=amd64 go build -o /dev/null ./cmd/relay
+
+  tools:
+    name: Guards and shared config
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Guards (herdr is absent here; its live cases are skipped)
+        run: bash tools/guards/test_guards.sh
+      - name: agent-watch.env tools (also checks the relay env merge with Linux awk)
+        run: bash tools/config/test_awenv.sh

@@ -1,0 +1,50 @@
+# Wear OS unit tests, lint and debug build, only when the app (or its version) changes.
+# A placeholder google-services.json is generated here: the real Firebase config never
+# leaves the owner's machine, and push is not exercised by these builds.
+name: Wear OS
+
+on:
+  push:
+    branches: [main]
+    paths: ["wearos-app/**", "VERSIONS", ".github/workflows/wearos.yml"]
+  pull_request:
+    paths: ["wearos-app/**", "VERSIONS", ".github/workflows/wearos.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: wearos-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Tests, lint, debug APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: wearos-app
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Placeholder google-services.json
+        run: |
+          cat > app/google-services.json <<'JSON'
+          {
+            "project_info": {"project_number": "000000000000", "project_id": "ci-placeholder", "storage_bucket": "ci-placeholder.appspot.com"},
+            "client": [{
+              "client_info": {"mobilesdk_app_id": "1:000000000000:android:0000000000000000", "android_client_info": {"package_name": "com.gabriel.agentwatch"}},
+              "oauth_client": [],
+              "api_key": [{"current_key": "ci-placeholder"}],
+              "services": {"appinvite_service": {"other_platform_oauth_client": []}}
+            }],
+            "configuration_version": "1"
+          }
+          JSON
+      - run: ./gradlew --no-daemon :app:testDebugUnitTest :app:lintDebug :app:assembleDebug

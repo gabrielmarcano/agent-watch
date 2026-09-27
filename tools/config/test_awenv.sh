@@ -24,7 +24,8 @@ contains() { # file-or-string needle description
 lacks() {
 	case "$1" in *"$2"*) no "$3 (found [$2])" ;; *) ok ;; esac
 }
-mode() { stat -f %Lp "$1" 2>/dev/null || stat -c %a "$1"; }
+# GNU stat first: its -f means "file system" and would print the wrong thing.
+mode() { stat -c %a "$1" 2>/dev/null || stat -f %Lp "$1"; }
 TOK=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
 
 # ── init ──

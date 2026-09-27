@@ -1,0 +1,106 @@
+# Publishes a GitHub release for a date tag (vYYYY.MM.DD[.N]): a snapshot of the whole system.
+# Each component keeps its own version (VERSIONS); the release notes list them.
+# workflow_dispatch builds the same artifacts without publishing (a dry run).
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  go:
+    name: Bridge and relay binaries
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Build
+        env:
+          CGO_ENABLED: "0"
+        run: |
+          set -a; . ./VERSIONS; set +a
+          out="$RUNNER_TEMP/dist"; mkdir -p "$out"
+          for target in darwin/arm64 darwin/amd64 linux/amd64 linux/arm64; do
+            os="${target%/*}"; arch="${target#*/}"
+            GOOS=$os GOARCH=$arch go build -ldflags "-s -w -X main.version=$BRIDGE_VERSION" -o "$out/agent-watch-bridge" ./cmd/bridge
+            tar -C "$out" -czf "$out/agent-watch-bridge_${BRIDGE_VERSION}_${os}_${arch}.tar.gz" agent-watch-bridge
+            rm "$out/agent-watch-bridge"
+          done
+          for arch in amd64 arm64; do
+            GOOS=linux GOARCH=$arch go build -ldflags "-s -w -X main.version=$RELAY_VERSION" -o "$out/agent-watch-relay" ./cmd/relay
+            tar -C "$out" -czf "$out/agent-watch-relay_${RELAY_VERSION}_linux_${arch}.tar.gz" agent-watch-relay
+            rm "$out/agent-watch-relay"
+          done
+      - uses: actions/upload-artifact@v4
+        with:
+          name: go-binaries
+          path: ${{ runner.temp }}/dist/*.tar.gz
+
+  menubar:
+    name: Menu bar app
+    runs-on: macos-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Build and zip
+        run: |
+          set -a; . ./VERSIONS; set +a
+          make bar
+          mkdir -p "$RUNNER_TEMP/dist"
+          ditto -c -k --keepParent bin/AgentWatchBar.app "$RUNNER_TEMP/dist/AgentWatchBar_${MENUBAR_VERSION}_macos_universal.zip"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: menubar
+          path: ${{ runner.temp }}/dist/*.zip
+
+  publish:
+    name: Publish the release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [go, menubar]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Checksums and notes
+        run: |
+          set -a; . ./VERSIONS; set +a
+          (cd dist && shasum -a 256 ./* > SHA256SUMS)
+          prev="$(git describe --tags --abbrev=0 "${GITHUB_REF_NAME}^" 2>/dev/null || true)"
+          {
+            echo "## Component versions"
+            echo
+            echo "| Component | Version |"
+            echo "|---|---|"
+            echo "| Bridge (\`agent-watch-bridge\`) | $BRIDGE_VERSION |"
+            echo "| Relay (\`agent-watch-relay\`) | $RELAY_VERSION |"
+            echo "| macOS menu bar | $MENUBAR_VERSION |"
+            echo "| Wear OS app | $WEAROS_VERSION_NAME ($WEAROS_VERSION_CODE), built from source (see README) |"
+            echo
+            echo "macOS binaries and the menu bar app are not notarized: after downloading, run \`xattr -d com.apple.quarantine <file>\` (or open the app with right click → Open)."
+            echo
+            echo "## Changes"
+            echo
+            if [ -n "$prev" ]; then git log --no-merges --format='- %s (%h)' "$prev..$GITHUB_REF_NAME"; else git log --no-merges --format='- %s (%h)' -n 40 "$GITHUB_REF_NAME"; fi
+          } > notes.md
+      - name: Create the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" --title "Agent Watch $GITHUB_REF_NAME" --notes-file notes.md dist/*

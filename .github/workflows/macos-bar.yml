@@ -1,0 +1,31 @@
+# The menu bar app needs a macOS runner (AppKit), whose minutes count 10x on GitHub Free,
+# so it runs only when the bar or the bridge CLI it drives changes.
+name: macOS menu bar
+
+on:
+  push:
+    branches: [main]
+    paths: ["macos-bar/**", "cmd/bridge/**", "pkg/bridge/**", "Makefile", "VERSIONS", ".github/workflows/macos-bar.yml"]
+  pull_request:
+    paths: ["macos-bar/**", "cmd/bridge/**", "pkg/bridge/**", "Makefile", "VERSIONS", ".github/workflows/macos-bar.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: macos-bar-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  bar:
+    name: Bar tests and universal build
+    runs-on: macos-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - run: make bar-test
+      - run: make bar
