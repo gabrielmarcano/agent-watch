@@ -29,6 +29,11 @@ const (
 	pingTimeout    = 10 * time.Second
 )
 
+// RelayVersionHeader carries the relay's version in the /v1/host WebSocket
+// handshake response, sent only once the host token is verified. The bridge
+// (pkg/relayclient) reads the same name; contracts.md §3.
+const RelayVersionHeader = "X-Agent-Watch-Relay-Version"
+
 // Notifier receives agent update notifications for push dispatching.
 type Notifier interface {
 	OnAgentUpdate(prev *model.AgentState, cur model.AgentState)
@@ -87,6 +92,7 @@ type Hub struct {
 	pingInterval   time.Duration
 	pingTimeout    time.Duration
 	afterPing      func(err error) // test hook, see setAfterPing
+	version        string          // sent to authenticated hosts (RelayVersionHeader)
 
 	closed   bool           // set by Shutdown: no new hosts
 	handlers sync.WaitGroup // running ServeHost calls; Add only under mu while !closed
@@ -134,6 +140,14 @@ func (h *Hub) SetHelloTimeout(d time.Duration) {
 	h.helloTimeout = d
 }
 
+// SetVersion sets the version sent to authenticated hosts in the handshake
+// response (RelayVersionHeader). Empty: no header.
+func (h *Hub) SetVersion(v string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.version = v
+}
+
 // setAfterPing installs a hook called after every host ping (tests only).
 func (h *Hub) setAfterPing(fn func(err error)) {
 	h.mu.Lock()
@@ -156,9 +170,15 @@ func (h *Hub) ServeHost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.handlers.Add(1)
+	version := h.version
 	h.mu.Unlock()
 	defer h.handlers.Done()
 
+	// Only here, past the host-token check: the version is for the bridge,
+	// not for anyone probing the relay.
+	if version != "" {
+		w.Header().Set(RelayVersionHeader, version)
+	}
 	conn, err := websocket.Accept(w, r, nil)
 	if err != nil {
 		slog.Error("accept host websocket", "err", err)

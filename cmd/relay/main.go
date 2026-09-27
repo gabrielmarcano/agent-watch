@@ -10,9 +10,13 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/gabrielmarcano/agent-monitor/pkg/buildinfo"
 	"github.com/gabrielmarcano/agent-monitor/pkg/relay"
 )
 
+// version is RELAY_VERSION from VERSIONS, stamped by the Makefile
+// (-ldflags "-X main.version=…"). Everything reports it through
+// buildinfo.String, which adds the commit: "0.3.0 (c8aa72e)".
 var version = "dev"
 
 func main() {
@@ -38,7 +42,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	case "devices":
 		return runDevices(ctx, args[1:], stdout)
 	case "version":
-		fmt.Fprintf(stdout, "agent-watch-relay %s\n", version)
+		fmt.Fprintf(stdout, "agent-watch-relay %s\n", buildinfo.String(version))
 		return nil
 	case "help", "-h", "--help":
 		printUsage(stdout)
@@ -83,14 +87,17 @@ Environment variables:
 they go through its local admin socket ($AW_DATA_DIR/admin.sock): a revoked
 device is rejected immediately and its open streams are closed. Run them as the
 service user or as root, with the same AW_DATA_DIR as the service.
-`, version)
+`, buildinfo.String(version))
 }
 
 func runServe(ctx context.Context) error {
+	v := buildinfo.String(version)
+	slog.Info("starting agent-watch-relay", "version", v)
 	cfg, err := relay.LoadConfig()
 	if err != nil {
 		return fmt.Errorf("configuration: %w", err)
 	}
+	cfg.Version = v
 
 	server, err := relay.NewServer(cfg)
 	if err != nil {

@@ -39,6 +39,11 @@ type Config struct {
 	// installed watch app handles "resolved" (older builds show it as a bogus
 	// approval).
 	PushResolved bool
+
+	// Version is the relay's own version with its commit, e.g.
+	// "0.3.0 (c8aa72e)" (set by cmd/relay, not from the environment). Only
+	// an authenticated bridge learns it (RelayVersionHeader).
+	Version string
 }
 
 // ClientIPPolicy returns the policy the rate limiter uses to identify clients.

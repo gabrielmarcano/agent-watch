@@ -122,6 +122,7 @@ func NewServer(cfg *Config) (_ *Server, err error) {
 	}
 
 	hub := NewHub(auth, state, store, notifier)
+	hub.SetVersion(cfg.Version)
 
 	s := &Server{
 		cfg:               cfg,
@@ -136,8 +137,12 @@ func NewServer(cfg *Config) (_ *Server, err error) {
 	return s, nil
 }
 
-// NewServerWithDeps initializes a Server with explicit components (useful for tests).
+// NewServerWithDeps initializes a Server with explicit components (useful for
+// tests). A cfg.Version is handed to hub, as NewServer does.
 func NewServerWithDeps(cfg *Config, store *Store, state *State, auth *AuthManager, hub *Hub) *Server {
+	if cfg != nil && cfg.Version != "" && hub != nil {
+		hub.SetVersion(cfg.Version)
+	}
 	s := &Server{
 		cfg:               cfg,
 		store:             store,

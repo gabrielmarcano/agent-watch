@@ -14,6 +14,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/coder/websocket"
+	"github.com/gabrielmarcano/agent-monitor/pkg/buildinfo"
 	"github.com/gabrielmarcano/agent-monitor/pkg/model"
 	"github.com/gabrielmarcano/agent-monitor/pkg/relay"
 )
@@ -276,14 +278,46 @@ func TestCLI_SecondRelayRefusesSameDataDir(t *testing.T) {
 	}
 }
 
+// setVersion stamps the package version as -ldflags would, for one test.
+func setVersion(t *testing.T, v string) {
+	t.Helper()
+	old := version
+	version = v
+	t.Cleanup(func() { version = old })
+}
+
 func TestCLI_Version(t *testing.T) {
+	setVersion(t, "0.3.0")
 	var stdout, stderr bytes.Buffer
 	err := run(context.Background(), []string{"version"}, &stdout, &stderr)
 	if err != nil {
 		t.Fatalf("run version failed: %v", err)
 	}
-	if !strings.Contains(stdout.String(), "agent-watch-relay") {
-		t.Errorf("expected version output, got %q", stdout.String())
+	// Test binaries carry no VCS stamp: buildinfo adds no commit here.
+	if want := "agent-watch-relay " + buildinfo.String("0.3.0") + "\n"; stdout.String() != want {
+		t.Errorf("version output = %q, want %q", stdout.String(), want)
+	}
+}
+
+// serve hands its version (with the commit) to the bridge in the /v1/host
+// handshake response.
+func TestServe_SendsVersionToHost(t *testing.T) {
+	setVersion(t, "0.3.0-test")
+	t.Setenv("AW_DATA_DIR", shortTempDir(t))
+	t.Setenv("AW_HOST_TOKEN", testHostToken)
+	base, _ := startRelay(t)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	conn, resp, err := websocket.Dial(ctx, "ws"+strings.TrimPrefix(base, "http")+"/v1/host", &websocket.DialOptions{
+		HTTPHeader: http.Header{"Authorization": []string{"Bearer " + testHostToken}},
+	})
+	if err != nil {
+		t.Fatalf("dial /v1/host: %v", err)
+	}
+	defer conn.CloseNow()
+	if got, want := resp.Header.Get(relay.RelayVersionHeader), buildinfo.String("0.3.0-test"); got != want {
+		t.Errorf("%s = %q, want %q", relay.RelayVersionHeader, got, want)
 	}
 }
 
