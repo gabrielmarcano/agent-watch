@@ -124,7 +124,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let versionsHeader = NSMenuItem(title: "Versions", action: nil, keyEquivalent: "")
         versionsHeader.isEnabled = false
         menu.addItem(versionsHeader)
-        for _ in 0..<2 {
+        for _ in 0..<3 { // menu bar, bridge, relay (versionLines)
             let v = NSMenuItem(title: "", action: nil, keyEquivalent: "")
             v.isEnabled = false
             v.isHidden = true

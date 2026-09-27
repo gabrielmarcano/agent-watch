@@ -47,7 +47,8 @@ let full = """
   "running": true, "stale": false, "relay_connected": true, "herdr_online": true,
   "agents": 9, "blocked": 2, "last_error": "", "relay_error": "", "herdr_error": "",
   "relay_host": "relay.example.com", "pid": 1159, "updated_at": "2026-09-25T14:51:06Z",
-  "age_seconds": 2, "version": "0.2.0", "daemon_version": "0.2.0", "service": "launchd",
+  "age_seconds": 2, "version": "0.3.0 (c8aa72e)", "daemon_version": "0.3.0 (c8aa72e)",
+  "relay_version": "0.3.0 (5a32851)", "service": "launchd",
   "definition_path": "/Users/u/Library/LaunchAgents/com.gabrielmarcano.agent-watch-bridge.plist",
   "binary": "/Users/u/agent-watch/bin/agent-watch-bridge",
   "config_path": "/Users/u/.config/herdr/plugins/config/herdr-agent-watch/config.toml",
@@ -61,8 +62,11 @@ let decoded = decodeLocalStatus(full)
 check(decoded != nil, "full status decodes")
 check(decoded?.blocked == 2 && decoded?.agents == 9 && decoded?.relayHost == "relay.example.com", "fields decode: \(String(describing: decoded))")
 check(decoded?.logPath == "/Users/u/Library/Logs/agent-watch-bridge.log", "log path decodes")
+check(decoded?.relayVersion == "0.3.0 (5a32851)" && decoded?.daemonVersion == "0.3.0 (c8aa72e)",
+      "versions decode: \(String(describing: decoded?.relayVersion))")
 let sparse = decodeLocalStatus(#"{"running": true, "relay_connected": false}"#)
-check(sparse?.running == true && sparse?.ageSeconds == -1 && sparse?.relayHost == "", "missing keys keep defaults")
+check(sparse?.running == true && sparse?.ageSeconds == -1 && sparse?.relayHost == "" && sparse?.relayVersion == "",
+      "missing keys keep defaults")
 check(decodeLocalStatus("not json") == nil, "garbage does not decode")
 
 // MARK: the real CLI, with a throwaway HOME
@@ -246,6 +250,24 @@ check(vOff == ["Menu bar 0.2.1", "Bridge 0.2.1"], "versions while stopped: \(vOf
 check(versionLines(barVersion: "", status: nil) == ["Menu bar unknown"], "no bridge status, no bundle version")
 check(present(state: .connected, status: st { $0.daemonVersion = "0.2.1-abc1234" }, barVersion: "0.2.1").versions
       == ["Menu bar 0.2.1", "Bridge 0.2.1-abc1234"], "present carries the versions")
+
+// The relay's version, when the running bridge knows it.
+let vRelay = versionLines(barVersion: "0.3.0", status: st {
+    $0.version = "0.3.0 (c8aa72e)"; $0.daemonVersion = "0.3.0 (c8aa72e)"; $0.relayVersion = "0.3.0 (5a32851)"
+})
+check(vRelay == ["Menu bar 0.3.0", "Bridge 0.3.0 (c8aa72e)", "Relay 0.3.0 (5a32851)"], "versions with the relay: \(vRelay)")
+let vRelayDown = versionLines(barVersion: "0.3.0", status: st {
+    $0.relayConnected = false; $0.daemonVersion = "0.3.0 (c8aa72e)"; $0.relayVersion = "0.3.0 (5a32851)"
+})
+check(vRelayDown.last == "Relay 0.3.0 (5a32851)", "relay down: last known relay version kept: \(vRelayDown)")
+let vNoRelay = versionLines(barVersion: "0.3.0", status: st { $0.daemonVersion = "0.3.0 (c8aa72e)"; $0.relayVersion = "" })
+check(vNoRelay == ["Menu bar 0.3.0", "Bridge 0.3.0 (c8aa72e)"], "relay version unknown: no relay line: \(vNoRelay)")
+let vStoppedRelay = versionLines(barVersion: "0.3.0", status: st {
+    $0.running = false; $0.daemonVersion = ""; $0.version = "0.3.0 (c8aa72e)"; $0.relayVersion = "0.3.0 (5a32851)"
+})
+check(vStoppedRelay == ["Menu bar 0.3.0", "Bridge 0.3.0 (c8aa72e)"], "bridge stopped: no relay line: \(vStoppedRelay)")
+check(present(state: .connected, status: st { $0.relayVersion = "0.3.0 (5a32851)" }, barVersion: "0.3.0").versions.count == 3,
+      "present carries the relay line")
 
 // Status dot: green connected, yellow on its way, red broken, gray off on purpose.
 let dotCases: [(BarState, StatusDot, String)] = [

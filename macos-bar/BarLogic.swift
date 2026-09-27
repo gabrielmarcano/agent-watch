@@ -28,6 +28,7 @@ struct LocalStatus: Decodable, Equatable, Sendable {
     var ageSeconds = -1
     var version = ""
     var daemonVersion = ""
+    var relayVersion = ""
     var service = ""
     var definitionPath = ""
     var binary = ""
@@ -39,7 +40,7 @@ struct LocalStatus: Decodable, Equatable, Sendable {
     enum CodingKeys: String, CodingKey {
         case installed, definitionError, configured, configError, running, stale
         case relayConnected, herdrOnline, agents, blocked, lastError, relayError, herdrError
-        case relayHost, pid, updatedAt, ageSeconds, version, daemonVersion, service
+        case relayHost, pid, updatedAt, ageSeconds, version, daemonVersion, relayVersion, service
         case definitionPath, binary, configPath, stateDir, statusPath, logPath
     }
 
@@ -69,6 +70,7 @@ struct LocalStatus: Decodable, Equatable, Sendable {
         ageSeconds = int(.ageSeconds, -1)
         version = str(.version)
         daemonVersion = str(.daemonVersion)
+        relayVersion = str(.relayVersion)
         service = str(.service)
         definitionPath = str(.definitionPath)
         binary = str(.binary)
@@ -174,13 +176,16 @@ enum Symbols {
     static let all = [connected, neutral, off, problem]
 }
 
-/// The "Versions" menu section: this app, and the bridge (the running daemon's
-/// version, else the CLI's). The bar reports bridge/relay health, never agents.
+/// The "Versions" menu section: this app, the bridge (the running daemon's
+/// version, else the CLI's) and the relay (what the running bridge last heard
+/// in its handshake; no line while unknown). The bar reports bridge/relay
+/// health, never agents.
 func versionLines(barVersion: String, status: LocalStatus?) -> [String] {
     var lines = ["Menu bar \(barVersion.isEmpty ? "unknown" : barVersion)"]
     if let s = status {
         let bridge = (s.running && !s.daemonVersion.isEmpty) ? s.daemonVersion : s.version
         if !bridge.isEmpty { lines.append("Bridge \(bridge)") }
+        if s.running && !s.relayVersion.isEmpty { lines.append("Relay \(s.relayVersion)") }
     }
     return lines
 }

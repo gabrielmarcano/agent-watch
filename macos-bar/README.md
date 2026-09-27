@@ -15,8 +15,12 @@ open bin/AgentWatchBar.app
 ```
 
 - Universal (Apple silicon + Intel), macOS 13 or later, ad-hoc signed.
+- The bundle version is `MENUBAR_VERSION` from `VERSIONS` at the repo root:
+  bump it there when the app changes. `build.sh` writes it into the built
+  `Info.plist` before signing; the committed `Info.plist` holds a `0.0.0`
+  placeholder.
 - `APP_DIR=/path/AgentWatchBar.app macos-bar/build.sh` builds somewhere else;
-  `VERSION=x.y.z` stamps the bundle version.
+  `MENUBAR_VERSION=x.y.z` overrides the version for one build.
 - To update a running copy: quit it from its menu, rebuild, open it again.
 - `make bar-test` tests the decision logic (`BarLogic.swift`) with the
   harness in `Tests/`: it runs the CLI with an empty temp dir as HOME, and
@@ -53,7 +57,11 @@ The bar reports the health of the bridge and the relay, and pairs watches. It ne
 | crossed watch | gray | Bridge not configured; Start is disabled | Run `make configure-bridge` (or `agent-watch-bridge configure …`) in a terminal |
 | watch with `!` | red | agent-watch-bridge not found, or status unavailable | See the menu |
 
-The tooltip repeats the state. The **Versions** section of the menu shows this app's version and the bridge's (the running daemon's, or the CLI's when it is stopped).
+The tooltip repeats the state. The **Versions** section of the menu shows:
+
+- **Menu bar** `0.3.0`: this app's bundle version.
+- **Bridge** `0.3.0 (c8aa72e)`: the running daemon's version with its commit, or the CLI's when it is stopped. A `, modified` after the commit means it was built with uncommitted changes.
+- **Relay** `0.3.0 (5a32851)`: what the relay reported in its last handshake with the running bridge (`relay_version`), kept while the relay is unreachable. No line while it is unknown: the bridge is stopped, has not connected yet, or the relay predates 0.3.0.
 
 ## Menu actions
 
