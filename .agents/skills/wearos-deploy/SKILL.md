@@ -34,6 +34,15 @@ export JAVA_HOME="$(/usr/libexec/java_home -v 17)"   # any installed JDK 17 (And
 
 The watch and the Mac must be on the same Wi-Fi. The connect port changes after the watch reboots, so check the screen again.
 
+**`No route to host` while `ping` works:** macOS Local Network privacy. Only the system's own binaries reach the LAN from a process without that permission, and an agent running inside herdr has no app that can hold it. The owner starts the adb server from a regular terminal app, outside herdr, and allows Local Network when macOS asks:
+
+```bash
+adb kill-server
+adb connect <ip>:<port>
+```
+
+The agent's `adb` commands then use that server over `localhost`. Do not run `adb kill-server` from inside herdr afterwards: the new server would start without the permission.
+
 ## Install and run
 
 ```bash
