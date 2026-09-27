@@ -409,15 +409,16 @@ The repository's `herdr-plugin.toml`:
 ```toml
 id = "herdr-agent-watch"
 name = "Agent Watch"
-version = "0.2.0"
+version = "0.3.0"   # = BRIDGE_VERSION in VERSIONS; `make check-versions` fails when they differ
 min_herdr_version = "0.9.0"   # the version this plan was verified against
 description = "Monitor and answer your agent herd from your smartwatch via a remote relay"
 platforms = ["macos", "linux"]
 
 # Runs on `herdr plugin install` only. For `herdr plugin link`, run `make bridge` first.
-# Same flags as `make bridge`: static (CGO_ENABLED=0), stripped, version stamped.
+# Same flags as `make bridge`: static (CGO_ENABLED=0), stripped, stamped with
+# BRIDGE_VERSION read from VERSIONS (the binary adds its commit on its own).
 [[build]]
-command = ["env", "CGO_ENABLED=0", "go", "build", "-ldflags", "-s -w -X main.version=0.2.0", "-o", "bin/agent-watch-bridge", "./cmd/bridge"]
+command = ["sh", "-c", 'v="$(sed -n "s/^BRIDGE_VERSION=//p" VERSIONS)" && [ -n "$v" ] || { echo "BRIDGE_VERSION not found in VERSIONS" >&2; exit 1; }; CGO_ENABLED=0 exec go build -ldflags "-s -w -X main.version=$v" -o bin/agent-watch-bridge ./cmd/bridge']
 platforms = ["macos", "linux"]
 
 [[actions]]
@@ -447,7 +448,7 @@ command = ["./bin/agent-watch-bridge", "pair"]
 ```
 
 - **Five one-shot actions:** `start`, `restart`, `stop`, `status`, `pair`. `configure` is not an action (it takes the token as an argument): run `./bin/agent-watch-bridge configure …` in a terminal.
-- **Build:** static (`CGO_ENABLED=0`), stripped and version-stamped, the same flags as `make bridge`. Keep the version in sync with the Makefile's `VERSION`.
+- **Build:** static (`CGO_ENABLED=0`), stripped and version-stamped, the same flags as `make bridge`. Versions live only in `VERSIONS` at the repo root (one per component); the build reads `BRIDGE_VERSION` from it, and the manifest's own `version` must equal it (`make check-versions`, also run by `go test`). The binaries add their commit themselves: `0.3.0 (c8aa72e)`.
 - **Service environment:** launchd does not inherit `HERDR_*`, so `start` pins the config path (`run --config`), `HERDR_SOCKET_PATH` and `HERDR_PLUGIN_STATE_DIR` in the LaunchAgent plist (or the systemd `--user` unit). Each value comes from a `start` flag, else herdr's plugin environment, else the installed definition, else the default, so a `start` from a terminal or the menu bar keeps what herdr installed. The service runs `agent-watch-bridge run` with `KeepAlive`.
 - **`restart`** restarts the installed service without rewriting its definition (`make restart` rebuilds `bin/agent-watch-bridge` first).
 - **Config file:** `$HERDR_PLUGIN_CONFIG_DIR/config.toml` (mode 0600) holds `relay_url`, `host_token`, `host_name` and `claude_config_dirs`.

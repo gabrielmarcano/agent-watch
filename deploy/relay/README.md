@@ -13,7 +13,7 @@ SSH_OPTS="-i ~/.ssh/<key> -o Port=2222" deploy/relay/deploy.sh root@<vps>
 ```
 
 - **Clean tree only.** It refuses to run with uncommitted or untracked changes, so the binary always matches a commit. (`agent-watch.env` is git-ignored and does not count.)
-- **Version stamp:** `<Makefile VERSION>-<short sha>`, e.g. `0.2.0-d5b8e33`. Check it with `agent-watch-relay version`.
+- **Version:** `RELAY_VERSION` from `VERSIONS` (bump it there when the relay changes), plus the commit the binary reports on its own, e.g. `0.3.0 (c8aa72e)`. Check it with `agent-watch-relay version`; the connected bridge shows it too (`relay_version` in `agent-watch-bridge status --json --local`, the menu bar's Versions section). Relays deployed before 0.3.0 read `0.2.0-<sha>`.
 - **Target:** an explicit `<ssh-target>` wins and uses `SSH_OPTS` only. Without one, `deploy.sh` reads `AW_RELAY_SSH` and `AW_RELAY_SSH_OPTS` from `agent-watch.env` (`AW_ENV_FILE=<path>` for another file); `SSH_OPTS`, if set, still overrides the file's options.
 - **`SSH_OPTS` / `AW_RELAY_SSH_OPTS`** go to both `ssh` and `scp`. Use `-o Port=…`, not `-p`: `scp` spells the port `-P`.
 - **Rollback:** the replaced binary is kept as `/usr/local/bin/agent-watch-relay.prev`. After the restart the box curls `/v1/healthz` on the address in `AW_LISTEN` (from `/etc/agent-watch-relay/env`) for up to 15 s. If it never answers, the script prints the last journal lines, restores `.prev` (and the env file, after `--sync-env`), restarts, and exits non-zero.

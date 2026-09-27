@@ -39,7 +39,7 @@ The files are the source of truth; this table says what each one must keep. **No
 **`deploy.sh <ssh-target>`** (optional `SSH_OPTS="-i <key> -o Port=<port>"`, passed to both `ssh` and `scp`):
 
 1. Refuses a dirty tree (uncommitted or untracked files), so the binary always matches a commit.
-2. `make relay-linux VERSION=<Makefile VERSION>-<short sha>`.
+2. `make relay-linux` with `RELAY_VERSION` from `VERSIONS`; the binary reports its commit on its own (`0.3.0 (c8aa72e)`).
 3. Copies it to a temp dir on the box, keeps the current binary as `/usr/local/bin/agent-watch-relay.prev`, installs the new one and restarts the unit.
 4. Curls `/v1/healthz` on the `AW_LISTEN` address from `/etc/agent-watch-relay/env` for up to 15 s. If it never answers: prints the last journal lines, restores `.prev`, restarts, and exits non-zero.
 
