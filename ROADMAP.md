@@ -4,7 +4,7 @@ This document outlines the milestones achieved in the Herdr-native architecture 
 
 ---
 
-## Milestones Achieved (v0.2.0)
+## Milestones Achieved
 
 ### Core Architecture & Host Bridge
 - **Herdr-Native Control Plane:** Host daemon `agent-watch-bridge` in Go 1.22+, talking directly to the Herdr UNIX socket API (`events.subscribe`, `agent.list`, `agent.read`, `agent.prompt`, `agent.send_keys`). Snapshot-authoritative sync with debounced re-lists, degraded polling and backoff when the event stream drops.
@@ -21,6 +21,7 @@ This document outlines the milestones achieved in the Herdr-native architecture 
 - **Pairing rate limit** per client IP, taken from forwarding headers only when a trusted proxy (`AW_TRUSTED_PROXIES`) wrote them.
 - **Push Dispatch:** FCM HTTP v1 data messages for Wear OS (debounce, digest, per-token delivery, careful dead-token rule) and ntfy for watchOS. An opt-in `resolved` push withdraws answered approvals.
 - **Safe deploys:** `deploy.sh` refuses dirty trees, stamps the version, health-checks and rolls back.
+- **Versions and releases:** one `VERSIONS` file with a version per component, binaries that report their commit, CI on GitHub Actions and date-tagged GitHub releases (`vYYYY.MM.DD`).
 
 ### Agent Adapters (`pkg/agents`)
 - **First-Class Agent Support:** Specialized adapters for Claude Code (`claude`), OpenCode (`opencode`), and Antigravity CLI (`agy`), with real captured fixtures.

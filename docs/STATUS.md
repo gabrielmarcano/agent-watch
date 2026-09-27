@@ -161,18 +161,18 @@ Keep entries short, and use absolute dates (YYYY-MM-DD).
 - [x] systemd service running on the VPS
 - [x] Cloudflare DNS / NPM TLS with WebSockets and unbuffered SSE
 - [x] verify commands pass; SSE streaming and bridge connected
-- Public URL: https://relay.example.com
+- Public URL: https://relay.<domain>
 - Notes:
   - `deploy/relay/`: systemd unit `agent-watch-relay.service`, `env.example`, `deploy.sh`, `Caddyfile.example`, `nginx.conf.example`, `Dockerfile`.
   - Static Linux binary built with `CGO_ENABLED=0` and installed to `/usr/local/bin/agent-watch-relay`.
   - Hardened systemd service running under `agentwatch:agentwatch` with `ProtectSystem=strict`, `StateDirectory=agent-watch-relay` (mode 0700).
   - FCM push enabled and operational.
   - Nginx Proxy Manager (NPM) on the VPS terminating TLS via Let's Encrypt, forwarding to `172.17.0.1:8080` with WebSocket support and `proxy_buffering off;`.
-  - Host bridge daemon on macOS connected to `wss://relay.example.com/v1/host` with `relay_connected: true`, `host_online: true`, reporting active agent states.
+  - Host bridge daemon on macOS connected to `wss://relay.<domain>/v1/host` with `relay_connected: true`, `host_online: true`, reporting active agent states.
   - End-to-end pairing verified via `./bin/agent-watch-bridge pair` and `POST /v1/pair`. *(corrected 2026-09-25)* The code worked; the expiry `pair` printed did not (see Phase 2c).
   - Unbuffered SSE event streaming verified on `GET /v1/events`.
   - Bridge enhanced with automatic `NormalizeRelayURL` (appending `/v1/host` when omitted) and launchd retry on macOS.
-  - **Review fixes 2026-09-25:** `deploy.sh` takes `SSH_OPTS`, refuses a dirty tree, stamps `<version>-<sha>`, keeps `.prev`, health-checks `/v1/healthz` and rolls back on failure; `deploy/relay/README.md` documents the NPM-in-docker topology (listen on `172.17.0.1`, `After=docker.service` drop-in, trusted proxies, why `ufw` must not be enabled blindly), devices and a lost watch; the unit is further hardened (checked on the VPS: exposure 2.4 OK); nginx/Caddy examples set the forwarding headers; the Dockerfile prepares a `0700` data dir.
+  - **Review fixes 2026-09-25:** `deploy.sh` takes `SSH_OPTS`, refuses a dirty tree, stamps `<version>-<sha>` *(since 2026-09-26: `RELAY_VERSION` from `VERSIONS`, and the binary adds its commit, `0.3.0 (<sha>)`)*, keeps `.prev`, health-checks `/v1/healthz` and rolls back on failure; `deploy/relay/README.md` documents the NPM-in-docker topology (listen on `172.17.0.1`, `After=docker.service` drop-in, trusted proxies, why `ufw` must not be enabled blindly), devices and a lost watch; the unit is further hardened (checked on the VPS: exposure 2.4 OK); nginx/Caddy examples set the forwarding headers; the Dockerfile prepares a `0700` data dir.
   - **Deployed 2026-09-25** (`0.2.0-04f5568`, with `deploy.sh`): `AW_TRUST_CF_IP` removed and `AW_TRUSTED_PROXIES` set to the NPM docker network; relay bound to the docker bridge with the `After=docker.service` drop-in; port 8080 verified closed from the server side (RST to outside SYNs); hardened unit installed, `systemd-analyze verify` clean, `systemd-analyze security` exposure **2.4 OK**, no seccomp kills; `AW_PUSH_RESOLVED` left off.
 
 ## Phase 4 — Wear OS (primary)
@@ -271,6 +271,7 @@ Keep entries short, and use absolute dates (YYYY-MM-DD).
 ## macOS menu bar app (`macos-bar/`, not a numbered phase)
 - 2026-09-25: driven entirely by the bridge CLI (`status --json --local` every 2.5 s, `start`, `stop`, `restart`, `pair --json`); distinct icon states; `make bar`, `make bar-test` (decision logic, with a temp HOME; never touches launchd or the real home). Docs: `macos-bar/README.md`.
 - 2026-09-26: a status circle on the icon (green / yellow / red / gray) and nothing else next to it; the bar no longer shows agents or blocked counts (the watch does); a Versions menu section (this app and the bridge).
+- 2026-09-26: the Versions section also shows the relay's version (`relay_version` in `status.json`, from the relay's handshake header), while the bridge runs.
 - Verified with `make bar-test` only; the app itself on the owner's Mac is not recorded as verified.
 
 ---
@@ -279,6 +280,10 @@ Keep entries short, and use absolute dates (YYYY-MM-DD).
 - Done 2026-09-25: one git-ignored `agent-watch.env` (template `agent-watch.env.example`) holds the relay domain, the host token shared by relay and bridge, the relay's SSH target and its server keys. Consumers: `make config` (creates it, generates the token), `make configure-bridge` (`configure --env-file`, token never in argv), `make deploy-relay [ARGS=--sync-env]` (key-by-key merge of the server env with backup and rollback), Wear OS `BuildConfig.DEFAULT_RELAY_URL`, `make watchos-config` (xcconfig for Phase 6). Guards treat the file as a secret.
 - The owner's file was filled from the running deployment (token matches the relay's by hash; nothing redeployed).
 - Deferred: `AW_ANDROID_APPLICATION_ID` until the tile stops hard-coding the package name (Phase 4b item); the first `--sync-env` on the VPS should be watched (the merge is POSIX awk, tested with BSD awk only).
+
+## Versions, CI and releases (not a numbered phase)
+- Done 2026-09-26: one `VERSIONS` file with a version per component (`BRIDGE_VERSION`, `RELAY_VERSION`, `MENUBAR_VERSION`, `WEAROS_VERSION_NAME` / `WEAROS_VERSION_CODE`), read by the Makefile, `herdr-plugin.toml`'s `[[build]]`, `macos-bar/build.sh`, Gradle and `deploy.sh`; `make check-versions` (also in `go test`) keeps the manifest's `version` equal to `BRIDGE_VERSION`. The Go binaries add their commit (`pkg/buildinfo`: `0.3.0 (<sha>)`, `, modified` for a dirty tree). The relay sends its version to the authenticated bridge in the `/v1/host` handshake (`X-Agent-Watch-Relay-Version`, `contracts.md` §3) and the menu bar shows it.
+- GitHub Actions, sized for the free plan: `ci.yml` (Linux, every push), `wearos.yml` (Linux, `wearos-app/` changes), `macos-bar.yml` (macOS, only menu bar / bridge CLI changes), `release.yml` (date tags `vYYYY.MM.DD`: bridge, relay and menu bar binaries, `SHA256SUMS`, notes with the component versions). First runs happen on the next push.
 
 ## Blocked / questions
 - **herdr dialog-status gap — mitigated 2026-09-25, review regularly.** herdr 0.9.1 misses every agy 1.2.x permission dialog (its rule expects wording agy no longer shows) and any Claude dialog after Claude is relaunched in the same pane (a stale input box wins `live_prompt_box`; it is not WebFetch-specific). Hooks can't fix it: herdr ignores the state reported by the claude/agy integrations. Mitigation: temporary local detection overrides, `tools/herdr-overrides/` (installed on the owner's Mac, herdr keeps being the source of truth). **Remove them once upstream fixes it:** run `tools/herdr-overrides/herdr-overrides.sh check` after every herdr manifest update or upgrade. Draft upstream issues, not filed: `tools/herdr-overrides/UPSTREAM-ISSUES.md`.

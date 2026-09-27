@@ -5,9 +5,9 @@ name: macOS menu bar
 on:
   push:
     branches: [main]
-    paths: ["macos-bar/**", "cmd/bridge/**", "pkg/bridge/**", "Makefile", "VERSIONS", ".github/workflows/macos-bar.yml"]
+    paths: ["macos-bar/**", "cmd/bridge/**", "pkg/bridge/**", "pkg/buildinfo/**", "Makefile", "VERSIONS", ".github/workflows/macos-bar.yml"]
   pull_request:
-    paths: ["macos-bar/**", "cmd/bridge/**", "pkg/bridge/**", "Makefile", "VERSIONS", ".github/workflows/macos-bar.yml"]
+    paths: ["macos-bar/**", "cmd/bridge/**", "pkg/bridge/**", "pkg/buildinfo/**", "Makefile", "VERSIONS", ".github/workflows/macos-bar.yml"]
   workflow_dispatch:
 
 permissions:

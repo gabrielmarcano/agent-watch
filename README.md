@@ -2,13 +2,15 @@
 
 Agent Watch connects your wrist to your coding agents. When Claude Code, OpenCode, Antigravity, or other terminal agents need permission, ask a multiple-choice question, or finish a long task, Agent Watch alerts your smartwatch with glanceable context and actionable buttons (Allow, Deny, options, voice dictation). You can step away from the computer while it keeps running your agents: approve commands and follow progress from the watch.
 
-> **Status (2026-09-25): alpha.** The host bridge, the relay and the Wear OS data layer went through a full review. The Wear OS UI is still the first alpha and is being redesigned, and the end-to-end checks are being re-run after that ([`docs/STATUS.md`](docs/STATUS.md)). The watchOS app is the legacy client until Phase 6.
+> **Status (2026-09-26): beta, in daily use.** The host bridge, the relay and the redesigned Wear OS app are deployed and checked on a Pixel Watch 2. The full end-to-end run (Phase 5) is still open, and the watchOS app is the legacy client until Phase 6 ([`docs/STATUS.md`](docs/STATUS.md)).
 
 <p align="center">
-  <img src="docs/assets/watch-agents-list.png" width="200" alt="Agent List on Pixel Watch 2" />
-  <img src="docs/assets/watch-blocked.png" width="200" alt="Blocked Approval on Pixel Watch 2" />
-  <img src="docs/assets/watch-question.png" width="200" alt="Question Picker on Pixel Watch 2" />
+  <img src="docs/assets/watch-agents-list.png" width="180" alt="Agent list: agents that need you come first" />
+  <img src="docs/assets/watch-blocked.png" width="180" alt="A blocked agent asking for permission" />
+  <img src="docs/assets/watch-approve.png" width="180" alt="Allow and Deny, with the agent's other options below" />
+  <img src="docs/assets/watch-question.png" width="180" alt="Answering an agent's multiple-choice question" />
 </p>
+<p align="center"><sub>Wear OS app, sample agents in a sandbox workspace.</sub></p>
 
 ---
 
@@ -56,6 +58,7 @@ Agent Watch is built around a thin outbound host bridge, a minimal cloud relay, 
 ```
 
 - **Outbound-Only Networking:** The host dials outbound to the relay. The watch never connects directly to your computer, and no VPN is required on the watch.
+- **Any internet path should work for the watch:** it only needs to reach the relay over HTTPS and Firebase for push. Wi-Fi, LTE, or the paired phone's connection over Bluetooth (Wear OS routes it through the phone on its own; no companion app of ours is involved). Only Wi-Fi has been checked so far.
 - **Sole Source of Truth:** Herdr is the authoritative multiplexer and control plane. Agent Watch interfaces cleanly through Herdr's verified socket API.
 - **Any TLS reverse proxy** in front of the relay works (nginx, Caddy, Nginx Proxy Manager; Cloudflare optional). See [`deploy/relay/README.md`](deploy/relay/README.md).
 
@@ -131,6 +134,7 @@ On the machine that runs herdr:
    # = ./bin/agent-watch-bridge configure --env-file agent-watch.env
    ```
    - `configure` rewrites the whole `config.toml`. Pass optional settings every time, e.g. `make configure-bridge ARGS="--claude-config-dir ~/work/claude-profile --host-name my-mac"`; it warns when it drops one the old config had.
+   - Claude profiles in `~/.claude` and `~/.claude-*` are found on their own; `--claude-config-dir` is only for profiles elsewhere.
    - It is a CLI command, not a plugin action. The file is `~/.config/herdr/plugins/config/herdr-agent-watch/config.toml` by default.
    - Without the file: `./bin/agent-watch-bridge configure --relay-url wss://relay.<domain> --host-token <64-hex-token>` (the token then shows in `ps`).
 4. Start the bridge service (a LaunchAgent on macOS, a `systemd --user` unit on Linux):
@@ -216,6 +220,56 @@ For a relay and bridge set up by hand before this file existed. Nothing changes 
 | `./bin/agent-watch-bridge status` | Human status, including the relay's view; exit 1 when the bridge is not running |
 | `./bin/agent-watch-bridge status --json --local` | Local files only, no network: what the menu bar reads ([`contracts.md` §6.2](docs/reference/contracts.md)) |
 | `sudo agent-watch-relay devices list` / `devices revoke <id>` | On the VPS; works with the relay running, and a revoke takes effect at once |
+| `make bar` | Rebuild the menu bar app (quit the running one and `open bin/AgentWatchBar.app` again) |
+| `make check` | Format, vet and test the Go code (`make bar-test` for the menu bar logic) |
+| `tools/herdr-overrides/herdr-overrides.sh check` | After a herdr update: are the temporary detection overrides still needed? ([Known issues](#known-issues)) |
+
+---
+
+## Versions and Releases
+
+**Each component has its own version,** all in one file, [`VERSIONS`](VERSIONS) at the repo root:
+
+| Key | Component |
+|---|---|
+| `BRIDGE_VERSION` | `agent-watch-bridge` and the herdr plugin manifest |
+| `RELAY_VERSION` | `agent-watch-relay` |
+| `MENUBAR_VERSION` | the macOS menu bar app |
+| `WEAROS_VERSION_NAME` / `WEAROS_VERSION_CODE` | the Wear OS app (the code must go up for every build installed over an older one) |
+
+- Bump only the component that changed, with semantic versioning. The builds (`make`, the herdr plugin build, Gradle, `macos-bar/build.sh`, the deploy script) read the file.
+- The one copy elsewhere is `version` in `herdr-plugin.toml` (herdr cannot read the file): keep it equal to `BRIDGE_VERSION`. `make check-versions` (also part of `go test`) fails when they differ.
+- The Go binaries add the commit they were built from: `0.3.0 (26b4e93)`, or `0.3.0 (26b4e93, modified)` when built with uncommitted changes.
+- **Where to see them:** `agent-watch-bridge version`, `agent-watch-relay version`, the menu bar's **Versions** section (menu bar, bridge, and the relay while the bridge is connected), and the watch's Settings.
+
+**A release is a dated snapshot of the whole system.** Tag the commit with the date, `vYYYY.MM.DD` (`.2`, `.3`… for more on the same day), and push the tag:
+
+```bash
+git tag v2026.09.26 && git push origin v2026.09.26
+```
+
+The [release workflow](.github/workflows/release.yml) then publishes a GitHub release with:
+- `agent-watch-bridge` for macOS (arm64, amd64) and Linux (amd64, arm64), and `agent-watch-relay` for Linux (amd64, arm64), as static binaries;
+- `AgentWatchBar.app` (universal) as a zip;
+- `SHA256SUMS`, and notes with each component's version and the commits since the previous tag.
+
+The Wear OS app is not attached: it needs your own `google-services.json` and signing key, so build it from source ([step 3](#3-build-and-install-the-wear-os-app)).
+
+**Installing from a release** instead of building:
+- Check the download with `shasum -a 256 -c SHA256SUMS --ignore-missing`.
+- The macOS binaries and the app are not notarized. A file downloaded with a browser is quarantined: `xattr -d com.apple.quarantine <file>` (or right click → Open for the app).
+- The setup guide applies unchanged with the downloaded binary in place of `bin/…`, except the herdr plugin actions, which need a checkout (`herdr plugin link`). Run `agent-watch-bridge start` from a herdr pane (it takes the socket from `$HERDR_SOCKET_PATH`) or pass `--socket`.
+
+### Continuous Integration
+
+GitHub Actions, sized for the free plan (macOS minutes count ten times, so macOS jobs run only when their files change):
+
+| Workflow | Runner | When | What |
+|---|---|---|---|
+| [`ci.yml`](.github/workflows/ci.yml) | Linux | every push to `main` and pull request | `gofmt`, `go vet`, `go test -race`, static cross-builds; guard and `agent-watch.env` tool tests |
+| [`wearos.yml`](.github/workflows/wearos.yml) | Linux | changes under `wearos-app/` or `VERSIONS` | unit tests, lint and a debug build (with a placeholder `google-services.json`) |
+| [`macos-bar.yml`](.github/workflows/macos-bar.yml) | macOS | changes to the menu bar, the bridge CLI or `VERSIONS` | `make bar-test` and `make bar` |
+| [`release.yml`](.github/workflows/release.yml) | Linux + macOS | a `v*` tag (or by hand, as a dry run without publishing) | the release above |
 
 ---
 
@@ -256,7 +310,7 @@ For claude, agy and opencode a menu counts only while its dialog is open, so a n
 - **herdr 0.9.1 misses some open permission dialogs** (reports `done`/`idle`/`working` instead of `blocked`): every Antigravity CLI 1.2.x dialog, and any Claude Code dialog after Claude was relaunched in the same pane. The bridge only publishes prompts for `blocked` agents, so without a workaround the watch cannot answer them. **Workaround:** temporary local detection overrides for herdr in [`tools/herdr-overrides/`](tools/herdr-overrides/README.md) (`herdr-overrides.sh install`; run `check` after herdr updates its manifests and `uninstall` once upstream handles these dialogs). While a dialog is open, dictation to that agent is refused ("Answer the question first").
 - **OpenCode approvals need the default focus.** OpenCode's keys act on the focused button, and focus starts on `Allow once`. Before pressing, the bridge reads the screen with colours and checks the focus is still there; if someone moved it at the computer (arrow keys or mouse hover), the watch's answer is refused with nothing pressed, and must be given at the computer. Reject (`esc`) never depends on focus.
 - **watchOS is the legacy client.** The Apple Watch app does not use the relay API yet; Phase 6 rewrites it (simulator-only, best-effort).
-- **Wear OS UI is an alpha** and is being redesigned; the `resolved` push (which withdraws answered approvals) stays off on the relay (`AW_PUSH_RESOLVED`) until the new app ships.
+- **An approval answered at the computer can stay in the watch's notifications** until the app next sees the live state (e.g. when you open it). The `resolved` push that withdraws them is off by default (`AW_PUSH_RESOLVED`). The installed app already handles it; turning it on is part of the Phase 5 end-to-end run.
 
 ---
 
@@ -276,6 +330,7 @@ For claude, agy and opencode a menu counts only while its dialog is open, so a n
   - When the computer wakes up, the bridge automatically reconnects and clears the banner without user intervention.
 - **"herdr stopped" indicator:**
   - Indicates that the bridge is running but the herdr daemon is not responding on its UNIX socket. Start herdr to restore live monitoring.
+- **"Can't reach the relay" on the watch:** the watch has no internet path to the relay. On Bluetooth only, check the phone itself is online (the watch goes out through it). `curl https://relay.<domain>/v1/healthz` from any network tells whether the relay is up.
 - **Relay rejects the host token:** `status` shows the relay error. The relay and the bridge must hold the same `AW_HOST_TOKEN`: give both the one in `agent-watch.env` with `make deploy-relay ARGS=--sync-env` and `make configure-bridge && make restart`.
 
 ---
@@ -285,4 +340,4 @@ For claude, agy and opencode a menu counts only while its dialog is open, so a n
 - [`HERDR_REFACTOR_PLAN.md`](HERDR_REFACTOR_PLAN.md): the design.
 - [`docs/README.md`](docs/README.md): phase guides and references; [`docs/STATUS.md`](docs/STATUS.md): what is done and verified.
 - [`docs/reference/contracts.md`](docs/reference/contracts.md): every JSON shape, the relay's and the bridge's configuration, and `agent-watch.env` (§7).
-- [`ROADMAP.md`](ROADMAP.md): what comes next.
+- [`ROADMAP.md`](ROADMAP.md): what comes next, including an Android phone client on the same relay ([Phase 7](docs/phases/7-android-mobile.md)).
