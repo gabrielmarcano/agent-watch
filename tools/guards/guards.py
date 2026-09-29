@@ -30,7 +30,7 @@ What is blocked, and why:
    --label aw-session-<name>`; run e.g. `claude "<task>"` in it once).
 2. Raw writes to the herdr socket with mutating methods (including renames).
 3. Owner-only herdr operations: server stop, integration install/uninstall,
-   closing a non-sandbox workspace.
+   closing a non-sandbox workspace or a tab outside the sandbox.
 4. Unsafe git in a shared worktree: add -A/--all/., commit --amend, and push
    unless AW_OWNER_APPROVED_PUSH=1 (use it only when the owner asked).
 5. Writes to legacy paths and secret files.
@@ -69,7 +69,7 @@ OWNER_ONLY = {
 }
 MUTATING_SOCKET_METHODS = re.compile(
     r"agent\.(prompt|send_keys|start|rename|focus)|pane\.(send_|close|split|run|report_|release_agent)"
-    r"|server\.stop|workspace\.(close|rename)|tab\.rename|integration\.(install|uninstall)"
+    r"|server\.stop|workspace\.(close|rename)|tab\.(close|rename)|integration\.(install|uninstall)"
 )
 CODE_RUNNERS = {"python", "python3", "node", "bun", "deno", "nc", "socat", "go", "ruby", "perl"}
 
@@ -139,6 +139,14 @@ def workspace_label(ws_id):
         if ws.get("workspace_id") == ws_id:
             return ws.get("label")
     return None
+
+
+def tab_workspace_label(tab_id):
+    tab = herdr_json(["tab", "get", tab_id]) or {}
+    info = (tab.get("result") or {}).get("tab")
+    if not info:
+        return None
+    return workspace_label(info.get("workspace_id"))
 
 
 def sandbox_problem(target):
@@ -225,6 +233,12 @@ def check_herdr(tokens):
         target = first_positional(rest[2:])
         if target and workspace_label(target) == SANDBOX_LABEL:
             return
+    if key == ("tab", "close"):
+        target = first_positional(rest[2:])
+        if target and tab_workspace_label(target) == SANDBOX_LABEL:
+            return
+        raise Blocked(f"`herdr tab close` refused: tab {target!r} is not in the {SANDBOX_LABEL!r} workspace. "
+                      f"Closing it would end the owner's agent sessions in it.")
     if key in OWNER_ONLY:
         raise Blocked(f"`herdr {' '.join(key)}` {OWNER_ONLY[key]}. Ask the owner to run it himself.")
     if key in TARGETED:

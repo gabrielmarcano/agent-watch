@@ -15,7 +15,7 @@ One Python script (`guards.py`, standard library only) holds every safety rule. 
 |---|---|
 | `herdr` input/pane commands whose target is outside the `aw-sandbox` workspace | The dev Mac runs the owner's real agent sessions. The target is resolved live with `herdr pane get` + `herdr workspace list` |
 | Renaming a workspace to `aw-sandbox`, or a tab into `aw-session-*` (CLI or raw socket) | Either would fake the checks above and open the owner's panes |
-| `herdr server stop`, `integration install/uninstall`, closing a non-sandbox workspace | Owner-only |
+| `herdr server stop`, `integration install/uninstall`, closing a workspace or a tab outside `aw-sandbox` | Owner-only: closing ends the owner's agent sessions in it (a tab's workspace is resolved live with `herdr tab get`) |
 | Raw socket scripts using mutating herdr methods | They would bypass the sandbox check |
 | `git add -A` / `.`, `commit --amend`, `commit --no-verify`, `push` without `AW_OWNER_APPROVED_PUSH=1` | Shared worktree; the owner decides when to publish |
 | Writes to `bridge/`, `claude-plugin/`, `.claude-plugin/`, `google-services.json`, `firebase-service-account*.json`, `.env`, `agent-watch.env` | Legacy code must not return; secrets are placed by hand (`agent-watch.env` by `make config`; its `.example` stays writable) |
@@ -49,7 +49,7 @@ git config core.hooksPath .githooks        # enables the pre-commit hook (repo-l
 bash tools/guards/test_guards.sh
 ```
 
-The script covers the core rules, the agy and OpenCode input formats, and the pre-commit hook in a throw-away repo. herdr is used read-only.
+The script covers the core rules, the agy, OpenCode and Claude Code input formats, the session-launch exception (with a fake herdr) and the pre-commit hook in a throw-away repo. herdr is used read-only.
 
 ## Verify inside each tool (once, after setup)
 
