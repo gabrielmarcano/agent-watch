@@ -32,6 +32,7 @@ herdr integration status
 ```
 - Verify that `claude`, `antigravity-cli`, and `opencode` report `current`.
 - If an integration shows `outdated`, **ask the owner** before running `herdr integration install <agent>` (since it alters user configuration files).
+- After a herdr upgrade or a manifest update, run `tools/herdr-overrides/herdr-overrides.sh check` and follow what it says (`tools/herdr-overrides/README.md`).
 
 ### Step 2: Create the Disposable Sandbox
 Create a fresh, isolated workspace for testing:
@@ -64,7 +65,7 @@ Prompt the agent to run a shell command requiring authorization:
 ```bash
 herdr agent prompt $PANE "Run the shell command ls -la and tell me what you see"
 ```
-Wait for `herdr agent list` to report `agent_status: blocked`.
+Wait for `herdr agent list` to report `agent_status: blocked`. This relies on `tools/herdr-overrides/` being installed: upstream herdr 0.9.1 misses agy's permission dialogs and Claude dialogs after a relaunch in the same pane (`docs/reference/agents.md` §3.1, §4.1).
 Capture the screen:
 ```bash
 herdr agent read $PANE --source visible --format text
@@ -76,13 +77,14 @@ Check:
   - Digit immediate vs digit + Enter.
   - Horizontal buttons (arrows + Enter vs letters).
   - Cancel key (`esc`).
+- **OpenCode:** also recapture the focus fixtures with `herdr agent read $PANE --source visible --format ansi` into `pkg/agents/testdata/opencode/focus/` (`docs/reference/agents.md` §5.1).
 
 #### C. Test File-Edit Permission Menu
 Prompt the agent to edit a file requiring authorization:
 ```bash
 herdr agent prompt $PANE "Append the line 'world' to note.txt"
 ```
-Wait for `agent_status: blocked`, then capture screen:
+Wait for `agent_status: blocked` (same caveat as in B), then capture screen:
 ```bash
 herdr agent read $PANE --source visible --format text
 ```
@@ -155,6 +157,6 @@ If any agent CLI altered its menus, keys, or transcript formats:
 Always terminate all sandbox sessions and delete the temporary directory when finished:
 ```bash
 herdr workspace close <workspace_id>
-rm -rf /tmp/aw-sandbox /tmp/aw-other
+rm -rf /tmp/aw-sandbox
 herdr agent list   # Verify only owner panes remain
 ```

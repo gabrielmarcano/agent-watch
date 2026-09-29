@@ -83,6 +83,7 @@ func (c *Client) Call(ctx context.Context, method string, params any, out any) e
 | `agent.send_keys` | `{"target", "keys":[...]}` | — | Key grammar in §4 |
 | `agent.prompt` | `{"target", "text", "wait"?}` | — | Never pass `wait` (it blocks); omit it or send `null` |
 | `session.snapshot` | `{}` | `session_snapshot` | Workspaces, tabs, panes, agents, `focused_pane_id` |
+| `workspace.list` | `{}` | `workspace_list` | `{"workspaces":[{"workspace_id", "number", "label", ...}]}` — the bridge reads `label` for `AgentState.workspace` |
 | `events.subscribe` | `{"subscriptions":[...]}` | `subscription_started` | Streaming, §5 |
 
 **`target`** accepts a `pane_id` (preferred, always unique) or an agent `name`. This project always sends `pane_id`.
@@ -113,17 +114,17 @@ func (c *Client) Call(ctx context.Context, method string, params any, out any) e
 
 ## 3. `AgentInfo` (element of `agent.list`)
 
-Real example (trimmed):
+Real example (trimmed, values replaced with placeholders):
 
 ```json
 {
-  "pane_id": "w5:pAE", "tab_id": "w5:tA9", "workspace_id": "w5", "terminal_id": "term_65c1bb8afb5493",
-  "agent": "claude", "agent_status": "done", "name": "bizum", "focused": false,
+  "pane_id": "w5:pAE", "tab_id": "w5:tA9", "workspace_id": "w5", "terminal_id": "term_00000000000000",
+  "agent": "claude", "agent_status": "done", "name": "my-app", "focused": false,
   "cwd": "/Users/me/Code/app", "foreground_cwd": "/Users/me/Code/app",
-  "terminal_title": "✳ Bizum configurable", "terminal_title_stripped": "Bizum configurable",
+  "terminal_title": "✳ Add a settings page", "terminal_title_stripped": "Add a settings page",
   "interactive_ready": true, "revision": 3, "state_change_seq": 333,
   "agent_session": { "agent": "claude", "kind": "id", "source": "herdr:claude",
-                     "value": "bc1bbe64-5d8f-41b6-910d-aa5ae80518cf" }
+                     "value": "00000000-0000-0000-0000-000000000000" }
 }
 ```
 
