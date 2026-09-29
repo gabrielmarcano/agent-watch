@@ -10,8 +10,8 @@ import org.junit.Test
 class AgentNotificationsTest {
 
     private fun blockedData(pane: String = "w5:pAE", seq: String = "334") = mapOf(
-        "event" to "blocked", "pane_id" to pane, "agent" to "claude", "label" to "bizum",
-        "title" to "bizum needs approval", "body" to "Bash: go test ./...", "state_change_seq" to seq,
+        "event" to "blocked", "pane_id" to pane, "agent" to "claude", "label" to "my-app",
+        "title" to "my-app needs approval", "body" to "Bash: go test ./...", "state_change_seq" to seq,
         "fingerprint" to "9f2c61d0a4b3e871", "allow_option_id" to "opt-1", "deny_option_id" to "opt-3"
     )
 
@@ -25,7 +25,7 @@ class AgentNotificationsTest {
         assertEquals("9f2c61d0a4b3e871", msg.fingerprint)
         assertEquals("opt-1", msg.allowOptionId)
         assertEquals("opt-3", msg.denyOptionId)
-        assertEquals("bizum needs approval", msg.title)
+        assertEquals("my-app needs approval", msg.title)
     }
 
     @Test

@@ -7,10 +7,11 @@
 # BRIDGE_VERSION (`make check-versions` fails when they differ).
 #
 # The Go binaries add the commit they were built from on their own, e.g.
-# "0.3.0 (c8aa72e)": never write a commit here.
+# "x.y.z (<commit>)": never write a commit here.
 #
-# WEAROS_VERSION_CODE must always increase: Android refuses to update an
-# installed app to a lower or equal code.
+# WEAROS_VERSION_CODE must increase for every build you ship: Android refuses
+# to install a lower code over a higher one, and an equal code hides which
+# build is on the watch.
 #
 # GitHub releases are date-tagged snapshots of the whole repo (vYYYY.MM.DD)
 # whose notes list the versions below.
@@ -20,6 +21,6 @@
 
 BRIDGE_VERSION=0.3.0
 RELAY_VERSION=0.3.0
-MENUBAR_VERSION=0.3.0
+MENUBAR_VERSION=0.3.1
 WEAROS_VERSION_NAME=1.1.0
 WEAROS_VERSION_CODE=2

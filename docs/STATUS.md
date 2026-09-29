@@ -27,7 +27,7 @@ The one place for the project's state: what is done, what is open, what comes ne
 | Shared config (`agent-watch.env`) | done | — | [`GUIDE.md`](GUIDE.md) § Setup, `agent-watch.env.example` |
 | Versions, CI, releases | done | — | [`GUIDE.md`](GUIDE.md) § Versions and Releases |
 
-**Deployed:** relay, bridge and menu bar from release `v2026.09.26`; the Wear OS app of that release on the owner's Pixel Watch 2. The component versions are in `VERSIONS`.
+**Deployed:** relay and bridge from release `v2026.09.26`, the Wear OS app of that release on the owner's Pixel Watch 2; the menu bar built from `main` into `bin/` (it runs the new build from its next launch). The component versions are in `VERSIONS`.
 
 **What can run in parallel:**
 - **5 runs alone:** it tests the whole system.
@@ -46,7 +46,6 @@ The one place for the project's state: what is done, what is open, what comes ne
 - `AW_PUSH_RESOLVED=1` on the relay (row 23). Unblocked: the watch runs the app that handles `resolved`.
 
 ### Code
-- **Menu bar:** its "not configured" hint suggests `configure --host-token <64 hex>` (`macos-bar/BarLogic.swift`), which shows the token in `ps`. It should point to `make configure-bridge`.
 - **`AW_ANDROID_APPLICATION_ID`:** nothing in the app depends on the application id any more. Left to wire:
   - `applicationId` in `wearos-app/app/build.gradle.kts`;
   - the placeholder `google-services.json` in `.github/workflows/wearos.yml`;
@@ -64,10 +63,6 @@ The one place for the project's state: what is done, what is open, what comes ne
 - ntfy delivery (watchOS push) has never been tested.
 - The menu bar app on the owner's Mac (Phase 5 row 27).
 - The first `make deploy-relay ARGS=--sync-env` on the VPS: the env merge is POSIX awk, tested with BSD awk only.
-
-### Owner decisions
-- `herdr-plugin.toml` sets `min_herdr_version = "0.9.0"`, but the docs say herdr ≥ 0.9.1 (the version everything was verified on).
-- The sample values in `contracts.md` §1.2, the golden `pkg/model/testdata/agent_state.json` and the model tests use the name of a real project (`bizum`). Replace them with a neutral name?
 
 ---
 

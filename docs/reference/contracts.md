@@ -79,11 +79,11 @@ type AgentState struct {
 {
   "pane_id": "w5:pAE",
   "agent": "claude",
-  "label": "bizum",
-  "name": "bizum",
+  "label": "my-app",
+  "name": "my-app",
   "cwd": "/Users/me/Code/app",
   "workspace_id": "w5",
-  "workspace": "bizum-app",
+  "workspace": "work",
   "status": "blocked",
   "focused": false,
   "state_change_seq": 334,
@@ -437,8 +437,8 @@ All values are strings (FCM data maps allow only strings). No `notification` blo
 | `event` | `blocked` | `blocked` \| `done` \| `digest` (and `resolved`, below) |
 | `pane_id` | `w5:pAE` | Empty for `digest` |
 | `agent` | `claude` | |
-| `label` | `bizum` | |
-| `title` | `bizum needs approval` | Ready to display |
+| `label` | `my-app` | |
+| `title` | `my-app needs approval` | Ready to display |
 | `body` | `Bash: go test ./...` | ≤ 240 chars. For `done`: the agent's reply as one line (markdown markers dropped; a markdown table becomes one line per row, `first cell: other cells · …`, without its header), or `Task finished` when no reply arrived in time (§4.3) |
 | `state_change_seq` | `334` | Decimal string, always a number (`0` for `digest`) |
 | `fingerprint` | `fd6ff7388739252d` | Only for `blocked` |

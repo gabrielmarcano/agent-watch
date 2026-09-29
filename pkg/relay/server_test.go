@@ -357,7 +357,7 @@ func TestServer_PushWiring(t *testing.T) {
 	defer cancel()
 	host := connectTestHost(t, ctx, server, ts)
 	update, _ := json.Marshal(model.AgentUpdateMsg{Type: model.WireAgentUpdate, Agent: model.AgentState{
-		PaneID: "w5:pAE", Agent: "claude", Label: "bizum", Status: model.StatusBlocked, StateChangeSeq: 334,
+		PaneID: "w5:pAE", Agent: "claude", Label: "my-app", Status: model.StatusBlocked, StateChangeSeq: 334,
 		Prompt: &model.PendingPrompt{
 			Kind: model.PromptPermission, Title: "Bash command", Detail: "go test ./...", Fingerprint: "9f2c61d0a4b3e871",
 			Options: []model.PromptOption{
@@ -382,7 +382,7 @@ func TestServer_PushWiring(t *testing.T) {
 	select {
 	case hit := <-ntfyHits:
 		if hit.path != "/aw-test-topic" || hit.auth != "Bearer ntfy-test-token" || hit.priority != "5" ||
-			hit.title != "bizum needs approval" || hit.body != "Bash command: go test ./..." {
+			hit.title != "my-app needs approval" || hit.body != "Bash command: go test ./..." {
 			t.Fatalf("ntfy request = %+v", hit)
 		}
 	case <-ctx.Done():

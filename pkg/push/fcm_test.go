@@ -55,8 +55,8 @@ func TestFCM_Payload(t *testing.T) {
 		{
 			name: "blocked",
 			msg: Message{
-				Event: EventBlocked, PaneID: "w5:pAE", Agent: "claude", Label: "bizum",
-				Title: "bizum needs approval", Body: "Bash command: go test ./...",
+				Event: EventBlocked, PaneID: "w5:pAE", Agent: "claude", Label: "my-app",
+				Title: "my-app needs approval", Body: "Bash command: go test ./...",
 				StateChangeSeq: 334, Fingerprint: "9f2c61d0a4b3e871",
 				AllowOptionID: "opt-1", DenyOptionID: "opt-3", Kind: "permission",
 			},
@@ -64,8 +64,8 @@ func TestFCM_Payload(t *testing.T) {
 			// §4.1), with kind and options (a permission has no one-tap options
 			// beyond allow and deny).
 			want: `{"message":{"token":"device-token-1",
-				"data":{"event":"blocked","pane_id":"w5:pAE","agent":"claude","label":"bizum",
-				        "title":"bizum needs approval","body":"Bash command: go test ./...",
+				"data":{"event":"blocked","pane_id":"w5:pAE","agent":"claude","label":"my-app",
+				        "title":"my-app needs approval","body":"Bash command: go test ./...",
 				        "state_change_seq":"334","fingerprint":"9f2c61d0a4b3e871",
 				        "allow_option_id":"opt-1","deny_option_id":"opt-3",
 				        "kind":"permission","options":""},
@@ -74,13 +74,13 @@ func TestFCM_Payload(t *testing.T) {
 		{
 			name: "blocked question",
 			msg: Message{
-				Event: EventBlocked, PaneID: "w5:pAE", Agent: "claude", Label: "bizum",
-				Title: "bizum needs you", Body: "Color: ¿Qué color?", StateChangeSeq: 40, Fingerprint: "ab12",
+				Event: EventBlocked, PaneID: "w5:pAE", Agent: "claude", Label: "my-app",
+				Title: "my-app needs you", Body: "Color: ¿Qué color?", StateChangeSeq: 40, Fingerprint: "ab12",
 				Kind: "question", Options: []Choice{{ID: "opt-1", Label: "Rojo"}, {ID: "opt-2", Label: "Verde"}},
 			},
 			want: `{"message":{"token":"device-token-1",
-				"data":{"event":"blocked","pane_id":"w5:pAE","agent":"claude","label":"bizum",
-				        "title":"bizum needs you","body":"Color: ¿Qué color?",
+				"data":{"event":"blocked","pane_id":"w5:pAE","agent":"claude","label":"my-app",
+				        "title":"my-app needs you","body":"Color: ¿Qué color?",
 				        "state_change_seq":"40","fingerprint":"ab12",
 				        "allow_option_id":"","deny_option_id":"",
 				        "kind":"question","options":"[{\"id\":\"opt-1\",\"label\":\"Rojo\"},{\"id\":\"opt-2\",\"label\":\"Verde\"}]"},
@@ -89,12 +89,12 @@ func TestFCM_Payload(t *testing.T) {
 		{
 			name: "done",
 			msg: Message{
-				Event: EventDone, PaneID: "w5:pAE", Agent: "claude", Label: "bizum",
-				Title: "bizum finished", Body: "Task finished", StateChangeSeq: 335,
+				Event: EventDone, PaneID: "w5:pAE", Agent: "claude", Label: "my-app",
+				Title: "my-app finished", Body: "Task finished", StateChangeSeq: 335,
 			},
 			want: `{"message":{"token":"device-token-1",
-				"data":{"event":"done","pane_id":"w5:pAE","agent":"claude","label":"bizum",
-				        "title":"bizum finished","body":"Task finished",
+				"data":{"event":"done","pane_id":"w5:pAE","agent":"claude","label":"my-app",
+				        "title":"my-app finished","body":"Task finished",
 				        "state_change_seq":"335","fingerprint":"",
 				        "allow_option_id":"","deny_option_id":""},
 				"android":{"priority":"normal","ttl":"600s"}}}`,
@@ -125,7 +125,7 @@ func TestFCM_Payload(t *testing.T) {
 			// Exactly three data keys: the app withdraws the pane's notification.
 			name: "resolved",
 			msg: Message{
-				Event: EventResolved, PaneID: "w5:pAE", Agent: "claude", Label: "bizum",
+				Event: EventResolved, PaneID: "w5:pAE", Agent: "claude", Label: "my-app",
 				Title: "ignored", Body: "ignored", StateChangeSeq: 335, Fingerprint: "ignored",
 			},
 			want: `{"message":{"token":"device-token-1",
@@ -203,10 +203,10 @@ func TestFCM_ResolvedIsOffByDefault(t *testing.T) {
 
 	// Through the dispatcher: only the blocked push goes out.
 	d, _, _ := newTestDispatcher(fcm)
-	blocked := model.AgentState{PaneID: "w5:pAE", Label: "bizum", Status: model.StatusBlocked, StateChangeSeq: 334}
+	blocked := model.AgentState{PaneID: "w5:pAE", Label: "my-app", Status: model.StatusBlocked, StateChangeSeq: 334}
 	d.OnAgentUpdate(nil, blocked)
 	d.Wait()
-	d.OnAgentUpdate(&blocked, model.AgentState{PaneID: "w5:pAE", Label: "bizum", Status: model.StatusWorking, StateChangeSeq: 335})
+	d.OnAgentUpdate(&blocked, model.AgentState{PaneID: "w5:pAE", Label: "my-app", Status: model.StatusWorking, StateChangeSeq: 335})
 	d.Wait()
 
 	// And even when handed one directly, FCM sends nothing.
@@ -245,11 +245,11 @@ func TestDispatcher_ResolvedReachesFCMNotNtfy(t *testing.T) {
 	ntfy := &Ntfy{BaseURL: ntfyServer.URL, Topic: "test-topic", Client: ntfyServer.Client()}
 	d, _, _ := newTestDispatcher(fcm, ntfy)
 
-	blocked := model.AgentState{PaneID: "w5:pAE", Agent: "claude", Label: "bizum", Status: model.StatusBlocked, StateChangeSeq: 334}
+	blocked := model.AgentState{PaneID: "w5:pAE", Agent: "claude", Label: "my-app", Status: model.StatusBlocked, StateChangeSeq: 334}
 	d.OnAgentUpdate(nil, blocked)
 	d.Wait()
 	<-fcmBodies // the blocked push
-	d.OnAgentUpdate(&blocked, model.AgentState{PaneID: "w5:pAE", Agent: "claude", Label: "bizum", Status: model.StatusWorking, StateChangeSeq: 335})
+	d.OnAgentUpdate(&blocked, model.AgentState{PaneID: "w5:pAE", Agent: "claude", Label: "my-app", Status: model.StatusWorking, StateChangeSeq: 335})
 	d.Wait()
 
 	select {

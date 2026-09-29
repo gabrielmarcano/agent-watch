@@ -190,7 +190,7 @@ func versionLines(barVersion: String, status: LocalStatus?) -> [String] {
     return lines
 }
 
-let configureHint = "Configure it in a terminal: agent-watch-bridge configure --relay-url wss://<relay> --host-token <64 hex>"
+let configureHint = "Configure it in a terminal: make configure-bridge in the repo, or agent-watch-bridge configure --env-file agent-watch.env (the token never goes on the command line)"
 
 func present(state: BarState, status: LocalStatus?, busy: String? = nil, barVersion: String = "") -> Presentation {
     let s = status ?? LocalStatus()

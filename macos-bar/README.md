@@ -54,7 +54,7 @@ The bar reports the health of the bridge and the relay, and pairs watches. It ne
 | watch with `!` | red | Bridge not responding (no status for more than 15 s) | Restart |
 | crossed watch | gray, or red if it failed to start | Bridge stopped (and why, if it failed) | Start |
 | crossed watch | gray | Bridge service not installed | Start |
-| crossed watch | gray | Bridge not configured; Start is disabled | Run `make configure-bridge` (or `agent-watch-bridge configure …`) in a terminal |
+| crossed watch | gray | Bridge not configured; Start is disabled | Run `make configure-bridge` (or `agent-watch-bridge configure --env-file agent-watch.env`) in a terminal |
 | watch with `!` | red | agent-watch-bridge not found, or status unavailable | See the menu |
 
 The tooltip repeats the state. The **Versions** section of the menu shows:
