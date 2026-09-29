@@ -32,6 +32,8 @@ Read `docs/reference/agents.md` (spec) and `.agents/rules/agent-adapters.md` fir
    // func (a <agent>Adapter) LastTurn(ctx context.Context, ref SessionRef) (*model.HistoryItem, error)
    ```
 
+   If an answer's keys act on whichever button has focus (OpenCode's Enter), also implement `FocusGuard` (`pkg/agents/adapter.go`) and capture an `--format ansi` focus fixture.
+
 4. **Register it** in `NewRegistry`.
 5. **Tests:**
    - The golden fixture test picks up the new `testdata/<agent>/` files automatically.
@@ -48,5 +50,5 @@ Read `docs/reference/agents.md` (spec) and `.agents/rules/agent-adapters.md` fir
 ## Never
 - Map roles by option position.
 - Return an Allow option when nothing was parsed.
-- Read a whole transcript file (always tail 256 KB).
+- Read a whole transcript file. Tail reads stay bounded: 256 KiB, grown to at most 4 MiB only when the turn starts further back (the Claude reader's `tailWindows`).
 - Write to an agent's files or database.

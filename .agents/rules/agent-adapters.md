@@ -16,8 +16,8 @@ Spec: `docs/reference/agents.md`. Guide: `docs/phases/2b-agent-adapters.md`. How
 - **Every behaviour change needs a test that fails without it**: a real fixture in `testdata/<agent>/` (captured with the `capture-fixture` skill) or a synthetic case in `testdata/generic/`.
 - **Priority agents:** `claude`, `agy`, `opencode`. Everything else must keep working through `generic`, so do not special-case other agents inside generic code.
 - **Transcript readers:**
-  - bounded tail reads (256 KB) and read-only access (the OpenCode DB opens with `mode=ro`);
+  - bounded tail reads (256 KiB; Claude grows to 1 MiB and 4 MiB when a turn starts further back) and read-only access (the OpenCode DB opens with `mode=ro`);
   - `ErrNoTranscript` on any failure, never a panic;
   - responses truncated with `model.TruncateUTF8(…, 16384)`.
 - **No imports of `pkg/herdr`**, and no network I/O.
-- **Fixtures are scrubbed:** no home paths, usernames, emails or tokens. The pre-commit hook scans them.
+- **Fixtures are scrubbed:** no home paths, usernames, emails or tokens. The pre-commit hook scans only for keys and tokens; check the rest by hand (`git grep` in `docs/guides/agent-cli-audit.md`).

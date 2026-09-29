@@ -14,7 +14,10 @@
 ## Read first
 
 - [`docs/reference/contracts.md`](../reference/contracts.md) §1, §2.
-- [`docs/phases/4-wearos.md`](4-wearos.md): the behaviour to copy (PromptCard rules, target-agent rule, error handling).
+- The behaviour to copy is the redesigned Wear OS app (Phase 4b, checked on the watch on 2026-09-26):
+  - [`docs/phases/4b-wearos-ui.md`](4b-wearos-ui.md) § Design decisions and Principles;
+  - [`wearos-app/ARCHITECTURE.md`](../../wearos-app/ARCHITECTURE.md) §4–5 (data-layer rules, screens, notifications);
+  - [`docs/phases/4-wearos.md`](4-wearos.md) only for the data-layer rules (§3) and the target-agent rule; its UI sections describe the replaced alpha.
 - `.agents/rules/watchos.md`.
 
 ---
@@ -28,6 +31,7 @@
 | `Network/AgentNetworkService.swift` | **Rewrite** as `Network/RelayClient.swift` (REST) + `Network/RelayStore.swift` (SSE + state) |
 | `Views/ConfigView.swift` | **Replace** with `Views/PairingView.swift` |
 | `Views/ContentView.swift` | **Split** into `AgentListView.swift`, `AgentDetailView.swift`, `PromptCardView.swift` |
+| `IMPLEMENTATION_PLAN.md` | **Delete** (the legacy plan; the DoD's `git grep` cannot pass while it exists) |
 | `Views/HistoryListView.swift`, `Views/ReaderDetailView.swift` | Adapt to the new `HistoryItem` |
 | `Utilities/*` | Keep |
 | `project.yml` | `SWIFT_VERSION: 5.9`; `deploymentTarget.watchOS: "10.0"` (needed for `NavigationStack` niceties; confirm the simulator runtime exists) |
@@ -42,15 +46,15 @@
 `Codable`, `Identifiable`, `Sendable`, snake_case via `CodingKeys`, or `decoder.keyDecodingStrategy = .convertFromSnakeCase` with camelCase properties. **Pick one and use it everywhere.**
 
 ```swift
-struct PromptOption: Codable, Identifiable, Sendable, Hashable { let id: String; let label: String; let role: String }
+struct PromptOption: Codable, Identifiable, Sendable, Hashable { let id: String; let label: String; let description: String?; let role: String }
 struct PendingPrompt: Codable, Sendable, Hashable {
     let kind: String; let title: String; let detail: String?
     let options: [PromptOption]; let fingerprint: String; let rawTail: String?
 }
 struct AgentState: Codable, Identifiable, Sendable, Hashable {
     var id: String { paneId }
-    let paneId: String; let agent: String; let label: String; let cwd: String?
-    let workspaceId: String; let status: String; let focused: Bool
+    let paneId: String; let agent: String; let label: String; let name: String?; let cwd: String?
+    let workspaceId: String; let workspace: String?; let status: String; let focused: Bool
     let stateChangeSeq: UInt64; let prompt: PendingPrompt?; let updatedAt: String
 }
 struct HistoryItem: Codable, Identifiable, Sendable, Hashable {
@@ -81,11 +85,11 @@ struct AgentsSnapshot: Codable, Sendable { let hostOnline: Bool; let herdrOnline
 ### 3. Views (copy the Wear OS UX)
 
 - `NavigationStack`:
-  - **`AgentListView`:** List sorted by severity, status color dot, ⚠ when blocked, offline banners.
-  - **`AgentDetailView`:** status, `PromptCardView`, Dictate, History. Opening it sets `pinnedPaneId`.
-- **`PromptCardView`:** the same rules as the Wear OS `PromptCard` (permission / question / unknown).
-- **Dictation:** `TextField` with dictation (watchOS offers the dictation input automatically). Show "To: <label>" before sending.
-- **History and reader:** markdown via `AttributedString(markdown:)` for `source == "transcript"`, plain `Text` otherwise.
+  - **`AgentListView`:** sections by attention (Needs you · Done · Working · Idle · Unknown) across workspaces, the workspace as secondary text; status as icon + word + colour, never colour alone; one notice line ("Connecting…", "Relay offline", "Device offline", "herdr stopped").
+  - **`AgentDetailView`:** status, `PromptCardView`, the last reply, Reply (dictation), History, and a "Pin to tile" toggle that sets `pinnedPaneId` (opening an agent does not pin it).
+- **`PromptCardView`:** the same rules as the Wear OS prompt section (`ui/screens/PromptSection.kt`: permission / question / unknown, Deny · Allow with the positive on the right, `allow_always` confirmed).
+- **Dictation:** `TextField` with dictation (watchOS offers the dictation input automatically), then a confirmation with the text and "To: <label>" before Send, as on Wear OS.
+- **History and reader:** markdown via `AttributedString(markdown:)` for `source == "transcript"`; `screen` captures in monospace, except their tables, which the bridge sends as markdown (show them as one record per row).
 - **No push code:** ntfy on the iPhone handles alerts. Remove APNs registration code if any remains.
 
 ### 4. Build and run in the simulator

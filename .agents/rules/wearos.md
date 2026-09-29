@@ -8,7 +8,7 @@ description: "Wear OS client rules (primary client, Pixel Watch 2)"
 
 > Applies to: wearos-app/**.
 
-Guide: `docs/phases/4-wearos.md`. Contracts: `docs/reference/contracts.md`.
+Guides: `docs/phases/4-wearos.md` (data layer) and `docs/phases/4b-wearos-ui.md` (the current UI); the code is described in `wearos-app/ARCHITECTURE.md`. Contracts: `docs/reference/contracts.md`.
 
 - **Reference implementation.** Every feature ships here first and is verified on the owner's Google Pixel Watch 2. Say "verified on device" only if the owner confirmed it on the watch.
 - **Models mirror `pkg/model` field by field**, with snake_case Gson names, `@Keep` on every class, and nullable where Go uses `omitempty`. `ContractsTest` parses `pkg/model/testdata/agent_state.json`. If it fails, the app is out of date.
@@ -23,6 +23,6 @@ Guide: `docs/phases/4-wearos.md`. Contracts: `docs/reference/contracts.md`.
   - never auto-retry an answer after a 409.
 - **Notifications:** every `PendingIntent` needs an identity unique per pane **and** action, or extras from different agents overwrite each other. Request codes alone are not enough (they can collide across panes): put a data URI per (pane, action) on the intent (`AgentNotifications.intentUri`).
 - **Battery:** SSE runs only while the app is in the foreground (process lifecycle). Complications and tiles make one `GET /v1/agents` and do no heavy parsing.
-- **UI:** Wear Compose Material, `ScalingLazyColumn` with `rotaryScrollable`, list → detail navigation. The dictation target label is shown before sending.
+- **UI:** Wear Compose Material 3 (`androidx.wear.compose.material3`), `ScreenScaffold` + `TransformingLazyColumn` (native rotary scrolling), list → agent screen navigation. Dictation is confirmed with the text and the target label before sending.
 - **Secrets:** never create, edit or commit `google-services.json`. The owner places it.
 - **Build:** `./gradlew :app:testDebugUnitTest :app:assembleDebug` (JDK 17). Device install: `.agents/skills/wearos-deploy/SKILL.md`.

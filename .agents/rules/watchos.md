@@ -12,7 +12,7 @@ Guide: `docs/phases/6-watchos.md`.
 
 - **Best-effort.** It follows Wear OS: copy the UX already validated there; do not invent new behaviour here first.
 - **No physical Apple Watch exists.** Report results as "verified in the simulator". Never claim device behaviour.
-- **Models mirror `pkg/model`** (`Codable`, `Identifiable`, `Sendable`). Even when the UI lags, a contract change must still update the Swift models so the app compiles.
+- **Models mirror `pkg/model`** (`Codable`, `Identifiable`, `Sendable`). Even when the UI lags, a contract change must still update the Swift models so the app compiles. Until Phase 6 the app is the legacy client and only `CancelRequest` is mirrored (`docs/STATUS.md`).
 - **Network:**
   - `/v1` over HTTPS with `Authorization: Bearer`;
   - the device token lives in the **Keychain**, not in `@AppStorage`;

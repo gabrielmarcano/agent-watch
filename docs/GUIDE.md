@@ -138,7 +138,11 @@ On the machine that runs herdr:
 5. Verify the bridge:
    ```bash
    ./bin/agent-watch-bridge status
-   # bridge: running (pid …); relay: connected to relay.<domain>; herdr: online; agents: N (M blocked)
+   # bridge:   running (pid …); launchd: running (pid …)
+   # relay:    connected to relay.<domain>
+   # herdr:    online
+   # agents:   N (M blocked)
+   # …then the config, status and log paths
    ```
 
 ### Alternative: Install the Bridge with herdr
@@ -253,7 +257,7 @@ For a relay and bridge set up by hand before this file existed. Nothing changes 
 - Bump only the component that changed, with semantic versioning. The builds (`make`, the herdr plugin build, Gradle, `macos-bar/build.sh`, the deploy script) read the file.
 - The one copy elsewhere is `version` in `herdr-plugin.toml` (herdr cannot read the file): keep it equal to `BRIDGE_VERSION`. `make check-versions` (also part of `go test`) fails when they differ.
 - The Go binaries add the commit they were built from: `0.3.0 (26b4e93)`, or `0.3.0 (26b4e93, modified)` when built with uncommitted changes.
-- **Where to see them:** `agent-watch-bridge version`, `agent-watch-relay version`, the menu bar's **Versions** section (menu bar, bridge, and the relay while the bridge is connected), and the watch's Settings.
+- **Where to see them:** `agent-watch-bridge version`, `agent-watch-relay version`, the menu bar's **Versions** section (menu bar, bridge, and the relay while the bridge runs, kept while the relay is unreachable), and the watch's Settings.
 
 **A release is a dated snapshot of the whole system.** Tag the commit with the date, `vYYYY.MM.DD` (`.2`, `.3`… for more on the same day), and push the tag:
 
@@ -337,11 +341,11 @@ For claude, agy and opencode a menu counts only while its dialog is open, so a n
 - **Log files:**
   - Bridge logs: `~/Library/Logs/agent-watch-bridge.log` (macOS), `journalctl --user -u agent-watch-bridge` (Linux)
   - Relay logs: `journalctl -u agent-watch-relay -f` on the VPS
-- **"Mac offline" banner:**
+- **"Device offline" banner:**
   - Displayed on the watch when the host bridge disconnects from the relay (e.g. the computer is asleep, or the bridge stopped). The relay also pings the bridge and drops a silent one within about 40 s.
   - Existing history remains browsable on the watch.
   - When the computer wakes up, the bridge automatically reconnects and clears the banner without user intervention.
 - **"herdr stopped" indicator:**
   - Indicates that the bridge is running but the herdr daemon is not responding on its UNIX socket. Start herdr to restore live monitoring.
-- **"Can't reach the relay" on the watch:** the watch has no internet path to the relay. On Bluetooth only, check the phone itself is online (the watch goes out through it). `curl https://relay.<domain>/v1/healthz` from any network tells whether the relay is up.
+- **"Relay offline" on the watch** (or "Can't reach the relay" after a tap): the watch has no internet path to the relay. On Bluetooth only, check the phone itself is online (the watch goes out through it). `curl https://relay.<domain>/v1/healthz` from any network tells whether the relay is up.
 - **Relay rejects the host token:** `status` shows the relay error. The relay and the bridge must hold the same `AW_HOST_TOKEN`: give both the one in `agent-watch.env` with `make deploy-relay ARGS=--sync-env` and `make configure-bridge && make restart`.

@@ -2,6 +2,8 @@
 
 > **Goal:** turn the alpha Wear OS UI into one that is comfortable for everyday use on the owner's **Google Pixel Watch 2**: readable at a glance, safe to approve from, and consistent. The data layer is already fixed (Phase 4 review, 2026-09-25); this phase adopts it in the UI.
 
+> **Status:** done. Checked with the owner on the Pixel Watch 2 on 2026-09-26 (release build); the record is in `docs/STATUS.md`, Phase 4b. The current app is described in [`wearos-app/ARCHITECTURE.md`](../../wearos-app/ARCHITECTURE.md).
+
 | | |
 |---|---|
 | **Depends on** | Phase 4 (data-layer review fixes merged) |
@@ -65,7 +67,7 @@ Taken after an emulator audit of every screen (round 384 px / 192 dp AVD, fake h
 | 4 | **Flat list ordered by attention** | Sections "Needs you · Done · Working · Idle · Unknown"; the workspace is the agent's secondary text |
 | 5 | **Fixed palette** | Status colours carry meaning; no dynamic colour from the watch face |
 
-**Principles:** status before name (icon + word + colour, never truncated, colour never alone) · the first blocked agent visible on open · the prompt anchored under the clock, "View all" past 6 lines · Deny | Allow with the positive on the right, ≥ 52 dp tall, ≥ 8 dp apart, extra options styled apart and `allow_always` confirmed · feedback where the finger is (`ConfirmationDialog` + haptics, errors next to the buttons) · nothing < 12 sp, body ≥ 14 sp, checked at font scale 1.24 · AA contrast for all text · honest states (`auth` first, `stale` dims, "Mac offline" only for `host_online=false`) · no Back buttons · a real Settings screen.
+**Principles:** status before name (icon + word + colour, never truncated, colour never alone) · the first blocked agent visible on open · the prompt anchored under the clock, "View all" past 6 lines · Deny | Allow with the positive on the right, ≥ 52 dp tall, ≥ 8 dp apart, extra options styled apart and `allow_always` confirmed · feedback where the finger is (`ConfirmationDialog` + haptics, errors next to the buttons) · nothing < 12 sp, body ≥ 14 sp, checked at font scale 1.24 · AA contrast for all text · honest states (`auth` first, `stale` dims, "Device offline" only for `host_online=false`; the owner renamed it from "Mac offline") · no Back buttons · a real Settings screen.
 
 **Order:** toolchain + M3 theme → navigation, `auth`/`stale`, pure logic with JVM tests → list → agent + prompt → history + reader → pairing + settings → dictation, tile, complication → notifications → final screenshots → watch check with the owner. Sequential: one Gradle at a time on this Mac, and every step shares the theme and `MainActivity`.
 
@@ -76,7 +78,7 @@ Taken after an emulator audit of every screen (round 384 px / 192 dp AVD, fake h
 - **Emulator first.** Install `system-images;android-34;android-wear;arm64-v8a` with `sdkmanager` (SDK at `/opt/homebrew/share/android-commandlinetools`) and create a **new** round AVD (e.g. `aw-wear-large-round`). Do not touch existing AVDs (another project owns them).
 - **Pairing the emulator** with the relay: `./bin/agent-watch-bridge pair` only prints a short-lived code (no service change). The emulator becomes a registered device: tell the owner its name at the end so it can be revoked.
 - **The emulator shows the owner's real agents.** Never approve, deny, cancel or dictate to them. To exercise prompts, use agents you start in a disposable herdr workspace named `aw-sandbox` (cwd `/tmp/aw-sandbox`; `.agents/skills/capture-fixture/SKILL.md` rules), and close it when done.
-- **The real watch** only for the final check, and **only after asking the owner** in this pane (he does not want to test on the watch until the new UI is ready). `adb install -r` keeps pairing. On the watch never tap approval buttons of real agents, never swipe on the watch face (it dismisses notifications), and remember opening a detail re-pins the tile target.
+- **The real watch** only for the final check, and **only after asking the owner** in this pane (he does not want to test on the watch until the new UI is ready). `adb install -r` keeps pairing. On the watch never tap approval buttons of real agents, never swipe on the watch face (it dismisses notifications), and remember "Pin to tile" changes the Quick Dictate tile's target.
 - **Screenshots** go to your scratchpad; anything committed to `docs/assets/` must show only sandbox agents (no real project names).
 - **One Gradle build at a time on this Mac** (a parallel task may need Gradle). Check `pgrep -fl GradleDaemon` before building and stop daemons when idle (`./gradlew --stop`).
 

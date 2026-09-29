@@ -83,7 +83,7 @@ When two disagree, the higher one wins, and the lower one must be fixed in the s
 | 2b and 3a/3b at the same time | ⚠️ | Both may edit `go.mod`/`go.sum`. Commit one before the other runs `go get`, or resolve the conflict carefully. Never overwrite the other's lines |
 | 3b and 3c | ✅ | 3c only writes `deploy/relay` |
 | 5 and anything | ❌ | 5 is the release gate; it tests the whole system |
-| 6 and 4 | ⚠️ | Technically disjoint, but 6 copies a UX that 4 must validate first |
+| 6 and 4/4b | ✅ | Disjoint; the UX 6 copies was checked on the Pixel Watch 2 on 2026-09-26 (4b) |
 | 7 and 6 | ✅ | Disjoint directories (`android/` vs `watchos-app/`) |
 | 7's step 1 and anything touching the Android tree | ❌ | Step 1 moves `wearos-app/` into `android/{core,wear}` and rewrites path references: it touches most of the Android index |
 

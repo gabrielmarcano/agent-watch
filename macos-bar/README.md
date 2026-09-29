@@ -39,7 +39,7 @@ System Settings → General → Login Items → **Open at Login** → `+` → ch
 2. Otherwise `agent-watch-bridge` next to the app (`bin/`, where `make`
    puts both).
 
-If neither exists the icon shows `?` and the menu says how to build it.
+If neither exists the icon shows the watch with `!` and a red dot, and the menu says how to build it.
 
 ## What the icon says
 

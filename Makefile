@@ -75,7 +75,7 @@ restart: bridge
 # AW_HOST_TOKEN if it is empty. Safe to re-run: it never replaces a token.
 config:
 	@$(AWENV) init $(AW_ENV_FILE) agent-watch.env.example
-	@echo "next: set AW_RELAY_DOMAIN and AW_RELAY_SSH in $(AW_ENV_FILE) (README.md, Setup Guide)"
+	@echo "next: set AW_RELAY_DOMAIN and AW_RELAY_SSH in $(AW_ENV_FILE) (docs/GUIDE.md, Setup Guide)"
 
 # Write the bridge config (relay URL + host token) from agent-watch.env, then
 # `make restart`. configure rewrites the whole config.toml: pass the optional

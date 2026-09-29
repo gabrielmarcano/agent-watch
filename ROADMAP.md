@@ -30,13 +30,14 @@ This document outlines the milestones achieved in the Herdr-native architecture 
 - **Transcript History Readers:** Claude JSONL tail reader, Antigravity JSONL, OpenCode read-only SQLite, and a screen-capture fallback.
 
 ### Smartwatch Clients
-- **Wear OS Application (Primary Client, alpha UI):**
-  - Jetpack Compose for Wear OS with rotary input.
-  - Approval prompts with Allow, Deny and More options, in the app and from notifications.
+- **Wear OS Application (Primary Client):**
+  - Wear Compose Material 3 UI for round screens, with rotary input; agents ordered by how much they need you.
+  - Approval prompts with Allow, Deny and More options, in the app and from notifications; a question's answers right in its notification.
   - Deep links from push notifications into blocked agents.
-  - Voice dictation to the pinned agent (tile and app).
-  - History with a markdown reader.
-  - Offline indicators ("Mac is offline", "herdr stopped") with automatic reconnection.
+  - Voice dictation to the pinned agent, from the app and from the Quick Dictate tile.
+  - An **Agents** tile with the two agents that need you most, and a complication with how many need you.
+  - The agent's last reply and history with a markdown reader; terminal tables shown as one record per row.
+  - Offline indicators ("Device offline", "Relay offline", "herdr stopped") with automatic reconnection.
   - A reviewed, JVM-tested data layer: revoked-pairing state, stale-list detection, re-pairing restart, FCM registration only after the relay accepts it.
 - **watchOS Application:** still the legacy pre-relay client; it is not on the `/v1` API yet (Phase 6).
 
@@ -44,26 +45,22 @@ This document outlines the milestones achieved in the Herdr-native architecture 
 
 ## Next Steps
 
-### 1. Wear OS UI Redesign (dedicated session)
-- Move the UI from its functional alpha to an ergonomic, glanceable design following the Wear OS guidelines: compact cards, badges, typography for round screens, distinct haptics.
-- Adopt the reviewed data layer: `UiState.auth` and `UiState.stale`, `RelayRepository.restart` after pairing, the prompt fingerprint on Cancel, no manual push registration, mapped errors in Quick Dictate (the list is in `docs/STATUS.md`, Phase 4).
-
-### 2. Re-verify End to End (Phase 5)
-- After the redesign, re-run the whole checklist of `docs/phases/5-e2e.md` on the Pixel Watch 2 with a release build, for claude, agy and opencode, including the new rows (duplicate taps, cancel after a menu change, live revoke, trusted-proxy rate limit, silent stream, menu bar).
+### 1. Re-verify End to End (Phase 5)
+- Re-run the whole checklist of `docs/phases/5-e2e.md` on the Pixel Watch 2 with a release build, for claude, agy and opencode, including the new rows (duplicate taps, cancel after a menu change, live revoke, trusted-proxy rate limit, silent stream, menu bar).
 - Replace `docs/e2e-report.md`; several rows of the first run were asserted from code.
 
-### 3. Enable the `resolved` Push
-- The watch app already ignores a `blocked` push older than the last `resolved` for its pane. With the new app on the watch, set `AW_PUSH_RESOLVED=1` on the relay and verify that answered approvals disappear from the watch.
+### 2. Enable the `resolved` Push
+- The watch app already ignores a `blocked` push older than the last `resolved` for its pane. That app is on the watch since 2026-09-26: set `AW_PUSH_RESOLVED=1` on the relay and verify that answered approvals disappear from the watch.
 
-### 4. Close the herdr Dialog-Status Gap Upstream
+### 3. Close the herdr Dialog-Status Gap Upstream
 - herdr 0.9.1 misses Antigravity 1.2.x permission dialogs and Claude dialogs after a relaunch in the same pane. Mitigated with temporary local detection overrides (`tools/herdr-overrides/`); remove them once herdr fixes it (draft issues in `tools/herdr-overrides/UPSTREAM-ISSUES.md`).
 
-### 5. Android Phone Client (Phase 7)
+### 4. Android Phone Client (Phase 7)
 - A native phone app as a first-class relay client next to the watch, sharing the Wear OS data layer through a `:core` module; phone notifications stay local-only and approving from a locked phone requires unlock. Guide: `docs/phases/7-android-mobile.md`.
 
-### 6. watchOS Client (Phase 6)
+### 5. watchOS Client (Phase 6)
 - Rewrite the SwiftUI app against the `/v1` contracts, copying the validated Wear OS UX; verified in the simulator only.
 
-### 7. Later Ideas
+### 6. Later Ideas
 - **Multi-Channel Notifiers:** a Telegram bot with inline approval buttons as a fallback when the watch is charging; Discord webhook summaries.
 - **Extended Agent Adapters:** dedicated adapters for Codex, Pi, Amp and other CLI agents.

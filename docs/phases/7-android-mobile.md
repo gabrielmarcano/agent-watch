@@ -8,7 +8,7 @@
 |---|---|
 | **Depends on** | Phase 5 (the Wear OS UX and data layer validated end to end) |
 | **Parallel with** | Phase 6 (disjoint directories), **except step 1**, which restructures the Android build: nothing else may touch the Android tree while it runs |
-| **Touches** | The Android Gradle build (restructured in step 1), path references in `tools/guards/guards.py`, `.agents/skills/*`, `Makefile`, `.gitignore` and docs; `docs/reference/contracts.md` + all contract copies only if step 4 adds a field (`schema-sync`); `docs/STATUS.md` |
+| **Touches** | The Android Gradle build (restructured in step 1), path references in `tools/guards/`, `.agents/skills/*`, `.agents/rules/*`, `.github/workflows/*`, `Makefile`, `.gitignore` and docs; `VERSIONS` (the phone app's version); `docs/reference/contracts.md` + all contract copies only if step 4 adds a field (`schema-sync`); `docs/STATUS.md` |
 | **Must not** | Create a second copy of the Kotlin contracts; send raw keys; weaken the bridge's validation; change the watch app's application id or signing key; commit Firebase files or personal values |
 
 ---
@@ -70,23 +70,29 @@ The relay does not care what kind of client it serves. Any app that pairs (`POST
 
 ### 1. Restructure into modules (alone)
 - Move to `android/{core,wear}`. `:core` gets `model/`, `network/`, `data/`, `approval/`, the pure notification logic, and their tests. Wear-only code (UI, tiles, complications, Wear notification builders) stays in `:wear`.
+- `network/` is not Wear-free today; split these out first:
+  - `SurfaceUpdates.kt` imports the tile and complication services, and `RelayRepository` calls it (e.g. a callback interface that `:core` defines and `:wear` implements);
+  - `MyFirebaseMessagingService`, `NotificationActionReceiver`, `NotificationSupport` and `AgentNotifications` build and handle Wear notifications: keep their pure logic in `:core` and the Android parts in `:wear`.
 - Update every path reference:
-  - `tools/guards/guards.py` `CONTRACT_PEERS` (the Kotlin model path), then run `bash tools/guards/test_guards.sh`;
+  - `tools/guards/guards.py` `CONTRACT_PEERS` (the Kotlin model path) and `tools/guards/test_guards.sh`, then run `bash tools/guards/test_guards.sh`;
+  - `.github/workflows/wearos.yml` (paths filter, working directory, the placeholder `google-services.json` it writes) and `release.yml`'s Wear OS line;
+  - `.agents/rules/wearos.md` and `.agents/rules/contracts.md`;
   - the `schema-sync` and `wearos-deploy` skills, `AGENTS.md` layout, docs, `Makefile`, `.gitignore` (`google-services.json`, `local.properties`);
   - the Gradle reader of `agent-watch.env`.
 - Gate:
-  - the same JVM test count as before the move, all green (189 on 2026-09-26);
+  - the same JVM test count as before the move, all green (193 on 2026-09-26);
   - `:wear:assembleRelease`;
   - installed on the Pixel Watch 2: pairing and push still work (same application id and signing key).
 - **Commit this step alone**, before any phone code.
 
 ### 2. `:mobile` skeleton
 - Application id; the Android app added to the same Firebase project (`google-services.json` per module, never committed).
+- Its own version pair in `VERSIONS` (e.g. `MOBILE_VERSION_NAME` / `MOBILE_VERSION_CODE`, read by Gradle like the watch's), and a CI job and release-notes line for `:mobile`.
 - `BuildConfig.DEFAULT_RELAY_URL`; pairing (editable URL, code entry; a QR from `agent-watch-bridge pair` is a nice later addition).
 - `RelayRepository` from `:core`; the SSE stream bound to the foreground, like the watch.
 
 ### 3. Screens
-- **Agent list:** an attention section first (blocked, then done), then the rest by workspace.
+- **Agent list:** the watch's information architecture (4b decision 4): sections by attention (Needs you · Done · Working · Idle · Unknown) across workspaces, the workspace as secondary text.
 - **Detail with the prompt card:** permission / question / unknown; roles from labels; ALLOW never `allow_always`; buttons locked after answering (`:core` logic).
 - **Prompt input:** keyboard and voice.
 - **History** and the markdown reader.

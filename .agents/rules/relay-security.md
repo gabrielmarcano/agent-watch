@@ -29,7 +29,7 @@ The relay can make agents on the owner's Mac type and approve things, so treat i
 - **Store:** atomic writes (temp file + fsync + rename, mode 0600). A corrupt file stops startup; never overwrite it silently.
 
 ## Push
-- **FCM data values are all strings,** and every key is always present.
+- **FCM data values are all strings,** and `state_change_seq` is always a number. Which keys each event carries is in `contracts.md` §4.1 (`resolved` has only three).
 - **Anti-spam** (`contracts.md` §4.3): debounce 5 s per pane+event (a repeated `done` is dropped, a quick re-block is **held** to the end of the window, never dropped); the first push of a 10 s window goes out at once; more than 3 in the window → one digest. A push failure never affects relay state.
 - **Dead FCM tokens:** unregister only on `UNREGISTERED` or a `message.token` field violation. A bare 404 is not a dead token.
 - **`resolved`** goes only to senders that can withdraw a notification (FCM with `AW_PUSH_RESOLVED`), never to ntfy.

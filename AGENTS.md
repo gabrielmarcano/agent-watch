@@ -112,21 +112,25 @@ This document defines the development rules, architectural boundaries, and codin
 ## 2. Directory Layout
 
 ```
-agent-monitor/
+agent-watch/                      # the Go module keeps its old name, github.com/gabrielmarcano/agent-monitor
 ├── go.mod · go.sum · Makefile    # make config / configure-bridge / deploy-relay / watchos-config read agent-watch.env
 ├── agent-watch.env.example       # the one deployment config file, documented; the real agent-watch.env is git-ignored (secret)
 ├── herdr-plugin.toml             # herdr-agent-watch plugin manifest
+├── VERSIONS                      # one version per component (make check-versions)
+├── .github/workflows/            # CI (ci, wearos, macos-bar) and date-tagged releases
 ├── cmd/
-│   ├── bridge/                   # host daemon + CLI (configure/run/start/restart/stop/status/pair)
-│   └── relay/                    # VPS relay (serve/devices)
+│   ├── bridge/                   # host daemon + CLI (configure/run/start/restart/stop/status/pair/version)
+│   └── relay/                    # VPS relay (serve/devices/version)
 ├── pkg/
 │   ├── model/                    # shared contracts: state, API DTOs, wire envelopes
 │   ├── herdr/                    # socket client — agent-agnostic
 │   ├── herdrtest/                # fake herdr socket for tests
 │   ├── agents/                   # adapters: claude, agy, opencode, generic (+ testdata/)
+│   ├── bridge/                   # bridge core: engine, command executor, config, status file
+│   ├── buildinfo/                # version + commit stamped into the binaries
 │   ├── relayclient/              # bridge side of the WSS link
 │   ├── relay/                    # relay server: hub, api, sse, auth, store
-│   └── push/                     # Notifier: FCM v1 (Wear OS), ntfy (watchOS)
+│   └── push/                     # Dispatcher (a relay.Notifier) and senders: FCM v1 (Wear OS), ntfy (watchOS)
 ├── deploy/
 │   ├── launchd/                  # LaunchAgent template
 │   └── relay/                    # systemd unit, env/proxy examples, deploy.sh, Dockerfile, README.md (operations)
@@ -176,7 +180,7 @@ agent-monitor/
 - Tests run against `pkg/herdrtest`, never against a live herdr session.
 
 ### Wear OS (Kotlin / Compose)
-- Jetpack Compose for Wear OS (`androidx.wear.compose.material`); keep native rotary scroll (`rotaryScrollable`).
+- Jetpack Compose for Wear OS Material 3 (`androidx.wear.compose.material3`); lists are `TransformingLazyColumn` in a `ScreenScaffold`, which keeps native rotary scrolling.
 - `@Keep` on serializable models (R8).
 - Complications and tiles stay lightweight: they read the aggregated snapshot, with no heavy parsing.
 
@@ -193,7 +197,7 @@ Before claiming a task is done:
 1. **No legacy references remain:** Warp, `osascript`, `agy-sidecar.js`, `claude-plugin`, `/webhook`, or the Node bridge.
 2. **Go builds and tests pass:** `go vet ./... && go test ./...`.
 3. **Adapter changes are covered** by a fixture test in `pkg/agents/testdata/`.
-4. **Both clients match `pkg/model`:** `wearos-app` and `watchos-app` models mirror the current schema. Wear OS behavior is verified on the Pixel Watch 2; watchOS only in the simulator, and reported as such.
+4. **Both clients match `pkg/model`:** `wearos-app` and `watchos-app` models mirror the current schema (watchOS from Phase 6; see §1.5). Wear OS behavior is verified on the Pixel Watch 2; watchOS only in the simulator, and reported as such.
 5. **Input rules hold:**
    - inputs to `blocked` agents go through `answer` / `cancel` → `agent.send_keys`, never `agent.prompt`
    - options are resolved by role, never by position

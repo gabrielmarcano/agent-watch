@@ -19,7 +19,7 @@ Applies to every Go file (bridge, relay, shared packages). Design: `HERDR_REFACT
 - Explicit errors, wrapped with context: `fmt.Errorf("herdr read %s: %w", pane, err)`. **No panics in daemons**: recover nothing, just don't panic.
 - `context.Context` is the first parameter of anything that does I/O. Respect cancellation and set timeouts at the call site.
 - Logging with `log/slog`. **Never log** tokens, `Authorization` headers, prompt text or transcript content. Log lengths and ids instead.
-- JSON types that cross a process boundary live **only** in `pkg/model` and match `docs/reference/contracts.md`.
+- JSON types that cross a process boundary live **only** in `pkg/model` and match `docs/reference/contracts.md`. The exception is the bridge's local files and CLI output (`status.json`, `status --json`, `pair --json`, contracts §6), defined in `pkg/bridge` and `cmd/bridge`.
 - Timestamps only via `model.Now()` (RFC 3339 UTC).
 - Package boundaries:
   - `pkg/herdr` knows no agent names;

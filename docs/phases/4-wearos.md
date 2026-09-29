@@ -12,6 +12,8 @@
 
 > **State on 2026-09-25:** the data layer was reworked after review (`RelayEngine`, `UiState.auth` / `stale`, `RelayRepository.restart`, SSE silence detection, `FcmRegistrar`, `resolved` handling, pane-safe notification intents; 105 JVM tests). **The UI is still the alpha from the first pass and is being redesigned in a separate session**, which must adopt the data-layer API below (`docs/STATUS.md`, Phase 4). Nothing from the rework has been re-verified on the watch yet. `wearos-app/ARCHITECTURE.md` describes the current code.
 
+> **Status (2026-09-26):** the redesign is done (Phase 4b, [`4b-wearos-ui.md`](4b-wearos-ui.md)) and the owner checked it on the Pixel Watch 2. The UI this guide describes (list, detail, PromptCard, pin-on-open, "Mac offline") is the replaced alpha; the end-to-end re-run is Phase 5.
+
 | | |
 |---|---|
 | **Depends on** | Phase 1 (contracts frozen). Build against a relay stub or the local relay (3a) until the real one is deployed |

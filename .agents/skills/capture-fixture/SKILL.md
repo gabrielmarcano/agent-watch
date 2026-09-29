@@ -5,7 +5,7 @@ description: "Safely capture a coding agent's blocked-menu screen, key behaviour
 
 # Capture an agent fixture without touching the owner's sessions
 
-The herdr on this Mac runs the owner's **real** agent sessions. Everything below happens inside a workspace labelled **`aw-sandbox`**. The repo guards (agy and OpenCode hooks) refuse `send-keys` / `prompt` / `pane run` against any pane outside that workspace. If you get `BLOCKED`, you targeted the wrong pane: stop and re-check. Never work around the hook.
+The herdr on this Mac runs the owner's **real** agent sessions. Everything below happens inside a workspace labelled **`aw-sandbox`**. The repo guards (the Antigravity, OpenCode and Claude Code hooks) refuse `send-keys` / `prompt` / `pane run` against any pane outside that workspace; the one exception is `pane run` in a fresh `aw-session-*` tab (`tools/guards/README.md`). If you get `BLOCKED`, you targeted the wrong pane: stop and re-check. Never work around the hook.
 
 For the complete end-to-end audit runbook covering all CLIs, key checks, and transcript verification, see [`docs/guides/agent-cli-audit.md`](../../docs/guides/agent-cli-audit.md).
 
@@ -34,6 +34,8 @@ herdr agent prompt $SBX "Run the shell command ls -la and tell me what you see"
 herdr agent list                    # wait for agent_status "blocked" on $SBX
 herdr agent read $SBX --source visible --format text > pkg/agents/testdata/<agent>/<case>.txt
 ```
+
+For a focus fixture (which button of a dialog has focus, e.g. `pkg/agents/testdata/opencode/focus/`), capture with `--format ansi` instead: the text format drops the colours that show focus.
 
 Case names and what to ask: see `docs/phases/0-fixtures.md` §3.
 

@@ -65,7 +65,7 @@ After installing, open the app once. A force-stop cancels the complication's tap
 
 ```bash
 adb logcat -c
-adb logcat -s AgentWatch:V FCM:V OkHttp:V AndroidRuntime:E
+adb logcat -s FCM:V RelayRepository:V NotifActionReceiver:V ApprovalNotifications:V Complication:V SurfaceUpdates:V MainActivity:V AndroidRuntime:E
 ```
 
 ## Reporting

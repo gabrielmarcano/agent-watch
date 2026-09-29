@@ -1,6 +1,6 @@
 # Repo guards
 
-One Python script (`guards.py`, standard library only) holds every safety rule. Three thin adapters call it, so every agent tool is covered the same way.
+One Python script (`guards.py`, standard library only) holds every safety rule. Four thin adapters call it (three agent tools plus git), so every agent tool is covered the same way.
 
 | Adapter | File | Covers |
 |---|---|---|

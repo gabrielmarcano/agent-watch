@@ -1,10 +1,12 @@
 # Contracts Reference (source of truth for every JSON shape)
 
-Every JSON object that crosses a process boundary is defined here. The following must all match this file exactly:
+Every JSON object that crosses a process boundary is defined here. The shapes of §1–§4 must match this file exactly in:
 
 - the Go structs in `pkg/model/`
 - the Kotlin models in `wearos-app/`
-- the Swift models in `watchos-app/`
+- the Swift models in `watchos-app/` (from Phase 6; until then the legacy client mirrors only `CancelRequest`)
+
+The bridge's local files and CLI output (§6) are defined in `pkg/bridge` and `cmd/bridge`, not in `pkg/model`.
 
 If you need a new field:
 
@@ -100,7 +102,7 @@ type AgentState struct {
 }
 ```
 
-The `fingerprint` above is the real `model.Fingerprint` of this prompt (§1.3); `TestFingerprintKnownAnswers` in `pkg/agents` checks it. The golden file `pkg/model/testdata/agent_state.json` (and the tests that read it) still carries an older made-up value: those tests treat the fingerprint as an opaque string.
+The `fingerprint` above is the real `model.Fingerprint` of this prompt (§1.3); `TestFingerprintKnownAnswers` in `pkg/agents` checks it. The golden file `pkg/model/testdata/agent_state.json` carries the same value.
 
 ### 1.3 `PendingPrompt` and `PromptOption`
 
@@ -323,19 +325,21 @@ Every non-200 response carries an `ErrorResponse`.
 |---|---|---|---|
 | `invalid_request` | 400 | Malformed body or bad parameter | "Something went wrong" |
 | `unauthorized` | 401 | Missing or unknown token | Go to pairing screen |
-| `unknown_pane` | 404 | Pane is not in the relay's list | Remove the card |
-| `stale_state` | 409 | `expected_seq` no longer matches | "The agent changed — refreshed" |
-| `prompt_changed` | 409 | Fingerprint mismatch; or, for OpenCode, the focus on the host is not on the button the keys assume (the `message` says to answer on the Mac; nothing was pressed) | "The question changed — refreshed" |
+| `unknown_pane` | 404 | Pane is not in the relay's list | "Agent closed" |
+| `stale_state` | 409 | `expected_seq` no longer matches; also `answer`/`cancel` to an agent that is not `blocked`, or a repeated command | "Agent changed — refreshed" |
+| `prompt_changed` | 409 | Fingerprint mismatch; or, for OpenCode, the focus on the host is not on the button the keys assume (the `message` says to answer on the Mac; nothing was pressed) | "Prompt changed — refreshed"; for the focus refusal "Answer on the device" |
 | `agent_busy` | 409 | Prompt sent while `working` to an agent that cannot queue | "Agent is busy" |
 | `agent_blocked` | 409 | Prompt sent while `blocked` | "Answer the question first" |
-| `agent_state_unknown` | 409 | Command sent while `unknown` | "Agent state unknown" |
-| `unknown_option` | 409 | `option_id` is not in the current prompt | "The question changed — refreshed" |
+| `agent_state_unknown` | 409 | Prompt sent while the agent's state does not accept prompts (e.g. `unknown`) | "Agent state unknown" |
+| `unknown_option` | 409 | `option_id` is not in the current prompt | "Prompt changed — refreshed" |
 | `pair_code_invalid` | 403 | Wrong or expired code | "Invalid code" |
 | `rate_limited` | 429 | Too many attempts | "Try again later" |
-| `host_offline` | 503 | Bridge not connected, or it disconnected (or was replaced) before answering a command | "Mac offline" |
+| `host_offline` | 503 | Bridge not connected, or it disconnected (or was replaced) before answering a command | "Device offline" |
 | `herdr_offline` | 503 | Bridge connected, herdr unreachable | "herdr stopped" |
-| `timeout` | 504 | Bridge did not answer within 7 s (one budget for sending the command and waiting for `command_result`). Timeouts nest from the inside out, bridge 6 s < relay 7 s < watch 8 s, so a `timeout` means the bridge has already given up | "No answer from the Mac" |
+| `timeout` | 504 | Bridge did not answer within 7 s (one budget for sending the command and waiting for `command_result`). Timeouts nest from the inside out, bridge 6 s < relay 7 s < watch 8 s, so a `timeout` means the bridge has already given up | "No answer from device" |
 | `internal` | 500 | Bug | "Something went wrong" |
+
+On a notification action the watch says "— open the app" instead of "— refreshed".
 
 ---
 
