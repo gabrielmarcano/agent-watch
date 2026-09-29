@@ -5,7 +5,7 @@ description: "Build and ship a new agent-watch-relay binary to the VPS, restart 
 
 # Deploy and check the relay
 
-The first-time VPS setup is in `docs/phases/3c-relay-deploy.md`; day-to-day operations (the Nginx Proxy Manager topology, client IP, devices) in `deploy/relay/README.md`. This skill covers **updates and checks**.
+Everything about the VPS (first-time setup, the proxy, client IP, devices) is in `deploy/relay/README.md`. This skill covers **updates and checks**.
 
 **The owner provides:**
 
@@ -35,7 +35,7 @@ SSH_OPTS="-i <key> -o Port=<port>" deploy/relay/deploy.sh <vps>   # extra ssh/sc
 - **Never read, print or edit `agent-watch.env`** (the guards refuse writes to it). `make deploy-relay` reads it itself.
 
 - **Clean tree only:** it refuses to run with uncommitted or untracked changes, so the binary always matches a commit. Commit first.
-- **Version:** `RELAY_VERSION` from `VERSIONS` plus the commit the binary adds itself, e.g. `0.3.0 (c8aa72e)`; check it with `agent-watch-relay version` on the box, or `relay_version` in `agent-watch-bridge status --json --local`. Bump `RELAY_VERSION` in `VERSIONS` when the relay changes.
+- **Version:** `RELAY_VERSION` from `VERSIONS` plus the commit the binary adds itself, e.g. `x.y.z (<commit>)`; check it with `agent-watch-relay version` on the box, or `relay_version` in `agent-watch-bridge status --json --local`. Bump `RELAY_VERSION` in `VERSIONS` when the relay changes.
 - **`SSH_OPTS`** goes to both `ssh` and `scp`. Use `-o Port=…`, never `-p` (`scp` spells it `-P`).
 - It keeps the replaced binary as `/usr/local/bin/agent-watch-relay.prev`, installs the new one, restarts the unit, and curls `/v1/healthz` on the `AW_LISTEN` address for up to 15 s. **If the new binary never answers, it prints the last journal lines, restores `.prev`, restarts, and exits non-zero.**
 - It never touches `/etc/agent-watch-relay/env`, except with **`--sync-env`** (`make deploy-relay ARGS=--sync-env`), which updates it key by key from `agent-watch.env`, keeps `env.bak-<time>`, and rolls it back with the binary. **Only when the owner asks for it:** it changes live secrets. Needs root over SSH and `curl` on the box.
@@ -49,6 +49,7 @@ ssh <vps> 'journalctl -u agent-watch-relay -n 50 --no-pager'
 ```
 
 - The journal must show `host connected` within a minute (the bridge reconnects on its own).
+- **SSE through the proxy** (with a device token the owner gives you): `curl -N -H "Authorization: Bearer <device_token>" https://relay.<domain>/v1/events` must print a `snapshot` at once, then a `:` keepalive regularly, and stay open for minutes. Bursts or silence mean the proxy buffers; a cut after about 100 s means its idle timeout is too short.
 - The journal must contain no tokens and no prompt text.
 
 **With the owner's host token** (he can run it, or export it only in his own shell):

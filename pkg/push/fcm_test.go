@@ -60,8 +60,9 @@ func TestFCM_Payload(t *testing.T) {
 				StateChangeSeq: 334, Fingerprint: "9f2c61d0a4b3e871",
 				AllowOptionID: "opt-1", DenyOptionID: "opt-3", Kind: "permission",
 			},
-			// The example of docs/phases/3b-push.md, plus kind and options (a
-			// permission has no one-tap options beyond allow and deny).
+			// A full FCM v1 blocked message (keys: docs/reference/contracts.md
+			// §4.1), with kind and options (a permission has no one-tap options
+			// beyond allow and deny).
 			want: `{"message":{"token":"device-token-1",
 				"data":{"event":"blocked","pane_id":"w5:pAE","agent":"claude","label":"bizum",
 				        "title":"bizum needs approval","body":"Bash command: go test ./...",

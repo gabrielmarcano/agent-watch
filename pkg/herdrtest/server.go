@@ -84,6 +84,7 @@ type Server struct {
 // New creates and starts a new in-process fake herdr socket server.
 // Registers cleanup on t so the server stops when the test completes.
 func New(t testing.TB) *Server {
+	// A short dir, not t.TempDir(): macOS caps Unix socket paths at 104 bytes.
 	dir, err := os.MkdirTemp("", "hs")
 	if err != nil {
 		t.Fatalf("herdrtest: MkdirTemp failed: %v", err)

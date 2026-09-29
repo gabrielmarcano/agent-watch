@@ -22,7 +22,7 @@ class DictationTargetTest {
 
     @Test
     fun withoutALaunchPaneTheTargetRuleApplies() {
-        // pinned → latest done → focused (HERDR_REFACTOR_PLAN §11)
+        // pinned → latest done → focused (wearos-app/ARCHITECTURE.md §4b)
         assertEquals(DictationTarget.Found(b), dictationTarget(listOf(a, b), launchPaneId = null, pinnedPaneId = "w1:pB"))
         assertEquals(DictationTarget.Found(b), dictationTarget(listOf(a, b), launchPaneId = "", pinnedPaneId = null))
         assertEquals(DictationTarget.Found(a), dictationTarget(listOf(a), launchPaneId = null, pinnedPaneId = null))

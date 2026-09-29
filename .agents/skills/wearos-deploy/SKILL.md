@@ -15,7 +15,16 @@ export JAVA_HOME="$(/usr/libexec/java_home -v 17)"   # any installed JDK 17 (And
 
 `google-services.json` must exist in `wearos-app/app/`. It is the owner's file and git-ignored. If it is missing, **ask the owner**. Never create or commit it.
 
+## Emulator first
+
+1. Create a **new** round AVD (`system-images;android-34;android-wear;arm64-v8a`, 192 dp like the Pixel Watch 2). Never touch existing AVDs: another project owns them.
+2. Prefer a local relay at `http://10.0.2.2:<port>`: only the debug build allows that cleartext (`src/debug/res/xml/network_security_config.xml`). An emulator paired with the production relay becomes a registered device: give the owner its name so he can revoke it.
+3. Screenshots go to your scratchpad; anything committed shows sandbox agents only. Show the owner each changed screen or state before installing on the watch.
+
 ## Connect the watch (wireless debugging)
+
+Install on the watch only after the owner agrees. There: never tap approvals of real agents, never swipe on the watch face (it dismisses notifications), and remember "Pin to tile" changes Quick Dictate's target.
+
 
 `adb devices` should list the watch. If it does not:
 

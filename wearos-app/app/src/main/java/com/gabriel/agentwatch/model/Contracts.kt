@@ -129,7 +129,7 @@ fun AgentState.severity(): Int = when (status) {
 }
 
 /**
- * Quick-dictation target (HERDR_REFACTOR_PLAN §11): the pinned agent if it still exists, else the most
+ * Quick-dictation target (wearos-app/ARCHITECTURE.md §4b): the pinned agent if it still exists, else the most
  * recently finished (`done`) one, else herdr's focused pane, else none. Never an arbitrary agent: a
  * dictated prompt must not land in a pane the user did not choose.
  */

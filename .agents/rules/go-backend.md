@@ -8,7 +8,7 @@ description: "Go conventions for the bridge, relay and shared packages"
 
 > Applies to: every Go file, go.mod, go.sum, Makefile.
 
-Applies to every Go file (bridge, relay, shared packages). Design: `HERDR_REFACTOR_PLAN.md`. Phase guides: `docs/phases/`.
+Applies to every Go file (bridge, relay, shared packages). Cross-cutting rules: `AGENTS.md`. Shapes and values (timeouts, backoff, limits): `docs/reference/contracts.md`.
 
 ## Language and dependencies
 - **Go 1.22 is the floor** (`go.mod` says `go 1.22`). Use `net/http` routing patterns and `r.PathValue`, and nothing newer without raising the `go` line.
@@ -18,9 +18,10 @@ Applies to every Go file (bridge, relay, shared packages). Design: `HERDR_REFACT
 ## Style
 - Explicit errors, wrapped with context: `fmt.Errorf("herdr read %s: %w", pane, err)`. **No panics in daemons**: recover nothing, just don't panic.
 - `context.Context` is the first parameter of anything that does I/O. Respect cancellation and set timeouts at the call site.
-- Logging with `log/slog`. **Never log** tokens, `Authorization` headers, prompt text or transcript content. Log lengths and ids instead.
+- Logging with `log/slog`, within `AGENTS.md` §3 (no tokens, headers, prompt or transcript text).
 - JSON types that cross a process boundary live **only** in `pkg/model` and match `docs/reference/contracts.md`. The exception is the bridge's local files and CLI output (`status.json`, `status --json`, `pair --json`, contracts §6), defined in `pkg/bridge` and `cmd/bridge`.
 - Timestamps only via `model.Now()` (RFC 3339 UTC).
+- Every long-lived connection (the herdr event stream, the relay WebSocket) reconnects with exponential backoff and jitter (`contracts.md` §3).
 - Package boundaries:
   - `pkg/herdr` knows no agent names;
   - `pkg/agents` does not import `pkg/herdr`;

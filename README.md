@@ -2,7 +2,7 @@
 
 Answer your coding agents from your wrist. When Claude Code, OpenCode, Antigravity or another terminal agent asks for permission, asks a question or finishes a task, your watch shows it with the ways to answer: Allow, Deny, the agent's own options, or a dictated prompt.
 
-> **Status (2026-09-27): beta, in daily use** on a Pixel Watch 2. The full end-to-end run (Phase 5) is still open, and the watchOS app is a legacy client until Phase 6 ([`docs/STATUS.md`](docs/STATUS.md)).
+> **Beta, in daily use** on a Pixel Watch 2. What works, what is open and what comes next: [`docs/STATUS.md`](docs/STATUS.md).
 
 <p align="center">
   <img src="docs/assets/watch-agents-list.png" width="180" alt="Agent list: agents that need you come first" />
@@ -71,19 +71,14 @@ Prebuilt bridge, relay and menu bar binaries are on the [releases page](https://
 
 ## Supported Agents
 
-| Agent | On the watch |
-|---|---|
-| **Claude Code** | permissions, plan approval, questions, history |
-| **OpenCode** | permissions, questions, history |
-| **Antigravity CLI** | permissions, history (needs a temporary herdr override: [known issues](docs/GUIDE.md#known-issues)) |
-| **Any other agent herdr detects** | numbered menus, screen history |
+**Claude Code**, **OpenCode** and **Antigravity CLI** are first-class; any other agent herdr detects works through its numbered menus. What each one supports: [the guide](docs/GUIDE.md#supported-agents).
 
 ---
 
 ## Documentation
 
 - **[Full guide](docs/GUIDE.md):** setup, operations, versions and releases, CI, security model, known issues, troubleshooting.
-- [Status](docs/STATUS.md) · [Roadmap](ROADMAP.md) (next: an Android phone client) · [Design](HERDR_REFACTOR_PLAN.md) · [Contracts](docs/reference/contracts.md) · [Phase guides](docs/README.md)
+- [Status and roadmap](docs/STATUS.md) · [Contracts](docs/reference/contracts.md)
 - Contributing with a coding agent: start with [`AGENTS.md`](AGENTS.md).
 
 ---

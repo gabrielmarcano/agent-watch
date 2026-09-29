@@ -45,7 +45,7 @@ Agent Watch is built around a thin outbound host bridge, a minimal cloud relay, 
 │  Smartwatch Clients                          │
 │                                              │
 │  • Wear OS (Google Pixel Watch 2 — Primary)  │
-│  • watchOS (legacy client until Phase 6)     │
+│  • watchOS (best-effort)                     │
 └──────────────────────────────────────────────┘
 ```
 
@@ -63,7 +63,7 @@ Agent Watch is built around a thin outbound host bridge, a minimal cloud relay, 
 3. **Cloud Relay:** a small Linux VPS (1 vCPU, 512 MB RAM) with a public domain (e.g. `relay.example.com`) and a TLS reverse proxy that passes WebSockets and unbuffered SSE.
 4. **Smartwatch:**
    - **Wear OS** 3 or later (the app's `minSdk` is 30) — *primary; verified only on a Google Pixel Watch 2*.
-   - **watchOS** — *legacy client* (the pre-relay LAN client), not yet on the relay API; Phase 6 rewrites it, simulator-only.
+   - **watchOS** — *best-effort*, simulator-only; not on the relay API yet ([status](STATUS.md)).
 5. **To build the Wear OS app:** JDK 17 (Android Studio's bundled JBR works), the Android SDK, `adb`, and your own **Firebase project** for push.
 
 ---
@@ -94,7 +94,7 @@ Everything a deployment needs lives in **one file**, `agent-watch.env` at the re
 
 ### 1. Deploy the Cloud Relay
 
-1. **First time only:** prepare the VPS (service user, systemd unit, TLS proxy) as in [`docs/phases/3c-relay-deploy.md`](phases/3c-relay-deploy.md). Create `/etc/agent-watch-relay/env` from [`deploy/relay/env.example`](../deploy/relay/env.example); its token placeholder is replaced in the next step.
+1. **First time only:** prepare the VPS (service user, env file, systemd unit, TLS proxy) as in [`deploy/relay/README.md` § First-time setup](../deploy/relay/README.md#first-time-setup-once-per-vps). The env file's token placeholder is replaced in the next step.
 2. Build, install and restart the relay, and copy the relay keys of `agent-watch.env` (the host token included) into the server's env file:
    ```bash
    make deploy-relay ARGS=--sync-env
@@ -182,7 +182,7 @@ The relay (step 1), the watch app (step 3) and pairing (step 4) are unchanged. T
 4. **Install:** `./gradlew :app:installDebug`.
 5. **Push on the relay:** copy the Firebase **service-account** JSON to the VPS only (e.g. `/etc/agent-watch-relay/firebase-service-account.json`, `root:agentwatch`, `0640`), set `AW_FCM_CREDENTIALS` to that server path in `agent-watch.env`, and run `make deploy-relay ARGS=--sync-env`. Without it the relay runs with push disabled.
 
-**watchOS (legacy until Phase 6):** `make watchos-config` writes the git-ignored `watchos-app/Config.generated.xcconfig` (relay URL, and `AW_WATCHOS_BUNDLE_ID` if set) for the Phase 6 project. The legacy Xcode project does not use it.
+**watchOS** ([status](STATUS.md)): `make watchos-config` writes the git-ignored `watchos-app/Config.generated.xcconfig` (relay URL, and `AW_WATCHOS_BUNDLE_ID` if set) for the Phase 6 project. The legacy Xcode project does not use it.
 
 The release build (`assembleRelease`, R8 on) is signed with the debug key: fine for your own watch, not for distribution.
 
@@ -256,13 +256,13 @@ For a relay and bridge set up by hand before this file existed. Nothing changes 
 
 - Bump only the component that changed, with semantic versioning. The builds (`make`, the herdr plugin build, Gradle, `macos-bar/build.sh`, the deploy script) read the file.
 - The one copy elsewhere is `version` in `herdr-plugin.toml` (herdr cannot read the file): keep it equal to `BRIDGE_VERSION`. `make check-versions` (also part of `go test`) fails when they differ.
-- The Go binaries add the commit they were built from: `0.3.0 (26b4e93)`, or `0.3.0 (26b4e93, modified)` when built with uncommitted changes.
+- The Go binaries add the commit they were built from: `x.y.z (<commit>)`, or `x.y.z (<commit>, modified)` when built with uncommitted changes.
 - **Where to see them:** `agent-watch-bridge version`, `agent-watch-relay version`, the menu bar's **Versions** section (menu bar, bridge, and the relay while the bridge runs, kept while the relay is unreachable), and the watch's Settings.
 
 **A release is a dated snapshot of the whole system.** Tag the commit with the date, `vYYYY.MM.DD` (`.2`, `.3`… for more on the same day), and push the tag:
 
 ```bash
-git tag v2026.09.26 && git push origin v2026.09.26
+git tag vYYYY.MM.DD && git push origin vYYYY.MM.DD
 ```
 
 The [release workflow](../.github/workflows/release.yml) then publishes a GitHub release with:
@@ -294,12 +294,12 @@ GitHub Actions, sized for the free plan (macOS minutes count ten times, so macOS
 
 All agent-specific approval menu parsing and key mappings live in `pkg/agents` ([`docs/reference/agents.md`](reference/agents.md)):
 
-| Agent | Status | Approval UI | Key Mapping | Transcript History |
-|---|---|---|---|---|
-| **Claude Code** (`claude`) | First-class | Numbered permission menu, plan approval, AskUserQuestion | Digit direct | JSONL tail reader + screen fallback |
-| **OpenCode** (`opencode`) | First-class | Framed button bar (`Allow once`, `Allow always`, `Reject`); question tool | `Enter` / `Right, Enter, Enter` (confirm stage) / `esc` | SQLite (`opencode.db`, read-only) + screen fallback |
-| **Antigravity CLI** (`agy`) | First-class, with a herdr gap (Known issues) | Numbered box menu (`Command`, `Pending edit`) | Digit direct | JSONL + screen fallback |
-| **Generic** | Universal fallback | Any numbered list matching `^\d+[.)]` | Digit direct | Screen capture |
+| Agent | Support | On the watch | History from |
+|---|---|---|---|
+| **Claude Code** (`claude`) | First-class | Permissions, plan approval, questions (AskUserQuestion) | its transcript, else the screen |
+| **OpenCode** (`opencode`) | First-class | Permissions (Allow once / Allow always / Reject), questions | its database (read-only), else the screen |
+| **Antigravity CLI** (`agy`) | First-class, with a herdr gap ([known issues](#known-issues)) | Permissions for commands and edits | its transcript, else the screen |
+| **Any other agent herdr detects** | Generic | Any numbered menu | the screen |
 
 For claude, agy and opencode a menu counts only while its dialog is open, so a numbered list in an answer is never taken for a menu.
 
@@ -324,10 +324,10 @@ For claude, agy and opencode a menu counts only while its dialog is open, so a n
 
 ## Known Issues
 
-- **herdr 0.9.1 misses some open permission dialogs** (reports `done`/`idle`/`working` instead of `blocked`): every Antigravity CLI 1.2.x dialog, and any Claude Code dialog after Claude was relaunched in the same pane. The bridge only publishes prompts for `blocked` agents, so without a workaround the watch cannot answer them. **Workaround:** temporary local detection overrides for herdr in [`tools/herdr-overrides/`](../tools/herdr-overrides/README.md) (`herdr-overrides.sh install`; run `check` after herdr updates its manifests and `uninstall` once upstream handles these dialogs). While a dialog is open, dictation to that agent is refused ("Answer the question first").
+- **herdr misses some open permission dialogs** (Antigravity CLI's, and Claude's after a relaunch in the same pane), so the watch cannot answer them without a workaround. **Workaround:** the temporary local detection overrides in [`tools/herdr-overrides/`](../tools/herdr-overrides/README.md), which explains the cause, how to install them and when to remove them. While a dialog is open, dictation to that agent is refused.
 - **OpenCode approvals need the default focus.** OpenCode's keys act on the focused button, and focus starts on `Allow once`. Before pressing, the bridge reads the screen with colours and checks the focus is still there; if someone moved it at the computer (arrow keys or mouse hover), the watch's answer is refused with nothing pressed, and must be given at the computer. Reject (`esc`) never depends on focus.
-- **watchOS is the legacy client.** The Apple Watch app does not use the relay API yet; Phase 6 rewrites it (simulator-only, best-effort).
-- **An approval answered at the computer can stay in the watch's notifications** until the app next sees the live state (e.g. when you open it). The `resolved` push that withdraws them is off by default (`AW_PUSH_RESOLVED`). The installed app already handles it; turning it on is part of the Phase 5 end-to-end run.
+- **The watchOS app is not on the relay API yet** ([status](STATUS.md)).
+- **An approval answered at the computer can stay in the watch's notifications** until the app next sees the live state (e.g. when you open it). The `resolved` push that withdraws them is off by default (`AW_PUSH_RESOLVED`). The current app handles it; whether the relay has it on yet is in [STATUS](STATUS.md).
 
 ---
 
@@ -348,4 +348,5 @@ For claude, agy and opencode a menu counts only while its dialog is open, so a n
 - **"herdr stopped" indicator:**
   - Indicates that the bridge is running but the herdr daemon is not responding on its UNIX socket. Start herdr to restore live monitoring.
 - **"Relay offline" on the watch** (or "Can't reach the relay" after a tap): the watch has no internet path to the relay. On Bluetooth only, check the phone itself is online (the watch goes out through it). `curl https://relay.<domain>/v1/healthz` from any network tells whether the relay is up.
+- **`status` shows a relay error with "close 4000":** two bridges share the host token (a foreground `run` beside the service, or a second host) and replace each other in a loop. Stop one of them.
 - **Relay rejects the host token:** `status` shows the relay error. The relay and the bridge must hold the same `AW_HOST_TOKEN`: give both the one in `agent-watch.env` with `make deploy-relay ARGS=--sync-env` and `make configure-bridge && make restart`.

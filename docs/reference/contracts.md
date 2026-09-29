@@ -321,25 +321,25 @@ Every 15 s the relay writes the comment line `:` followed by a blank line, as a 
 
 Every non-200 response carries an `ErrorResponse`.
 
-| Code | HTTP | Meaning | What the watch shows |
-|---|---|---|---|
-| `invalid_request` | 400 | Malformed body or bad parameter | "Something went wrong" |
-| `unauthorized` | 401 | Missing or unknown token | Go to pairing screen |
-| `unknown_pane` | 404 | Pane is not in the relay's list | "Agent closed" |
-| `stale_state` | 409 | `expected_seq` no longer matches; also `answer`/`cancel` to an agent that is not `blocked`, or a repeated command | "Agent changed — refreshed" |
-| `prompt_changed` | 409 | Fingerprint mismatch; or, for OpenCode, the focus on the host is not on the button the keys assume (the `message` says to answer on the Mac; nothing was pressed) | "Prompt changed — refreshed"; for the focus refusal "Answer on the device" |
-| `agent_busy` | 409 | Prompt sent while `working` to an agent that cannot queue | "Agent is busy" |
-| `agent_blocked` | 409 | Prompt sent while `blocked` | "Answer the question first" |
-| `agent_state_unknown` | 409 | Prompt sent while the agent's state does not accept prompts (e.g. `unknown`) | "Agent state unknown" |
-| `unknown_option` | 409 | `option_id` is not in the current prompt | "Prompt changed — refreshed" |
-| `pair_code_invalid` | 403 | Wrong or expired code | "Invalid code" |
-| `rate_limited` | 429 | Too many attempts | "Try again later" |
-| `host_offline` | 503 | Bridge not connected, or it disconnected (or was replaced) before answering a command | "Device offline" |
-| `herdr_offline` | 503 | Bridge connected, herdr unreachable | "herdr stopped" |
-| `timeout` | 504 | Bridge did not answer within 7 s (one budget for sending the command and waiting for `command_result`). Timeouts nest from the inside out, bridge 6 s < relay 7 s < watch 8 s, so a `timeout` means the bridge has already given up | "No answer from device" |
-| `internal` | 500 | Bug | "Something went wrong" |
+| Code | HTTP | Meaning |
+|---|---|---|
+| `invalid_request` | 400 | Malformed body or bad parameter |
+| `unauthorized` | 401 | Missing or unknown token |
+| `unknown_pane` | 404 | Pane is not in the relay's list |
+| `stale_state` | 409 | `expected_seq` no longer matches; also `answer`/`cancel` to an agent that is not `blocked`, or a repeated command |
+| `prompt_changed` | 409 | Fingerprint mismatch; or, for OpenCode, the focus on the host is not on the button the keys assume (the `message` says to answer on the Mac; nothing was pressed) |
+| `agent_busy` | 409 | Prompt sent while `working` to an agent that cannot queue |
+| `agent_blocked` | 409 | Prompt sent while `blocked` |
+| `agent_state_unknown` | 409 | Prompt sent while the agent's state does not accept prompts (e.g. `unknown`) |
+| `unknown_option` | 409 | `option_id` is not in the current prompt |
+| `pair_code_invalid` | 403 | Wrong or expired code |
+| `rate_limited` | 429 | Too many attempts |
+| `host_offline` | 503 | Bridge not connected, or it disconnected (or was replaced) before answering a command |
+| `herdr_offline` | 503 | Bridge connected, herdr unreachable |
+| `timeout` | 504 | Bridge did not answer within 7 s (one budget for sending the command and waiting for `command_result`). Timeouts nest from the inside out, bridge 6 s < relay 7 s < watch 8 s, so a `timeout` means the bridge has already given up |
+| `internal` | 500 | Bug |
 
-On a notification action the watch says "— open the app" instead of "— refreshed".
+What the Wear OS app shows for each code: `commandErrorFeedback` in `wearos-app/app/src/main/java/com/gabriel/agentwatch/approval/CommandFeedback.kt`.
 
 ---
 
@@ -349,7 +349,7 @@ URL: `wss://relay.<domain>/v1/host`, with the header `Authorization: Bearer <hos
 
 **Handshake response:** once the host token is verified, the relay's `101 Switching Protocols` carries its version in `X-Agent-Watch-Relay-Version: <version>` (format below; absent from a relay that predates it). A rejected handshake (`401`) never carries it, and no watch-facing endpoint exposes it (`/v1/healthz` stays `{"ok":true}`). The bridge keeps the value of its last successful handshake and reports it as `relay_version` (§6.1, §6.2).
 
-**Version strings** (`hello.version`, the relay header, `status.json`, `status --json`, the `version` commands): the component's version from `VERSIONS` at the repo root, plus the commit the binary was built from, which Go stamps on its own: `0.3.0 (c8aa72e)`, `0.3.0 (c8aa72e, modified)` for a build with uncommitted changes, or just `0.3.0` for a build without the VCS stamp. A plain `go build` without the Makefile's ldflags reports `dev (…)`. They are display strings: never parse or compare them for ordering.
+**Version strings** (`hello.version`, the relay header, `status.json`, `status --json`, the `version` commands): the component's version from `VERSIONS` at the repo root, plus the commit the binary was built from, which Go stamps on its own: `x.y.z (<commit>)`, `x.y.z (<commit>, modified)` for a build with uncommitted changes, or just `0.3.0` for a build without the VCS stamp. A plain `go build` without the Makefile's ldflags reports `dev (…)`. They are display strings: never parse or compare them for ordering.
 
 - Every frame is one JSON text message with a `type` field.
 - To decode, first unmarshal into `struct{ Type string \`json:"type"\` }`, then unmarshal again into the concrete type.
@@ -358,7 +358,7 @@ URL: `wss://relay.<domain>/v1/host`, with the header `Authorization: Bearer <hos
 ```go
 type HelloMsg struct {
     Type          string `json:"type"` // "hello"
-    Version       string `json:"version"`        // bridge version with its commit, e.g. "0.3.0 (c8aa72e)"
+    Version       string `json:"version"`        // bridge version with its commit, e.g. "x.y.z (<commit>)"
     Host          string `json:"host"`           // host_name or os.Hostname()
     HerdrVersion  string `json:"herdr_version"`  // from herdr "ping"
     HerdrProtocol int    `json:"herdr_protocol"` // from herdr "ping"
@@ -489,7 +489,7 @@ Any other error keeps the token, a bare 404 included (a wrong project id must no
 | `Tags` | `warning` for `blocked`, `white_check_mark` for `done`, `bell` for `digest` |
 | `Authorization` | `Bearer {AW_NTFY_TOKEN}` (only when the token is set) |
 
-ntfy never gets `resolved`: it cannot withdraw a notification it already delivered.
+ntfy never gets `resolved`: it cannot withdraw a notification it already delivered. ntfy messages carry no actions and no click URL: approvals happen in the watch app.
 
 ### 4.3 When to push (relay)
 
@@ -593,8 +593,8 @@ claude_config_dirs = []                  # extra Claude profiles; ~/.claude and 
 
 ```json
 { "pid": 4242, "relay_connected": true, "herdr_online": true, "agents": 11, "blocked": 1,
-  "last_error": "", "relay_error": "", "herdr_error": "", "version": "0.3.0 (c8aa72e)",
-  "relay_version": "0.3.0 (5a32851)", "updated_at": "2026-09-23T17:04:05Z" }
+  "last_error": "", "relay_error": "", "herdr_error": "", "version": "x.y.z (<commit>)",
+  "relay_version": "x.y.z (<commit>)", "updated_at": "2026-09-23T17:04:05Z" }
 ```
 
 | Key | Meaning |
@@ -624,8 +624,8 @@ A reader must not trust `pid` alone: a file left by a crash names a dead pid. `s
   "last_error": "", "relay_error": "", "herdr_error": "",
   "relay_host": "relay.example.com",
   "pid": 4242, "updated_at": "2026-09-23T17:04:05Z", "age_seconds": 3,
-  "version": "0.3.0 (c8aa72e)", "daemon_version": "0.3.0 (c8aa72e)",
-  "relay_version": "0.3.0 (5a32851)",
+  "version": "x.y.z (<commit>)", "daemon_version": "x.y.z (<commit>)",
+  "relay_version": "x.y.z (<commit>)",
   "service": "launchd",
   "definition_path": "/Users/me/Library/LaunchAgents/com.gabrielmarcano.agent-watch-bridge.plist",
   "binary": "/Users/me/Code/agent-watch/bin/agent-watch-bridge",

@@ -14,10 +14,7 @@
 ## Read first
 
 - [`docs/reference/contracts.md`](../reference/contracts.md) §1, §2.
-- The behaviour to copy is the redesigned Wear OS app (Phase 4b, checked on the watch on 2026-09-26):
-  - [`docs/phases/4b-wearos-ui.md`](4b-wearos-ui.md) § Design decisions and Principles;
-  - [`wearos-app/ARCHITECTURE.md`](../../wearos-app/ARCHITECTURE.md) §4–5 (data-layer rules, screens, notifications);
-  - [`docs/phases/4-wearos.md`](4-wearos.md) only for the data-layer rules (§3) and the target-agent rule; its UI sections describe the replaced alpha.
+- The behaviour to copy: [`wearos-app/ARCHITECTURE.md`](../../wearos-app/ARCHITECTURE.md) §3–4 (data-layer rules), §4a (screens), §4b (UX rules, target agent), §5 (notifications); SSE client rules in `contracts.md` §2.3.
 - `.agents/rules/watchos.md`.
 
 ---
@@ -31,7 +28,6 @@
 | `Network/AgentNetworkService.swift` | **Rewrite** as `Network/RelayClient.swift` (REST) + `Network/RelayStore.swift` (SSE + state) |
 | `Views/ConfigView.swift` | **Replace** with `Views/PairingView.swift` |
 | `Views/ContentView.swift` | **Split** into `AgentListView.swift`, `AgentDetailView.swift`, `PromptCardView.swift` |
-| `IMPLEMENTATION_PLAN.md` | **Delete** (the legacy plan; the DoD's `git grep` cannot pass while it exists) |
 | `Views/HistoryListView.swift`, `Views/ReaderDetailView.swift` | Adapt to the new `HistoryItem` |
 | `Utilities/*` | Keep |
 | `project.yml` | `SWIFT_VERSION: 5.9`; `deploymentTarget.watchOS: "10.0"` (needed for `NavigationStack` niceties; confirm the simulator runtime exists) |
@@ -77,7 +73,7 @@ struct AgentsSnapshot: Codable, Sendable { let hostOnline: Bool; let herdrOnline
 **`RelayStore`:** `@MainActor final class RelayStore: ObservableObject`, with `@Published` `agents`, `hostOnline`, `herdrOnline`, `history`, `connection`.
 - SSE with `URLSession.bytes(for:)` and `for try await line in bytes.lines`. Parse the `event:` / `data:` pairs, separated by a blank line.
 - Reconnect with backoff 1 s → 30 s.
-- Apply the same event rules as Wear OS (§3 of the Phase 4 guide).
+- Apply the same event rules as Wear OS (`wearos-app/ARCHITECTURE.md` §3–4).
 - Keep the SSE open only while the scene is `.active` (`@Environment(\.scenePhase)`).
 
 **Storage:** `@AppStorage` for `relayURL` and `pinnedPaneId`. **Keychain** for `deviceToken`, with a small `KeychainHelper` using `SecItemAdd`/`SecItemCopyMatching`.
@@ -118,7 +114,8 @@ Replace the simulator name with one from the `simctl` list. To check the UI, ope
   - Allow / Deny / Cancel on a sandbox agent work;
   - dictation reaches the pinned agent;
   - history opens.
-- [ ] `docs/STATUS.md` Phase 6 ticked with "verified in simulator" and any gaps listed.
+- [ ] Push: ntfy checked on the iPhone (the simulator gets none).
+- [ ] `docs/STATUS.md` updated per its workflow ("verified in the simulator", gaps listed as open items), and this guide deleted.
 - [ ] Commit only `watchos-app/**` and `docs/STATUS.md`.
 
 ---
@@ -127,8 +124,8 @@ Replace the simulator name with one from the `simctl` list. To check the UI, ope
 
 ```
 You are executing Phase 6 (watchOS client, best-effort) of the Agent Watch refactor in this repository.
-Read AGENTS.md, .agents/rules/watchos.md, docs/reference/contracts.md (§1, §2), docs/phases/4-wearos.md (the UX to copy) and
+Read AGENTS.md, .agents/rules/watchos.md, docs/reference/contracts.md (§1, §2), wearos-app/ARCHITECTURE.md (the UX to copy) and
 docs/phases/6-watchos.md. Rewrite watchos-app/ as specified, regenerate the project with xcodegen, and verify with
 xcodebuild build/test on a watchOS simulator. There is no physical Apple Watch: report results as "verified in simulator"
-and never claim device behaviour. Tick Phase 6 in docs/STATUS.md and commit only watchos-app/** and docs/STATUS.md.
+and never claim device behaviour. Update docs/STATUS.md per its workflow, delete this guide, and commit only those paths.
 ```

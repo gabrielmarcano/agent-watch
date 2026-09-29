@@ -59,9 +59,9 @@ The bar reports the health of the bridge and the relay, and pairs watches. It ne
 
 The tooltip repeats the state. The **Versions** section of the menu shows:
 
-- **Menu bar** `0.3.0`: this app's bundle version.
-- **Bridge** `0.3.0 (c8aa72e)`: the running daemon's version with its commit, or the CLI's when it is stopped. A `, modified` after the commit means it was built with uncommitted changes.
-- **Relay** `0.3.0 (5a32851)`: what the relay reported in its last handshake with the running bridge (`relay_version`), kept while the relay is unreachable. No line while it is unknown: the bridge is stopped, has not connected yet, or the relay predates 0.3.0.
+- **Menu bar** `x.y.z`: this app's bundle version.
+- **Bridge** `x.y.z (<commit>)`: the running daemon's version with its commit, or the CLI's when it is stopped. A `, modified` after the commit means it was built with uncommitted changes.
+- **Relay** `x.y.z (<commit>)`: what the relay reported in its last handshake with the running bridge (`relay_version`), kept while the relay is unreachable. No line while it is unknown: the bridge is stopped, has not connected yet, or the relay predates 0.3.0.
 
 ## Menu actions
 

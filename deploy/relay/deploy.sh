@@ -171,7 +171,7 @@ healthy() {
 # owner, group and mode, then swap it in. Only key names are printed.
 if [ "$sync_env" = 1 ]; then
 	if [ ! -f "$env_file" ]; then
-		echo "$env_file does not exist: create it first (docs/phases/3c-relay-deploy.md), then re-run with --sync-env" >&2
+		echo "$env_file does not exist: create it first (deploy/relay/README.md, First-time setup), then re-run with --sync-env" >&2
 		exit 1
 	fi
 	env_tmp="$(mktemp "$env_file.sync.XXXXXX")"

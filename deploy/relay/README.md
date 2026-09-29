@@ -1,6 +1,34 @@
 # Relay operations
 
-Setup and deployment are in [`docs/phases/3c-relay-deploy.md`](../../docs/phases/3c-relay-deploy.md). This page covers day-to-day operations on the VPS.
+Everything about running the relay on a VPS: first-time setup, deploys, the proxy, devices and backups.
+
+## First-time setup (once per VPS)
+
+Owner-run (it needs root on the VPS):
+
+```bash
+ssh <vps>
+useradd --system --home /var/lib/agent-watch-relay --shell /usr/sbin/nologin agentwatch
+install -d -m 0750 -o root -g agentwatch /etc/agent-watch-relay   # the relay (agentwatch) must read the Firebase JSON kept here
+# Create /etc/agent-watch-relay/env from env.example (root:agentwatch, 0640).
+#   With agent-watch.env on the Mac: keep the AW_HOST_TOKEN placeholder; --sync-env writes the real token.
+#   Without it: AW_HOST_TOKEN=$(openssl rand -hex 32), and give the same value to the bridge's `configure`.
+install -m 0644 agent-watch-relay.service /etc/systemd/system/   # scp the unit first
+systemctl daemon-reload && systemctl enable agent-watch-relay
+```
+
+- **Listen address:** the address your proxy reaches, never a public interface: `127.0.0.1:8080` for nginx or Caddy on the host, the docker bridge for Nginx Proxy Manager in docker (below).
+- **TLS in front:** any reverse proxy that terminates TLS and passes WebSockets and unbuffered SSE: `nginx.conf.example`, `Caddyfile.example`, or Nginx Proxy Manager (below). Set `AW_TRUSTED_PROXIES` for it (Client IP, below).
+- Then, from the Mac: `make deploy-relay ARGS=--sync-env`.
+
+### Behind Cloudflare (optional)
+
+In the dashboard:
+- the DNS record for `relay` **Proxied**;
+- SSL/TLS **Full (strict)**, with an Origin Certificate installed in your proxy (Flexible sends plain HTTP to the origin);
+- Network → WebSockets **on**;
+- a Cache Rule **Bypass cache** for `relay.<domain>/*`: SSE and API responses must never be cached;
+- the client IP header: see Client IP, below.
 
 ## Deploy a new build
 
@@ -13,7 +41,7 @@ SSH_OPTS="-i ~/.ssh/<key> -o Port=2222" deploy/relay/deploy.sh root@<vps>
 ```
 
 - **Clean tree only.** It refuses to run with uncommitted or untracked changes, so the binary always matches a commit. (`agent-watch.env` is git-ignored and does not count.)
-- **Version:** `RELAY_VERSION` from `VERSIONS` (bump it there when the relay changes), plus the commit the binary reports on its own, e.g. `0.3.0 (c8aa72e)`. Check it with `agent-watch-relay version`; the connected bridge shows it too (`relay_version` in `agent-watch-bridge status --json --local`, the menu bar's Versions section). Relays deployed before 0.3.0 read `0.2.0-<sha>`.
+- **Version:** `RELAY_VERSION` from `VERSIONS` (bump it there when the relay changes), plus the commit the binary reports on its own, e.g. `x.y.z (<commit>)`. Check it with `agent-watch-relay version`; the connected bridge shows it too (`relay_version` in `agent-watch-bridge status --json --local`, the menu bar's Versions section). Relays deployed before 0.3.0 read `0.2.0-<sha>`.
 - **Target:** an explicit `<ssh-target>` wins and uses `SSH_OPTS` only. Without one, `deploy.sh` reads `AW_RELAY_SSH` and `AW_RELAY_SSH_OPTS` from `agent-watch.env` (`AW_ENV_FILE=<path>` for another file); `SSH_OPTS`, if set, still overrides the file's options.
 - **`SSH_OPTS` / `AW_RELAY_SSH_OPTS`** go to both `ssh` and `scp`. Use `-o Port=…`, not `-p`: `scp` spells the port `-P`.
 - **Rollback:** the replaced binary is kept as `/usr/local/bin/agent-watch-relay.prev`. After the restart the box curls `/v1/healthz` on the address in `AW_LISTEN` (from `/etc/agent-watch-relay/env`) for up to 15 s. If it never answers, the script prints the last journal lines, restores `.prev` (and the env file, after `--sync-env`), restarts, and exits non-zero.
@@ -25,7 +53,7 @@ Opt-in. It never runs on a plain deploy.
 
 - **What is synced:** the relay keys `agent-watch.env` sets on an uncommented line, even an empty one: `AW_HOST_TOKEN`, `AW_LISTEN`, `AW_TRUSTED_PROXIES`, `AW_CLIENT_IP_HEADER`, `AW_PUSH_RESOLVED`, `AW_FCM_CREDENTIALS`, `AW_NTFY_URL`, `AW_NTFY_TOPIC`, `AW_NTFY_TOKEN`. A commented-out key leaves the server's line alone. `AW_DATA_DIR` is never synced (a new one also needs a `ReadWritePaths=` drop-in).
 - **Checked on the Mac, before the build:** `AW_HOST_TOKEN` must be 64 hex characters (an empty token is never sent), and values with a quote, a backslash or `$` are refused.
-- **On the server:** each key replaces its line in `/etc/agent-watch-relay/env` in place; other keys, comments and blank lines stay, and missing keys are appended at the end. The file keeps its owner and mode (`root:agentwatch`, `0640`). The server file must exist already (first-time setup: [`docs/phases/3c-relay-deploy.md`](../../docs/phases/3c-relay-deploy.md)).
+- **On the server:** each key replaces its line in `/etc/agent-watch-relay/env` in place; other keys, comments and blank lines stay, and missing keys are appended at the end. The file keeps its owner and mode (`root:agentwatch`, `0640`). The server file must exist already (see First-time setup).
 - **Backup:** when anything changed, the previous file is kept as `/etc/agent-watch-relay/env.bak-<UTC time>`. Backups hold the old secrets with the same mode; delete old ones by hand.
 - **Secrets:** the values travel in a `0600` temp file over `scp` and are deleted after the run. Nothing is printed but key names: `env: changed: …; added: …; unchanged: …`.
 - **The Firebase JSON** is not in `agent-watch.env`: copy it to the server yourself and put its server path in `AW_FCM_CREDENTIALS`.

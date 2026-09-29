@@ -7,35 +7,29 @@ description: "Security rules for the relay server, push notifications and VPS de
 
 > Applies to: pkg/relay, pkg/push, cmd/relay, deploy/.
 
-The relay can make agents on the owner's Mac type and approve things, so treat it as a remote-execution surface. Spec: `docs/reference/contracts.md` §2–§5, guides `docs/phases/3a…3c`.
+The relay can make agents on the owner's Mac type and approve things, so treat it as a remote-execution surface. Shapes and values (timeouts, keepalives, anti-spam windows): `docs/reference/contracts.md` §2–§5. Secrets: `AGENTS.md` §3. Operations: `deploy/relay/README.md`.
 
 ## Tokens and auth
-- **Tokens travel only in the `Authorization: Bearer` header.** Ignore query-string tokens.
+- **Only the `Authorization: Bearer` header authenticates;** ignore query-string tokens.
 - **Device tokens are 32 random bytes.** Store only `sha256` hashes, and compare with `crypto/subtle.ConstantTimeCompare`. The host token is compared the same way.
 - **Pairing codes:** 6 digits from `crypto/rand`, 5-minute TTL, single use, rate-limited per client IP and globally.
 - **Client IP:** forwarding headers (`X-Forwarded-For`, `X-Real-IP`, the optional `AW_CLIENT_IP_HEADER`) are read **only** from peers in `AW_TRUSTED_PROXIES`; otherwise the TCP peer is the client. Never trust a header from an untrusted peer (`contracts.md` §5).
-- **Never log** tokens, headers, request bodies, prompt text or history content.
+- **Never log** request bodies or history content, besides what `AGENTS.md` §3 forbids.
 
 ## Behaviour
 - **Exactly one host connection;** a new one replaces the old (close code 4000).
-- **Commands** get one 7 s budget for sending and waiting (`timeout`), between the bridge's 6 s and the watch's 8 s: inner layers always time out first. With no host they fail immediately (`host_offline`), and in-flight ones fail the moment their host disconnects, misses a ping or is replaced.
-- **Host keepalive:** ping the host every 30 s; no pong within 10 s → drop it.
+- **Commands** get one budget for sending and waiting, longer than the bridge's and shorter than the watch's, so inner layers always time out first (values: `contracts.md` §2.4). With no host they fail immediately (`host_offline`), and in-flight ones fail the moment their host disconnects, misses a ping or is replaced.
+- **Host keepalive:** ping the host; no pong in time → drop it (`contracts.md` §3).
+- **Keepalives stay short** (SSE comments, WebSocket pings; `contracts.md` §2–§3): proxies close idle connections (Cloudflare about 100 s, the nginx example 90 s), so never lengthen them.
 - **HTTP server:** no `ReadTimeout` or `WriteTimeout` (they kill SSE and WebSocket). Keep `ReadHeaderTimeout: 10s` and `IdleTimeout: 120s`. Shutdown cancels every request context, so open streams end at once.
 - **SSE:**
   - subscribe **before** taking the snapshot;
-  - keepalive `:` every 15 s;
-  - a 10 s deadline on every write;
+  - keepalive comments and a deadline on every write (`contracts.md` §2);
   - drop slow subscribers instead of blocking.
 - **Store:** atomic writes (temp file + fsync + rename, mode 0600). A corrupt file stops startup; never overwrite it silently.
 
 ## Push
-- **FCM data values are all strings,** and `state_change_seq` is always a number. Which keys each event carries is in `contracts.md` §4.1 (`resolved` has only three).
-- **Anti-spam** (`contracts.md` §4.3): debounce 5 s per pane+event (a repeated `done` is dropped, a quick re-block is **held** to the end of the window, never dropped); the first push of a 10 s window goes out at once; more than 3 in the window → one digest. A push failure never affects relay state.
+- **FCM data values are all strings,** and `state_change_seq` always holds a number. Which keys each event carries is in `contracts.md` §4.1 (`resolved` has only three).
+- **Anti-spam** follows `contracts.md` §4.3 exactly (debounce, window, digest). A quick re-block is **held**, never dropped. A push failure never affects relay state.
 - **Dead FCM tokens:** unregister only on `UNREGISTERED` or a `message.token` field violation. A bare 404 is not a dead token.
 - **`resolved`** goes only to senders that can withdraw a notification (FCM with `AW_PUSH_RESOLVED`), never to ntfy.
-- **APNs is out of scope.** watchOS gets alerts through ntfy.
-
-## Deploy
-- **Real secrets never enter the repo:** `/etc/agent-watch-relay/env`, `agent-watch.env`, the Firebase JSON, the ntfy topic and tokens. Only `*.example` files are committed.
-- **Secrets never go on a command line or into output:** tools read them from `agent-watch.env` or the env file and print key names only (`configure --env-file`, `deploy.sh --sync-env`).
-- **Commands that need VPS or Cloudflare credentials are handed to the owner,** not run by agents.

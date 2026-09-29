@@ -34,8 +34,8 @@ func sinkLogger(s *logSink, level slog.Level) *slog.Logger {
 	return slog.New(slog.NewTextHandler(s, &slog.HandlerOptions{Level: level}))
 }
 
-// A failed transcript read is worth a warning (the plan asks for it): the
-// history silently degrades to a screen capture otherwise.
+// A failed transcript read is worth a warning: the history silently degrades
+// to a screen capture otherwise.
 func TestEngine_LogsLastTurnFailure(t *testing.T) {
 	h := newTestHarness(t)
 	var logs logSink

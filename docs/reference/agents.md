@@ -209,19 +209,6 @@ Used when an agent has no transcript reader, or when its reader returns an error
 
 ---
 
-## 7. Capturing fixtures (Phase 0 and every adapter change)
+## 7. Capturing fixtures
 
-Follow the `capture-fixture` skill. Summary:
-
-1. Create a **dedicated sandbox** pane. Never use the owner's working panes.
-2. In a throw-away directory, start the agent and make it ask for permission, e.g. "run `ls`" with the default permission mode.
-3. Capture:
-   ```bash
-   herdr agent read <sandbox_pane> --source visible --format text \
-     > pkg/agents/testdata/<agent>/<case>.txt
-   ```
-4. Write `pkg/agents/testdata/<agent>/<case>.golden.json` with the `PendingPrompt` you expect, plus the key map (`{"opt-1":["1"],...}`) and the cancel keys.
-5. In the sandbox **only**, try the keys and record which ones worked. Update the ✅/🔍 marks in this file.
-6. Close the sandbox pane.
-
-**Naming:** `permission-bash.txt`, `permission-edit.txt`, `question-multiple.txt`, `plan-approval.txt`, `no-menu-working.txt`. Extra cases use a descriptive suffix (`permission-webfetch.txt`, `permission-bash-herdr-done.txt`, `no-menu-idle-numbered-list.txt`). Record the herdr status you observed in the golden's `herdr_status` and `notes`.
+The procedure (cases, key checks, golden format, transcript samples, scrubbing) is the `capture-fixture` skill: `.agents/skills/capture-fixture/SKILL.md`.

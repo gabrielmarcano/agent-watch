@@ -35,7 +35,7 @@ type Engine struct {
 	RetryDelay   time.Duration // delay between prompt parse retries (defaults to 300ms)
 	HistoryDelay time.Duration // delay before capturing history (defaults to 500ms)
 	// CommandTimeout bounds a command from its arrival, including the wait
-	// for the pane lock (defaults to 9s, below the relay's 10s wait).
+	// for the pane lock (defaults to commandTimeout, below the relay's wait).
 	CommandTimeout time.Duration
 
 	mu            sync.RWMutex
@@ -217,6 +217,8 @@ func (e *Engine) OnChanges(changes []herdr.Change) {
 	}
 }
 
+// resolvePrompt retries the parse because the TUI may draw the menu a moment
+// after herdr flips the pane to blocked.
 func (e *Engine) resolvePrompt(paneID string, seq uint64, agentName string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()

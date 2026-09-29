@@ -17,9 +17,7 @@
 
 - `AGENTS.md`, `.agents/rules/wearos.md` (the Kotlin conventions carry over).
 - `docs/reference/contracts.md` §1, §2 (API, error codes), §4 (push payloads, `resolved`).
-- `wearos-app/ARCHITECTURE.md`: the data layer this phase shares.
-- `docs/phases/4b-wearos-ui.md`: the validated UX and the review findings (most apply to a phone too).
-- `HERDR_REFACTOR_PLAN.md` §11 (target agent), §13.1 (approval UX).
+- `wearos-app/ARCHITECTURE.md`: the data layer this phase shares, and §4b, the UX rules (target agent, approvals) a phone copies.
 
 ---
 
@@ -92,7 +90,7 @@ The relay does not care what kind of client it serves. Any app that pairs (`POST
 - `RelayRepository` from `:core`; the SSE stream bound to the foreground, like the watch.
 
 ### 3. Screens
-- **Agent list:** the watch's information architecture (4b decision 4): sections by attention (Needs you · Done · Working · Idle · Unknown) across workspaces, the workspace as secondary text.
+- **Agent list:** the watch's information architecture (`wearos-app/ARCHITECTURE.md` §4a): sections by attention (Needs you · Done · Working · Idle · Unknown) across workspaces, the workspace as secondary text.
 - **Detail with the prompt card:** permission / question / unknown; roles from labels; ALLOW never `allow_always`; buttons locked after answering (`:core` logic).
 - **Prompt input:** keyboard and voice.
 - **History** and the markdown reader.
@@ -122,7 +120,7 @@ The relay does not care what kind of client it serves. Any app that pairs (`POST
 - [ ] `:mobile` release build installed on the owner's phone.
 - [ ] Every step-5 check passes with the watch paired: no duplicate notification on the wrist; a locked phone cannot approve.
 - [ ] No personal values in tracked files (relay domain, Firebase ids): `git grep` before committing.
-- [ ] `docs/STATUS.md` Phase 7 ticked; README, ROADMAP and AGENTS.md describe the phone client and the new layout.
+- [ ] `docs/STATUS.md` updated per its workflow, and this guide deleted; `docs/GUIDE.md` and `AGENTS.md` §2 describe the phone client and the new layout.
 
 ---
 
@@ -131,7 +129,7 @@ The relay does not care what kind of client it serves. Any app that pairs (`POST
 - **A second copy of the contracts.** `:core` is the only Kotlin copy.
 - **Changing the watch app's application id or signing key in step 1** loses its pairing and push registration.
 - **Bridged notifications** and **lock-screen approvals** (see Decisions).
-- **One Gradle build at a time** on the Mac.
+- **One Gradle build at a time** on the Mac (`.agents/rules/wearos.md`).
 - **Real agents:** only sandbox agents (`aw-sandbox`) are approved or prompted during development.
 
 ---

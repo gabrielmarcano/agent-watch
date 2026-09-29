@@ -84,6 +84,7 @@ func (c *Client) Call(ctx context.Context, method string, params any, out any) e
 | `agent.prompt` | `{"target", "text", "wait"?}` | — | Never pass `wait` (it blocks); omit it or send `null` |
 | `session.snapshot` | `{}` | `session_snapshot` | Workspaces, tabs, panes, agents, `focused_pane_id` |
 | `workspace.list` | `{}` | `workspace_list` | `{"workspaces":[{"workspace_id", "number", "label", ...}]}` — the bridge reads `label` for `AgentState.workspace` |
+| `notification.show` | `{"title", "body"?, "sound"?: none\|done\|request}` | — | Used by `pair`, because a plugin action's stdout may not be visible (`cmd/bridge/pair.go`) |
 | `events.subscribe` | `{"subscriptions":[...]}` | `subscription_started` | Streaming, §5 |
 
 **`target`** accepts a `pane_id` (preferred, always unique) or an agent `name`. This project always sends `pane_id`.

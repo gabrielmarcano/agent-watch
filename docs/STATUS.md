@@ -1,292 +1,90 @@
-# Implementation Status
+# Status
 
-One section per phase.
+The one place for the project's state: what is done, what is open, what comes next. Other docs link here instead of restating it. History (how each phase went, fixes, deploys) lives in git: `git log -- <path>`.
 
-**Workflow:**
-1. **Claim** a phase before starting: write your agent and date on the `Claimed by` line, and commit that change alone.
-2. **Tick** the boxes as you finish them.
-3. **Record** anything you could not do under **Blocked / questions**.
-
-Keep entries short, and use absolute dates (YYYY-MM-DD).
-
-**Review batch 2026-09-25.** A review found and fixed bugs in every Go package, the deploy files and the Wear OS data layer, and found several notes below that were wrong or overstated. Each phase now has a **Review fixes 2026-09-25** note; claims that turned out false are corrected in place and marked *(corrected 2026-09-25)*. Phase 5 is reopened.
+**Workflow for agents:** before starting a phase, put your name and the date in its **Claimed by** cell and commit that change alone. When you finish, set its state, remove the items you closed from **Open items**, and add what you could not do. **Then delete the phase's guide:** anything in it still worth knowing moves first to its home (`AGENTS.md` §0), and the rest stays in git history.
 
 ---
 
-## Phase 0 — Capture agent fixtures
-- Claimed by: agy, 2026-09-23
-- [x] `herdr integration status` current for claude / agy / opencode (paste output)
-  ```
-  claude: current (v10) (~/.claude/hooks/herdr-agent-state.sh)
-  opencode: current (v12) (~/.config/opencode/plugins/herdr-agent-state.js)
-  antigravity-cli: current (v3) (~/.gemini/config/hooks/herdr-agent-state.sh)
-  ```
-- [x] claude fixtures + golden files
-- [x] agy fixtures + golden files
-- [x] opencode fixtures + golden files
-- [x] transcript samples (scrubbed) + expected results
-- [x] no 🔍 left in `docs/reference/agents.md`
-- [x] sandbox removed
-- Notes:
-  - Claude: digit selects immediately without Enter; esc cancels; AskUserQuestion and plan approval render numbered menus (question kind); PromptWhileWorking() = true.
-  - Antigravity (agy): digit selects immediately without Enter; esc cancels commands. File edits explicitly disable Esc ("Esc disabled during file edits — press 1 to accept or 2 to reject."), so cancel_keys is ["2"]. Multiple-choice and plan approval are unsupported (.missing.md). PromptWhileWorking() = true.
-  - OpenCode: horizontal button bar (Allow once / Allow always / Reject); Allow once is focused by default (Enter confirms); Reject via esc. *(corrected 2026-09-25)* Allow always is **not** Right+Enter: that opens a confirm stage, so the keys are `Right, Enter, Enter`. OpenCode **does** have a question tool (the `.missing.md` was wrong); plan approval is still unsupported. PromptWhileWorking() = true.
-  - *(corrected 2026-09-25)* The scrub claim was false: the Claude transcript sample kept `attachment` lines with personal data. Fixed on 2026-09-25 and purged from the git history. `git grep -nE '/Users/[a-z]+|@gmail|sk-|ghp_' pkg/agents/testdata` is empty again.
-  - *(corrected 2026-09-25)* The Phase 0 `claude/plan-approval.txt` was an AskUserQuestion asked in plan mode, not the ExitPlanMode dialog; it is now `question-plan-mode.txt`.
-  - **Review fixes 2026-09-25** — fixtures recaptured or added (Claude Code 2.1.282, Antigravity CLI 1.2.10, OpenCode 1.18.32, herdr 0.9.1; details in `docs/reference/agents.md`):
-    - claude: `plan-approval.txt` (real ExitPlanMode), `question-plan-mode.txt`, `permission-webfetch.txt`, `permission-bash-dont-ask-again.txt` (typographic apostrophe), `permission-write-numbered-list.txt`; negatives `no-menu-idle-numbered-list.txt`, `no-menu-working-numbered-list.txt`.
-    - agy: `no-menu-working.txt` (recaptured while really working), `permission-bash-herdr-done.txt` and `permission-bash-herdr-working.txt` (the dialog open while herdr says `done`/`working`); negative `no-menu-idle-numbered-list.txt`.
-    - opencode: `permission-bash.txt` and `permission-edit.txt` (recaptured), `permission-external-directory.txt`, `permission-always-confirm.txt`, `question-multiple.txt`, transcript `session-multistep.json`; negative `no-menu-idle-numbered-list.txt`.
-    - generic: `footer-no-blank.txt`, `indented-box.txt`.
+## Phases
 
-## Phase 1 — Foundation
-- Claimed by: agy, 2026-09-23
-- [x] legacy removed (`bridge/`, `claude-plugin/`, `.claude-plugin/`, `agent_integrations_analysis.md`)
-- [x] `go.mod` (`github.com/gabrielmarcano/agent-monitor`, go 1.22) + Makefile
-- [x] `pkg/model` + tests (golden `testdata/agent_state.json`)
-- [x] `pkg/herdrtest` + tests
-- [x] `make check` and `make build` pass
-- Notes:
-  - Go module github.com/gabrielmarcano/agent-monitor initialized at Go 1.22 floor.
-  - All contracts from docs/reference/contracts.md encoded in pkg/model (agent.go, api.go, wire.go) with round-trip, golden file, and helper tests.
-  - pkg/herdrtest implements full in-process fake socket server covering 7 verified herdr behaviors.
-  - Legacy code removed; zero references to old bridge/plugins remain; make check and make build pass.
-  - **Review fixes 2026-09-25:** `herdrtest` registers subscribers before the ack, rejects unknown targets, bounds each event write (2 s), and gained `Call.ID`, `HoldNext`/`Hold`, `DropStreams` and `SetDropStreamsAfterAck`. `pkg/model`: `CancelRequest.fingerprint` (optional). The example fingerprint in `contracts.md` was not the real hash (now `fd6ff7388739252d`); the golden `agent_state.json` carries the real value too since `f27bc63`.
+| Phase | State | Claimed by | Where it lives now |
+|---|---|---|---|
+| 0 Agent fixtures | done | — | `pkg/agents/testdata/`, the `capture-fixture` skill |
+| 1 Foundation | done | — | `pkg/model`, `pkg/herdrtest` |
+| 2a herdr client | done | — | `pkg/herdr`, [`reference/herdr-socket-api.md`](reference/herdr-socket-api.md) |
+| 2b Agent adapters | done | — | `pkg/agents`, [`reference/agents.md`](reference/agents.md) |
+| 2c Bridge daemon | done | — | `cmd/bridge`, `pkg/bridge` |
+| 3a Relay server | done | — | `cmd/relay`, `pkg/relay`, [`reference/contracts.md`](reference/contracts.md) |
+| 3b Push | done (ntfy never tested) | — | `pkg/push` |
+| 3c Relay deploy | done | — | [`deploy/relay/README.md`](../deploy/relay/README.md) |
+| 4 Wear OS client | done | — | [`wearos-app/ARCHITECTURE.md`](../wearos-app/ARCHITECTURE.md) |
+| 4b Wear OS UI redesign | done: checked by the owner on the Pixel Watch 2, 2026-09-26 | — | [`wearos-app/ARCHITECTURE.md`](../wearos-app/ARCHITECTURE.md) |
+| **5 End-to-end (release gate)** | **open** | — | [`phases/5-e2e.md`](phases/5-e2e.md) |
+| 6 watchOS (best-effort) | not started; after 5 | — | [`phases/6-watchos.md`](phases/6-watchos.md) |
+| 7 Android phone client | not started; after 5 | — | [`phases/7-android-mobile.md`](phases/7-android-mobile.md) |
+| macOS menu bar app | done; verified only by `make bar-test` | — | [`macos-bar/README.md`](../macos-bar/README.md) |
+| Shared config (`agent-watch.env`) | done | — | [`GUIDE.md`](GUIDE.md) § Setup, `agent-watch.env.example` |
+| Versions, CI, releases | done | — | [`GUIDE.md`](GUIDE.md) § Versions and Releases |
 
-## Phase 2a — herdr client
-- Claimed by: agy, 2026-09-23
-- [x] client, subscribe, syncer
-- [x] all tests in the guide's table pass
-- [x] read-only smoke test against real herdr (paste 3–5 lines)
-  ```
-  [HerdrOnline] online=true version=0.9.1 protocol=22
-  [Added] pane=w5:pB5 agent=claude status=working focused=false
-  [Added] pane=w9:p1 agent=claude status=idle focused=false
-  [Added] pane=w7:p1 agent=agy status=working focused=true
-  ```
-- Notes:
-  - Agent-agnostic `pkg/herdr` implemented: `types.go`, `client.go`, `subscribe.go`, `sync.go`.
-  - Client respects one connection per call, string IDs, `recent_unwrapped` underscore source, and omits `wait` in prompt.
-  - Syncer handles online/offline transitions, initial snapshot diffing, live event-driven debounced re-listing, and fallback degraded polling when event streams drop.
-  - Filters out non-agent shells (`agent: null, agent_status: unknown`).
-  - All 11 tests pass with race detector; read-only live herdr smoke test verified.
-  - **Review fixes 2026-09-25:** refreshes, apply and Listener callbacks are serialized (an older list could overwrite a newer one, and callbacks could overlap); a stream drop now re-lists at once, then resubscribes after a backoff while polling every 2 s (it used to retry immediately); the subscribe handshake is bounded; cancelling ctx interrupts a pending call; answers to another request id and unexpected result types are rejected; random per-process request-id prefix; offline at startup is reported. Tests went from 11 to the table in the 2a guide.
+**Deployed:** relay, bridge and menu bar from release `v2026.09.26`; the Wear OS app of that release on the owner's Pixel Watch 2. The component versions are in `VERSIONS`.
 
-## Phase 2b — Agent adapters
-- Claimed by: agy, 2026-09-23
-- [x] generic parser + unit tests
-- [x] claude adapter (fixtures + transcript)
-- [x] agy adapter (fixtures + transcript)
-- [x] opencode adapter (fixtures + SQLite)
-- [x] CGO-free build confirmed
-- Notes:
-  - `pkg/agents`: pure Go agent adapters implemented for `generic`, `claude`, `agy`, and `opencode` with zero `pkg/herdr` imports.
-  - Generic parser in `menu.go`: parses numbered blocks, continuation lines, cursor detection, role classification via keyword matching, and arrow/digit key generators.
-  - All 11 Phase 0 fixtures in `pkg/agents/testdata/{claude,agy,opencode}/` pass against their respective adapters and golden JSON contracts.
-  - Synthetic test cases under `pkg/agents/testdata/generic/` verify edge cases (cursors, continuation lines, boxed tables, multiple blocks, non-menus).
-  - Transcript readers implemented and verified against expected golden outputs: Claude (`.jsonl`), Antigravity (`transcript_full.jsonl`), and OpenCode (`modernc.org/sqlite` read-only queries on `message` and `part` tables).
-  - Screen fallback formatter `ScreenTurn` implemented per `agents.md` §6 with input box cutting and UTF-8 truncation.
-  - CGO-free static build verified with `CGO_ENABLED=0` (`make build`).
-  - `go test -race ./...` and `go vet ./...` pass with 0 errors.
-  - **Review fixes 2026-09-25:**
-    - Menus are parsed only while the dialog is open (claude/agy: the numbered block at the bottom, in place of the input box; opencode: the `┃`-framed dialog, no generic fallback). Before, a numbered list in an answer or in dictated text was taken for a menu.
-    - "don’t ask again" with a typographic apostrophe is `allow_always`.
-    - OpenCode "Allow always" = `Right, Enter, Enter` (confirm stage); its question tool is parsed.
-    - OpenCode's transcript returns the final answer, not the first step; agy's query is the `<USER_REQUEST>` text only.
-    - Rune-safe truncation (detail 400 runes); the transcript tail read stays bounded when the file grows; `HistoryItem.ID` is left to the bridge; known-answer hash tests.
-
-## Phase 2c — Bridge daemon
-- Claimed by: agy, 2026-09-24
-- [x] relayclient + tests
-- [x] engine + command executor + tests (every error code)
-- [x] cmd/bridge subcommands
-- [x] launchd install/uninstall verified on the Mac
-- [x] herdr plugin linked; start/status/stop/pair work
-- [x] sandbox blocked → parsed → answered via stub relay
-- Notes:
-  - `pkg/relayclient`: outbound WebSocket link to `wss://relay.<domain>/v1/host` with Bearer auth, exponential backoff (1s–60s) + jitter, 30s ping keepalive, sequential `OnMessage`, and bounded 50-item history queue.
-  - `pkg/bridge`: `Engine` implements `herdr.Listener` mapping `AgentInfo` to `model.AgentState`, preferring `ForegroundCWD`. *(corrected 2026-09-25)* Label precedence is task title (`TerminalTitleStripped`, ignoring `agy --conversation…` and `OpenCode`) > `Name` > `Base(CWD)` > `PaneID`, not `Name` first.
-  - *(corrected 2026-09-25)* Prompt parsing makes at most **3 attempts in total** (300 ms apart, 5 s budget), not "3 retries", before falling back to `UnknownPrompt`.
-  - History capture with 500ms debounce, `LastTurn` with screen-turn fallback, and deduplication by `HistoryID`.
-  - Safety-critical command executor: per-pane mutex, `expected_seq` verification, screen re-reading and `fingerprint` comparison before sending keys. Zero raw watch keys accepted. Audit logging records lengths/IDs, never prompt text. *(corrected 2026-09-25)* At the time it validated against the Syncer's shared snapshot (`Refresh`) and `cancel` sent the adapter's cancel keys **without** re-reading the screen; both fixed below.
-  - All command error codes tested and verified (`stale_state`, `prompt_changed`, `unknown_option`, `agent_busy`, `agent_blocked`, `agent_state_unknown`, `unknown_pane`, `herdr_offline`, `invalid_request`).
-  - `cmd/bridge`: subcommands `configure` (mode 0600), `run`, `start`, `stop`, `status`, `pair`, `version` (`restart` added 2026-09-25).
-  - macOS launchd service template embedded and verified via `start`/`status`/`stop`.
-  - `herdr-plugin.toml` manifest created and linked into live herdr (`herdr plugin link "$PWD"`).
-  - All tests (`go test -race ./...`) and guard checks pass cleanly.
-  - *(corrected 2026-09-25)* "start/status/stop/pair work" overstated it: `pair` always printed the expiry as "in 0 seconds" (it read an expiry field the relay never sends, instead of `expires_at`), and `start` rewrote the LaunchAgent from the caller's environment (a `start` from a terminal moved the state dir, socket and binary). The guide's "log shows hello sent" could not have been checked: no such log line existed until 2026-09-25.
-  - **Review fixes 2026-09-25:**
-    - Commands: validated against the command's own `agent.list`; one 9 s budget from arrival; `cancel` re-reads the screen (fresh parse, fingerprint check; with no menu it cancels only a prompt the watch saw as `unknown`, with the adapter's default keys); answer, cancel and prompt act at most once (request id, answered prompt, prompt-text hash); `prompt` is refused while a menu is on screen and accepted only in `idle`/`done` (+ `working` if the adapter queues); on `prompt_changed` the fresh prompt is published; prompt length counted in characters.
-    - `status.json` is truthful: `blocked`, `relay_error`, `herdr_error`, `version`, and `pid: 0` on stop or a failed start.
-    - CLI: `restart`; `status --json [--local]`; `pair --json` with the real expiry; `start` keeps the installed definition's values unless a flag or herdr's environment says otherwise, and validates the config first; config 0600/0700 enforced.
-    - Plugin manifest: a `restart` action and a static, version-stamped `[[build]]`. `make restart`, `make bar`, `make bar-test`.
-    - relayclient logs `relay connected; hello sent`, flushes live history, and reports its last error.
-
-## Phase 3a — Relay server
-- Claimed by: agy, 2026-09-24
-- [x] store, auth/pairing, state, hub, API, SSE
-- [x] all tests in the guide's table pass
-- [x] static linux binary builds
-- Notes:
-  - `pkg/relay/config.go`: parses and validates `AW_LISTEN` (default :8080), `AW_HOST_TOKEN` (64 hex characters required), `AW_DATA_DIR` (default /var/lib/agent-watch-relay). *(corrected 2026-09-25)* The original `AW_TRUST_CF_IP` was removed (it made any client able to pick its own IP); see the review fixes.
-  - `pkg/relay/store.go`: atomic JSON storage (`store.json.tmp` -> fsync -> rename) with file permissions `0600`; devices (SHA-256 token hashing, constant-time compare); bounded history (20/pane, 200 total, 7-day pane pruning, ID deduplication); coalesced 1s saves.
-  - `pkg/relay/auth.go`: constant-time host token verification; device bearer token authentication with context injection; 6-digit `crypto/rand` pairing codes (5-minute TTL, max 3 active, single-use); sliding-window rate limiting on `/v1/pair` (5/IP/10m, 20 total/10m). *(corrected 2026-09-25)* It trusted a client-supplied header for the IP; now only headers from `AW_TRUSTED_PROXIES`.
-  - `pkg/relay/state.go`: thread-safe `State` tracking agents, `host_online`, `herdr_online`; snapshot sorting; SSE fan-out with non-blocking 64-item buffers dropping slow subscribers.
-  - `pkg/relay/hub.go`: `/v1/host` WebSocket endpoint; enforces 1 active host (close 4000 `replaced`); 5s hello handshake check (close 4001); round-trip command routing with 10s timeout; no-op `Notifier` hook for Phase 3b. *(corrected 2026-09-25)* The 4001 close frame was never actually sent, the relay never pinged the host, and commands waited out the 10 s after their host had gone.
-  - `pkg/relay/api.go` & `pkg/relay/sse.go`: Go 1.22 routing (`ServeMux`), MaxBytesReader (16KB), structured `ErrorResponse` mapping, `/v1/events` SSE streaming with snapshot on connect and 15s keepalive ticks. Access logging without secrets or prompt text.
-  - `cmd/relay/main.go`: subcommands `serve`, `devices list`, `devices revoke <id>`, `version`.
-  - Static Linux binary `bin/agent-watch-relay-linux-amd64` builds with `CGO_ENABLED=0` via `make relay-linux`.
-  - Full test suite passing with race detector (`go test -race ./...`). Guard checks passing 43/43.
-  - **Review fixes 2026-09-25:** `AW_TRUSTED_PROXIES` (+ optional `AW_CLIENT_IP_HEADER`) replace `AW_TRUST_CF_IP` (ignored with a warning); the relay pings the host every 30 s (10 s timeout); in-flight commands fail `host_offline` at once on disconnect, missed pong or replacement; one 7 s budget per command (timeouts nest bridge 6 s < relay 7 s < watch 8 s); `devices list|revoke` work with the relay running (`admin.sock`, `relay.lock`), and a revoke takes effect immediately; fast clean shutdown (exit 0) with watches and the bridge connected; 10 s SSE write deadlines; `ReadHeaderTimeout` 10 s and `IdleTimeout` 120 s; prompt length in characters; history broadcast only for items the store kept; store save errors logged and the data dir fsynced; rate-limit memory bounded; the ntfy topic kept out of logs; the device id in the access log.
-
-## Phase 3b — Push
-- Claimed by: agy, 2026-09-24
-- [x] dispatcher (transitions, debounce, digest) + tests
-- [x] FCM sender + tests
-- [x] ntfy sender + tests
-- [x] manual push check (deferred to Phase 5 release gate / live device verification) — *(corrected 2026-09-25)* ticked while deferred: it was never done as a separate check. FCM delivery to the Pixel Watch 2 was seen in Phase 5; ntfy is not recorded as tested anywhere.
-- Notes:
-  - `pkg/push/push.go`: `Message` and `Sender` interface; `Dispatcher` implementing `relay.Notifier` with `OnAgentUpdate`. Detects transitions (`any -> blocked` with title/body/options/seq/fingerprint; `working -> done` with "Task finished"; runes truncated to <= 240 on rune boundary).
-  - *(corrected 2026-09-25)* The debounce **dropped** a quick re-block (a new prompt right after an answer was lost), and the digest counted messages, always said "need you", and went out at normal priority even when it covered a blocked agent. Current rules: `contracts.md` §4.3.
-  - *(corrected 2026-09-25)* "Single retry on failure" retried the whole FCM send, so healthy devices got the push twice; retries are now per token.
-  - `pkg/push/fcm.go`: FCM HTTP v1 API sender (`POST /v1/projects/{project_id}/messages:send`) using `golang.org/x/oauth2/google` service account credentials. Priority `high` for blocked, `normal` otherwise; 600s TTL. *(corrected 2026-09-25)* The dead-token rule (any 404, or any 400 with `UNREGISTERED`/`INVALID_ARGUMENT`) was dangerous: a wrong project id (404) or a payload error (400 `INVALID_ARGUMENT`) would unregister every device. Now only `UNREGISTERED` or a `message.token` field violation.
-  - `pkg/push/ntfy.go`: plain-text ntfy sender with custom headers (`Title`, `Priority` 5/3/4, `Tags` warning/white_check_mark/bell, Bearer token auth).
-  - `pkg/relay/server.go`: wires push senders based on `AW_FCM_CREDENTIALS`, `AW_NTFY_URL`, `AW_NTFY_TOPIC`; logs `push disabled` when unconfigured. `Store` extended with `AllFCMTokens` and `RemoveFCMToken`.
-  - All tests passing with race detector (`go test -race ./...`). Guard checks 43/43 passing. No secrets or topic names committed.
-  - **Review fixes 2026-09-25:** FCM `resolved` data-only message, opt-in (`FCM.EnableResolved`, relay env `AW_PUSH_RESOLVED`, default off until the watch app that handles it is installed); digests count agents and their titles fit the events; stale held pushes are dropped and held ones rebuilt from the current state; a digest covering a blocked agent is high priority; a quick re-block is held, not dropped; dead tokens only on `UNREGISTERED` / `message.token`; each token has its own timeout and tokens are sent concurrently; `state_change_seq` always a number; a zero-value `Dispatcher` works.
-
-## Phase 3c — Relay deploy
-- Claimed by: agy, 2026-09-24
-- [x] `deploy/relay/` files (no secrets)
-- [x] systemd service running on the VPS
-- [x] Cloudflare DNS / NPM TLS with WebSockets and unbuffered SSE
-- [x] verify commands pass; SSE streaming and bridge connected
-- Public URL: https://relay.<domain>
-- Notes:
-  - `deploy/relay/`: systemd unit `agent-watch-relay.service`, `env.example`, `deploy.sh`, `Caddyfile.example`, `nginx.conf.example`, `Dockerfile`.
-  - Static Linux binary built with `CGO_ENABLED=0` and installed to `/usr/local/bin/agent-watch-relay`.
-  - Hardened systemd service running under `agentwatch:agentwatch` with `ProtectSystem=strict`, `StateDirectory=agent-watch-relay` (mode 0700).
-  - FCM push enabled and operational.
-  - Nginx Proxy Manager (NPM) on the VPS terminating TLS via Let's Encrypt, forwarding to `172.17.0.1:8080` with WebSocket support and `proxy_buffering off;`.
-  - Host bridge daemon on macOS connected to `wss://relay.<domain>/v1/host` with `relay_connected: true`, `host_online: true`, reporting active agent states.
-  - End-to-end pairing verified via `./bin/agent-watch-bridge pair` and `POST /v1/pair`. *(corrected 2026-09-25)* The code worked; the expiry `pair` printed did not (see Phase 2c).
-  - Unbuffered SSE event streaming verified on `GET /v1/events`.
-  - Bridge enhanced with automatic `NormalizeRelayURL` (appending `/v1/host` when omitted) and launchd retry on macOS.
-  - **Review fixes 2026-09-25:** `deploy.sh` takes `SSH_OPTS`, refuses a dirty tree, stamps `<version>-<sha>` *(since 2026-09-26: `RELAY_VERSION` from `VERSIONS`, and the binary adds its commit, `0.3.0 (<sha>)`)*, keeps `.prev`, health-checks `/v1/healthz` and rolls back on failure; `deploy/relay/README.md` documents the NPM-in-docker topology (listen on `172.17.0.1`, `After=docker.service` drop-in, trusted proxies, why `ufw` must not be enabled blindly), devices and a lost watch; the unit is further hardened (checked on the VPS: exposure 2.4 OK); nginx/Caddy examples set the forwarding headers; the Dockerfile prepares a `0700` data dir.
-  - **Deployed 2026-09-25** (`0.2.0-04f5568`, with `deploy.sh`): `AW_TRUST_CF_IP` removed and `AW_TRUSTED_PROXIES` set to the NPM docker network; relay bound to the docker bridge with the `After=docker.service` drop-in; port 8080 verified closed from the server side (RST to outside SYNs); hardened unit installed, `systemd-analyze verify` clean, `systemd-analyze security` exposure **2.4 OK**, no seccomp kills; `AW_PUSH_RESOLVED` left off.
-
-## Phase 4 — Wear OS (primary)
-- Claimed by: agy, 2026-09-24
-- [x] models + ContractsTest
-- [x] RelayClient + RelayRepository (SSE lifecycle)
-- [x] pairing, list, detail, PromptCard, dictation, history, reader
-- [x] notifications with answer/cancel/prompt actions
-- [x] complication + tile (target-agent rule)
-- [x] release build (R8) parses JSON
-- [x] verified on the Pixel Watch 2 (alpha UI, 2026-09-24, before the review fixes)
-- [x] data-layer review fixes adopted by the UI (Phase 4b, 2026-09-25; list below)
-- [x] re-verified on the Pixel Watch 2 after the review fixes and the UI redesign (by the owner, 2026-09-26, release build: see Phase 4b; the end-to-end re-run is Phase 5)
-- Notes:
-  - *(superseded 2026-09-26 by Phase 4b)* UI State Note: The UI is currently in an alpha state and verified functional on the Google Pixel Watch 2 (pairing, live SSE list with workspace grouping, 2-line chips with herdr status colors, detail screen, dictation, and history). The app is technically usable but not yet final or optimized for everyday real-world utility; it will require subsequent design refinement focused on user usage ergonomics and objective readability rules.
-  - `model/Contracts.kt`: mirrors `pkg/model` field by field with `@Keep` on all serializable classes; includes `AgentState.severity()` and `resolveTargetAgent()`.
-  - `ContractsTest.kt`: verified against golden fixture `pkg/model/testdata/agent_state.json` and unit tests for target agent resolution.
-  - `data/Prefs.kt`: SharedPreferences wrapper for `relay_url`, `device_token`, `device_id`, `fcm_token`, `pinned_pane_id` and (since 2026-09-25) `fcm_registration`, which replaced `fcm_registered_token`. Purged legacy `local_ip` / `tailscale_ip`.
-  - `network/RelayClient.kt`: stateless HTTP client using `OkHttpClient` with `Authorization: Bearer` auth, URL-encoded pane IDs, `ErrorResponse` mapping, and `okhttp-sse` support.
-  - `network/RelayRepository.kt`: singleton owning `UiState` with `StateFlow`, managing foreground SSE lifecycle (snapshot, agent, agent_removed, host, history), exponential backoff reconnect, and 401 token revocation. Since 2026-09-25 it is a façade over `RelayEngine`.
-  - Split monolith `AgentScreen.kt` into `PairingScreen.kt`, `AgentListScreen.kt`, `AgentDetailScreen.kt`, `PromptCard.kt`, `HistoryListScreen.kt`, `ResponseReaderScreen.kt`, and `MicrophoneIcon.kt`.
-  - `PromptCard`: handles `permission` (Allow once / Deny / More), `question` (options list + Cancel), and `unknown` (raw tail + Cancel). Emits `expected_seq` and `fingerprint`.
-  - `NotificationActionReceiver` + `MyFirebaseMessagingService`: handles FCM v1 push notifications and dispatches `answer`, `cancel`, and `prompt` commands via `goAsync()` coroutines. *(corrected 2026-09-25)* The per-pane request codes could collide across panes; intents now carry a data URI unique per (pane, action).
-  - `AgentStatusComplicationService`: fetches `/v1/agents` with device token; displays most severe status (`blocked > done > working > idle > unknown`).
-  - `AgentQuickActionTileService` + `QuickDictateActivity`: implements Plan §11 target agent resolution (pinned -> done with latest updated_at -> focused); shows "To: <label>" before voice dictation; sends fresh `state_change_seq`. *(corrected 2026-09-25)* It also fell back to an arbitrary agent; now none.
-  - Network security: purged `usesCleartextTraffic="true"` from main manifest (HTTPS enforced). Added debug network security config allowing cleartext for local testing.
-  - Verification: `./gradlew :app:testDebugUnitTest`, `./gradlew :app:assembleDebug`, and `./gradlew :app:assembleRelease` (with R8 minification) all passed cleanly. Zero occurrences of `local_ip`, `tailscale`, `8420`, or `usesCleartextTraffic="true"` in `app/src/main`. The release build is **signed with the debug key**.
-  - **Review fixes 2026-09-25 (data layer only; 105 JVM tests):** `RelayEngine` (JVM-testable) behind `RelayRepository`; `UiState.auth` (`PAIRED`/`UNPAIRED`/`REVOKED`) with every 401 routed into one revoked state; `UiState.stale`; `RelayRepository.restart` (new relay URL and token after re-pairing); 45 s SSE silence detection; refreshes merged by `state_change_seq` without losing SSE history; relay calls cancelled with their coroutine and commands capped at 8 s; `cancel(..., fingerprint)`; `FcmRegistrar` records a registration only after the relay accepts it; `resolved` pushes and live state dismiss stale approvals; collision-free notification intents; "Canceled" feedback for a cancel; `allowBackup=false`; `QuickDictateActivity` exported for the tile's `LaunchAction`; complication and tile update requests on state changes; answered prompts locked until the state changes; errors mapped by relay code.
-  - **The UI-redesign session must:**
-    - consume `UiState.auth` (show pairing for `UNPAIRED`/`REVOKED`, before any "Mac is offline"/"No active agents") and `UiState.stale` (dim the list or show "Reconnecting…");
-    - call `RelayRepository.restart(context)` after pairing instead of `resetClient()` + `start()`;
-    - pass `fingerprint = prompt.fingerprint` to `RelayRepository.cancel` in `AgentDetailScreen` (≈ line 235; it sends none today);
-    - delete the manual `registerPush` + `prefs.fcmRegisteredToken` write in `PairingScreen` (≈ lines 264–270; the write is ignored and `FcmRegistrar` already registers on stream open);
-    - map `QuickDictateActivity`'s toast errors through `CommandFeedback` (it shows raw exception messages);
-    - show the relay `message` for a `prompt_changed` focus refusal ("answer it on the Mac") instead of the generic "Prompt changed — refreshed", and don't invite a retry (the prompt is unchanged);
-    - drop the owner's relay domain pre-filled in `PairingScreen` (personal data if the repo goes public; a wrong default for anyone else).
-  - Done 2026-09-25 in Phase 4b: every item of this list (the default URL is now `BuildConfig.DEFAULT_RELAY_URL`).
-  - Done 2026-09-25: the app ignores a `blocked` push whose seq is ≤ the last `resolved` seq for its pane (`contracts.md` §4.1), a prerequisite for `AW_PUSH_RESOLVED`.
-
-## Phase 4b — Wear OS UI redesign
-- Claimed by: claude (Opus 5.5), 2026-09-25
-- [x] data-layer API adopted (the Phase 4 "UI-redesign session must" list)
-- [x] review findings fixed or deferred with a reason (`docs/phases/4b-wearos-ui.md`): all fixed; notification grouping deferred (one notification per pane plus the digest already bound how many there are)
-- [x] unit tests + debug/release builds green (189 JVM tests)
-- [x] emulator screenshots of every screen and state, reviewed with the owner (2026-09-26)
-- [x] checked on the Pixel Watch 2 with the owner (2026-09-26, release build; tables fixed and checked the same day)
-- Notes:
-  - 2026-09-25: every screen and state audited on a new round emulator (`aw-wear-small-round`, fake host on a local relay, no real agents); design approved by the owner (M3 1.6.2, block markdown, confirmed dictation, attention-ordered list, fixed palette). Decisions and order: `docs/phases/4b-wearos-ui.md` § Design decisions.
-  - 2026-09-25: UI rebuilt on Wear Compose Material 3 1.6.2 (toolchain: AGP 8.13.2, Kotlin 2.2.21, Gradle 8.14.3, compileSdk 36). Every screen, the tile (ProtoLayout Material 3) and the complication; strings in `strings.xml`; nothing below 12 sp; Deny · Allow 81.5 × 52 dp, 8 dp apart; all text pairs ≥ 6.6:1. Verified on the emulator: every state of the list, all prompt kinds, answer/cancel/focus-refusal feedback, dictation from the app and from the tile, revoke → pairing → pair with the keyboard, unpair, font scale 1.24, crown scrolling, the complication (blocked state). Not yet on the watch.
-  - Notifications, fixed on the owner's request (round 3, 2026-09-25): a question offers its answers (up to 4, from the push's `options`), a permission Allow and Deny, an unreadable prompt only Open; Cancel is never offered for a question; app glyph and `BigTextStyle`. Verified on the emulator with real FCM payloads: a question answered from the notification, Allow, Deny, and a Reply to a finished agent.
-  - Reported, outside 4b, then fixed on the owner's request (2026-09-25, round 2): option label and description are separate (`PromptOption.description`, contract change); free-text options ("Type something.", "Type your own answer") are left out by the adapters; `screen` history holds the last turn without the TUI (`ScreenTurnReader`); the `done` push shows the agent's reply (relay waits up to 3 s for it); the `wearos-deploy` skill finds JDK 17 with `java_home`. Still open: the focus refusal is recognised by its message text (a dedicated code would be sturdier). **Deployed 2026-09-25:** relay `0.2.0-c8aa72e` (healthy) and the bridge rebuilt and restarted (connected).
-  - Round 2 on the watch (owner's review of the screenshots): the agent screen shows the last reply with Reply as its edge button; "Device offline" instead of Mac; short one-line labels; no relay or bridge administration advice; tables as one record per row; complication with the app's glyph, short/long/icon types and a tap that opens the urgent agent; "Pin to tile" replaces "Tile target".
-  - Round 3 (owner's choices): the short complication is the glyph and how many agents need the user, no words (style B); a second tile, **Agents**, shows the two agents that need the user most, each opening its screen, and counts the rest in its title. Verified on the emulator: both surfaces, a tap on a tile agent and on the complication opening that agent. Installed on the watch on 2026-09-26 (below).
-  - 2026-09-26: lint errors cleared (standalone flag, `StateFlow.value` in composition, Fragment 1.1.0 pulled by the complications library); lint errors now fail the build and release builds run `lintVital`. The release build (R8) verified on the emulator: list, agent screen, Allow, a notification's answers (Deny reached the host with seq and fingerprint), both tiles, the complication, history and the reader.
-  - 2026-09-26: the release build is installed on the owner's Pixel Watch 2, over the old debug app (same key, pairing kept; the FCM token re-registered with the relay). The owner checked it and accepted everything except tables. Phase 5 can now set `AW_PUSH_RESOLVED=1` (row 23).
-  - **Tables (owner, 2026-09-26): fixed, deployed and checked by the owner on the Pixel Watch 2** (notification, last-reply card, reader, history). *(claude (Opus 5.5), 2026-09-26.)* Cause: all Claude history came from the screen (114 of 115 captures in the bridge log), where Claude Code draws a markdown table with box characters (`┌─┬─┐`, a separator under every row, wrapped cells) and the watch showed that grid monospaced. Three causes, three fixes:
-    - the bridge looked for transcripts only in `~/.claude`, and the owner runs Claude with another `CLAUDE_CONFIG_DIR`: added to `claude_config_dirs` (config only; verified in aw-sandbox);
-    - `LastTurn` read only the last 256 KiB, and in a turn with many tool calls the user's message lies further back (1.4 MB seen): it now grows the read to 1 MiB and 4 MiB (`transcript-long-turn.jsonl`);
-    - screen captures turn box-drawn tables into markdown tables (`pkg/agents/boxtable.go`, `table-box.txt`); the reader shows them as records, and the card, history list and notifications (relay `replyPreview` too) show one line per row, `first cell: other cells · …`.
-    - Verified: `go vet` + `go test -race`, 193 JVM tests, `lintDebug`, `assembleRelease`; emulator screenshots of the reader, card, notification and history list before and after, approved by the owner.
-    - Future Claude profiles (the owner's choice, option A): the bridge finds `~/.claude` and every `~/.claude-*` on each lookup, so `claude_config_dirs` is only for profiles elsewhere; the owner's config no longer lists any, and a sandbox turn still read its transcript. Not done: asking herdr to expose the transcript path its Claude hook already receives (it reports only the session id).
-    - Deployed 2026-09-26: relay `0.2.0-5a32851` (healthy, host reconnected), the bridge from `f635480`, the release app on the Pixel Watch 2 (same key, pairing kept). A real sandbox table reached the watch as a push. Known edge: a turn that ends while the bridge restarts gets the generic `Task finished` body (the new bridge never sees it working).
-  - The emulator was paired only with a local relay: no device was registered on the production relay.
-
-## Phase 5 — End-to-end + docs (release gate)
-- Claimed by: agy, 2026-09-24 — **reopened 2026-09-25** — re-run claimed by claude (Opus 5.5), 2026-09-29
-- [ ] `docs/e2e-report.md` complete for claude / agy / opencode (re-run after the Wear OS UI redesign, rows 1–27)
-- [ ] security spot checks (re-run; add the trusted-proxy and closed-port checks)
-- [x] README + ROADMAP rewritten (rewritten again on 2026-09-25: the first version claimed a plugin `configure` action, SQLite history, salted hashes and a working watchOS client)
-- [ ] `AW_PUSH_RESOLVED=1` on the relay (row 23; unblocked since 2026-09-26, when the new app reached the watch)
-- Notes:
-  - *(corrected 2026-09-25)* Several rows of `docs/e2e-report.md` were asserted from the code, not tested on the watch: claude row 5, and rows 8, 9 (tile path), 10, 13, 14, 17 and 18. Row 12 was renamed ("Transcript reader") instead of running the guide's screen-fallback test. Rows 3, 4 and 6 ran for claude only.
-  - Actually observed on 2026-09-24/25 (Pixel Watch 2, production relay, launchd bridge, alpha UI): claude Allow from the notification, Deny (a repeated request prompted again), stale tap rejected (409, nothing typed) and the question picker; opencode Allow from the app; the "Mac is offline" banner within ~5 s of stopping the bridge and recovery without re-pairing; the security spot checks (401 without a token and with a query token; no prompt text or tokens in the bridge log or the relay journal).
-  - agy: herdr 0.9.1 reports its permission dialog as `done` (or `working`), never `blocked`, so the watch never gets it as a prompt (see Blocked / questions).
-  - Wear OS live fixes during the run: notification deep link (black screen), Deny feedback, "Cancel" label for question menus.
-  - The review batch changed the bridge, relay, push and the Wear OS data layer after this run: nothing of it is verified end to end yet.
-
-## Phase 6 — watchOS (best-effort, simulator)
-- Claimed by: —
-- [ ] models + parity test
-- [ ] RelayClient + RelayStore
-- [ ] views copied from the Wear OS UX
-- [ ] xcodebuild build + test pass
-- [ ] verified in simulator (list gaps)
-- Notes:
-  - `watchos-app/` is still the legacy LAN/Tailscale client. Its only `/v1` code is the `CancelRequest` struct appended to `Models/AgentState.swift` on 2026-09-25.
-
-## Phase 7 — Android phone client
-- Claimed by: —
-- [ ] decisions confirmed with the owner (`docs/phases/7-android-mobile.md`)
-- [ ] step 1: `android/{core,wear}` restructure merged alone; Wear OS unchanged on the watch
-- [ ] `:mobile` screens, notifications (local-only, unlock to approve) and push
-- [ ] verified on the owner's phone with the watch paired (no duplicate notifications)
-- Notes:
-
-## macOS menu bar app (`macos-bar/`, not a numbered phase)
-- 2026-09-25: driven entirely by the bridge CLI (`status --json --local` every 2.5 s, `start`, `stop`, `restart`, `pair --json`); distinct icon states; `make bar`, `make bar-test` (decision logic, with a temp HOME; never touches launchd or the real home). Docs: `macos-bar/README.md`.
-- 2026-09-26: a status circle on the icon (green / yellow / red / gray) and nothing else next to it; the bar no longer shows agents or blocked counts (the watch does); a Versions menu section (this app and the bridge).
-- 2026-09-26: the Versions section also shows the relay's version (`relay_version` in `status.json`, from the relay's handshake header), while the bridge runs.
-- Verified with `make bar-test` only; the app itself on the owner's Mac is not recorded as verified.
+**What can run in parallel:**
+- **5 runs alone:** it tests the whole system.
+- **6 and 7** start after 5 and can run together (disjoint directories), **except 7's step 1**, which moves `wearos-app/`: nothing else may touch the Android tree while it runs.
+- **A contract change** is cross-cutting: stop parallel work and follow the `schema-sync` skill.
 
 ---
 
-## Shared configuration (`agent-watch.env`, not a numbered phase)
-- Done 2026-09-25: one git-ignored `agent-watch.env` (template `agent-watch.env.example`) holds the relay domain, the host token shared by relay and bridge, the relay's SSH target and its server keys. Consumers: `make config` (creates it, generates the token), `make configure-bridge` (`configure --env-file`, token never in argv), `make deploy-relay [ARGS=--sync-env]` (key-by-key merge of the server env with backup and rollback), Wear OS `BuildConfig.DEFAULT_RELAY_URL`, `make watchos-config` (xcconfig for Phase 6). Guards treat the file as a secret.
-- The owner's file was filled from the running deployment (token matches the relay's by hash; nothing redeployed).
-- Deferred: `AW_ANDROID_APPLICATION_ID`. Its blocker is gone (checked 2026-09-29: tiles, complication and notifications no longer depend on the application id); what is left is wiring: `applicationId` in `wearos-app/app/build.gradle.kts`, the placeholder `google-services.json` in `.github/workflows/wearos.yml`, the `wearos-deploy` skill's `adb` commands, and the docs that say the id is fixed (`docs/GUIDE.md`, `agent-watch.env.example`, `contracts.md` §7). Phase 7 expects the key; the first `--sync-env` on the VPS should be watched (the merge is POSIX awk, tested with BSD awk only).
+## Open items
 
-## Versions, CI and releases (not a numbered phase)
-- Done 2026-09-26: one `VERSIONS` file with a version per component (`BRIDGE_VERSION`, `RELAY_VERSION`, `MENUBAR_VERSION`, `WEAROS_VERSION_NAME` / `WEAROS_VERSION_CODE`), read by the Makefile, `herdr-plugin.toml`'s `[[build]]`, `macos-bar/build.sh`, Gradle and `deploy.sh`; `make check-versions` (also in `go test`) keeps the manifest's `version` equal to `BRIDGE_VERSION`. The Go binaries add their commit (`pkg/buildinfo`: `0.3.0 (<sha>)`, `, modified` for a dirty tree). The relay sends its version to the authenticated bridge in the `/v1/host` handshake (`X-Agent-Watch-Relay-Version`, `contracts.md` §3) and the menu bar shows it.
-- GitHub Actions, sized for the free plan: `ci.yml` (Linux, every push), `wearos.yml` (Linux, `wearos-app/` changes), `macos-bar.yml` (macOS, only menu bar / bridge CLI changes), `release.yml` (date tags `vYYYY.MM.DD`: bridge, relay and menu bar binaries, `SHA256SUMS`, notes with the component versions).
-- 2026-09-27: CI green on GitHub (after fixing two timing-dependent tests the Linux runner exposed: `pkg/herdrtest` HoldNext, `pkg/relay` cancelled caller). First release **`v2026.09.26`** published (bridge, relay, menu bar 0.3.0; checksums and versions checked from the downloads). Deployed: relay and bridge `0.3.0`, menu bar `0.3.0`, Wear OS `1.1.0` (2) on the Pixel Watch 2, checked by the owner.
+### Phase 5 (release gate)
+- Run the whole checklist of [`phases/5-e2e.md`](phases/5-e2e.md) (rows 1–27) for claude, agy and opencode, on the Pixel Watch 2 with a release build, recording the results in the guide's tables.
+  - The first run (2026-09-24/25, alpha UI) asserted several rows from the code. What it really observed: for claude, Allow from the notification, Deny (a repeated request prompted again), a stale tap rejected with nothing typed, and the question picker; for opencode, Allow from the app; the offline banner and recovery without re-pairing; the 401 checks and clean logs (no tokens or prompt text).
+  - Nothing changed by the 2026-09-25 review batch (bridge, relay, push, Wear OS data layer) is verified end to end yet.
+- Security spot checks again, plus the trusted-proxy and closed-port checks.
+- `AW_PUSH_RESOLVED=1` on the relay (row 23). Unblocked: the watch runs the app that handles `resolved`.
 
-## Blocked / questions
-- **herdr dialog-status gap — mitigated 2026-09-25, review regularly.** herdr 0.9.1 misses every agy 1.2.x permission dialog (its rule expects wording agy no longer shows) and any Claude dialog after Claude is relaunched in the same pane (a stale input box wins `live_prompt_box`; it is not WebFetch-specific). Hooks can't fix it: herdr ignores the state reported by the claude/agy integrations. Mitigation: temporary local detection overrides, `tools/herdr-overrides/` (installed on the owner's Mac, herdr keeps being the source of truth). **Remove them once upstream fixes it:** run `tools/herdr-overrides/herdr-overrides.sh check` after every herdr manifest update or upgrade. Draft upstream issues, not filed: `tools/herdr-overrides/UPSTREAM-ISSUES.md`.
-- **OpenCode button focus — guarded 2026-09-25.** Before focus-dependent keys (Allow once/always, Confirm) the bridge reads the pane with `format: "ansi"` and checks the focused button against the dialog's accent colour (works in every bundled theme); if focus moved, it refuses with `prompt_changed` and presses nothing. Verified live in the sandbox (default focus → accepted; focus moved → refused; moved back → accepted). Left: a millisecond window between the ANSI read and `send_keys`. Since Phase 4b the watch shows "Answer on the device" for this refusal, recognised by the relay's message text (a dedicated error code would be sturdier).
-- **watchOS contracts.** Only `CancelRequest` was added to the legacy Swift models; the rest of the `/v1` contracts are not mirrored, so AGENTS.md §1.5 ("always compiles against `/v1`") does not hold until Phase 6.
+### Code
+- **Menu bar:** its "not configured" hint suggests `configure --host-token <64 hex>` (`macos-bar/BarLogic.swift`), which shows the token in `ps`. It should point to `make configure-bridge`.
+- **`AW_ANDROID_APPLICATION_ID`:** nothing in the app depends on the application id any more. Left to wire:
+  - `applicationId` in `wearos-app/app/build.gradle.kts`;
+  - the placeholder `google-services.json` in `.github/workflows/wearos.yml`;
+  - the `wearos-deploy` skill's `adb` commands;
+  - the docs that say the id is fixed.
+
+  Phase 7 expects the key.
+- **Focus refusal:** the watch recognises OpenCode's focus refusal by the relay's message text. A dedicated error code would be sturdier.
+- **OpenCode focus guard:** a millisecond window remains between the ANSI read and `send_keys`.
+- **Claude transcript:** herdr reports only the session id, not the transcript path its hook receives. A turn that ends while the bridge restarts gets the generic `Task finished` body.
+- **Wear OS release APK:** signed with the debug key.
+- **Notifications:** grouping is deferred (one notification per pane plus the digest already bound them).
+
+### Checks nobody has done yet
+- ntfy delivery (watchOS push) has never been tested.
+- The menu bar app on the owner's Mac (Phase 5 row 27).
+- The first `make deploy-relay ARGS=--sync-env` on the VPS: the env merge is POSIX awk, tested with BSD awk only.
+
+### Owner decisions
+- `herdr-plugin.toml` sets `min_herdr_version = "0.9.0"`, but the docs say herdr ≥ 0.9.1 (the version everything was verified on).
+- The sample values in `contracts.md` §1.2, the golden `pkg/model/testdata/agent_state.json` and the model tests use the name of a real project (`bizum`). Replace them with a neutral name?
+
+---
+
+## Blocked / waiting on upstream
+
+- **herdr misses some dialogs** (agy's, and Claude's after a relaunch): mitigated by the temporary overrides in [`tools/herdr-overrides/`](../tools/herdr-overrides/README.md), which explains the cause. Run its `check` after every herdr update; last check, 2026-09-29: still needed. The upstream issues are drafted but not filed.
+- **watchOS contracts:** only `CancelRequest` is mirrored in the legacy Swift models until Phase 6.
+
+---
+
+## Next steps
+
+1. **Phase 5**, above.
+2. **Close the herdr gap upstream:** file the drafted issues, then remove the overrides once herdr detects the dialogs by itself.
+3. **Phase 7**, the Android phone client.
+4. **Phase 6**, the watchOS client.
+5. **Later ideas:**
+   - a Telegram bot with inline approval buttons, for when the watch is charging;
+   - Discord webhook summaries;
+   - dedicated adapters for Codex, Pi, Amp and other CLI agents.

@@ -28,6 +28,6 @@ In scope, for example:
 Out of scope:
 - a compromised computer or VPS that runs the bridge or the relay;
 - problems in herdr or in the agents themselves (report those upstream);
-- the legacy watchOS app (it is rewritten in Phase 6).
+- the watchOS app while it is the legacy pre-relay client ([status](docs/STATUS.md)).
 
 How Agent Watch is meant to be secure: [the security model](docs/GUIDE.md#security-model).
