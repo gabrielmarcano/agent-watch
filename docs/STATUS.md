@@ -238,7 +238,7 @@ Keep entries short, and use absolute dates (YYYY-MM-DD).
   - The emulator was paired only with a local relay: no device was registered on the production relay.
 
 ## Phase 5 — End-to-end + docs (release gate)
-- Claimed by: agy, 2026-09-24 — **reopened 2026-09-25**
+- Claimed by: agy, 2026-09-24 — **reopened 2026-09-25** — re-run claimed by claude (Opus 5.5), 2026-09-29
 - [ ] `docs/e2e-report.md` complete for claude / agy / opencode (re-run after the Wear OS UI redesign, rows 1–27)
 - [ ] security spot checks (re-run; add the trusted-proxy and closed-port checks)
 - [x] README + ROADMAP rewritten (rewritten again on 2026-09-25: the first version claimed a plugin `configure` action, SQLite history, salted hashes and a working watchOS client)
