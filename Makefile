@@ -2,9 +2,8 @@
 .PHONY: config configure-bridge deploy-relay watchos-config _need-bridge-env _need-deploy-env _need-watchos-env
 
 # ── Component versions: VERSIONS ──────────────────────────────────────────
-# One version per component, written only there (bump the one you change).
-# The Go binaries add the commit they were built from on their own. A value
-# given on the command line wins, e.g. make bridge BRIDGE_VERSION=0.0.0-test.
+# The rules are in VERSIONS. A value given on the command line wins, e.g.
+# make bridge BRIDGE_VERSION=0.0.0-test.
 -include VERSIONS
 need-version = $(if $(strip $($(1))),,$(error $(1) is not set: VERSIONS is missing or incomplete))
 BRIDGE_LDFLAGS = -s -w -X main.version=$(BRIDGE_VERSION)
@@ -94,9 +93,8 @@ deploy-relay: _need-deploy-env
 _need-deploy-env:
 	@:$(call need-env)$(call need-key,AW_RELAY_SSH)
 
-# Generate the watchOS xcconfig (relay URL, bundle id). Git-ignored, and not
-# used by the legacy Xcode project: the Phase 6 rewrite takes it as its base
-# configuration.
+# Generate the git-ignored watchOS xcconfig (relay URL, bundle id):
+# docs/reference/contracts.md §7.
 watchos-config: _need-watchos-env
 	@$(AWENV) xcconfig $(AW_ENV_FILE) $(WATCHOS_XCCONFIG)
 	@echo "wrote $(WATCHOS_XCCONFIG)"

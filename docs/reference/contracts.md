@@ -1,22 +1,13 @@
 # Contracts Reference (source of truth for every JSON shape)
 
-Every JSON object that crosses a process boundary is defined here. The shapes of §1–§4 must match this file exactly in:
+Every JSON object that crosses a process boundary is defined here.
 
-- the Go structs in `pkg/model/`
-- the Kotlin models in `wearos-app/`
-- the Swift models in `watchos-app/` (from Phase 6; until then the legacy client mirrors only `CancelRequest`)
-
-The bridge's local files and CLI output (§6) are defined in `pkg/bridge` and `cmd/bridge`, not in `pkg/model`.
-
-If you need a new field:
-
-1. Change this file first.
-2. Then change the Go structs.
-3. Then change both clients (use the `schema-sync` skill).
+- **The shapes the watch sends or receives (§1–§2)** must match this file exactly in the Go structs (`pkg/model/`), the Kotlin models (`wearos-app/`) and the Swift models (`watchos-app/`; the watchOS app's state: `docs/STATUS.md`). To change one, follow the `schema-sync` skill: it lists every copy.
+- **§3** exists only in Go (`pkg/model/wire.go`). **§4**'s data keys are read by `wearos-app/app/src/main/java/com/gabriel/agentwatch/network/AgentNotifications.kt`. **§5** is the relay's environment and data dir. **§6** (the bridge's config, local files and CLI output) is defined in `pkg/bridge` and `cmd/bridge`, not in `pkg/model`.
 
 **Conventions (apply everywhere):**
 - JSON keys are `snake_case`.
-- Timestamps are RFC 3339 in UTC, e.g. `2026-09-23T17:04:05Z`. In Go, produce them with `time.Now().UTC().Format(time.RFC3339)`.
+- Timestamps are RFC 3339 in UTC, e.g. `2026-09-23T17:04:05Z`. In Go, produce them with `model.Now()`.
 - Optional fields use `omitempty` in Go and are nullable in the clients.
 - Unknown JSON fields must be **ignored** by every decoder, never rejected. This lets the relay add fields without breaking old watches.
 - IDs are opaque strings. Never parse them.
@@ -37,7 +28,7 @@ Herdr's enum, copied verbatim. Never rename, never remap, never add values.
 | `done` | Agent finished a turn and nobody has looked at it yet |
 | `unknown` | Herdr cannot tell |
 
-**Severity order** (used by complications and push): `blocked > done > working > idle > unknown`.
+**Severity order** (used for the `agents` order, §1.5, and by the watch's list, complication and tile): `blocked > done > working > idle > unknown`.
 
 ### 1.2 `AgentState`
 
@@ -61,7 +52,7 @@ type AgentState struct {
 | Field | Source (bridge side) | Rule |
 |---|---|---|
 | `pane_id` | herdr `pane_id` | Primary key everywhere. Contains `:` (e.g. `w5:pAW`) |
-| `agent` | herdr `agent` | Lowercase herdr id: `claude`, `agy`, `opencode`, `codex`, … Empty string if herdr reports null |
+| `agent` | herdr `agent` | Lowercase herdr id: `claude`, `agy`, `opencode`, `codex`, … Never empty: a pane whose herdr `agent` is null is not tracked (the relay gets `agent_removed`) |
 | `label` | computed | First non-empty of: descriptive task `terminal_title_stripped`, herdr `name`, `basename(cwd)`, `pane_id` |
 | `name` | herdr `name` | Explicit pane name or slug if set, otherwise omitted |
 | `cwd` | herdr `foreground_cwd`, else `cwd` | Omit if both are null |
@@ -71,7 +62,7 @@ type AgentState struct {
 | `focused` | herdr `focused` | |
 | `state_change_seq` | herdr `state_change_seq` | Used as the optimistic-concurrency token for commands |
 | `prompt` | parsed by the adapter | Present **only** when `status == "blocked"`, otherwise omitted |
-| `updated_at` | bridge clock | Set whenever any other field changes |
+| `updated_at` | bridge clock | Set each time the bridge rebuilds the state from a herdr change or publishes a newly parsed prompt; a workspace rename alone does not change it |
 
 **Example:**
 
@@ -149,9 +140,9 @@ type PendingPrompt struct {
 - **`id` is `opt-<n>`**, where `<n>` is the number printed in the menu. If the menu has no numbers, `<n>` is the 1-based position.
 - **`options` is never null.** For `unknown` it is an empty array `[]`.
 - **`raw_tail` is set only for `unknown`.** It holds the last 12 non-empty lines of the visible screen, each trimmed of trailing spaces.
-- **`label` and `description`:** `label` is the option's first line; `description` holds the lines printed under it (the description Claude and OpenCode questions show for each answer, or the rest of a label that wrapped), joined with spaces. It is omitted when there are none. An option's **text** is `label`, plus a space and `description` when present: roles are derived from the text (a "don't ask again" on the second line still makes `allow_always`).
+- **`label` and `description`:** `label` is the option's first line; `description` holds the lines printed under it (the description Claude and OpenCode questions show for each answer, or the rest of a label that wrapped), joined with spaces. It is omitted when there are none. An option's **text** is `label`, plus a space and `description` when present: roles are derived from the text (a "don't ask again" on the second line still makes `allow_always`). Exception: OpenCode's buttons have fixed roles (agents.md §5.1).
 - **Options the watch cannot answer are left out**: a free-text entry (Claude's "Type something.", OpenCode's "Type your own answer") opens a text field that keys cannot fill. The other options keep their ids.
-- **`fingerprint`** is the first 16 hex characters of `sha256(kind + "\n" + title + "\n" + detail + "\n" + text_1 + "\n" + … + text_n)`, with each option's text as defined above (the same value as before `description` existed). It lets the bridge detect that the menu on screen changed between display and tap.
+- **`fingerprint`** is the first 16 hex characters of `sha256(kind + "\n" + title + "\n" + detail + "\n" + text_1 + "\n" + … + text_n)`, with each option's text as defined above. It lets the bridge detect that the menu on screen changed between display and tap.
 - **Keys are never part of this object.** The bridge keeps the option → keys map privately.
 
 ### 1.4 `HistoryItem`
@@ -200,7 +191,7 @@ Base URL: `https://relay.<domain>`. All paths are prefixed with `/v1`.
 
 | Caller | Header |
 |---|---|
-| Watch (every endpoint except `POST /v1/pair`) | `Authorization: Bearer <device_token>` |
+| Watch (every endpoint except `POST /v1/pair` and `GET /v1/healthz`) | `Authorization: Bearer <device_token>` |
 | Bridge (`/v1/host` WebSocket and `/v1/host/*`) | `Authorization: Bearer <host_token>` |
 
 Never accept a token in the query string.
@@ -225,8 +216,10 @@ Never accept a token in the query string.
 
 `GET /v1/history` parameters:
 - `pane_id` is optional. Without it, the response mixes all panes.
-- `limit` defaults to 20, maximum 200.
+- `limit` defaults to 20, maximum 200. A missing, invalid or ≤ 0 value means 20.
 - Items are sorted newest first.
+
+**History retention** (`pkg/relay/store.go`): the relay keeps at most 20 items per pane and 200 in total (the oldest go first), and drops a pane whose newest item is older than 7 days. So a request with `pane_id` never returns more than 20.
 
 ### 2.2 Bodies
 
@@ -285,7 +278,7 @@ type ErrorBody struct {
 
 | Field | Bodies | Rule |
 |---|---|---|
-| `text` | prompt | 1 to 4000 **characters**, counted as Unicode code points after JSON decoding (`é` and `😀` count 1 each), never bytes. Outside that range → `invalid_request`. The prompt body may be up to 64 KiB, so 4000 characters fit however the client escapes them |
+| `text` | prompt | 1 to 4000 **characters**, counted as Unicode code points after JSON decoding (`é` and `😀` count 1 each), never bytes. Outside that range, or blank (whitespace only) → `invalid_request` (blank text is refused by the bridge). The prompt body may be up to 64 KiB, so 4000 characters fit however the client escapes them |
 | `expected_seq` | prompt, answer, cancel | The `state_change_seq` the watch showed. A mismatch → `stale_state` |
 | `option_id` | answer | An `id` from `prompt.options`. Not in the current prompt → `unknown_option` |
 | `fingerprint` | answer (required), cancel (optional) | The `prompt.fingerprint` the watch showed. A mismatch → `prompt_changed`. On cancel, when it is omitted the bridge compares against the prompt it published for `expected_seq` |
@@ -319,25 +312,25 @@ Every 15 s the relay writes the comment line `:` followed by a blank line, as a 
 
 ### 2.4 Error codes
 
-Every non-200 response carries an `ErrorResponse`.
+Every non-200 response of the endpoints in §2.1 carries an `ErrorResponse`. A path or method the relay does not serve gets Go's plain-text `404`/`405`, and `/v1/host` answers a plain-text `503` while the relay shuts down: decode the body only when it is JSON.
 
 | Code | HTTP | Meaning |
 |---|---|---|
 | `invalid_request` | 400 | Malformed body or bad parameter |
 | `unauthorized` | 401 | Missing or unknown token |
-| `unknown_pane` | 404 | Pane is not in the relay's list |
+| `unknown_pane` | 404 | Pane is not in the relay's list; or herdr's list no longer has it, or it has no agent (bridge) |
 | `stale_state` | 409 | `expected_seq` no longer matches; also `answer`/`cancel` to an agent that is not `blocked`, or a repeated command |
-| `prompt_changed` | 409 | Fingerprint mismatch; or, for OpenCode, the focus on the host is not on the button the keys assume (the `message` says to answer on the Mac; nothing was pressed) |
+| `prompt_changed` | 409 | Fingerprint mismatch; the menu is no longer on the screen; a cancel without `fingerprint` for which the bridge published no prompt; or, for OpenCode, the focus on the host is not on the button the keys assume (the `message` says to answer on the Mac; nothing was pressed) |
 | `agent_busy` | 409 | Prompt sent while `working` to an agent that cannot queue |
-| `agent_blocked` | 409 | Prompt sent while `blocked` |
+| `agent_blocked` | 409 | Prompt sent while `blocked`, or while a menu is open on the pane although herdr reports another status, or herdr refused the prompt as blocked |
 | `agent_state_unknown` | 409 | Prompt sent while the agent's state does not accept prompts (e.g. `unknown`) |
 | `unknown_option` | 409 | `option_id` is not in the current prompt |
 | `pair_code_invalid` | 403 | Wrong or expired code |
 | `rate_limited` | 429 | Too many attempts |
 | `host_offline` | 503 | Bridge not connected, or it disconnected (or was replaced) before answering a command |
 | `herdr_offline` | 503 | Bridge connected, herdr unreachable |
-| `timeout` | 504 | Bridge did not answer within 7 s (one budget for sending the command and waiting for `command_result`). Timeouts nest from the inside out, bridge 6 s < relay 7 s < watch 8 s, so a `timeout` means the bridge has already given up |
-| `internal` | 500 | Bug |
+| `timeout` | 504 | The relay's 7 s budget ran out (one budget for sending the command and waiting for `command_result`), or the bridge's own 6 s budget did (e.g. waiting behind another command on the same pane). Timeouts nest from the inside out, bridge 6 s < relay 7 s < watch 8 s, so a `timeout` means the bridge has already given up |
+| `internal` | 500 | Bug, or herdr failed `agent.prompt` / `agent.send_keys` for an unclassified reason (the text or keys may have reached the pane) |
 
 What the Wear OS app shows for each code: `commandErrorFeedback` in `wearos-app/app/src/main/java/com/gabriel/agentwatch/approval/CommandFeedback.kt`.
 
@@ -349,7 +342,7 @@ URL: `wss://relay.<domain>/v1/host`, with the header `Authorization: Bearer <hos
 
 **Handshake response:** once the host token is verified, the relay's `101 Switching Protocols` carries its version in `X-Agent-Watch-Relay-Version: <version>` (format below; absent from a relay that predates it). A rejected handshake (`401`) never carries it, and no watch-facing endpoint exposes it (`/v1/healthz` stays `{"ok":true}`). The bridge keeps the value of its last successful handshake and reports it as `relay_version` (§6.1, §6.2).
 
-**Version strings** (`hello.version`, the relay header, `status.json`, `status --json`, the `version` commands): the component's version from `VERSIONS` at the repo root, plus the commit the binary was built from, which Go stamps on its own: `x.y.z (<commit>)`, `x.y.z (<commit>, modified)` for a build with uncommitted changes, or just `0.3.0` for a build without the VCS stamp. A plain `go build` without the Makefile's ldflags reports `dev (…)`. They are display strings: never parse or compare them for ordering.
+**Version strings** (`hello.version`, the relay header, `status.json`, `status --json`, the `version` commands): the component's version from `VERSIONS` at the repo root, plus the commit the binary was built from, which Go stamps on its own: `x.y.z (<commit>)`, `x.y.z (<commit>, modified)` for a build with uncommitted changes, or just `x.y.z` for a build without the VCS stamp. A plain `go build` without the Makefile's ldflags reports `dev (…)`. They are display strings: never parse or compare them for ordering.
 
 - Every frame is one JSON text message with a `type` field.
 - To decode, first unmarshal into `struct{ Type string \`json:"type"\` }`, then unmarshal again into the concrete type.
@@ -420,9 +413,9 @@ type ResyncMsg struct {
 - **Bridge:** no pong → it reconnects.
 - **Relay:** no pong → it drops the host: closes the socket, broadcasts `host` with `host_online=false`, and fails the host's in-flight commands with `host_offline`.
 
-**In-flight commands** fail with `host_offline` as soon as their host disconnects, is dropped, or is replaced by a new connection, without waiting for the 7 s budget.
+**In-flight commands** fail with `host_offline` as soon as their host disconnects, is dropped, or is replaced by a new connection, without waiting for the command budget (§2.4).
 
-**Reconnect backoff** (bridge side): 1 s, 2 s, 4 s … up to 60 s, each ±20 % jitter. The backoff resets after 60 s of healthy connection.
+**Reconnect backoff** (bridge side): 1 s, 2 s, 4 s … up to 60 s, each ±20 % jitter. The backoff resets after 60 s of healthy connection. A host token the relay rejects (401/403) waits the full 60 s before the next try.
 
 ---
 
@@ -439,17 +432,17 @@ All values are strings (FCM data maps allow only strings). No `notification` blo
 | `agent` | `claude` | |
 | `label` | `my-app` | |
 | `title` | `my-app needs approval` | Ready to display |
-| `body` | `Bash: go test ./...` | ≤ 240 chars. For `done`: the agent's reply as one line (markdown markers dropped; a markdown table becomes one line per row, `first cell: other cells · …`, without its header), or `Task finished` when no reply arrived in time (§4.3) |
+| `body` | `Bash command: go test ./...` | ≤ 240 chars. For `blocked`: `<title>: <detail>` (the title alone without a detail), or a fixed invitation to open the app for an `unknown` prompt. For `done`: the agent's reply as one line (markdown markers dropped; a markdown table becomes one line per row, `first cell: other cells · …`, without its header), or `Task finished` when no reply arrived in time (§4.3) |
 | `state_change_seq` | `334` | Decimal string, always a number (`0` for `digest`) |
-| `fingerprint` | `fd6ff7388739252d` | Only for `blocked` |
+| `fingerprint` | `fd6ff7388739252d` | Empty except for `blocked` |
 | `allow_option_id` | `opt-1` | First `allow_once` option, else empty |
-| `deny_option_id` | `opt-3` | First `deny` option, else empty (the app then calls `cancel`) |
+| `deny_option_id` | `opt-3` | First `deny` option, else empty |
 | `kind` | `question` | Only for `blocked`: the prompt's kind (`permission`, `question`, `unknown`) |
-| `options` | `[{"id":"opt-1","label":"Rojo"}]` | Only for `blocked`: a `question`'s one-tap answers as a JSON array string, `""` otherwise. At most 4, in menu order, never an `allow_always` option (the notification cannot ask for the confirmation the app asks for); labels ≤ 40 characters. The app shows one action per answer and no Cancel |
+| `options` | `[{"id":"opt-1","label":"Rojo"}]` | Only for `blocked`: a `question`'s one-tap answers as a JSON array string, `""` otherwise. At most 4, in menu order, never an `allow_always` option (the notification cannot ask for the confirmation the app asks for); labels ≤ 40 characters |
 
 **`resolved`: withdraw a `blocked` notification.**
 
-> ⚠️ **Disabled by default.** The relay sends `resolved` only when the FCM sender's `EnableResolved` is set (`pkg/push.FCM`). Enable it **only once the installed watch app handles `resolved`**: older apps show an unknown event as `"<label> needs you"` on the pane's notification id, which replaces a real approval with a bogus one.
+> ⚠️ **Disabled by default.** The relay sends `resolved` only when the FCM sender's `EnableResolved` is set (`AW_PUSH_RESOLVED`, §5). Enable it **only once every installed watch app handles `resolved`**: older apps show an unknown event as an approval on the pane's notification id, which replaces a real approval with a bogus one. Whether it is on: `docs/STATUS.md`.
 
 It carries **only** these three keys, and never a notification block:
 
@@ -527,18 +520,18 @@ ntfy never gets `resolved`: it cannot withdraw a notification it already deliver
 
 ## 5. Relay configuration (environment variables)
 
-The relay reads them from `/etc/agent-watch-relay/env` (systemd `EnvironmentFile=`). `deploy.sh --sync-env` can copy the ones set in `agent-watch.env` there, key by key (§7).
+The relay reads them from `/etc/agent-watch-relay/env` (systemd `EnvironmentFile=`). `make deploy-relay ARGS=--sync-env` can set them there from `agent-watch.env` (`deploy/relay/README.md` § `--sync-env`).
 
 | Variable | Required | Default | Meaning |
 |---|---|---|---|
-| `AW_LISTEN` | no | `:8080` | Listen address. Bind it to the address the reverse proxy reaches (e.g. `127.0.0.1:8080`, or the docker bridge `172.17.0.1:8080`), never to a public interface |
+| `AW_LISTEN` | no | `:8080` | Listen address. Bind it to the address the reverse proxy reaches, never to a public interface (the value per proxy topology: `deploy/relay/README.md`) |
 | `AW_HOST_TOKEN` | **yes** | — | 64 hex chars; the same value goes in the bridge config |
 | `AW_DATA_DIR` | no | `/var/lib/agent-watch-relay` | Holds `store.json`, `relay.lock` and `admin.sock` (see below) |
 | `AW_FCM_CREDENTIALS` | no | — | Path to the Firebase service-account JSON. FCM is disabled if unset |
 | `AW_NTFY_URL` | no | — | e.g. `https://ntfy.sh`. ntfy is disabled if unset |
 | `AW_NTFY_TOPIC` | with ntfy | — | Random, unguessable topic name |
 | `AW_NTFY_TOKEN` | no | — | ntfy access token |
-| `AW_PUSH_RESOLVED` | no | `false` | `1`/`true` sends the FCM `resolved` push (§4.1) that withdraws an answered approval. Enable it only once the installed Wear OS app handles `resolved`: older builds show it as a bogus approval |
+| `AW_PUSH_RESOLVED` | no | `false` | `1`/`true` sends the FCM `resolved` push that withdraws an answered approval (§4.1 says when it is safe to enable) |
 | `AW_TRUSTED_PROXIES` | no | empty | Comma-separated CIDRs (a bare IP counts as one host) of the reverse proxies allowed to report the client IP. Empty: the TCP peer address is the client IP and every forwarding header is ignored |
 | `AW_CLIENT_IP_HEADER` | no | empty | A single-IP header, e.g. `CF-Connecting-IP`, honored from a trusted proxy before `X-Forwarded-For`. Requires `AW_TRUSTED_PROXIES`. Set it only when nothing but that CDN can reach the proxy, or clients can spoof it |
 
@@ -557,15 +550,16 @@ The relay reads them from `/etc/agent-watch-relay/env` (systemd `EnvironmentFile
 
 | File | Meaning |
 |---|---|
-| `store.json` | Devices (token hashes only) and history. `0600`, owned by the service user |
+| `store.json` | Devices (device-token hashes only, plus each device's FCM push token) and history. `0600`, owned by the service user |
 | `relay.lock` | Exclusive `flock` held by the running relay for its whole life. A second relay on the same directory refuses to start |
 | `admin.sock` | Local admin API, a `0600` Unix socket that exists only while the relay runs. Never exposed over TCP |
 
-**`agent-watch-relay devices list|revoke <id>`** works with the relay running or stopped:
+**Admin API on `admin.sock`** (`pkg/relay/admin.go`; used by `agent-watch-relay devices`, whose behaviour is in `deploy/relay/README.md` § Devices):
 
-- **Relay running** (lock held): the CLI asks it over `admin.sock`. The revoked token is rejected from the next request on, the device's open SSE streams and in-flight requests are cancelled, and `store.json` is flushed at once.
-- **Relay stopped:** the CLI takes the lock and edits `store.json` itself.
-- Run it as the service user or as root, with the same `AW_DATA_DIR` as the service. Files written as root are handed to the owner of `AW_DATA_DIR`.
+| Request | Response |
+|---|---|
+| `GET /devices` | `200`, a JSON array of `{"id", "name", "created_at", "last_seen"}`: never the token hash or the push token |
+| `DELETE /devices/{id}` | `204`; `404 {"error": "…"}` for an unknown id; `500 {"error": "…"}` when the store cannot be saved |
 
 ---
 
@@ -582,7 +576,7 @@ The relay reads them from `/etc/agent-watch-relay/env` (systemd `EnvironmentFile
 relay_url  = "wss://relay.example.com/v1/host"   # https:// is derived for /v1/host/* calls
 host_token = "…64 hex chars…"
 host_name  = ""                          # empty → os.Hostname()
-claude_config_dirs = []                  # extra Claude profiles; ~/.claude and every ~/.claude-* are found without it
+claude_config_dirs = []                  # extra Claude profiles; which ones are found without it: agents.md §3.2
 ```
 
 ### 6.1 `status.json` (written by `agent-watch-bridge run`)
@@ -605,7 +599,7 @@ claude_config_dirs = []                  # extra Claude profiles; ~/.claude and 
 | `relay_error` | Why the relay is not connected (a rejected token, a failed dial). Never contains the token |
 | `herdr_error` | Why herdr is offline |
 | `last_error` | `relay_error` and `herdr_error` joined with `; `, or the start failure. `""` when healthy |
-| `version` | Version of the bridge that wrote the file, with its commit (§3 version strings). Before 0.3.0 it was the bare version (`0.2.0`) |
+| `version` | Version of the bridge that wrote the file, with its commit (§3 version strings) |
 | `relay_version` | The relay's version from the last successful handshake (§3), kept while the relay is unreachable. `""` before the first connection, from a relay that does not send it, and in the stopped status (`pid: 0`) |
 
 A reader must not trust `pid` alone: a file left by a crash names a dead pid. `status` checks that the pid is alive and that the file is fresh (15 s).
@@ -672,13 +666,8 @@ One file at the repo root holds everything a deployment needs. `agent-watch.env.
 | `AW_LISTEN`, `AW_TRUSTED_PROXIES`, `AW_CLIENT_IP_HEADER`, `AW_PUSH_RESOLVED`, `AW_FCM_CREDENTIALS`, `AW_NTFY_URL`, `AW_NTFY_TOPIC`, `AW_NTFY_TOKEN` | `deploy.sh --sync-env` only | Relay variables (§5). Commented out in the example; `AW_FCM_CREDENTIALS` is a path **on the server** |
 | `AW_WATCHOS_BUNDLE_ID` | `make watchos-config` | Bundle id for the Phase 6 watchOS project. Empty: the project's own |
 
-**`deploy.sh --sync-env`** (opt-in; `make deploy-relay ARGS=--sync-env`):
-
-- A relay key counts when the file has an uncommented line for it, even with an empty value; a commented-out key leaves the server's line alone. `AW_HOST_TOKEN` must be 64 hex. Values with a quote, a backslash or `$` are refused (systemd would not read them literally).
-- On the server, each synced key replaces its line in `/etc/agent-watch-relay/env`; other lines, other keys and comments stay, and missing keys are appended. The file keeps its owner and mode. When anything changed, the previous file is kept as `env.bak-<UTC time>` next to it.
-- The values travel in a `0600` file over `scp` and are never printed: the output lists key names only (`changed`, `added`, `unchanged`).
-- If the relay is not healthy after the restart, both the binary and the env file are rolled back.
+How `deploy.sh --sync-env` copies the relay keys to the server: `deploy/relay/README.md` § `--sync-env`.
 
 **Wear OS:** `BuildConfig.DEFAULT_RELAY_URL` is `"https://<AW_RELAY_DOMAIN>"`, or `""` without the file or the key. A malformed domain fails the build. The application id stays `com.gabriel.agentwatch`.
 
-**watchOS:** `make watchos-config` writes the git-ignored `watchos-app/Config.generated.xcconfig` (`AW_RELAY_DOMAIN`, `AW_RELAY_URL`, `PRODUCT_BUNDLE_IDENTIFIER` when set). The legacy Xcode project does not use it; the Phase 6 project takes it as its base configuration.
+**watchOS:** `make watchos-config` writes the git-ignored `watchos-app/Config.generated.xcconfig` (`AW_RELAY_DOMAIN`, `AW_RELAY_URL`, `PRODUCT_BUNDLE_IDENTIFIER` when set). Only the rewritten watchOS project reads it, as its base configuration (Phase 6; state in `docs/STATUS.md`).

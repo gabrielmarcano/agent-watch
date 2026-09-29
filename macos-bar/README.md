@@ -15,10 +15,9 @@ open bin/AgentWatchBar.app
 ```
 
 - Universal (Apple silicon + Intel), macOS 13 or later, ad-hoc signed.
-- The bundle version is `MENUBAR_VERSION` from `VERSIONS` at the repo root:
-  bump it there when the app changes. `build.sh` writes it into the built
-  `Info.plist` before signing; the committed `Info.plist` holds a `0.0.0`
-  placeholder.
+- The bundle version is `MENUBAR_VERSION` from `VERSIONS` (bump it as that
+  file says). `build.sh` writes it into the built `Info.plist` before
+  signing; the committed `Info.plist` holds a `0.0.0` placeholder.
 - `APP_DIR=/path/AgentWatchBar.app macos-bar/build.sh` builds somewhere else;
   `MENUBAR_VERSION=x.y.z` overrides the version for one build.
 - To update a running copy: quit it from its menu, rebuild, open it again.
@@ -28,7 +27,8 @@ open bin/AgentWatchBar.app
 
 ## Launch at login
 
-System Settings → General → Login Items → **Open at Login** → `+` → choose
+System Settings → General → Login Items (Login Items & Extensions on macOS 15
+and later) → **Open at Login** → `+` → choose
 `bin/AgentWatchBar.app`.
 
 ## Which bridge binary it uses
@@ -51,7 +51,7 @@ The bar reports the health of the bridge and the relay, and pairs watches. It ne
 | watch | yellow | Connecting to *relay*… | Wait |
 | watch | yellow | herdr is not running | Start herdr |
 | watch with `!` | red | Relay error (for example the host token was rejected), with the error | Fix the cause; it keeps retrying |
-| watch with `!` | red | Bridge not responding (no status for more than 15 s) | Restart |
+| watch with `!` | red | Bridge not responding (its status file is stale: `contracts.md` §6) | Restart |
 | crossed watch | gray, or red if it failed to start | Bridge stopped (and why, if it failed) | Start |
 | crossed watch | gray | Bridge service not installed | Start |
 | crossed watch | gray | Bridge not configured; Start is disabled | Run `make configure-bridge` (or `agent-watch-bridge configure --env-file agent-watch.env`) in a terminal |
@@ -59,9 +59,11 @@ The bar reports the health of the bridge and the relay, and pairs watches. It ne
 
 The tooltip repeats the state. The **Versions** section of the menu shows:
 
-- **Menu bar** `x.y.z`: this app's bundle version.
-- **Bridge** `x.y.z (<commit>)`: the running daemon's version with its commit, or the CLI's when it is stopped. A `, modified` after the commit means it was built with uncommitted changes.
-- **Relay** `x.y.z (<commit>)`: what the relay reported in its last handshake with the running bridge (`relay_version`), kept while the relay is unreachable. No line while it is unknown: the bridge is stopped, has not connected yet, or the relay predates 0.3.0.
+- **Menu bar:** this app's bundle version.
+- **Bridge:** the running daemon's version, or the CLI's when it is stopped.
+- **Relay:** what the relay reported in its last handshake with the running bridge (`relay_version`), kept while the relay is unreachable. No line while it is unknown: the bridge is stopped, has not connected yet, or the relay is too old to report it.
+
+The version strings' format is in `docs/reference/contracts.md` §3.
 
 ## Menu actions
 
@@ -72,7 +74,7 @@ The tooltip repeats the state. The **Versions** section of the menu shows:
 - **Restart Bridge** (⌘R): `agent-watch-bridge restart`, which restarts the
   installed service without rewriting it (use it after `make bridge`).
 - **Pair a Watch…** (⌘P): `agent-watch-bridge pair --json`; shows the code and
-  its real expiry. Needs only the config and the relay, not a running bridge.
+  its real expiry.
   "Copy Code" marks the clipboard entry as concealed.
 - **Open Bridge Log** (⌘L) and **Show Configuration in Finder** (⌘,): the
   config holds the host token, so it is revealed, not opened in an editor.

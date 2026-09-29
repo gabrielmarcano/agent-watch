@@ -6,8 +6,8 @@
 # herdr-plugin.toml cannot read files: keep its `version` equal to
 # BRIDGE_VERSION (`make check-versions` fails when they differ).
 #
-# The Go binaries add the commit they were built from on their own, e.g.
-# "x.y.z (<commit>)": never write a commit here.
+# The Go binaries add the commit they were built from on their own (format:
+# docs/reference/contracts.md §3): never write a commit here.
 #
 # WEAROS_VERSION_CODE must increase for every build you ship: Android refuses
 # to install a lower code over a higher one, and an equal code hides which

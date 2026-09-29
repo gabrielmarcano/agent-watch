@@ -1,27 +1,32 @@
 ---
 trigger: model_decision
 description: "Security rules for the relay server, push notifications and VPS deployment. Apply when touching pkg/relay, pkg/push, cmd/relay or deploy/"
+paths:
+  - "pkg/relay/**"
+  - "pkg/push/**"
+  - "cmd/relay/**"
+  - "deploy/**"
 ---
 
 # Relay and push rules (security is correctness here)
 
 > Applies to: pkg/relay, pkg/push, cmd/relay, deploy/.
 
-The relay can make agents on the owner's Mac type and approve things, so treat it as a remote-execution surface. Shapes and values (timeouts, keepalives, anti-spam windows): `docs/reference/contracts.md` §2–§5. Secrets: `AGENTS.md` §3. Operations: `deploy/relay/README.md`.
+The relay can make agents on the owner's Mac type and approve things, so treat it as a remote-execution surface. Shapes and values (timeouts, keepalives, pairing limits, anti-spam windows): `docs/reference/contracts.md` §2–§5. Secrets and who may deploy: `AGENTS.md` §3. Operations: `deploy/relay/README.md`.
 
 ## Tokens and auth
 - **Only the `Authorization: Bearer` header authenticates;** ignore query-string tokens.
 - **Device tokens are 32 random bytes.** Store only `sha256` hashes, and compare with `crypto/subtle.ConstantTimeCompare`. The host token is compared the same way.
-- **Pairing codes:** 6 digits from `crypto/rand`, 5-minute TTL, single use, rate-limited per client IP and globally.
-- **Client IP:** forwarding headers (`X-Forwarded-For`, `X-Real-IP`, the optional `AW_CLIENT_IP_HEADER`) are read **only** from peers in `AW_TRUSTED_PROXIES`; otherwise the TCP peer is the client. Never trust a header from an untrusted peer (`contracts.md` §5).
+- **Pairing codes** come from `crypto/rand`, are single use, expire (`contracts.md` §2.2) and are rate-limited per client IP and globally.
+- **Client IP:** forwarding headers are read **only** from peers in `AW_TRUSTED_PROXIES`; otherwise the TCP peer is the client. Never trust a header from an untrusted peer (the algorithm: `contracts.md` §5).
 - **Never log** request bodies or history content, besides what `AGENTS.md` §3 forbids.
 
 ## Behaviour
 - **Exactly one host connection;** a new one replaces the old (close code 4000).
 - **Commands** get one budget for sending and waiting, longer than the bridge's and shorter than the watch's, so inner layers always time out first (values: `contracts.md` §2.4). With no host they fail immediately (`host_offline`), and in-flight ones fail the moment their host disconnects, misses a ping or is replaced.
 - **Host keepalive:** ping the host; no pong in time → drop it (`contracts.md` §3).
-- **Keepalives stay short** (SSE comments, WebSocket pings; `contracts.md` §2–§3): proxies close idle connections (Cloudflare about 100 s, the nginx example 90 s), so never lengthen them.
-- **HTTP server:** no `ReadTimeout` or `WriteTimeout` (they kill SSE and WebSocket). Keep `ReadHeaderTimeout: 10s` and `IdleTimeout: 120s`. Shutdown cancels every request context, so open streams end at once.
+- **Keepalives stay short** (SSE comments, WebSocket pings; `contracts.md` §2–§3): they must stay below the proxies' idle timeouts (`deploy/relay/README.md` § Proxy idle timeouts), so never lengthen them.
+- **HTTP server:** no `ReadTimeout` or `WriteTimeout` (they kill SSE and WebSocket); keep `ReadHeaderTimeout` and `IdleTimeout` (`pkg/relay/server.go`). Shutdown cancels every request context, so open streams end at once.
 - **SSE:**
   - subscribe **before** taking the snapshot;
   - keepalive comments and a deadline on every write (`contracts.md` §2);

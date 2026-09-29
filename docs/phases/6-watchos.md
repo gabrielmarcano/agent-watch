@@ -4,9 +4,9 @@
 
 | | |
 |---|---|
-| **Depends on** | Phase 5 (the Wear OS UX is validated). Model + network sync (steps 1–3) may start earlier if a contract change forces it |
-| **Parallel with** | nothing required; it runs last |
-| **Touches** | `watchos-app/**`, `docs/STATUS.md` |
+| **Order and parallel work** | [`docs/STATUS.md`](../STATUS.md). Model + network sync (steps 1–2) may start earlier if a contract change forces it |
+| **Touches** | `watchos-app/**`, `.agents/rules/watchos.md`, `docs/STATUS.md`, and every line that calls the watchOS app legacy or "not on the relay API yet": `docs/GUIDE.md`, `SECURITY.md`, `docs/reference/contracts.md`, `Makefile` (`watchos-config` comment), `tools/config/awenv.sh`, `agent-watch.env.example` |
+| **Needs the owner** | Pairing a simulator: `agent-watch-bridge pair` prints the code. A simulator paired with the production relay becomes a registered device: give the owner its name so he can revoke it. Sandbox agents to answer: the `capture-fixture` skill, steps 1–2. ntfy: the owner enables it on the relay and checks his iPhone |
 | **Never blocks** | a release. If time runs out, steps 1–3 alone (it compiles and shows the agent list) are an acceptable stopping point |
 
 ---
@@ -39,40 +39,20 @@
 
 ### 1. Models (`Models/Contracts.swift`)
 
-`Codable`, `Identifiable`, `Sendable`, snake_case via `CodingKeys`, or `decoder.keyDecodingStrategy = .convertFromSnakeCase` with camelCase properties. **Pick one and use it everywhere.**
+Mirror `contracts.md` §1–§2 field by field (`Codable`, `Identifiable`, `Sendable`), nullable where Go uses `omitempty`. Snake_case via `CodingKeys`, or `decoder.keyDecodingStrategy = .convertFromSnakeCase` with camelCase properties: **pick one and use it everywhere.**
 
-```swift
-struct PromptOption: Codable, Identifiable, Sendable, Hashable { let id: String; let label: String; let description: String?; let role: String }
-struct PendingPrompt: Codable, Sendable, Hashable {
-    let kind: String; let title: String; let detail: String?
-    let options: [PromptOption]; let fingerprint: String; let rawTail: String?
-}
-struct AgentState: Codable, Identifiable, Sendable, Hashable {
-    var id: String { paneId }
-    let paneId: String; let agent: String; let label: String; let name: String?; let cwd: String?
-    let workspaceId: String; let workspace: String?; let status: String; let focused: Bool
-    let stateChangeSeq: UInt64; let prompt: PendingPrompt?; let updatedAt: String
-}
-struct HistoryItem: Codable, Identifiable, Sendable, Hashable {
-    let id: String; let paneId: String; let agent: String; let label: String
-    let query: String?; let response: String; let source: String; let completedAt: String
-}
-struct AgentsSnapshot: Codable, Sendable { let hostOnline: Bool; let herdrOnline: Bool; let agents: [AgentState]; let generatedAt: String }
-// + request/response bodies and ErrorResponse, mirroring contracts.md §2.2
-```
-
-**Contract parity check:** add a unit-test target in `project.yml` (`AgentWatchTests`, type `bundle.unit-test`, platform watchOS). Its test decodes `pkg/model/testdata/agent_state.json`, located with `URL(fileURLWithPath: #filePath)` walking up to the repo root, and asserts every field.
+**Contract parity check:** add a unit-test target in `project.yml` (`AgentWatchTests`, type `bundle.unit-test`, platform watchOS). Its test decodes `pkg/model/testdata/agent_state.json`, located with `URL(fileURLWithPath: #filePath)` walking up to the repo root, and asserts every field. Add it to the scheme so `xcodebuild … test` runs it: under the `AgentWatch` target, `scheme: { testTargets: [AgentWatchTests] }`.
 
 ### 2. Networking
 
 **`RelayClient`:** `async` functions mirroring the Wear OS `RelayClient`.
 - `URLSession.shared`.
-- `Authorization: Bearer` header on every request.
+- Auth as in `contracts.md` §2.
 - Pane ids percent-encoded with `.urlPathAllowed` minus `:`.
 
 **`RelayStore`:** `@MainActor final class RelayStore: ObservableObject`, with `@Published` `agents`, `hostOnline`, `herdrOnline`, `history`, `connection`.
 - SSE with `URLSession.bytes(for:)` and `for try await line in bytes.lines`. Parse the `event:` / `data:` pairs, separated by a blank line.
-- Reconnect with backoff 1 s → 30 s.
+- Reconnect and silence rules: `contracts.md` §2.3.
 - Apply the same event rules as Wear OS (`wearos-app/ARCHITECTURE.md` §3–4).
 - Keep the SSE open only while the scene is `.active` (`@Environment(\.scenePhase)`).
 
@@ -80,27 +60,15 @@ struct AgentsSnapshot: Codable, Sendable { let hostOnline: Bool; let herdrOnline
 
 ### 3. Views (copy the Wear OS UX)
 
-- `NavigationStack`:
-  - **`AgentListView`:** sections by attention (Needs you · Done · Working · Idle · Unknown) across workspaces, the workspace as secondary text; status as icon + word + colour, never colour alone; one notice line ("Connecting…", "Relay offline", "Device offline", "herdr stopped").
-  - **`AgentDetailView`:** status, `PromptCardView`, the last reply, Reply (dictation), History, and a "Pin to tile" toggle that sets `pinnedPaneId` (opening an agent does not pin it).
-- **`PromptCardView`:** the same rules as the Wear OS prompt section (`ui/screens/PromptSection.kt`: permission / question / unknown, Deny · Allow with the positive on the right, `allow_always` confirmed).
-- **Dictation:** `TextField` with dictation (watchOS offers the dictation input automatically), then a confirmation with the text and "To: <label>" before Send, as on Wear OS.
-- **History and reader:** markdown via `AttributedString(markdown:)` for `source == "transcript"`; `screen` captures in monospace, except their tables, which the bridge sends as markdown (show them as one record per row).
+The screens and UX rules are in `wearos-app/ARCHITECTURE.md` §4a–§4b (list sections and notice, agent screen, prompt, dictation confirmation, pin to tile, reader). The watchOS mapping:
+- `NavigationStack`: `AgentListView` → `AgentDetailView` (with `PromptCardView`), plus history, reader and pairing views.
+- **Dictation:** a `TextField` (watchOS offers the dictation input automatically), then the same confirmation before Send.
+- **Reader:** markdown via `AttributedString(markdown:)`.
 - **No push code:** ntfy on the iPhone handles alerts. Remove APNs registration code if any remains.
 
 ### 4. Build and run in the simulator
 
-```bash
-cd watchos-app
-xcodegen generate
-xcrun simctl list devices available | grep -i watch            # pick a watch simulator
-xcodebuild -project AgentWatch.xcodeproj -scheme AgentWatch \
-  -destination 'platform=watchOS Simulator,name=Apple Watch Series 9 (45mm)' build
-xcodebuild -project AgentWatch.xcodeproj -scheme AgentWatch \
-  -destination 'platform=watchOS Simulator,name=Apple Watch Series 9 (45mm)' test
-```
-
-Replace the simulator name with one from the `simctl` list. To check the UI, open the project in Xcode and run it on the simulator against the real relay (HTTPS works from the simulator).
+The commands (XcodeGen, `xcodebuild` build and test on a simulator) are in `.agents/rules/watchos.md` § Build. To check the UI, open the project in Xcode and run it on the simulator against the real relay (HTTPS works from the simulator).
 
 ---
 
@@ -115,8 +83,9 @@ Replace the simulator name with one from the `simctl` list. To check the UI, ope
   - dictation reaches the pinned agent;
   - history opens.
 - [ ] Push: ntfy checked on the iPhone (the simulator gets none).
+- [ ] The lines listed under **Touches** no longer call the app legacy.
 - [ ] `docs/STATUS.md` updated per its workflow ("verified in the simulator", gaps listed as open items), and this guide deleted.
-- [ ] Commit only `watchos-app/**` and `docs/STATUS.md`.
+- [ ] Commit only the paths listed under **Touches**, plus the deletion of this guide.
 
 ---
 
@@ -127,5 +96,6 @@ You are executing Phase 6 (watchOS client, best-effort) of the Agent Watch refac
 Read AGENTS.md, .agents/rules/watchos.md, docs/reference/contracts.md (§1, §2), wearos-app/ARCHITECTURE.md (the UX to copy) and
 docs/phases/6-watchos.md. Rewrite watchos-app/ as specified, regenerate the project with xcodegen, and verify with
 xcodebuild build/test on a watchOS simulator. There is no physical Apple Watch: report results as "verified in simulator"
-and never claim device behaviour. Update docs/STATUS.md per its workflow, delete this guide, and commit only those paths.
+and never claim device behaviour. Update the lines listed under Touches and docs/STATUS.md per its workflow, delete this
+guide, and commit only those paths.
 ```

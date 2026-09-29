@@ -30,15 +30,11 @@ tools/herdr-overrides/herdr-overrides.sh uninstall           # remove our files,
 
 All commands take optional agent names (`agy`, `claude`). `install` refuses to overwrite an override it did not write.
 
+**Who may run them:** `install` and `uninstall` write `~/.config/herdr/agent-detection/` and reload the owner's live herdr. Agents may run them when their task needs it, and say so in their report (`AGENTS.md` §3); `verify` and `check` change nothing.
+
 ## Fixtures
 
-`verify` runs `herdr agent explain --file` over real captures: the dialogs and no-dialog screens in `pkg/agents/testdata/{agy,claude}/`, plus the live cases in `testdata/` here (agy 1.2.11 dialogs; Claude dialogs with and without a stale input box; an idle Claude with a typed `❯` prompt). Result on 2026-09-25:
-
-| | Upstream only | With overrides |
-|---|---|---|
-| agy dialogs (6) | 0 blocked | 6 blocked |
-| claude dialogs (10) | 6 blocked | 10 blocked |
-| no-dialog screens (6) | 0 blocked | 0 blocked |
+`verify` runs `herdr agent explain --file` over real captures: the dialogs and no-dialog screens in `pkg/agents/testdata/{agy,claude}/`, plus the live cases in `testdata/` here (agy 1.2.11 dialogs; Claude dialogs with and without a stale input box; an idle Claude with a typed `❯` prompt). Run `verify` (and `verify --upstream`) for the current numbers.
 
 ## When to remove
 

@@ -10,23 +10,28 @@ Rules for every AI agent working in this repository: Claude Code, Antigravity, O
 
 | What | Its one home |
 |---|---|
-| State: phases, claims, open items, blockers, next steps | [`docs/STATUS.md`](docs/STATUS.md) |
+| State: phases, claims (also for work outside a phase), open items, blockers, next steps, what is deployed | [`docs/STATUS.md`](docs/STATUS.md) |
 | Guides for the open phases | [`docs/phases/`](docs/phases/) |
-| Every JSON shape, endpoint, error code, push payload, env var, config key and CLI output | [`docs/reference/contracts.md`](docs/reference/contracts.md) |
-| The herdr socket: methods, events, keys, verified behaviour | [`docs/reference/herdr-socket-api.md`](docs/reference/herdr-socket-api.md) |
+| Every JSON shape, endpoint, error code, push payload, config key, machine-readable CLI output (`--json`, version strings), and product env vars (relay `AW_*`, `agent-watch.env` keys) | [`docs/reference/contracts.md`](docs/reference/contracts.md) |
+| Timeouts, limits and intervals | the doc of their layer: `contracts.md` (relay, bridge, watch), `herdr-socket-api.md` (herdr side), `agents.md` §3.2 (transcript reads) |
+| The herdr socket: methods, events, keys, verified behaviour, and the bridge's herdr policy | [`docs/reference/herdr-socket-api.md`](docs/reference/herdr-socket-api.md) |
 | Per agent: menus, option roles, keys, transcripts | [`docs/reference/agents.md`](docs/reference/agents.md) |
-| Wear OS internals, screens, notifications and UX decisions | [`wearos-app/ARCHITECTURE.md`](wearos-app/ARCHITECTURE.md) |
-| Exact texts the watch shows | `wearos-app/app/src/main/res/values/strings.xml`, `approval/CommandFeedback.kt` |
-| Install, operate, troubleshoot; versions, releases and CI; security model; known issues | [`docs/GUIDE.md`](docs/GUIDE.md) |
-| Relay operations: VPS, proxy, devices, backups | [`deploy/relay/README.md`](deploy/relay/README.md) |
+| Wear OS internals, client rules, screens, notifications and UX decisions | [`wearos-app/ARCHITECTURE.md`](wearos-app/ARCHITECTURE.md) |
+| Exact texts the watch shows | the code: `wearos-app/app/src/main/res/values/strings.xml`, `approval/CommandFeedback.kt`, and the notification builders in `network/AgentNotifications.kt`, `MyFirebaseMessagingService.kt`, `NotificationActionReceiver.kt` |
+| Installing, operating and troubleshooting the bridge and the watch app; the tool minimums users need; releases and CI; security model; known issues (symptom and workaround only) | [`docs/GUIDE.md`](docs/GUIDE.md) |
+| Relay operations: VPS setup, deploys, rollback, the relay CLI, proxy, devices, backups | [`deploy/relay/README.md`](deploy/relay/README.md) |
 | macOS menu bar app | [`macos-bar/README.md`](macos-bar/README.md) |
 | What the guards block, their setup and tests | [`tools/guards/README.md`](tools/guards/README.md) |
-| The temporary herdr detection overrides | [`tools/herdr-overrides/README.md`](tools/herdr-overrides/README.md) |
-| Component versions | [`VERSIONS`](VERSIONS) |
-| Rules per area | `.agents/rules/*.md` (§4) |
-| Procedures | `.agents/skills/*/SKILL.md`: `capture-fixture` (capture and audit agent CLIs), `add-agent-adapter`, `schema-sync`, `herdr-probe`, `wearos-deploy`, `relay-deploy` |
+| The herdr dialog-detection gap and its temporary overrides | [`tools/herdr-overrides/README.md`](tools/herdr-overrides/README.md) |
+| Component versions and when to bump them | [`VERSIONS`](VERSIONS) |
+| Toolchain versions | the build files: `go.mod`, the Gradle files, `herdr-plugin.toml` (`min_herdr_version`) |
+| Tool-specific env vars (`SSH_OPTS`, `APP_DIR`, guard escape hatches, `HERDR_*`) | the doc of that tool |
+| Repo layout | §2 |
+| Rules per area, with their build and test commands | `.agents/rules/*.md` (§4) |
+| Procedures | `.agents/skills/*/SKILL.md`: `capture-fixture` (capture and audit agent CLIs; the checklist after a herdr upgrade), `add-agent-adapter`, `schema-sync`, `herdr-probe`, `wearos-deploy`, `relay-deploy` |
+| Reporting a vulnerability | [`SECURITY.md`](SECURITY.md) |
 
-**To start work:** pick an open phase in `docs/STATUS.md`, claim it there as its workflow line says, then read its guide.
+**To start work:** claim it in `docs/STATUS.md` as its workflow line says (a phase, or an open item for anything else), then read the phase's guide or the rule and skill for the area.
 
 > ⚠️ **The herdr on the development Mac runs the owner's real agent sessions.** Before any herdr command, read `.agents/rules/herdr-integration.md` § Safety.
 
@@ -57,7 +62,7 @@ Rules for every AI agent working in this repository: Claude Code, Antigravity, O
 - **Never map prompt options by position.** Roles (`allow_once`, `allow_always`, `deny`, `choice`) come from the option **label**. Why: in Claude Code, `2` means "Yes, and don't ask again".
 
 ### 1.3 Two Go binaries, one module
-- Go 1.22+, one module (`go.mod`; it keeps its old name, `agent-monitor`, although the repo is `agent-watch`).
+- One Go module (`go.mod`; it keeps its old name, `agent-monitor`, although the repo is `agent-watch`).
 - `agent-watch-bridge`: static binary on the Mac/Linux host. Keep it thin: herdr ↔ relay translation plus on-demand transcript reads.
   - The herdr plugin (`herdr-plugin.toml`) only installs and controls this binary. Its actions are one-shot.
   - The long-running process is `agent-watch-bridge run`, supervised by launchd (macOS) or systemd `--user` (Linux). Never rely on herdr to keep it alive: plugin actions are one-shot, and the service manager restarts the bridge after a crash or reboot and outlives herdr restarts.
@@ -83,14 +88,14 @@ Rules for every AI agent working in this repository: Claude Code, Antigravity, O
 
 ```
 agent-watch/                      # the Go module keeps its old name, github.com/gabrielmarcano/agent-monitor
-├── go.mod · go.sum · Makefile    # make config / configure-bridge / deploy-relay / watchos-config read agent-watch.env
+├── go.mod · go.sum · Makefile    # build, test, configure and deploy targets
 ├── agent-watch.env.example       # the one deployment config file, documented; the real agent-watch.env is git-ignored (secret)
 ├── herdr-plugin.toml             # herdr-agent-watch plugin manifest
-├── VERSIONS                      # one version per component (make check-versions)
-├── .github/workflows/            # CI (ci, wearos, macos-bar) and date-tagged releases
+├── VERSIONS                      # component versions
+├── .github/workflows/            # CI and releases
 ├── cmd/
-│   ├── bridge/                   # host daemon + CLI (configure/run/start/restart/stop/status/pair/version)
-│   └── relay/                    # VPS relay (serve/devices/version)
+│   ├── bridge/                   # host daemon and its CLI
+│   └── relay/                    # VPS relay and its CLI
 ├── pkg/
 │   ├── model/                    # shared contracts: state, API DTOs, wire envelopes
 │   ├── herdr/                    # socket client — agent-agnostic
@@ -127,30 +132,35 @@ agent-watch/                      # the Go module keeps its old name, github.com
 - **Never log** tokens, `Authorization` headers, prompt text or transcript content; log lengths and ids.
 - **Tokens travel only in the `Authorization` header**, never in URLs or query strings (they end up in proxy logs).
 - **Personal deployment details** (the owner's domain, SSH target, IPs, device ids, project names) never go into tracked files: use placeholders such as `relay.<domain>`.
-- Commands that need VPS or Cloudflare credentials are handed to the owner, not run by agents.
+- **Deploys and the owner's machines (owner's decision, 2026-09-29):** agents may deploy the relay, run commands on the VPS over SSH, roll it back, and install or uninstall the herdr detection overrides whenever their task needs it, and **must say so in their report** (and update `docs/STATUS.md` "Deployed"). Still the owner's: `herdr server stop` and `herdr integration install`/`uninstall` (the guards refuse them), Cloudflare dashboard changes, revoking his watch, rebooting the host, and pausing shared infrastructure such as the proxy container.
 - The security design (hashed tokens, pairing limits, the bridge's checks before pressing keys) is described in [`docs/GUIDE.md` § Security Model](docs/GUIDE.md#security-model); the rules that implement it are in `relay-security.md` and `herdr-integration.md`.
 
 ---
 
 ## 4. Area Rules
 
-| Rule | Applies to |
-|---|---|
-| [`herdr-integration.md`](.agents/rules/herdr-integration.md) | any herdr command; `pkg/herdr`, `pkg/bridge`, `cmd/bridge`, the plugin (always on) |
-| [`contracts.md`](.agents/rules/contracts.md) | any JSON shape: `pkg/model`, `contracts.md`, the client models (always on) |
-| [`go-backend.md`](.agents/rules/go-backend.md) | every Go file |
-| [`agent-adapters.md`](.agents/rules/agent-adapters.md) | `pkg/agents/**` |
-| [`relay-security.md`](.agents/rules/relay-security.md) | `pkg/relay`, `pkg/push`, `cmd/relay`, `deploy/` |
-| [`wearos.md`](.agents/rules/wearos.md) | `wearos-app/**` |
-| [`watchos.md`](.agents/rules/watchos.md) | `watchos-app/**` |
+Each rule's first lines say what it applies to.
 
-How they load: Antigravity CLI by each file's `trigger`/`glob` frontmatter; OpenCode through `opencode.json`; Claude Code through `.claude/rules` (a link to `.agents/rules`). **Any other agent: read the ones for the files you touch.**
+- [`herdr-integration.md`](.agents/rules/herdr-integration.md): herdr safety, protocol and the bridge's commands
+- [`contracts.md`](.agents/rules/contracts.md): JSON shapes and their copies
+- [`go-backend.md`](.agents/rules/go-backend.md): Go conventions and checks
+- [`agent-adapters.md`](.agents/rules/agent-adapters.md): `pkg/agents`
+- [`relay-security.md`](.agents/rules/relay-security.md): the relay, push and deploy
+- [`wearos.md`](.agents/rules/wearos.md): the Wear OS app
+- [`watchos.md`](.agents/rules/watchos.md): the watchOS app
+
+How they load:
+- **Antigravity CLI:** by each file's `trigger`/`glob` frontmatter.
+- **OpenCode:** all of them, through `opencode.json`.
+- **Claude Code:** through `.claude/rules` (a link to `.agents/rules`): a rule with `paths:` in its frontmatter loads when you work on matching files, the others always. Skills reach it through `.claude/skills` (a link to `.agents/skills`).
+- **Any other agent:** read the ones for the files you touch.
 
 ---
 
 ## 5. Guards and Git
 
 - **Guards:** one implementation (`tools/guards/guards.py`), wired into Antigravity, OpenCode, Claude Code and the git pre-commit hook. What they block and how to set them up: [`tools/guards/README.md`](tools/guards/README.md). If a guard blocks you, fix the cause; never work around it.
+- **Codex, Cursor and other tools** get only the pre-commit hook: nothing stops them from sending input to the owner's herdr panes, so `herdr-integration.md` § Safety is entirely on them.
 - **The working tree is shared with other sessions:**
   - commit only the paths you changed, by name (never `git add -A` or `.`);
   - never `git commit --amend` or `--no-verify`;
@@ -161,9 +171,9 @@ How they load: Antigravity CLI by each file's `trigger`/`glob` frontmatter; Open
 
 ## 6. Before Claiming Done
 
-1. The "before done" commands of every area rule you touched pass (Go: `go vet ./...`, `go test -race ./...`).
+1. The checks of every area rule you touched pass (Go: `go-backend.md` § Before claiming done; Wear OS: `wearos.md`'s build line).
 2. No legacy reference (§1.1) came back.
-3. If you changed `tools/guards/`, `.agents/hooks.json`, `.opencode/` or `.githooks/`: `bash tools/guards/test_guards.sh`.
+3. If you changed `tools/guards/`, `.agents/hooks.json`, `.opencode/`, `.claude/settings.json` or `.githooks/`: `bash tools/guards/test_guards.sh`.
 4. Every fact you changed is changed in its home (§0), and no copy of it is left elsewhere.
 5. `docs/STATUS.md` is up to date: your phase's state, and the open items you closed or found.
 6. Nothing is left behind: no uncommitted scratch files or secrets; only your own paths committed.

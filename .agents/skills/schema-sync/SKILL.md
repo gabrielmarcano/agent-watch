@@ -19,22 +19,23 @@ description: "Change a JSON contract (agent state, prompt, history, API bodies, 
 
 ## Steps
 1. **Edit `contracts.md`:** the struct, the field table and the example JSON.
-2. **Edit the Go structs.** If §1.2 changed, update `pkg/model/testdata/agent_state.json` to match its example.
-3. **Run `go test ./pkg/model/...`.** The golden test must pass.
-4. **Update the Kotlin model.** Add `@Keep` if the class is new. Then run:
+2. **Edit the Go structs.** If §1.2 changed, update `pkg/model/testdata/agent_state.json` to match its example, and the struct literal of `TestGoldenAgentState` (`pkg/model/model_test.go`).
+3. **Fill the value where it is produced.** An `AgentState` field is built in `buildAgentState` (`pkg/bridge/engine.go`). If it comes from herdr, add it to `AgentInfo` (`pkg/herdr/types.go`) and to `agentDiffers` (`pkg/herdr/sync.go`), or its changes are never republished.
+4. **Run `go test ./pkg/model/... ./pkg/bridge/... ./pkg/herdr/...`.** The golden test must pass.
+5. **Update the Kotlin model.** Add `@Keep` if the class is new, and an assert for the new field in `ContractsTest` (it checks fields one by one, so a missing field passes silently). Then run:
 
    ```bash
    cd wearos-app && ./gradlew :app:testDebugUnitTest --tests '*ContractsTest*'
    ```
 
-5. **Update the Swift model.** If the parity test target exists, run:
+6. **Update the Swift model.** Until Phase 6 the app is the legacy client (`docs/STATUS.md`), but the pre-commit hook still wants a staged change under `watchos-app/AgentWatch/Models/`: append the new field or type to the legacy models, as was done for `CancelRequest` and `PromptOption`. If the parity test target exists, run:
 
    ```bash
    cd watchos-app && xcodegen generate && xcodebuild -project AgentWatch.xcodeproj -scheme AgentWatch -destination 'platform=watchOS Simulator,name=<sim>' test
    ```
 
-6. **Grep for the old field name** in `cmd pkg wearos-app watchos-app`. Nothing may still use it.
-7. **Commit all copies together** in one commit, with explicit paths.
+7. **Grep for the old field name** in `cmd pkg wearos-app watchos-app`. Nothing may still use it.
+8. **Commit all copies together** in one commit, with explicit paths.
 
 ## If a client cannot be updated right now
-Say so to the owner explicitly and add a line under "Blocked / questions" in `docs/STATUS.md`. If the change touches no JSON field, commit with `AW_CONTRACT_NO_JSON_CHANGE=1` and say so in the message.
+Say so to the owner explicitly and add a line under **Open items** in `docs/STATUS.md`. If the change touches no JSON field, commit with `AW_CONTRACT_NO_JSON_CHANGE=1` and say so in the message.

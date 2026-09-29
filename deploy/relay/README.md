@@ -1,25 +1,30 @@
 # Relay operations
 
-Everything about running the relay on a VPS: first-time setup, deploys, the proxy, devices and backups.
+Everything about running the relay on a VPS: first-time setup, deploys, rollback, the proxy, devices and backups. The relay's environment variables and data files are defined in [`docs/reference/contracts.md`](../../docs/reference/contracts.md) §5. Who may run these commands: [`AGENTS.md`](../../AGENTS.md) §3.
 
 ## First-time setup (once per VPS)
 
-Owner-run (it needs root on the VPS):
+**Needs:** an x86-64 (amd64) Linux VPS (`make deploy-relay` builds linux/amd64 only; on arm64, install the release's `linux_arm64` binary by hand as `/usr/local/bin/agent-watch-relay`), root over SSH, and `curl` on the box.
 
 ```bash
-ssh <vps>
+# On the Mac, from the repo root:
+scp deploy/relay/env.example deploy/relay/agent-watch-relay.service <vps>:/tmp/
+
+# On the VPS, as root:
 useradd --system --home /var/lib/agent-watch-relay --shell /usr/sbin/nologin agentwatch
 install -d -m 0750 -o root -g agentwatch /etc/agent-watch-relay   # the relay (agentwatch) must read the Firebase JSON kept here
-# Create /etc/agent-watch-relay/env from env.example (root:agentwatch, 0640).
-#   With agent-watch.env on the Mac: keep the AW_HOST_TOKEN placeholder; --sync-env writes the real token.
-#   Without it: AW_HOST_TOKEN=$(openssl rand -hex 32), and give the same value to the bridge's `configure`.
-install -m 0644 agent-watch-relay.service /etc/systemd/system/   # scp the unit first
+install -m 0640 -o root -g agentwatch /tmp/env.example /etc/agent-watch-relay/env
+install -m 0644 /tmp/agent-watch-relay.service /etc/systemd/system/
 systemctl daemon-reload && systemctl enable agent-watch-relay
 ```
 
+- **The env file:** set `AW_LISTEN` and `AW_TRUSTED_PROXIES` for your proxy (below).
+  - **With `agent-watch.env` on the Mac:** leave the `AW_HOST_TOKEN` placeholder; `--sync-env` writes the real token.
+  - **Without it:** `AW_HOST_TOKEN=$(openssl rand -hex 32)`, and give the same value to the bridge's `configure`.
+- **Push:** copy the Firebase service-account JSON to `/etc/agent-watch-relay/` yourself (`install -m 0640 -o root -g agentwatch …`) and put its server path in `AW_FCM_CREDENTIALS`. It never goes through `agent-watch.env`.
 - **Listen address:** the address your proxy reaches, never a public interface: `127.0.0.1:8080` for nginx or Caddy on the host, the docker bridge for Nginx Proxy Manager in docker (below).
-- **TLS in front:** any reverse proxy that terminates TLS and passes WebSockets and unbuffered SSE: `nginx.conf.example`, `Caddyfile.example`, or Nginx Proxy Manager (below). Set `AW_TRUSTED_PROXIES` for it (Client IP, below).
-- Then, from the Mac: `make deploy-relay ARGS=--sync-env`.
+- **TLS in front:** any reverse proxy that terminates TLS and passes WebSockets and unbuffered SSE: `nginx.conf.example`, `Caddyfile.example`, or Nginx Proxy Manager (below).
+- **Then, from the Mac:** `make deploy-relay ARGS=--sync-env` installs the binary and starts the service.
 
 ### Behind Cloudflare (optional)
 
@@ -30,37 +35,53 @@ In the dashboard:
 - a Cache Rule **Bypass cache** for `relay.<domain>/*`: SSE and API responses must never be cached;
 - the client IP header: see Client IP, below.
 
+### Proxy idle timeouts
+
+Proxies close connections that stay idle: Cloudflare after about 100 s, `nginx.conf.example` after 90 s. The relay's SSE keepalives and WebSocket pings (contracts §2.3, §3) are shorter than both: never lengthen them, and never set a proxy timeout below them.
+
 ## Deploy a new build
+
+Run **one** of these:
 
 ```bash
 make deploy-relay                     # target and options from agent-watch.env (AW_RELAY_SSH, AW_RELAY_SSH_OPTS)
-make deploy-relay ARGS=--sync-env     # also update /etc/agent-watch-relay/env from agent-watch.env
+make deploy-relay ARGS=--sync-env     # the same, and update /etc/agent-watch-relay/env from agent-watch.env
 
 deploy/relay/deploy.sh root@<vps>     # without agent-watch.env
 SSH_OPTS="-i ~/.ssh/<key> -o Port=2222" deploy/relay/deploy.sh root@<vps>
 ```
 
 - **Clean tree only.** It refuses to run with uncommitted or untracked changes, so the binary always matches a commit. (`agent-watch.env` is git-ignored and does not count.)
-- **Version:** `RELAY_VERSION` from `VERSIONS` (bump it there when the relay changes), plus the commit the binary reports on its own, e.g. `x.y.z (<commit>)`. Check it with `agent-watch-relay version`; the connected bridge shows it too (`relay_version` in `agent-watch-bridge status --json --local`, the menu bar's Versions section). Relays deployed before 0.3.0 read `0.2.0-<sha>`.
+- **Version:** bump `RELAY_VERSION` per [`VERSIONS`](../../VERSIONS); the binary adds its commit on its own (format: contracts §3). Check it with `agent-watch-relay version`; the connected bridge shows it too (`relay_version` in `agent-watch-bridge status --json --local`, the menu bar's Versions section).
 - **Target:** an explicit `<ssh-target>` wins and uses `SSH_OPTS` only. Without one, `deploy.sh` reads `AW_RELAY_SSH` and `AW_RELAY_SSH_OPTS` from `agent-watch.env` (`AW_ENV_FILE=<path>` for another file); `SSH_OPTS`, if set, still overrides the file's options.
 - **`SSH_OPTS` / `AW_RELAY_SSH_OPTS`** go to both `ssh` and `scp`. Use `-o Port=…`, not `-p`: `scp` spells the port `-P`.
-- **Rollback:** the replaced binary is kept as `/usr/local/bin/agent-watch-relay.prev`. After the restart the box curls `/v1/healthz` on the address in `AW_LISTEN` (from `/etc/agent-watch-relay/env`) for up to 15 s. If it never answers, the script prints the last journal lines, restores `.prev` (and the env file, after `--sync-env`), restarts, and exits non-zero.
-- **Needs on the box:** root over SSH (it writes `/usr/local/bin` and `/etc/agent-watch-relay`, and runs `systemctl`) and `curl`.
+- **Automatic rollback:** the replaced binary is kept as `/usr/local/bin/agent-watch-relay.prev`. After the restart the box curls `/v1/healthz` on the address in `AW_LISTEN` (from `/etc/agent-watch-relay/env`) for up to 15 s. If it never answers, the script prints the last journal lines, restores `.prev` (and the env file, after `--sync-env`), restarts, and exits non-zero.
+- **Needs on the box:** see First-time setup. The script writes `/usr/local/bin` and `/etc/agent-watch-relay`, and runs `systemctl`.
+
+### Rollback by hand
+
+To go back after a deploy that passed its health check, restore the kept binary:
+
+```bash
+ssh <vps> 'install -m 0755 /usr/local/bin/agent-watch-relay.prev /usr/local/bin/agent-watch-relay && systemctl restart agent-watch-relay'
+```
+
+Only one previous binary is kept: each deploy overwrites `.prev`.
 
 ### `--sync-env`: the server's env file from `agent-watch.env`
 
-Opt-in. It never runs on a plain deploy.
+Opt-in. It never runs on a plain deploy, and it changes live secrets.
 
 - **What is synced:** the relay keys `agent-watch.env` sets on an uncommented line, even an empty one: `AW_HOST_TOKEN`, `AW_LISTEN`, `AW_TRUSTED_PROXIES`, `AW_CLIENT_IP_HEADER`, `AW_PUSH_RESOLVED`, `AW_FCM_CREDENTIALS`, `AW_NTFY_URL`, `AW_NTFY_TOPIC`, `AW_NTFY_TOKEN`. A commented-out key leaves the server's line alone. `AW_DATA_DIR` is never synced (a new one also needs a `ReadWritePaths=` drop-in).
-- **Checked on the Mac, before the build:** `AW_HOST_TOKEN` must be 64 hex characters (an empty token is never sent), and values with a quote, a backslash or `$` are refused.
+- **Checked on the Mac, before the build:** `AW_HOST_TOKEN` must be 64 hex characters (an empty token is never sent), and values with a quote, a backslash or `$` are refused (systemd would not read them literally).
 - **On the server:** each key replaces its line in `/etc/agent-watch-relay/env` in place; other keys, comments and blank lines stay, and missing keys are appended at the end. The file keeps its owner and mode (`root:agentwatch`, `0640`). The server file must exist already (see First-time setup).
 - **Backup:** when anything changed, the previous file is kept as `/etc/agent-watch-relay/env.bak-<UTC time>`. Backups hold the old secrets with the same mode; delete old ones by hand.
 - **Secrets:** the values travel in a `0600` temp file over `scp` and are deleted after the run. Nothing is printed but key names: `env: changed: …; added: …; unchanged: …`.
-- **The Firebase JSON** is not in `agent-watch.env`: copy it to the server yourself and put its server path in `AW_FCM_CREDENTIALS`.
+- **Rollback:** if the relay is not healthy after the restart, both the binary and the env file are rolled back.
 
 ## Client IP and the pairing rate limit
 
-`POST /v1/pair` is limited per client IP. The relay reads forwarding headers only from the proxies in `AW_TRUSTED_PROXIES`; from anyone else it uses the TCP peer address.
+`POST /v1/pair` is limited per client IP. How the relay picks the client IP from `AW_TRUSTED_PROXIES` and the forwarding headers: contracts §5. What to set per topology:
 
 | Topology | `AW_TRUSTED_PROXIES` | `AW_CLIENT_IP_HEADER` |
 |---|---|---|
@@ -69,13 +90,12 @@ Opt-in. It never runs on a plain deploy.
 | Behind Cloudflare, origin reachable from Cloudflare **only** | the local proxy, as above | `CF-Connecting-IP` |
 | Relay exposed directly (no proxy) | unset | unset |
 
-- **`AW_TRUST_CF_IP` is gone.** If it is still in the env file, the relay ignores it and logs a warning at startup. Delete the line.
 - **Never set `AW_CLIENT_IP_HEADER=CF-Connecting-IP` on a domain that is not proxied by Cloudflare.** Anyone can send that header, and the proxy passes it through.
 - **Every container on a trusted docker network can claim any client IP.** Trust only networks whose containers you control; the narrowest subnet is best.
 
 ## Nginx Proxy Manager in docker
 
-The live layout: NPM runs in docker on a custom network, terminates TLS, and proxies `relay.<domain>` to the relay running under systemd on the host.
+A common layout: NPM runs in docker on a custom network, terminates TLS, and proxies `relay.<domain>` to the relay running under systemd on the host.
 
 ```
 internet ──443──▶ NPM container (custom docker network, 172.x.0.y)
@@ -138,9 +158,9 @@ curl -sS --max-time 3 http://$PUBLIC_IP:8080/v1/healthz; echo "exit=$?"   # must
 - The last command fails because nothing listens on the public address. `ss` is the authoritative check.
 - Linux accepts a packet for `172.17.0.1` on any interface, but only a machine on the same private L2 network can send one. If the VPS shares a private network (e.g. a provider VPC) with machines you do not control, drop `172.17.0.1:8080` from non-docker interfaces with a firewall rule.
 
-## systemd unit hardening
+## systemd unit
 
-`agent-watch-relay.service` runs as `agentwatch` with no capabilities, a read-only system (`ProtectSystem=strict`), `UMask=0077`, only `AF_INET`, `AF_INET6` and `AF_UNIX` sockets (`AF_UNIX` is required for `admin.sock`), and the `@system-service` syscall set. Only `/var/lib/agent-watch-relay` is writable.
+The hardening is in `agent-watch-relay.service` itself; only `/var/lib/agent-watch-relay` is writable.
 
 - **Custom `AW_DATA_DIR`:** add it to `ReadWritePaths=` in a drop-in, or the relay cannot write its store.
 - **After changing the unit:** `sudo systemctl daemon-reload && sudo systemctl restart agent-watch-relay`, then `systemd-analyze security agent-watch-relay` for the exposure score.
@@ -150,16 +170,16 @@ curl -sS --max-time 3 http://$PUBLIC_IP:8080/v1/healthz; echo "exit=$?"   # must
 `devices list` and `devices revoke` work **with the relay running**. There is no need to stop the service.
 
 ```bash
-sudo agent-watch-relay devices list
+sudo agent-watch-relay devices list               # ID, NAME, CREATED, LAST SEEN
 sudo agent-watch-relay devices revoke <device_id>
 ```
 
-- **Relay running:** the CLI talks to it through `/var/lib/agent-watch-relay/admin.sock`, a `0600` Unix socket that is never exposed over TCP.
+- **Relay running:** the CLI talks to it through `admin.sock` in the data dir (a `0600` Unix socket, never exposed over TCP; its API: contracts §5).
   - The revoked token gets `401` on its next request.
-  - The device's open SSE streams are closed at once.
+  - The device's open SSE streams and in-flight requests are cancelled at once.
   - `store.json` is saved immediately.
 - **Relay stopped:** the CLI edits `store.json` itself, under the same lock the relay uses.
-- **As root or as the service user:** both work. Files written as root keep the `agentwatch` owner, so the service can still read them.
+- **As root or as the service user:** both work. Files written as root are handed to the owner of the data dir, so the service can still read them.
 - **Custom data dir:** if `/etc/agent-watch-relay/env` sets a different `AW_DATA_DIR`, pass the same value: `sudo AW_DATA_DIR=<dir> agent-watch-relay devices …`.
 - **Docker:** `docker exec <container> /agent-watch-relay devices revoke <device_id>`.
 
@@ -169,10 +189,23 @@ sudo agent-watch-relay devices revoke <device_id>
 2. `sudo agent-watch-relay devices revoke <device_id>`.
 3. **Apple Watch (ntfy):** revoking does not stop ntfy notifications, because every watchOS device shares the topic. Put a new random `AW_NTFY_TOPIC` in `/etc/agent-watch-relay/env` and run `sudo systemctl restart agent-watch-relay` (or, if `agent-watch.env` manages it, change it there and run `make deploy-relay ARGS=--sync-env`), then subscribe the remaining devices to the new topic.
 
-## Files in `/var/lib/agent-watch-relay`
+## Backups
 
-| File | Meaning |
-|---|---|
-| `store.json` | Devices (token hashes only) and history |
-| `relay.lock` | Held by the running relay. A second relay on the same directory refuses to start |
-| `admin.sock` | Local admin socket. It exists only while the relay runs |
+What to keep: `store.json` in the data dir (devices and history; its contents: contracts §5) and `/etc/agent-watch-relay/env` (the relay's secrets). Both are secrets: keep the copies root-only.
+
+```bash
+sudo install -m 0600 /var/lib/agent-watch-relay/store.json /root/agent-watch-store.json.bak-$(date -u +%Y%m%d)
+sudo install -m 0600 /etc/agent-watch-relay/env /root/agent-watch-env.bak-$(date -u +%Y%m%d)
+```
+
+- **Copying while the relay runs is safe:** it writes `store.json` atomically (temp file and rename), so a copy is always a whole file.
+- **Restore:** stop the relay, put the file back with its owner and mode, start it again:
+
+  ```bash
+  sudo systemctl stop agent-watch-relay
+  sudo install -m 0600 -o agentwatch -g agentwatch <backup> /var/lib/agent-watch-relay/store.json
+  sudo systemctl start agent-watch-relay
+  ```
+
+  The env file goes back with `install -m 0640 -o root -g agentwatch <backup> /etc/agent-watch-relay/env`, then a restart.
+- **Without a backup** the relay starts empty: every watch must pair again, and the history is gone.

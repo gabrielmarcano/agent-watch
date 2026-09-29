@@ -1,8 +1,8 @@
 # Herdr Socket API Reference (verified)
 
-Everything here was **probed live against herdr 0.9.1, socket protocol 22**, on 2026-09-23. When in doubt, re-derive it with the commands in §8. Do not trust memory or blog posts.
+Everything here was **probed live against herdr 0.9.1, socket protocol 22**, on 2026-09-23. When in doubt, re-derive it with the `herdr-probe` skill (`.agents/skills/herdr-probe/SKILL.md`). Do not trust memory or blog posts.
 
-> ⚠️ **Safety first.** The herdr on the development Mac runs the owner's **real** agent sessions. **Never** call `agent.prompt`, `agent.send_keys`, `pane.send_*`, `agent.start` or `pane.close` against a pane you did not create yourself for testing. Sending `"1"` to a real Claude pane approves whatever it was asking. Read-only methods (`ping`, `agent.list`, `agent.get`, `agent.read`, `session.snapshot`, `events.subscribe`) are safe. See the `capture-fixture` skill for the sandbox procedure.
+> ⚠️ **Safety first.** The herdr on the development Mac runs the owner's **real** agent sessions: sending `"1"` to a real Claude pane approves whatever it was asking. Which methods are safe and which are never called on the owner's panes: `.agents/rules/herdr-integration.md` § Safety.
 
 ---
 
@@ -29,46 +29,7 @@ Everything here was **probed live against herdr 0.9.1, socket protocol 22**, on 
 - **Success:** `{"id":"<same id>","result":{"type":"<result type>", ...}}`
 - **Error:** `{"id":"<same id or empty>","error":{"code":"<code>","message":"<text>"}}`. For malformed requests, `id` is `""` and `code` is `invalid_request`. The message names the offending field; use it to debug.
 
-### Minimal Go call (reference implementation shape)
-
-```go
-func (c *Client) Call(ctx context.Context, method string, params any, out any) error {
-    var d net.Dialer
-    conn, err := d.DialContext(ctx, "unix", c.SocketPath)
-    if err != nil {
-        return fmt.Errorf("herdr dial: %w", err) // treat as herdr offline
-    }
-    defer conn.Close()
-    if dl, ok := ctx.Deadline(); ok {
-        _ = conn.SetDeadline(dl)
-    }
-    if params == nil {
-        params = struct{}{} // herdr requires an object, never null
-    }
-    req := map[string]any{"id": newID(), "method": method, "params": params}
-    if err := json.NewEncoder(conn).Encode(req); err != nil { // Encode appends '\n'
-        return fmt.Errorf("herdr write: %w", err)
-    }
-    line, err := bufio.NewReader(conn).ReadBytes('\n')
-    if err != nil && len(line) == 0 {
-        return fmt.Errorf("herdr read: %w", err)
-    }
-    var resp struct {
-        Result json.RawMessage `json:"result"`
-        Error  *Error          `json:"error"`
-    }
-    if err := json.Unmarshal(line, &resp); err != nil {
-        return fmt.Errorf("herdr decode: %w", err)
-    }
-    if resp.Error != nil {
-        return resp.Error // *Error implements error; callers use errors.As
-    }
-    if out != nil {
-        return json.Unmarshal(resp.Result, out)
-    }
-    return nil
-}
-```
+The implementation, with its default timeout and cancellation: `Client.Call` in `pkg/herdr/client.go`.
 
 ---
 
@@ -150,12 +111,12 @@ Real example (trimmed, values replaced with placeholders):
 
 `{"agent": string, "kind": "id"|"path", "source": string, "value": string}`
 
-- **`kind: "id"`:** `value` is a session id (a UUID for claude and opencode).
+- **`kind: "id"`:** `value` is a session id (a UUID for claude, `ses_…` for opencode).
 - **`kind: "path"`:** `value` is an absolute transcript path (pi; agy reports a transcript path when available).
 - **It can be stale.** Herdr keeps the last session any harness announced for the pane. **Only trust it when `agent_session.agent == agent`.**
 - **It can be missing.** The agent's herdr integration may not be installed or up to date. Check with `herdr integration status`.
 
-Agent ids known to herdr 0.9.1 (from `server.agent_manifests`): `pi claude codex gemini cursor devin agy cline opencode copilot kimi kiro droid amp grok hermes kilo qodercli qwen letta maki muse`.
+The agent ids herdr knows are the `kinds:` line of `herdr agent` (its help output).
 
 ---
 
@@ -195,7 +156,7 @@ Request (keep the connection open afterwards):
 - **`pane_agent_detected` bursts:** it can fire for the whole herd at once, so debounce it.
 - **An empty `subscriptions` array** gets an ack but never any events.
 
-**Project rule:** events are only a **trigger**. On any event, schedule a debounced (150 ms) `agent.list` and diff the result. Never build state from event payloads alone. Also poll `agent.list` every 15 s while the stream is healthy, and every 2 s while it is down.
+**Bridge policy:** events are only a **trigger**: on any event the bridge schedules a debounced `agent.list` and diffs the result, and it also polls `agent.list`, more often while the stream is down. Never build state from event payloads alone. The loop and its values: `Syncer.Run` in `pkg/herdr/sync.go`.
 
 ---
 
@@ -212,36 +173,14 @@ If the socket cannot be dialed, herdr is not running. Report `herdr_online=false
 
 ---
 
-## 7. Reconnect policy
+## 7. Reconnect (bridge policy)
 
-- **Backoff** for dial failures and stream drops: 500 ms, 1 s, 2 s, 4 s … up to 30 s, each ±20 % jitter.
+- **Backoff** for dial failures and stream drops: exponential with jitter (values: `pkg/herdr/clock.go`).
 - **On reconnect:**
-  1. `ping`
-  2. `agent.list`
-  3. re-subscribe
-  4. send a full `snapshot` to the relay
+  1. `ping` (the bridge then sends `herdr_status` with `herdr_online: true` to the relay)
+  2. `agent.list`, diffed against the last known list: the relay gets `agent_update` / `agent_removed` for what changed
+  3. re-subscribe, then `agent.list` once more to cover the gap
 
----
-
-## 8. Re-verifying this document
-
-```bash
-herdr --version                                 # server version
-herdr api schema --json > /tmp/herdr-schema.json  # full machine-readable schema
-herdr agent list                                # live agents (read-only)
-herdr agent read <pane_id> --source visible --format text   # read-only
-herdr integration status                        # which agent integrations report sessions
-```
-
-To probe a single socket method without writing Go (read-only methods only):
-
-```bash
-python3 - <<'EOF'
-import json, os, socket
-s = socket.socket(socket.AF_UNIX); s.connect(os.path.expanduser('~/.config/herdr/herdr.sock'))
-s.sendall((json.dumps({"id": "p1", "method": "ping", "params": {}}) + "\n").encode())
-print(s.makefile().readline())
-EOF
-```
+  A full `snapshot` goes to the relay only when the bridge (re)connects to the relay (`contracts.md` §3).
 
 If a fact here turns out wrong on a newer herdr, fix this file in the same commit as the code change.

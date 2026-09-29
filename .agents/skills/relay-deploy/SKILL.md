@@ -5,7 +5,9 @@ description: "Build and ship a new agent-watch-relay binary to the VPS, restart 
 
 # Deploy and check the relay
 
-Everything about the VPS (first-time setup, the proxy, client IP, devices) is in `deploy/relay/README.md`. This skill covers **updates and checks**.
+How the deploy works (first-time setup, `deploy.sh`, `--sync-env`, rollback, the proxy, devices): `deploy/relay/README.md`. This skill is the procedure for **updates and checks**.
+
+**You may deploy, run these checks over SSH and roll back whenever your task needs it** (`AGENTS.md` §3): say so in your report, and after a deploy update the **Deployed** line in `docs/STATUS.md`.
 
 **The owner provides:**
 
@@ -24,21 +26,23 @@ make relay-linux
 file bin/agent-watch-relay-linux-amd64    # must say "statically linked"
 ```
 
+- Bump `RELAY_VERSION` per `VERSIONS` when the relay changed, and commit: `deploy.sh` refuses a dirty tree.
+
 ## 2. Ship (needs SSH access; ask the owner if you lack it)
+
+Run **one** of these:
 
 ```bash
 make deploy-relay                     # target and options from the owner's agent-watch.env
+# or, without agent-watch.env:
 deploy/relay/deploy.sh <vps>
-SSH_OPTS="-i <key> -o Port=<port>" deploy/relay/deploy.sh <vps>   # extra ssh/scp options
+# or, with extra ssh/scp options:
+SSH_OPTS="-i <key> -o Port=<port>" deploy/relay/deploy.sh <vps>
 ```
 
 - **Never read, print or edit `agent-watch.env`** (the guards refuse writes to it). `make deploy-relay` reads it itself.
-
-- **Clean tree only:** it refuses to run with uncommitted or untracked changes, so the binary always matches a commit. Commit first.
-- **Version:** `RELAY_VERSION` from `VERSIONS` plus the commit the binary adds itself, e.g. `x.y.z (<commit>)`; check it with `agent-watch-relay version` on the box, or `relay_version` in `agent-watch-bridge status --json --local`. Bump `RELAY_VERSION` in `VERSIONS` when the relay changes.
-- **`SSH_OPTS`** goes to both `ssh` and `scp`. Use `-o Port=…`, never `-p` (`scp` spells it `-P`).
-- It keeps the replaced binary as `/usr/local/bin/agent-watch-relay.prev`, installs the new one, restarts the unit, and curls `/v1/healthz` on the `AW_LISTEN` address for up to 15 s. **If the new binary never answers, it prints the last journal lines, restores `.prev`, restarts, and exits non-zero.**
-- It never touches `/etc/agent-watch-relay/env`, except with **`--sync-env`** (`make deploy-relay ARGS=--sync-env`), which updates it key by key from `agent-watch.env`, keeps `env.bak-<time>`, and rolls it back with the binary. **Only when the owner asks for it:** it changes live secrets. Needs root over SSH and `curl` on the box.
+- **`--sync-env`** (`make deploy-relay ARGS=--sync-env`) also rewrites the server's env file from `agent-watch.env`: it changes live secrets, so use it only when the task needs it, and say so.
+- If the new binary fails its health check, `deploy.sh` rolls back by itself and exits non-zero: report the journal lines it printed.
 
 ## 3. Check
 
@@ -46,10 +50,11 @@ SSH_OPTS="-i <key> -o Port=<port>" deploy/relay/deploy.sh <vps>   # extra ssh/sc
 curl -fsS https://relay.<domain>/v1/healthz
 curl -s -o /dev/null -w '%{http_code}\n' https://relay.<domain>/v1/agents     # 401
 ssh <vps> 'journalctl -u agent-watch-relay -n 50 --no-pager'
+ssh <vps> 'agent-watch-relay version'      # the version you shipped, with its commit
 ```
 
 - The journal must show `host connected` within a minute (the bridge reconnects on its own).
-- **SSE through the proxy** (with a device token the owner gives you): `curl -N -H "Authorization: Bearer <device_token>" https://relay.<domain>/v1/events` must print a `snapshot` at once, then a `:` keepalive regularly, and stay open for minutes. Bursts or silence mean the proxy buffers; a cut after about 100 s means its idle timeout is too short.
+- **SSE through the proxy** (with a device token the owner gives you): `curl -N -H "Authorization: Bearer <device_token>" https://relay.<domain>/v1/events` must print a `snapshot` at once, then a `:` keepalive regularly, and stay open for minutes. Bursts or silence mean the proxy buffers; a cut after a minute or two means its idle timeout is too short (`deploy/relay/README.md` § Proxy idle timeouts).
 - The journal must contain no tokens and no prompt text.
 
 **With the owner's host token** (he can run it, or export it only in his own shell):
@@ -58,12 +63,6 @@ ssh <vps> 'journalctl -u agent-watch-relay -n 50 --no-pager'
 curl -fsS -H "Authorization: Bearer $AW_HOST_TOKEN" https://relay.<domain>/v1/host/status
 ```
 
-## Rollback
+## 4. Roll back a deploy that passed its checks
 
-`deploy.sh` rolls back by itself when the new binary fails its health check. To go back after a deploy that passed it, restore the kept binary:
-
-```bash
-ssh <vps> 'install -m 0755 /usr/local/bin/agent-watch-relay.prev /usr/local/bin/agent-watch-relay && systemctl restart agent-watch-relay'
-```
-
-Only one previous binary is kept: each deploy overwrites `.prev`.
+`deploy/relay/README.md` § Rollback by hand.

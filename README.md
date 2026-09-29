@@ -23,16 +23,18 @@ your agents ─▶ herdr ─▶ agent-watch-bridge ══ WSS ══▶ agent-wa
 
 - **[herdr](https://herdr.dev)** runs your agents and knows what each one is doing.
 - **The bridge** runs on your computer and only dials out: no open ports, no VPN.
-- **The relay** is a small server you host. The watch talks only to it, over Wi-Fi, LTE or its phone's connection.
+- **The relay** is a small server you host. The watch talks to it (and to Firebase for push) over any internet path it has.
 - **The watch never sends keystrokes.** It sends "answer option X", and the bridge checks the prompt on screen is still the same before pressing anything.
 
 ---
 
 ## What You Need
 
-- **herdr** ≥ 0.9.1 and **Go** 1.22+ on the computer that runs your agents.
+- **herdr** and **Go** on the computer that runs your agents.
 - A small **Linux VPS** with a domain and a TLS reverse proxy, for the relay.
-- A **Wear OS** 3+ watch (tested on a Pixel Watch 2), plus JDK 17, the Android SDK and your own **Firebase** project (for push) to build the app.
+- A **Wear OS** watch (tested on a Pixel Watch 2), plus a JDK, the Android SDK and your own **Firebase** project (for push) to build the app.
+
+Minimum versions and details: [Requirements](docs/GUIDE.md#requirements).
 
 ---
 
@@ -62,7 +64,7 @@ Agent Watch is a herdr plugin, listed on [herdr.dev/plugins](https://herdr.dev/p
 herdr plugin install gabrielmarcano/agent-watch
 ```
 
-- It builds the bridge on your machine, so it needs **Go 1.22+**.
+- It builds the bridge on your machine, so it needs **Go**.
 - It covers the bridge only. The relay, the watch app and pairing are still needed ([guide](docs/GUIDE.md#alternative-install-the-bridge-with-herdr)). Not yet tested end to end.
 
 Prebuilt bridge, relay and menu bar binaries are on the [releases page](https://github.com/gabrielmarcano/agent-watch/releases).

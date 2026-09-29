@@ -9,36 +9,42 @@ Read `docs/reference/agents.md` (spec) and `.agents/rules/agent-adapters.md` fir
 
 ## Decide: adapter or generic?
 
-- **Numbered menu + `esc` + no transcript needed** → no adapter. The generic one already works. Add a fixture under `testdata/<agent>/` to prove it, and stop there.
+- **Numbered menu + `esc` + no transcript needed** → no adapter. The generic one already works. Add a fixture under `testdata/<agent>/` and the agent's herdr id to the `agents` list of `TestGoldenFixtures` (`pkg/agents/adapters_test.go`) to prove it, and stop there.
 - **Different keys, menu layout, queueing behaviour, or history wanted** → write an adapter.
 
 ## Steps
 
+0. **The agent's CLI and its herdr integration must be installed** (`herdr integration status`). Both are the owner's to install: ask him.
 1. **Fixtures first.** Run the `capture-fixture` skill for the agent. You need at least:
    - `permission-bash.txt` + `.golden.json`
    - `no-menu-working.txt`
    - a transcript sample + `transcript.expected.json`
-2. **Find herdr's id for the agent.** Use the `agent` field in `herdr agent list`, or the ids listed in `docs/reference/herdr-socket-api.md` §3.1.
-3. **Create `pkg/agents/<agent>.go`:**
+2. **Find herdr's id for the agent.** Use the `agent` field in `herdr agent list`, or the `kinds:` line of `herdr agent`.
+3. **Create `pkg/agents/<agent>.go`,** copying the shape of `agy.go`:
 
    ```go
-   type <agent>Adapter struct{ genericAdapter; cfg Config }
+   type <agent>Adapter struct {
+       *genericAdapter
+       cfg Config
+   }
 
-   func (a <agent>Adapter) Name() string { return "<herdr id>" }
-   // Override only what differs from generic:
-   // func (a <agent>Adapter) ParsePrompt(screen string) (Prompt, bool)
-   // func (a <agent>Adapter) CancelKeys() []string
-   // func (a <agent>Adapter) PromptWhileWorking() bool
-   // func (a <agent>Adapter) LastTurn(ctx context.Context, ref SessionRef) (*model.HistoryItem, error)
+   func new<Agent>Adapter(cfg Config) *<agent>Adapter {
+       return &<agent>Adapter{genericAdapter: newGenericAdapter(), cfg: cfg}
+   }
+
+   func (a *<agent>Adapter) Name() string { return "<herdr id>" }
+   // Override only what differs from generic (pointer receivers):
+   // ParsePrompt, CancelKeys, PromptWhileWorking, LastTurn (interfaces: pkg/agents/adapter.go)
+   // SplitScreenTurn (ScreenTurnReader, pkg/agents/screen.go): without it, screen history is the whole screen
    ```
 
    If an answer's keys act on whichever button has focus (OpenCode's Enter), also implement `FocusGuard` (`pkg/agents/adapter.go`) and capture an `--format ansi` focus fixture.
 
-4. **Register it** in `NewRegistry`.
+4. **Register it** in `NewRegistry` (`pkg/agents/adapter.go`): `"<herdr id>": new<Agent>Adapter(cfg),`.
 5. **Tests:**
-   - The golden fixture test picks up the new `testdata/<agent>/` files automatically.
+   - Add the agent's herdr id to the `agents` list of `TestGoldenFixtures` (`pkg/agents/adapters_test.go`); it then runs every `testdata/<agent>/*.txt` that has a `.golden.json`.
    - Add transcript tests: happy path, tool-call turn skipped, missing file → `ErrNoTranscript`, truncation.
-6. **Document it:** in `docs/reference/agents.md`, add a section for the agent with ✅ facts, following the claude/agy/opencode sections.
+6. **Document it:** in `docs/reference/agents.md`, add a section for the agent with ✅ facts, following the claude/agy/opencode sections; add its row to `docs/GUIDE.md` § Supported Agents.
 7. **Verify:**
 
    ```bash
@@ -50,5 +56,5 @@ Read `docs/reference/agents.md` (spec) and `.agents/rules/agent-adapters.md` fir
 ## Never
 - Map roles by option position.
 - Return an Allow option when nothing was parsed.
-- Read a whole transcript file. Tail reads stay bounded: 256 KiB, grown to at most 4 MiB only when the turn starts further back (the Claude reader's `tailWindows`).
+- Read a whole transcript file. Tail reads stay bounded (`.agents/rules/agent-adapters.md`).
 - Write to an agent's files or database.

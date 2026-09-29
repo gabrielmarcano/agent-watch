@@ -5,21 +5,14 @@ description: "Verify a herdr socket/CLI fact (method params, response shape, eve
 
 # Probe herdr safely (read-only)
 
-**Allowed without asking:**
-- `ping`
-- `agent.list`, `agent.get`, `agent.read`
-- `pane.get`, `pane.list`
-- `session.snapshot`
-- `workspace.list`
-- `events.subscribe` (you only listen)
-- `herdr api schema`
+**Allowed without asking:** the read-only methods and commands of `.agents/rules/herdr-integration.md` § Safety.
 
-**Anything that types, starts, closes or renames** goes through the `capture-fixture` sandbox. A hook enforces this.
+**Anything that types, starts, closes or renames** goes through the `capture-fixture` sandbox. The guards block most of it (`tools/guards/README.md`), but not ordinary tab or workspace renames: those are on you.
 
 ## 1. The schema is the fastest source of truth
 
 ```bash
-herdr --version
+herdr --version                                   # compare with herdr-socket-api.md's header
 herdr api schema --json > /tmp/herdr-schema.json
 python3 - <<'EOF'
 import json
@@ -46,12 +39,14 @@ print(call("agent.list", {})[:600])
 EOF
 ```
 
+From the CLI, also read-only: `herdr agent list`, `herdr agent read <pane_id> --source visible --format text`.
+
 ## 3. Watch events for a few seconds
 
 ```bash
 python3 - <<'EOF'
 import json, os, socket
-c = socket.socket(socket.AF_UNIX); c.connect(os.path.expanduser('~/.config/herdr/herdr.sock')); c.settimeout(20)
+c = socket.socket(socket.AF_UNIX); c.connect(os.environ.get('HERDR_SOCKET_PATH') or os.path.expanduser('~/.config/herdr/herdr.sock')); c.settimeout(20)
 c.sendall((json.dumps({"id": "sub", "method": "events.subscribe", "params": {"subscriptions": [
     {"type": "pane.created"}, {"type": "pane.focused"}]}}) + "\n").encode())
 f = c.makefile()

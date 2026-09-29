@@ -6,16 +6,15 @@
 
 | | |
 |---|---|
-| **Depends on** | Phase 5 (the Wear OS UX and data layer validated end to end) |
-| **Parallel with** | Phase 6 (disjoint directories), **except step 1**, which restructures the Android build: nothing else may touch the Android tree while it runs |
-| **Touches** | The Android Gradle build (restructured in step 1), path references in `tools/guards/`, `.agents/skills/*`, `.agents/rules/*`, `.github/workflows/*`, `Makefile`, `.gitignore` and docs; `VERSIONS` (the phone app's version); `docs/reference/contracts.md` + all contract copies only if step 4 adds a field (`schema-sync`); `docs/STATUS.md` |
+| **Order and parallel work** | [`docs/STATUS.md`](../STATUS.md) |
+| **Touches** | The Android Gradle build (restructured in step 1), path references in `tools/guards/`, `.agents/skills/*`, `.agents/rules/*`, `.github/workflows/*` and docs; `VERSIONS` (the phone app's version); `docs/reference/contracts.md` + all contract copies only if step 4 adds a field (`schema-sync`); `docs/STATUS.md` |
 | **Must not** | Create a second copy of the Kotlin contracts; send raw keys; weaken the bridge's validation; change the watch app's application id or signing key; commit Firebase files or personal values |
 
 ---
 
 ## Read first
 
-- `AGENTS.md`, `.agents/rules/wearos.md` (the Kotlin conventions carry over).
+- `AGENTS.md`, `.agents/rules/wearos.md` (its process rules carry over).
 - `docs/reference/contracts.md` §1, §2 (API, error codes), §4 (push payloads, `resolved`).
 - `wearos-app/ARCHITECTURE.md`: the data layer this phase shares, and §4b, the UX rules (target agent, approvals) a phone copies.
 
@@ -59,15 +58,15 @@ The relay does not care what kind of client it serves. Any app that pairs (`POST
 
 ### Shared configuration
 
-- `:mobile` reads `agent-watch.env` like `:wear`: `BuildConfig.DEFAULT_RELAY_URL`, and an application id key if the owner wants it configurable.
-- After the rename, the Gradle files read `../agent-watch.env` from their new location: adjust the path.
+- `:mobile` reads `agent-watch.env` like `:wear`: `BuildConfig.DEFAULT_RELAY_URL`, and `AW_ANDROID_APPLICATION_ID` (wiring that key is an open item in [`docs/STATUS.md`](../STATUS.md) § Code).
+- The reader in `app/build.gradle.kts` resolves `../agent-watch.env` and `../VERSIONS` against the Gradle root, which stays one level below the repo root after the rename: move it where `:wear` and `:mobile` can share it.
 
 ---
 
 ## Steps
 
 ### 1. Restructure into modules (alone)
-- Move to `android/{core,wear}`. `:core` gets `model/`, `network/`, `data/`, `approval/`, the pure notification logic, and their tests. Wear-only code (UI, tiles, complications, Wear notification builders) stays in `:wear`.
+- Move to `android/{core,wear}`. `:core` gets `model/`, `network/`, `data/`, `approval/`, `util/` (markdown), the pure notification logic, and their tests. Wear-only code (UI, tiles, complications, Wear notification builders) stays in `:wear`.
 - `network/` is not Wear-free today; split these out first:
   - `SurfaceUpdates.kt` imports the tile and complication services, and `RelayRepository` calls it (e.g. a callback interface that `:core` defines and `:wear` implements);
   - `MyFirebaseMessagingService`, `NotificationActionReceiver`, `NotificationSupport` and `AgentNotifications` build and handle Wear notifications: keep their pure logic in `:core` and the Android parts in `:wear`.
@@ -75,10 +74,10 @@ The relay does not care what kind of client it serves. Any app that pairs (`POST
   - `tools/guards/guards.py` `CONTRACT_PEERS` (the Kotlin model path) and `tools/guards/test_guards.sh`, then run `bash tools/guards/test_guards.sh`;
   - `.github/workflows/wearos.yml` (paths filter, working directory, the placeholder `google-services.json` it writes) and `release.yml`'s Wear OS line;
   - `.agents/rules/wearos.md` and `.agents/rules/contracts.md`;
-  - the `schema-sync` and `wearos-deploy` skills, `AGENTS.md` layout, docs, `Makefile`, `.gitignore` (`google-services.json`, `local.properties`);
-  - the Gradle reader of `agent-watch.env`.
+  - the `schema-sync` and `wearos-deploy` skills, `AGENTS.md` layout, `README.md` and the docs (`.gitignore` needs nothing: its patterns are unanchored);
+  - the Gradle reader of `agent-watch.env` (above).
 - Gate:
-  - the same JVM test count as before the move, all green (193 on 2026-09-26);
+  - the same JVM test count as before the move (count it first), all green;
   - `:wear:assembleRelease`;
   - installed on the Pixel Watch 2: pairing and push still work (same application id and signing key).
 - **Commit this step alone**, before any phone code.
@@ -90,8 +89,7 @@ The relay does not care what kind of client it serves. Any app that pairs (`POST
 - `RelayRepository` from `:core`; the SSE stream bound to the foreground, like the watch.
 
 ### 3. Screens
-- **Agent list:** the watch's information architecture (`wearos-app/ARCHITECTURE.md` §4a): sections by attention (Needs you · Done · Working · Idle · Unknown) across workspaces, the workspace as secondary text.
-- **Detail with the prompt card:** permission / question / unknown; roles from labels; ALLOW never `allow_always`; buttons locked after answering (`:core` logic).
+- **Agent list** and **detail with the prompt card:** the watch's screens and UX rules (`wearos-app/ARCHITECTURE.md` §4a–§4b), with the logic from `:core`.
 - **Prompt input:** keyboard and voice.
 - **History** and the markdown reader.
 - **Settings:** relay, unpair, notification behaviour.
@@ -100,7 +98,7 @@ The relay does not care what kind of client it serves. Any app that pairs (`POST
 - Channels (approvals high importance, done low), actions with `RemoteInput` for answers, `setAuthenticationRequired(true)` on approving actions, local-only notifications (or the option chosen), `resolved` handling from `:core`.
 - If option 3 is chosen: a contract change through `schema-sync` (all four copies), plus relay and tests.
 
-### 5. Verify on the owner's phone (Pixel 8 Pro), with the watch paired too
+### 5. Verify on an Android phone (the owner's), with the watch paired too
 - Pair; the list is live; approve and deny a **sandbox** agent from the app and from a notification, locked and unlocked; a prompt reaches the agent; history opens.
 - `agent-watch-relay devices revoke <id>` cuts the phone at once.
 - **No duplicate notification on the watch.**
@@ -116,7 +114,7 @@ The relay does not care what kind of client it serves. Any app that pairs (`POST
 
 ## Definition of done
 
-- [ ] Step 1 merged on its own; the Wear OS app behaves the same on the watch; guards, skills and docs use the new paths.
+- [ ] Step 1 committed on its own; the Wear OS app behaves the same on the watch; guards, skills and docs use the new paths.
 - [ ] `:mobile` release build installed on the owner's phone.
 - [ ] Every step-5 check passes with the watch paired: no duplicate notification on the wrist; a locked phone cannot approve.
 - [ ] No personal values in tracked files (relay domain, Firebase ids): `git grep` before committing.
@@ -141,6 +139,6 @@ You are executing Phase 7 (Android phone client) of Agent Watch in this reposito
 Read AGENTS.md, docs/phases/7-android-mobile.md, wearos-app/ARCHITECTURE.md and docs/reference/contracts.md (§1, §2, §4).
 First confirm the "Decisions" table with the owner. Then do step 1 (module restructure) alone and commit it before any
 phone code: keep the Wear OS app's application id, signing key and behaviour unchanged and its tests green. Build
-:mobile, verify on the owner's phone with sandbox agents only (never approve or prompt real agents), tick Phase 7 in
-docs/STATUS.md, and commit only your own paths.
+:mobile, verify on the owner's phone with sandbox agents only (never approve or prompt real agents), update
+docs/STATUS.md per its workflow, delete this guide, and commit only your own paths.
 ```

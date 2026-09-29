@@ -2,30 +2,19 @@
 
 The one place for the project's state: what is done, what is open, what comes next. Other docs link here instead of restating it. History (how each phase went, fixes, deploys) lives in git: `git log -- <path>`.
 
-**Workflow for agents:** before starting a phase, put your name and the date in its **Claimed by** cell and commit that change alone. When you finish, set its state, remove the items you closed from **Open items**, and add what you could not do. **Then delete the phase's guide:** anything in it still worth knowing moves first to its home (`AGENTS.md` §0), and the rest stays in git history.
+**Workflow for agents:** before starting a phase, put your name and the date in its **Claimed by** cell and commit that change alone; for work outside a phase, add your name and the date to its item under **Open items** (or add the item) the same way. When you finish, set its state, remove the items you closed from **Open items**, and add what you could not do. **Then delete the phase's guide:** anything in it still worth knowing moves first to its home (`AGENTS.md` §0), and the rest stays in git history.
 
 ---
 
 ## Phases
 
-| Phase | State | Claimed by | Where it lives now |
-|---|---|---|---|
-| 0 Agent fixtures | done | — | `pkg/agents/testdata/`, the `capture-fixture` skill |
-| 1 Foundation | done | — | `pkg/model`, `pkg/herdrtest` |
-| 2a herdr client | done | — | `pkg/herdr`, [`reference/herdr-socket-api.md`](reference/herdr-socket-api.md) |
-| 2b Agent adapters | done | — | `pkg/agents`, [`reference/agents.md`](reference/agents.md) |
-| 2c Bridge daemon | done | — | `cmd/bridge`, `pkg/bridge` |
-| 3a Relay server | done | — | `cmd/relay`, `pkg/relay`, [`reference/contracts.md`](reference/contracts.md) |
-| 3b Push | done (ntfy never tested) | — | `pkg/push` |
-| 3c Relay deploy | done | — | [`deploy/relay/README.md`](../deploy/relay/README.md) |
-| 4 Wear OS client | done | — | [`wearos-app/ARCHITECTURE.md`](../wearos-app/ARCHITECTURE.md) |
-| 4b Wear OS UI redesign | done: checked by the owner on the Pixel Watch 2, 2026-09-26 | — | [`wearos-app/ARCHITECTURE.md`](../wearos-app/ARCHITECTURE.md) |
-| **5 End-to-end (release gate)** | **open** | — | [`phases/5-e2e.md`](phases/5-e2e.md) |
-| 6 watchOS (best-effort) | not started; after 5 | — | [`phases/6-watchos.md`](phases/6-watchos.md) |
-| 7 Android phone client | not started; after 5 | — | [`phases/7-android-mobile.md`](phases/7-android-mobile.md) |
-| macOS menu bar app | done; verified only by `make bar-test` | — | [`macos-bar/README.md`](../macos-bar/README.md) |
-| Shared config (`agent-watch.env`) | done | — | [`GUIDE.md`](GUIDE.md) § Setup, `agent-watch.env.example` |
-| Versions, CI, releases | done | — | [`GUIDE.md`](GUIDE.md) § Versions and Releases |
+**Done:** phases 0–4b (fixtures, foundation, herdr client, agent adapters, bridge, relay, push, relay deploy, Wear OS client and its redesign), the macOS menu bar app (verified only by `make bar-test`), the shared `agent-watch.env`, and versions, CI and releases. Where each part is documented: `AGENTS.md` §0.
+
+| Phase | State | Claimed by |
+|---|---|---|
+| **[5 End-to-end](phases/5-e2e.md) (release gate)** | **open** | — |
+| [6 watchOS](phases/6-watchos.md) (best-effort) | not started; after 5 | — |
+| [7 Android phone client](phases/7-android-mobile.md) | not started; after 5 | — |
 
 **Deployed:** relay and bridge from release `v2026.09.26`, the Wear OS app of that release on the owner's Pixel Watch 2; the menu bar built from `main` into `bin/` (it runs the new build from its next launch). The component versions are in `VERSIONS`.
 
@@ -39,9 +28,7 @@ The one place for the project's state: what is done, what is open, what comes ne
 ## Open items
 
 ### Phase 5 (release gate)
-- Run the whole checklist of [`phases/5-e2e.md`](phases/5-e2e.md) (rows 1–27) for claude, agy and opencode, on the Pixel Watch 2 with a release build, recording the results in the guide's tables.
-  - The first run (2026-09-24/25, alpha UI) asserted several rows from the code. What it really observed: for claude, Allow from the notification, Deny (a repeated request prompted again), a stale tap rejected with nothing typed, and the question picker; for opencode, Allow from the app; the offline banner and recovery without re-pairing; the 401 checks and clean logs (no tokens or prompt text).
-  - Nothing changed by the 2026-09-25 review batch (bridge, relay, push, Wear OS data layer) is verified end to end yet.
+- Run every row of [`phases/5-e2e.md`](phases/5-e2e.md) for claude, agy and opencode, on the Pixel Watch 2 with a release build, recording the results in the guide's tables. The first run (2026-09-24/25) asserted several rows from the code, and later changes to the bridge, relay, push and Wear OS data layer were never checked end to end.
 - Security spot checks again, plus the trusted-proxy and closed-port checks.
 - `AW_PUSH_RESOLVED=1` on the relay (row 23). Unblocked: the watch runs the app that handles `resolved`.
 
@@ -58,18 +45,26 @@ The one place for the project's state: what is done, what is open, what comes ne
 - **Claude transcript:** herdr reports only the session id, not the transcript path its hook receives. A turn that ends while the bridge restarts gets the generic `Task finished` body.
 - **Wear OS release APK:** signed with the debug key.
 - **Notifications:** grouping is deferred (one notification per pane plus the digest already bound them).
+- **Tiles and complication:** they build their own `RelayClient`, so their 401 revokes the pairing only if `RelayRepository.init` already ran in that process (`network/RelayClient.kt`).
+- **Legacy Swift models:** the pre-commit hook requires a staged change under `watchos-app/AgentWatch/Models/` for every `pkg/model` change. Until Phase 6 the practice is to append the new type or field to the legacy models; only `CancelRequest` and `PromptOption` are mirrored so far.
+- **Relay deploy is amd64-only:** `make deploy-relay` builds `make relay-linux` (linux/amd64); an arm64 VPS needs the release binary installed by hand.
+- **Codex and Cursor have no guard adapter:** only the pre-commit hook covers them (`AGENTS.md` §5).
+- **Tests and CI:**
+  - `gofmt -l cmd pkg` in the Makefile and CI misses `deploy/launchd/template.go`;
+  - `TestGoldenFixtures` walks a fixed agent list (`pkg/agents/adapters_test.go`): a new agent's fixtures run only once it is added there;
+  - the fake herdr delivers global events to a subscription with no event types, which real herdr does not (`pkg/herdrtest/server.go`, `EmitGlobal`);
+  - `pkg/relay/state_test.go` and `pkg/bridge/engine_test.go` sleep longer than `go-backend.md` allows.
 
 ### Checks nobody has done yet
 - ntfy delivery (watchOS push) has never been tested.
 - The menu bar app on the owner's Mac (Phase 5 row 27).
-- The first `make deploy-relay ARGS=--sync-env` on the VPS: the env merge is POSIX awk, tested with BSD awk only.
+- The first `make deploy-relay ARGS=--sync-env` on the VPS: the merge is covered by `tools/config/test_awenv.sh` (BSD awk locally, Linux awk in CI) but has never run against the real server file. The owner's `agent-watch.env` was filled from the running deployment, so it must list `AW_HOST_TOKEN` as **unchanged**; `changed` means the file's token is not the server's.
 
 ---
 
 ## Blocked / waiting on upstream
 
 - **herdr misses some dialogs** (agy's, and Claude's after a relaunch): mitigated by the temporary overrides in [`tools/herdr-overrides/`](../tools/herdr-overrides/README.md), which explains the cause. Run its `check` after every herdr update; last check, 2026-09-29: still needed. The upstream issues are drafted but not filed.
-- **watchOS contracts:** only `CancelRequest` is mirrored in the legacy Swift models until Phase 6.
 
 ---
 

@@ -9,15 +9,20 @@ The herdr on this Mac runs the owner's **real** agent sessions. Everything below
 
 Results go to `pkg/agents/testdata/<agent>/` (fixtures) and `docs/reference/agents.md` (the verified facts).
 
-## 0. Preflight (audits and herdr upgrades)
+## 0. Preflight, and the checklist after a herdr upgrade
 
-1. `herdr integration status`: `claude`, `antigravity-cli` and `opencode` must say `current`. If one is `outdated`, **ask the owner**: `herdr integration install` edits his configuration and is owner-only.
-2. After a herdr upgrade or a manifest update: `tools/herdr-overrides/herdr-overrides.sh check`, and follow what it says.
+1. `herdr integration status`: `claude`, `antigravity-cli` and `opencode` (and any agent you are adding) must say `current`. If one is `outdated` or `not installed`, **ask the owner**: `herdr integration install` edits his configuration and is owner-only. A new agent's CLI is his to install too.
+2. **After a herdr upgrade or a manifest update**, in this order:
+   1. `tools/herdr-overrides/herdr-overrides.sh check`, and follow what it says (`tools/herdr-overrides/README.md`).
+   2. Compare `herdr --version` and the socket schema with the version and protocol in `docs/reference/herdr-socket-api.md`'s header (the `herdr-probe` skill); fix that file where herdr changed.
+   3. Run the audit (§3) for claude, agy and opencode.
+   4. Record the newly verified herdr version where it is stated: `herdr-socket-api.md`'s header, `docs/reference/agents.md`'s ✅ line, `docs/GUIDE.md` § Requirements, and `min_herdr_version` in `herdr-plugin.toml` if the old version no longer works.
+   5. Update the date of the last overrides check in `docs/STATUS.md` § Blocked / waiting on upstream.
 
 ## 1. Create the sandbox
 
 ```bash
-mkdir -p /tmp/aw-sandbox && cd /tmp/aw-sandbox && git init -q && printf 'hello\n' > note.txt
+(mkdir -p /tmp/aw-sandbox && cd /tmp/aw-sandbox && git init -q && printf 'hello\n' > note.txt)   # subshell: stay in the repo
 herdr workspace create --label aw-sandbox --cwd /tmp/aw-sandbox --no-focus
 herdr workspace list        # note the workspace_id of "aw-sandbox"
 herdr pane list --workspace <aw-sandbox workspace_id>   # note the pane_id → call it $SBX
@@ -32,9 +37,12 @@ herdr pane run $SBX "claude"        # or: agy, opencode (default permission mode
 herdr agent list                    # wait until $SBX shows the right "agent" and agent_status "idle"
 ```
 
+If `herdr agent get $SBX` shows no `agent_session` once the agent has run a turn, its herdr integration is missing or the agent runs with another config dir or profile: no transcript sample is possible (step 0).
+
 ## 3. Make it block and capture the screen
 
 ```bash
+mkdir -p pkg/agents/testdata/<agent>
 herdr agent prompt $SBX "Run the shell command ls -la and tell me what you see"
 herdr agent list                    # wait for agent_status "blocked" on $SBX
 herdr agent read $SBX --source visible --format text > pkg/agents/testdata/<agent>/<case>.txt
@@ -49,6 +57,7 @@ herdr agent read $SBX --source visible --format text > pkg/agents/testdata/<agen
 | `no-menu-working.txt` | Any long task; capture while `working` | No menu (negative test) |
 
 - **A case the agent cannot produce:** write `<case>.missing.md` with one line saying why.
+- **An agent that runs `ls -la` without asking** (a sandboxed default mode): ask for something outside its sandbox instead, e.g. reading a file outside `/tmp/aw-sandbox`, and note the mode in the golden's `notes`.
 - **Extra cases** use a descriptive suffix: `permission-webfetch.txt`, `permission-bash-herdr-done.txt`, `no-menu-idle-numbered-list.txt`.
 - **No `blocked`?** Check step 0 before assuming the TUI changed: agy's dialogs, and Claude's after a relaunch in the same pane, depend on the herdr overrides (`docs/reference/agents.md` §3.1, §4.1).
 - **Focus fixtures** (OpenCode's button bar): capture with `--format ansi` into `pkg/agents/testdata/opencode/focus/` (`docs/reference/agents.md` §5.1). The text format drops the colours that show focus.

@@ -3,18 +3,11 @@ trigger: always_on
 description: "The four copies of the JSON contracts must stay identical"
 ---
 
-# Contract files: four copies, one truth
+# Contract files: one truth, several copies
 
 > Applies to: pkg/model, docs/reference/contracts.md, the Wear OS and watchOS models.
 
-Every JSON shape exists in four places, and they must match exactly:
+Every JSON shape the watch and the bridge exchange has one source of truth, `docs/reference/contracts.md`, and copies in Go, Kotlin and Swift that must match it.
 
-1. `docs/reference/contracts.md` (the source of truth; change it first)
-2. `pkg/model/*.go`
-3. `wearos-app/.../model/*.kt`
-4. `watchos-app/AgentWatch/Models/*.swift` (its current state: `docs/STATUS.md`)
-
-- **Follow `.agents/skills/schema-sync/SKILL.md`** for any field change. The git pre-commit hook rejects a `pkg/model` change without the others (agy's Stop hook also reminds you).
-- **Additive changes only while clients are deployed:** add optional fields, never rename or remove. Decoders ignore unknown fields.
-- **Status values are herdr's enum, verbatim** (`idle / working / blocked / done / unknown`). Never add or remap values.
-- **Update the golden file `pkg/model/testdata/agent_state.json`** together with the example in `contracts.md` §1.2. The client parity tests read it.
+- **Any field change follows `.agents/skills/schema-sync/SKILL.md`:** which copies exist, the rules (additive only, closed enums), the golden file and the steps.
+- The git pre-commit hook rejects a `pkg/model` change without the other copies (agy's Stop hook also reminds you).
