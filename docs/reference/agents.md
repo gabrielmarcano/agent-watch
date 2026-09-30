@@ -21,7 +21,7 @@ The interfaces (`Adapter`, the optional `FocusGuard`, `ScreenTurnReader`) and th
 - **Registry:** an exact match on herdr's `agent` field. Anything not registered uses `generic`.
 - **Focus guard:** only `opencode` implements it: §5.1.
 - **Overrides:** adapters embed the generic behaviour and override only what differs.
-- **Missing transcript:** `LastTurn` returns `ErrNoTranscript` when it cannot find or read one; a cancelled context returns `ctx.Err()` (claude, agy) or `ErrNoTranscript` (opencode). On any error the bridge falls back to a screen capture (§6).
+- **Missing transcript:** `LastTurn` returns `ErrNoTranscript` when it cannot find or read one; a cancelled context returns `ctx.Err()` (opencode only when it is cancelled before its query; mid-query, `ErrNoTranscript`). On any error the bridge falls back to a screen capture (§6).
 
 ---
 
@@ -175,7 +175,7 @@ LIMIT 40;
 
 ## 6. Screen-capture fallback (every agent)
 
-Used when an agent has no transcript reader, or when its reader returns an error. Budgets (`pkg/bridge/engine.go`): 3 s for `LastTurn`, 3 s for the capture, 5 s for the whole history capture.
+Used when an agent has no transcript reader, when herdr gives no trusted `agent_session` (`TrustedSession`), or when the reader returns an error. Budgets (`pkg/bridge/engine.go`): 3 s for `LastTurn`, 3 s for the capture, 5 s for the whole history capture.
 
 1. Read the screen as `herdr-socket-api.md` §2.1 describes for history (the `recent_unwrapped` source, as text).
 2. Trim trailing blank lines.

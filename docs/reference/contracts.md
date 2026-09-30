@@ -219,9 +219,9 @@ Never accept a token in the query string.
 - `limit` defaults to 20, maximum 200. A missing, invalid or ≤ 0 value means 20.
 - Items are sorted newest first.
 
-**History retention** (`pkg/relay/store.go`): the relay keeps at most 20 items per pane and 200 in total (the oldest go first), and, each time it stores a new item, drops every pane whose newest item is older than 7 days. So a request with `pane_id` never returns more than 20.
+**History retention** (`pkg/relay/store.go`): the relay keeps at most 20 items per pane and 200 in total (the oldest go first), and, each time a history item arrives, drops every pane whose newest item is older than 7 days. So a request with `pane_id` never returns more than 20.
 
-**Pairing limits** (`pkg/relay/auth.go`): a code lives 5 minutes and works once; at most 3 codes are active (a new one evicts the oldest). `POST /v1/pair` allows 5 attempts per client IP and 20 in total per 10 minutes, and counts every attempt, not only failed ones; past that it answers `429 rate_limited`.
+**Pairing limits** (`pkg/relay/auth.go`): a code lives 5 minutes and works once; at most 3 codes are active (a new one evicts the oldest). `POST /v1/pair` allows 5 attempts per client IP and 20 in total per 10 minutes, and counts every attempt it lets through, successful ones included; past that it answers `429 rate_limited`.
 
 ### 2.2 Bodies
 
@@ -406,6 +406,8 @@ type ResyncMsg struct {
 1. The bridge sends `hello`.
 2. The bridge sends `snapshot`.
 3. From then on, it sends `agent_update`, `agent_removed`, `history_item` and `herdr_status` as things change.
+
+On a `resync` the bridge sends `hello` and `snapshot` again (the current relay never sends one).
 
 **Relay rules:**
 - If no `hello` arrives within 5 s, close the socket with status 4001.

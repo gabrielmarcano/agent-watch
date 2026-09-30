@@ -36,5 +36,5 @@ The relay can make agents on the owner's Mac type and approve things, so treat i
 ## Push
 - **FCM data carries exactly what `contracts.md` §4.1 lists per event,** all values as strings.
 - **Anti-spam** follows `contracts.md` §4.3 exactly (debounce, window, digest). A quick re-block is **held**, never dropped. A push failure never affects relay state.
-- **Dead FCM tokens:** unregister only on the errors `contracts.md` §4.1 names; a bare 404 is not a dead token.
+- **Dead FCM tokens:** unregister only on the errors `contracts.md` §4.1 names, never on anything broader.
 - **`resolved`** goes only to senders that can withdraw a notification (`contracts.md` §4.1–§4.2).

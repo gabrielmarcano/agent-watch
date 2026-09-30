@@ -39,7 +39,7 @@ The implementation, with its default timeout and cancellation: `Client.Call` in 
 |---|---|---|---|
 | `ping` | `{}` | `pong` | `{"version":"0.9.1","protocol":22,"capabilities":{...}}` — use for `hello` and health checks |
 | `agent.list` | `{}` | `agent_list` | `{"agents":[AgentInfo...]}` — the authoritative list |
-| `agent.get` | `{"target":"<pane_id or name>"}` | — | Single agent |
+| `agent.get` | `{"target":"<pane_id or name>"}` | — | Single agent. Not called by the bridge; the guards use its CLI form |
 | `agent.read` | `{"target", "source", "lines"?, "format"?, "strip_ansi"?}` | `pane_read` | `{"read":{"text", "truncated", "revision", "pane_id", ...}}` |
 | `agent.send_keys` | `{"target", "keys":[...]}` | — | Key grammar in §4 |
 | `agent.prompt` | `{"target", "text", "wait"?}` | — | Never pass `wait` (it blocks); omit it or send `null` |

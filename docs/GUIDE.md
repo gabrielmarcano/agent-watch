@@ -227,7 +227,7 @@ How each agent's menus, keys and history work: [`docs/reference/agents.md`](refe
 
 - **Outbound-only host:** The bridge opens an outbound TLS WebSocket (`wss://relay.<domain>/v1/host`). No inbound ports, listeners, or open firewall holes on your computer.
 - **Hashed device tokens:** The relay stores only `sha256(device_token)`. If the relay's store were compromised, existing tokens cannot be reconstructed. Devices are revocable at once (`agent-watch-relay devices revoke`).
-- **Rate-limited pairing:** short-lived, single-use codes; attempts are limited per client IP, taken from forwarding headers only when a trusted proxy wrote them ([`contracts.md` §2.2, §5](reference/contracts.md)).
+- **Rate-limited pairing:** short-lived, single-use codes; attempts are limited per client IP, taken from forwarding headers only when a trusted proxy wrote them ([`contracts.md` §2.1, §5](reference/contracts.md)).
 - **Zero raw keys:** The watch client never sends raw key presses or terminal input. The watch sends high-level actions (`answer` with option ID, `cancel`, or `prompt` text). The host bridge maps actions to keys itself.
 - **Strict safety checks:** Right before pressing keys, the bridge re-lists the agent from herdr and re-reads the screen, and verifies:
   1. The pane has a detected agent.
