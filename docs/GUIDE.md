@@ -11,7 +11,7 @@ How to set up, run and troubleshoot Agent Watch, in detail. The [README](../READ
 The minimums below come from the build files named with each one; those files win if this list lags.
 
 1. **herdr** 0.9.1 or later (`min_herdr_version` in `herdr-plugin.toml`) on the machine that runs your agents, with its integrations installed for your agents (`herdr integration status`).
-2. **Go** 1.22 or later (`go.mod`) to build the bridge and the relay (static binaries).
+2. **Go** 1.23 or later (`go.mod`) to build the bridge and the relay (static binaries).
 3. **Cloud relay:** a small **x86-64 (amd64)** Linux VPS (1 vCPU, 512 MB RAM) with a public domain (e.g. `relay.example.com`). For arm64: [`deploy/relay/README.md` § First-time setup](../deploy/relay/README.md#first-time-setup-once-per-vps).
    - **Any TLS reverse proxy** in front of it works if it passes WebSockets and unbuffered SSE (nginx, Caddy, Nginx Proxy Manager; Cloudflare optional): [`deploy/relay/README.md`](../deploy/relay/README.md).
 4. **Smartwatch:**
