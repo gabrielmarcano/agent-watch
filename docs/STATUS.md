@@ -16,7 +16,7 @@ The one place for the project's state: what is done, what is open, what comes ne
 | [6 watchOS](phases/6-watchos.md) (best-effort) | not started; after 5 | — |
 | [7 Android phone client](phases/7-android-mobile.md) | not started; after 5 | — |
 
-**Deployed:** relay and bridge from release `v2026.09.26`, the Wear OS app of that release on the owner's Pixel Watch 2; the menu bar built from `main` into `bin/` (it runs the new build from its next launch). The component versions are in `VERSIONS`.
+**Deployed:** the relay at `0.3.1` (commit `0d7f1eb`, 2026-09-30); the bridge from release `v2026.09.26`; the Wear OS app of that release on the owner's Pixel Watch 2; the menu bar `0.3.1`, built from `main` into `bin/`. The component versions are in `VERSIONS`.
 
 **What can run in parallel:**
 - **5 runs alone:** it tests the whole system.
