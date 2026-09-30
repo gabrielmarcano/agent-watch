@@ -18,6 +18,7 @@ Rules for every AI agent working in this repository: Claude Code, Antigravity, O
 | Per agent: menus, option roles, keys, transcripts | [`docs/reference/agents.md`](docs/reference/agents.md) |
 | Wear OS internals, client rules, screens, notifications and UX decisions | [`wearos-app/ARCHITECTURE.md`](wearos-app/ARCHITECTURE.md) |
 | Exact texts the watch shows | the code: `wearos-app/app/src/main/res/values/strings.xml`, `approval/CommandFeedback.kt`, and the notification builders in `network/AgentNotifications.kt`, `MyFirebaseMessagingService.kt`, `NotificationActionReceiver.kt` |
+| The pitch and a quick start: a short version of `docs/GUIDE.md`'s setup, kept on purpose (the owner's decision) | [`README.md`](README.md) |
 | Installing, operating and troubleshooting the bridge and the watch app; the tool minimums users need; releases and CI; security model; known issues (symptom and workaround only) | [`docs/GUIDE.md`](docs/GUIDE.md) |
 | Relay operations: VPS setup, deploys, rollback, the relay CLI, proxy, devices, backups | [`deploy/relay/README.md`](deploy/relay/README.md) |
 | macOS menu bar app | [`macos-bar/README.md`](macos-bar/README.md) |

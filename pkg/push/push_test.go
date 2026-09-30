@@ -1051,6 +1051,52 @@ func TestDispatcher_DoneWaitsForTheReply(t *testing.T) {
 	}
 }
 
+// A done push held by the window keeps its reply: the flush must not rebuild
+// it with the generic body. The common case: an approval from the watch opens
+// the window, and the agent finishes a few seconds later.
+func TestDispatcher_HeldDoneKeepsTheReply(t *testing.T) {
+	sender := &mockSender{name: "mock"}
+	d, _, timers := newTestDispatcher(sender)
+	d.ReplyWait = 3 * time.Second
+
+	d.OnAgentUpdate(nil, blockedState("p2", "web")) // sent at once, opens the window
+	finish(d, "p1", "api", 5)
+	d.OnHistoryItem(model.HistoryItem{PaneID: "p1", Response: "Fixed the login loop."})
+	d.Wait()
+	if got := sender.getMessages(); len(got) != 1 {
+		t.Fatalf("pushes before the flush = %v, want only the blocked one", eventsOf(got))
+	}
+
+	flushWindow(d, timers)
+	got := sender.getMessages()
+	if len(got) != 2 || got[1].Event != EventDone {
+		t.Fatalf("pushes = %v, want blocked then done", eventsOf(got))
+	}
+	if want := "Fixed the login loop."; got[1].Body != want {
+		t.Errorf("held done body = %q, want %q", got[1].Body, want)
+	}
+}
+
+// A held reply belongs to its turn: when the agent finished again before the
+// flush and the newer reply has not arrived, the older one is not shown.
+func TestDispatcher_HeldDoneReplyOnlyForItsTurn(t *testing.T) {
+	sender := &mockSender{name: "mock"}
+	d, _, timers := newTestDispatcher(sender)
+	d.ReplyWait = 3 * time.Second
+
+	d.OnAgentUpdate(nil, blockedState("p2", "web")) // opens the window
+	finish(d, "p1", "api", 5)
+	d.OnHistoryItem(model.HistoryItem{PaneID: "p1", Response: "First turn."})
+	finish(d, "p1", "api", 7) // a newer turn; its reply is still pending
+	flushWindow(d, timers)
+
+	for _, m := range sender.getMessages() {
+		if m.Event == EventDone && m.Body == "First turn." {
+			t.Fatalf("done for seq %d shows the previous turn's reply", m.StateChangeSeq)
+		}
+	}
+}
+
 // No reply within ReplyWait: the done push goes out with the generic body.
 func TestDispatcher_DoneWithoutAReply(t *testing.T) {
 	sender := &mockSender{name: "mock"}

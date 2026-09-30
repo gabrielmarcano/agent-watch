@@ -668,15 +668,21 @@ type paneEvent struct {
 // agent, built from the agent's newest state, and only while that state is one
 // a held message announced. When the agent has left it (the prompt was
 // answered, the finished agent is working again) its messages are dropped:
-// the watch must never offer to approve a prompt that is gone.
+// the watch must never offer to approve a prompt that is gone. A held done
+// message keeps its body (the agent's reply) when it is for the turn the
+// agent is in now.
 func dueMessages(held []Message, latest map[string]model.AgentState) []Message {
 	announced := make(map[paneEvent]bool)
+	doneHeld := make(map[string]Message) // the newest held done message per pane
 	var panes []string
 	for _, m := range held {
 		if !announced[paneEvent{m.PaneID, EventBlocked}] && !announced[paneEvent{m.PaneID, EventDone}] {
 			panes = append(panes, m.PaneID)
 		}
 		announced[paneEvent{m.PaneID, m.Event}] = true
+		if m.Event == EventDone {
+			doneHeld[m.PaneID] = m
+		}
 	}
 
 	var due []Message
@@ -687,7 +693,11 @@ func dueMessages(held []Message, latest map[string]model.AgentState) []Message {
 		case cur.Status == model.StatusBlocked && announced[paneEvent{pane, EventBlocked}]:
 			due = append(due, blockedMessage(cur))
 		case cur.Status == model.StatusDone && announced[paneEvent{pane, EventDone}]:
-			due = append(due, doneMessage(cur))
+			msg := doneMessage(cur)
+			if h := doneHeld[pane]; h.StateChangeSeq == cur.StateChangeSeq && h.Body != "" {
+				msg.Body = h.Body
+			}
+			due = append(due, msg)
 		}
 	}
 	return due

@@ -30,7 +30,10 @@ The one place for the project's state: what is done, what is open, what comes ne
 ### Phase 5 (release gate)
 - Run the whole of [`phases/5-e2e.md`](phases/5-e2e.md) (every row and the security checks). No row has a valid result yet. Row 23 (`AW_PUSH_RESOLVED=1`) is unblocked: the watch runs the app that handles `resolved`.
 
-### Code
+### Code debt (for later)
+
+Known and accepted for now; none blocks a phase.
+
 - **`AW_ANDROID_APPLICATION_ID`:** nothing in the app depends on the application id any more. Left to wire:
   - `applicationId` in `wearos-app/app/build.gradle.kts`;
   - the placeholder `google-services.json` in `.github/workflows/wearos.yml`;
@@ -43,7 +46,6 @@ The one place for the project's state: what is done, what is open, what comes ne
 - **Claude transcript:** herdr reports only the session id, not the transcript path its hook receives. A turn that ends while the bridge restarts gets the generic `Task finished` body.
 - **Wear OS release APK:** signed with the debug key.
 - **Notifications:** grouping is deferred (one notification per pane plus the digest already bound them).
-- **`done` push loses the reply when the anti-spam window holds it:** the reply is set, but the flush rebuilds the message with the generic `Task finished` body (`dueMessages` → `doneMessage`, `pkg/push/push.go`). `contracts.md` §4.1 describes the intended behaviour; no test covers the held case.
 - **Tiles and complication:** a 401 from them may not revoke the pairing (`wearos-app/ARCHITECTURE.md` §3).
 - **Legacy Swift models** need a touch for every contract change until Phase 6 (`schema-sync` skill, step 6).
 - **Relay deploy is amd64-only** (`deploy/relay/README.md` § First-time setup).
@@ -64,14 +66,14 @@ The one place for the project's state: what is done, what is open, what comes ne
 
 ## Blocked / waiting on upstream
 
-- **herdr misses some dialogs** (agy's, and Claude's after a relaunch): mitigated by the temporary overrides in [`tools/herdr-overrides/`](../tools/herdr-overrides/README.md), which explains the cause. Last check (`capture-fixture` skill, §0), 2026-09-29: still needed. The upstream issues are drafted but not filed.
+- **herdr misses some dialogs** (agy's, and Claude's after a relaunch): mitigated by the temporary overrides in [`tools/herdr-overrides/`](../tools/herdr-overrides/README.md), which explains the cause. Last check (`capture-fixture` skill, §0), 2026-09-29: still needed. The upstream issues are drafted (`tools/herdr-overrides/UPSTREAM-ISSUES.md`) and, by the owner's decision, not being filed for now.
 
 ---
 
 ## Next steps
 
 1. **Phase 5**, above.
-2. **Close the herdr gap upstream:** file the drafted issues, then remove the overrides once herdr detects the dialogs by itself.
+2. **Drop the herdr overrides** once herdr detects the dialogs by itself (the drafted upstream issues stay unfiled for now).
 3. **Phase 7**, the Android phone client.
 4. **Phase 6**, the watchOS client.
 5. **Later ideas:**
