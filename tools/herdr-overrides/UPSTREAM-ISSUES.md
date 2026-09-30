@@ -1,6 +1,6 @@
-# Draft issues for herdr (not filed)
+# Draft issues for herdr
 
-Drafts written on 2026-09-25 from a sandbox investigation with herdr 0.9.1. The owner decides whether to file them. There is already an upstream issue about agy dialogs; draft 1 adds the root cause and a candidate rule to it.
+Drafts from a sandbox investigation with herdr 0.9.1; whether they are filed: `docs/STATUS.md`. There is already an upstream issue about agy dialogs; draft 1 adds the root cause and a candidate rule to it.
 
 Once upstream fixes either one, run `tools/herdr-overrides/herdr-overrides.sh check` and uninstall the matching override (see [`README.md`](README.md)).
 

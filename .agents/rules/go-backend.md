@@ -21,7 +21,7 @@ Cross-cutting rules: `AGENTS.md`. Shapes and values: the relay protocol in `docs
 - Explicit errors, wrapped with context: `fmt.Errorf("herdr read %s: %w", pane, err)`. **No panics in daemons**: recover nothing, just don't panic.
 - `context.Context` is the first parameter of anything that does I/O. Respect cancellation and set timeouts at the call site.
 - Logging with `log/slog`, within `AGENTS.md` §3 (no tokens, headers, prompt or transcript text).
-- JSON types that cross a process boundary live **only** in `pkg/model` and match `docs/reference/contracts.md`. Exceptions: the bridge's local files and CLI output (contracts §6, `pkg/bridge`, `cmd/bridge`), the push payloads (contracts §4, `pkg/push`), the relay's admin socket (`pkg/relay/admin.go`), and herdr's own shapes (`pkg/herdr`, `herdr-socket-api.md`).
+- JSON types that cross a process boundary live **only** in `pkg/model` and match `docs/reference/contracts.md`. Exceptions: the bridge's local files and CLI output (contracts §6, `pkg/bridge`, `cmd/bridge`), the push payloads (contracts §4, `pkg/push`), the relay's admin socket (`pkg/relay/admin.go`) and `store.json` (`pkg/relay/store.go`, contracts §5), the agents' transcript formats (`pkg/agents`, `agents.md`), and herdr's own shapes (`pkg/herdr`, `herdr-socket-api.md`).
 - Timestamps only via `model.Now()` (RFC 3339 UTC).
 - Every long-lived connection reconnects with exponential backoff and jitter (the relay WebSocket: `contracts.md` §3; herdr: `herdr-socket-api.md` §7).
 - Package boundaries:

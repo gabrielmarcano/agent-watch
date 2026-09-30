@@ -20,7 +20,7 @@ The one place for the project's state: what is done, what is open, what comes ne
 
 **What can run in parallel:**
 - **5 runs alone:** it tests the whole system.
-- **6 and 7** start after 5 and can run together (disjoint directories), **except 7's step 1**, which moves `wearos-app/`: nothing else may touch the Android tree while it runs.
+- **6 and 7** start after 5 and can run together (disjoint code directories), **except 7's step 1**, which moves `wearos-app/`: nothing else may touch the Android tree while it runs. Both edit `docs/GUIDE.md`, `contracts.md`, this file and the `schema-sync` skill: commit those by path, one at a time.
 - **A contract change** is cross-cutting: stop parallel work and follow the `schema-sync` skill.
 
 ---
@@ -28,9 +28,7 @@ The one place for the project's state: what is done, what is open, what comes ne
 ## Open items
 
 ### Phase 5 (release gate)
-- Run every row of [`phases/5-e2e.md`](phases/5-e2e.md) for claude, agy and opencode, on the Pixel Watch 2 with a release build, recording the results in the guide's tables. The first run (2026-09-24/25) asserted several rows from the code, and later changes to the bridge, relay, push and Wear OS data layer were never checked end to end.
-- Security spot checks again, plus the trusted-proxy and closed-port checks.
-- `AW_PUSH_RESOLVED=1` on the relay (row 23). Unblocked: the watch runs the app that handles `resolved`.
+- Run the whole of [`phases/5-e2e.md`](phases/5-e2e.md) (every row and the security checks). No row has a valid result yet. Row 23 (`AW_PUSH_RESOLVED=1`) is unblocked: the watch runs the app that handles `resolved`.
 
 ### Code
 - **`AW_ANDROID_APPLICATION_ID`:** nothing in the app depends on the application id any more. Left to wire:
@@ -45,9 +43,10 @@ The one place for the project's state: what is done, what is open, what comes ne
 - **Claude transcript:** herdr reports only the session id, not the transcript path its hook receives. A turn that ends while the bridge restarts gets the generic `Task finished` body.
 - **Wear OS release APK:** signed with the debug key.
 - **Notifications:** grouping is deferred (one notification per pane plus the digest already bound them).
-- **Tiles and complication:** they build their own `RelayClient`, so their 401 revokes the pairing only if `RelayRepository.init` already ran in that process (`network/RelayClient.kt`).
-- **Legacy Swift models:** the pre-commit hook requires a staged change under `watchos-app/AgentWatch/Models/` for every `pkg/model` change. Until Phase 6 the practice is to append the new type or field to the legacy models; only `CancelRequest` and `PromptOption` are mirrored so far.
-- **Relay deploy is amd64-only:** `make deploy-relay` builds `make relay-linux` (linux/amd64); an arm64 VPS needs the release binary installed by hand.
+- **`done` push loses the reply when the anti-spam window holds it:** the reply is set, but the flush rebuilds the message with the generic `Task finished` body (`dueMessages` → `doneMessage`, `pkg/push/push.go`). `contracts.md` §4.1 describes the intended behaviour; no test covers the held case.
+- **Tiles and complication:** a 401 from them may not revoke the pairing (`wearos-app/ARCHITECTURE.md` §3).
+- **Legacy Swift models** need a touch for every contract change until Phase 6 (`schema-sync` skill, step 6).
+- **Relay deploy is amd64-only** (`deploy/relay/README.md` § First-time setup).
 - **Codex and Cursor have no guard adapter:** only the pre-commit hook covers them (`AGENTS.md` §5).
 - **Tests and CI:**
   - `gofmt -l cmd pkg` in the Makefile and CI misses `deploy/launchd/template.go`;
@@ -57,14 +56,15 @@ The one place for the project's state: what is done, what is open, what comes ne
 
 ### Checks nobody has done yet
 - ntfy delivery (watchOS push) has never been tested.
-- The menu bar app on the owner's Mac (Phase 5 row 27).
+- The watch over LTE or its phone's Bluetooth connection: only Wi-Fi has been checked.
+- `herdr plugin install gabrielmarcano/agent-watch` end to end.
 - The first `make deploy-relay ARGS=--sync-env` on the VPS: the merge is covered by `tools/config/test_awenv.sh` (BSD awk locally, Linux awk in CI) but has never run against the real server file. The owner's `agent-watch.env` was filled from the running deployment, so it must list `AW_HOST_TOKEN` as **unchanged**; `changed` means the file's token is not the server's.
 
 ---
 
 ## Blocked / waiting on upstream
 
-- **herdr misses some dialogs** (agy's, and Claude's after a relaunch): mitigated by the temporary overrides in [`tools/herdr-overrides/`](../tools/herdr-overrides/README.md), which explains the cause. Run its `check` after every herdr update; last check, 2026-09-29: still needed. The upstream issues are drafted but not filed.
+- **herdr misses some dialogs** (agy's, and Claude's after a relaunch): mitigated by the temporary overrides in [`tools/herdr-overrides/`](../tools/herdr-overrides/README.md), which explains the cause. Last check (`capture-fixture` skill, §0), 2026-09-29: still needed. The upstream issues are drafted but not filed.
 
 ---
 

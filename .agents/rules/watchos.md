@@ -14,7 +14,7 @@ The app's state: `docs/STATUS.md`. While Phase 6 is open, its guide is `docs/pha
 
 - **Best-effort.** It follows Wear OS: copy the UX already validated there (`wearos-app/ARCHITECTURE.md` §4–§4b); do not invent new behaviour here first.
 - **No physical Apple Watch exists.** Report results as "verified in the simulator". Never claim device behaviour.
-- **Swift 5.9+, SwiftUI, `NavigationStack`.**
+- **SwiftUI with `NavigationStack`;** the Swift version is the one `project.yml` sets.
 - **Models mirror `pkg/model`** (`Codable`, `Identifiable`, `Sendable`). A contract change updates the Swift models too, so the app compiles (`schema-sync` skill).
 - **Network:**
   - `/v1` over HTTPS;

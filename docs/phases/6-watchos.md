@@ -5,7 +5,7 @@
 | | |
 |---|---|
 | **Order and parallel work** | [`docs/STATUS.md`](../STATUS.md). Model + network sync (steps 1–2) may start earlier if a contract change forces it |
-| **Touches** | `watchos-app/**`, `.agents/rules/watchos.md`, `docs/STATUS.md`, and every line that calls the watchOS app legacy or "not on the relay API yet": `docs/GUIDE.md`, `SECURITY.md`, `docs/reference/contracts.md`, `Makefile` (`watchos-config` comment), `tools/config/awenv.sh`, `agent-watch.env.example` |
+| **Touches** | `watchos-app/**`, `.agents/rules/watchos.md`, `docs/STATUS.md`, and every line that calls the watchOS app legacy, pre-relay or not on the relay API yet: `git grep -nIiE 'legacy (client|pre-relay|swift|xcode)|not on the relay API|Phase 6' -- ':!docs/phases'` lists them |
 | **Needs the owner** | Pairing a simulator: `agent-watch-bridge pair` prints the code. A simulator paired with the production relay becomes a registered device: give the owner its name so he can revoke it. Sandbox agents to answer: the `capture-fixture` skill, steps 1–2. ntfy: the owner enables it on the relay and checks his iPhone |
 | **Never blocks** | a release. If time runs out, steps 1–3 alone (it compiles and shows the agent list) are an acceptable stopping point |
 

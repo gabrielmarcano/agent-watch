@@ -11,12 +11,12 @@ Results go to `pkg/agents/testdata/<agent>/` (fixtures) and `docs/reference/agen
 
 ## 0. Preflight, and the checklist after a herdr upgrade
 
-1. `herdr integration status`: `claude`, `antigravity-cli` and `opencode` (and any agent you are adding) must say `current`. If one is `outdated` or `not installed`, **ask the owner**: `herdr integration install` edits his configuration and is owner-only. A new agent's CLI is his to install too.
+1. `herdr integration status`: the integrations of the first-class agents (`AGENTS.md` §1.2; agy's is `antigravity-cli`), and of any agent you are adding, must say `current`. If one is `outdated` or `not installed`, **ask the owner**: `herdr integration install` edits his configuration and is owner-only. A new agent's CLI is his to install too.
 2. **After a herdr upgrade or a manifest update**, in this order:
    1. `tools/herdr-overrides/herdr-overrides.sh check`, and follow what it says (`tools/herdr-overrides/README.md`).
    2. Compare `herdr --version` and the socket schema with the version and protocol in `docs/reference/herdr-socket-api.md`'s header (the `herdr-probe` skill); fix that file where herdr changed.
-   3. Run the audit (§3) for claude, agy and opencode.
-   4. Record the newly verified herdr version where it is stated: `herdr-socket-api.md`'s header, `docs/reference/agents.md`'s ✅ line, `docs/GUIDE.md` § Requirements, and `min_herdr_version` in `herdr-plugin.toml` if the old version no longer works.
+   3. Run the audit (§3) for every first-class agent.
+   4. Record the newly verified herdr version in `herdr-socket-api.md`'s header and `docs/reference/agents.md`'s ✅ line. Only if the old version no longer works, raise the minimum: `min_herdr_version` in `herdr-plugin.toml` together with `docs/GUIDE.md` § Requirements.
    5. Update the date of the last overrides check in `docs/STATUS.md` § Blocked / waiting on upstream.
 
 ## 1. Create the sandbox
@@ -61,7 +61,7 @@ herdr agent read $SBX --source visible --format text > pkg/agents/testdata/<agen
 - **Extra cases** use a descriptive suffix: `permission-webfetch.txt`, `permission-bash-herdr-done.txt`, `no-menu-idle-numbered-list.txt`.
 - **No `blocked`?** Check step 0 before assuming the TUI changed: agy's dialogs, and Claude's after a relaunch in the same pane, depend on the herdr overrides (`docs/reference/agents.md` §3.1, §4.1).
 - **Focus fixtures** (OpenCode's button bar): capture with `--format ansi` into `pkg/agents/testdata/opencode/focus/` (`docs/reference/agents.md` §5.1). The text format drops the colours that show focus.
-- **An audit** runs every case for claude, agy and opencode and diffs each screen against the committed `<case>.txt`.
+- **An audit** runs every case for every first-class agent and diffs each screen against the committed `<case>.txt`.
 
 ## 4. Find the keys (sandbox only)
 

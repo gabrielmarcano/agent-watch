@@ -21,7 +21,7 @@ export JAVA_HOME="$(/usr/libexec/java_home -v <JDK version, docs/GUIDE.md § Req
 ## Emulator first
 
 1. Use a round AVD named `aw-*` (192 dp like the Pixel Watch 2; e.g. `aw-wear-small-round`). If none exists, create one with that prefix (`system-images;android-34;android-wear;arm64-v8a`). Never touch AVDs you did not create.
-2. A local relay (`agent-watch-relay serve` with `AW_LISTEN`, `AW_HOST_TOKEN` and `AW_DATA_DIR` in its environment, `contracts.md` §5) shows agents only when a host connects to it; the repo has no fake host. Only the debug build can reach a local `http://` relay (`src/debug/res/xml/network_security_config.xml`; from the emulator the Mac is `10.0.2.2`). An emulator paired with the production relay becomes a registered device: give the owner its name so he can revoke it.
+2. **Where the agents come from:** pair the emulator with the production relay (`agent-watch-bridge pair` prints a code), so it shows the host's real list. It becomes a registered device: give the owner its name so he can revoke it. A local relay (`agent-watch-relay serve`, `contracts.md` §5; only the debug build reaches `http://`, and from the emulator the Mac is `10.0.2.2`) shows no agents, because the repo has no fake host. **Never point the installed bridge at it:** `agent-watch-bridge configure` rewrites the service's `config.toml` (`contracts.md` §6) unless you pass `--config` with a scratch path.
 3. Act only on `aw-sandbox` agents (the `capture-fixture` skill, steps 1–2), never on the owner's real ones.
 4. Screenshots go to your scratchpad; anything committed shows sandbox agents only. Show the owner each changed screen or state before installing on the watch.
 
@@ -47,7 +47,7 @@ Bump `WEAROS_VERSION_CODE` per `VERSIONS` for every build you install on the wat
 
 ```bash
 cd wearos-app
-./gradlew :app:installDebug                       # or :app:installRelease to test R8/@Keep
+./gradlew :app:installRelease                     # the owner's watch runs the release build; :app:installDebug on the emulator
 adb shell am start -n com.gabriel.agentwatch/.MainActivity
 ```
 
@@ -56,8 +56,6 @@ adb shell am start -n com.gabriel.agentwatch/.MainActivity
 ```bash
 adb shell dumpsys package com.gabriel.agentwatch | grep -A1 signatures
 ```
-
-The release build allows no cleartext HTTP, so it cannot reach a local `http://` relay; test it against HTTPS.
 
 After installing, open the app once. A force-stop cancels the complication's tap action until the app refreshes it (seen on the emulator; an update likely does the same).
 

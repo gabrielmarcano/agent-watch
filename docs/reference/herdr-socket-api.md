@@ -43,7 +43,7 @@ The implementation, with its default timeout and cancellation: `Client.Call` in 
 | `agent.read` | `{"target", "source", "lines"?, "format"?, "strip_ansi"?}` | `pane_read` | `{"read":{"text", "truncated", "revision", "pane_id", ...}}` |
 | `agent.send_keys` | `{"target", "keys":[...]}` | — | Key grammar in §4 |
 | `agent.prompt` | `{"target", "text", "wait"?}` | — | Never pass `wait` (it blocks); omit it or send `null` |
-| `session.snapshot` | `{}` | `session_snapshot` | Workspaces, tabs, panes, agents, `focused_pane_id` |
+| `session.snapshot` | `{}` | `session_snapshot` | Workspaces, tabs, panes, agents, `focused_pane_id`. Not called by the bridge; handy when probing |
 | `workspace.list` | `{}` | `workspace_list` | `{"workspaces":[{"workspace_id", "number", "label", ...}]}` — the bridge reads `label` for `AgentState.workspace` |
 | `notification.show` | `{"title", "body"?, "sound"?: none\|done\|request}` | — | Used by `pair`, because a plugin action's stdout may not be visible (`cmd/bridge/pair.go`) |
 | `events.subscribe` | `{"subscriptions":[...]}` | `subscription_started` | Streaming, §5 |
@@ -181,6 +181,6 @@ If the socket cannot be dialed, herdr is not running. Report `herdr_online=false
   2. `agent.list`, diffed against the last known list: the relay gets `agent_update` / `agent_removed` for what changed
   3. re-subscribe, then `agent.list` once more to cover the gap
 
-  A full `snapshot` goes to the relay only when the bridge (re)connects to the relay (`contracts.md` §3).
+  A full `snapshot` goes to the relay only when the bridge (re)connects to the relay, or on a relay `resync` (`contracts.md` §3).
 
 If a fact here turns out wrong on a newer herdr, fix this file in the same commit as the code change.

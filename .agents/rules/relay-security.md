@@ -17,12 +17,12 @@ The relay can make agents on the owner's Mac type and approve things, so treat i
 ## Tokens and auth
 - **Only the `Authorization: Bearer` header authenticates;** ignore query-string tokens.
 - **Device tokens are 32 random bytes.** Store only `sha256` hashes, and compare with `crypto/subtle.ConstantTimeCompare`. The host token is compared the same way.
-- **Pairing codes** come from `crypto/rand`, are single use, expire (`contracts.md` §2.2) and are rate-limited per client IP and globally.
+- **Pairing codes** come from `crypto/rand`, and follow the pairing limits in `contracts.md` §2.1 (single use, expiry, rate limits per client IP and global).
 - **Client IP:** forwarding headers are read **only** from peers in `AW_TRUSTED_PROXIES`; otherwise the TCP peer is the client. Never trust a header from an untrusted peer (the algorithm: `contracts.md` §5).
 - **Never log** request bodies or history content, besides what `AGENTS.md` §3 forbids.
 
 ## Behaviour
-- **Exactly one host connection;** a new one replaces the old (close code 4000).
+- **Exactly one host connection;** a new one replaces the old (`contracts.md` §3).
 - **Commands** get one budget for sending and waiting, longer than the bridge's and shorter than the watch's, so inner layers always time out first (values: `contracts.md` §2.4). With no host they fail immediately (`host_offline`), and in-flight ones fail the moment their host disconnects, misses a ping or is replaced.
 - **Host keepalive:** ping the host; no pong in time → drop it (`contracts.md` §3).
 - **Keepalives stay short** (SSE comments, WebSocket pings; `contracts.md` §2–§3): they must stay below the proxies' idle timeouts (`deploy/relay/README.md` § Proxy idle timeouts), so never lengthen them.
@@ -34,7 +34,7 @@ The relay can make agents on the owner's Mac type and approve things, so treat i
 - **Store:** atomic writes (temp file + fsync + rename, mode 0600). A corrupt file stops startup; never overwrite it silently.
 
 ## Push
-- **FCM data values are all strings,** and `state_change_seq` always holds a number. Which keys each event carries is in `contracts.md` §4.1 (`resolved` has only three).
+- **FCM data carries exactly what `contracts.md` §4.1 lists per event,** all values as strings.
 - **Anti-spam** follows `contracts.md` §4.3 exactly (debounce, window, digest). A quick re-block is **held**, never dropped. A push failure never affects relay state.
-- **Dead FCM tokens:** unregister only on `UNREGISTERED` or a `message.token` field violation. A bare 404 is not a dead token.
-- **`resolved`** goes only to senders that can withdraw a notification (FCM with `AW_PUSH_RESOLVED`), never to ntfy.
+- **Dead FCM tokens:** unregister only on the errors `contracts.md` §4.1 names; a bare 404 is not a dead token.
+- **`resolved`** goes only to senders that can withdraw a notification (`contracts.md` §4.1–§4.2).

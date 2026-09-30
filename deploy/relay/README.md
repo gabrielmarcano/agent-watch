@@ -72,7 +72,8 @@ Only one previous binary is kept: each deploy overwrites `.prev`.
 
 Opt-in. It never runs on a plain deploy, and it changes live secrets.
 
-- **What is synced:** the relay keys `agent-watch.env` sets on an uncommented line, even an empty one: `AW_HOST_TOKEN`, `AW_LISTEN`, `AW_TRUSTED_PROXIES`, `AW_CLIENT_IP_HEADER`, `AW_PUSH_RESOLVED`, `AW_FCM_CREDENTIALS`, `AW_NTFY_URL`, `AW_NTFY_TOPIC`, `AW_NTFY_TOKEN`. A commented-out key leaves the server's line alone. `AW_DATA_DIR` is never synced (a new one also needs a `ReadWritePaths=` drop-in).
+- **What is synced:** the relay keys (`docs/reference/contracts.md` §7, read by `deploy.sh --sync-env`) that `agent-watch.env` sets on an uncommented line, even an empty one. A commented-out key leaves the server's line alone.
+- **One server variable by hand** (e.g. `AW_PUSH_RESOLVED=1`): edit `/etc/agent-watch-relay/env` on the VPS as root, keeping its owner and mode, then `systemctl restart agent-watch-relay`. A later `--sync-env` overwrites that line if `agent-watch.env` sets the same key, so the owner should set it there too. `AW_DATA_DIR` is never synced (a new one also needs a `ReadWritePaths=` drop-in).
 - **Checked on the Mac, before the build:** `AW_HOST_TOKEN` must be 64 hex characters (an empty token is never sent), and values with a quote, a backslash or `$` are refused (systemd would not read them literally).
 - **On the server:** each key replaces its line in `/etc/agent-watch-relay/env` in place; other keys, comments and blank lines stay, and missing keys are appended at the end. The file keeps its owner and mode (`root:agentwatch`, `0640`). The server file must exist already (see First-time setup).
 - **Backup:** when anything changed, the previous file is kept as `/etc/agent-watch-relay/env.bak-<UTC time>`. Backups hold the old secrets with the same mode; delete old ones by hand.

@@ -56,16 +56,7 @@ Minimum versions and details: [Requirements](docs/GUIDE.md#requirements).
 
 Every step in detail, the day-to-day commands and troubleshooting are in **[the full guide](docs/GUIDE.md)**.
 
-### Install with herdr
-
-Agent Watch is a herdr plugin, listed on [herdr.dev/plugins](https://herdr.dev/plugins/):
-
-```bash
-herdr plugin install gabrielmarcano/agent-watch
-```
-
-- It builds the bridge on your machine, so it needs **Go**.
-- It covers the bridge only. The relay, the watch app and pairing are still needed ([guide](docs/GUIDE.md#alternative-install-the-bridge-with-herdr)). Not yet tested end to end.
+**Install with herdr:** Agent Watch is a herdr plugin, listed on [herdr.dev/plugins](https://herdr.dev/plugins/); it installs the bridge only ([guide](docs/GUIDE.md#alternative-install-the-bridge-with-herdr)).
 
 Prebuilt bridge, relay and menu bar binaries are on the [releases page](https://github.com/gabrielmarcano/agent-watch/releases).
 
@@ -73,7 +64,7 @@ Prebuilt bridge, relay and menu bar binaries are on the [releases page](https://
 
 ## Supported Agents
 
-**Claude Code**, **OpenCode** and **Antigravity CLI** are first-class; any other agent herdr detects works through its numbered menus. What each one supports: [the guide](docs/GUIDE.md#supported-agents).
+The first-class agents, and what the watch can do for each one and for any other agent herdr detects: [the guide](docs/GUIDE.md#supported-agents).
 
 ---
 

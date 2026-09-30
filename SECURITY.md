@@ -9,7 +9,7 @@ Agent Watch can press keys in your terminal agents, so security reports matter h
 
 Please include:
 - the component (bridge, relay, Wear OS app, menu bar app, watchOS app);
-- the version (`agent-watch-bridge version`, `agent-watch-relay version`, or the watch's Settings);
+- the version ([where to see it](docs/GUIDE.md#versions-and-releases));
 - steps to reproduce, and what an attacker could do with it.
 
 This is a one-person project: I aim to acknowledge a report within a week and will keep you updated while it is fixed. Credit is given in the advisory unless you prefer otherwise.

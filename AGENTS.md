@@ -13,7 +13,7 @@ Rules for every AI agent working in this repository: Claude Code, Antigravity, O
 | State: phases, claims (also for work outside a phase), open items, blockers, next steps, what is deployed | [`docs/STATUS.md`](docs/STATUS.md) |
 | Guides for the open phases | [`docs/phases/`](docs/phases/) |
 | Every JSON shape, endpoint, error code, push payload, config key, machine-readable CLI output (`--json`, version strings), and product env vars (relay `AW_*`, `agent-watch.env` keys) | [`docs/reference/contracts.md`](docs/reference/contracts.md) |
-| Timeouts, limits and intervals | the doc of their layer: `contracts.md` (relay, bridge, watch), `herdr-socket-api.md` (herdr side), `agents.md` §3.2 (transcript reads) |
+| Timeouts, limits and intervals | the doc of their layer: `contracts.md` (relay, bridge, watch protocol; pairing and history limits), `herdr-socket-api.md` (herdr side and the bridge's herdr policy), `agents.md` (transcript reads and screen captures), `wearos-app/ARCHITECTURE.md` (the watch app's own timers) |
 | The herdr socket: methods, events, keys, verified behaviour, and the bridge's herdr policy | [`docs/reference/herdr-socket-api.md`](docs/reference/herdr-socket-api.md) |
 | Per agent: menus, option roles, keys, transcripts | [`docs/reference/agents.md`](docs/reference/agents.md) |
 | Wear OS internals, client rules, screens, notifications and UX decisions | [`wearos-app/ARCHITECTURE.md`](wearos-app/ARCHITECTURE.md) |
@@ -57,12 +57,12 @@ Rules for every AI agent working in this repository: Claude Code, Antigravity, O
   Scanning directories for the "latest file" and continuous tailing are not allowed. Why transcripts at all: herdr exposes no reply text, and a screen capture loses the markdown.
 
 ### 1.2 Multi-agent by design
-- Priority agents: **Claude (`claude`), Antigravity (`agy`), OpenCode (`opencode`)**. Every other agent herdr detects must work through the **generic adapter**.
+- Priority agents: **Claude (`claude`), Antigravity (`agy`), OpenCode (`opencode`)**. Every other agent herdr detects works through the **generic adapter** until it gets its own adapter (`add-agent-adapter` skill), which makes it first-class.
 - **All agent-specific knowledge lives in `pkg/agents`** and nowhere else: menu layout, key mapping, cancel keys, transcript format, and whether a prompt can be queued while working. `pkg/herdr`, the bridge core, the relay and the clients stay agent-agnostic.
 - **Never map prompt options by position.** Roles (`allow_once`, `allow_always`, `deny`, `choice`) come from the option **label**. Why: in Claude Code, `2` means "Yes, and don't ask again".
 
 ### 1.3 Two Go binaries, one module
-- One Go module (`go.mod`; it keeps its old name, `agent-monitor`, although the repo is `agent-watch`).
+- One Go module (`go.mod`; its name: §2).
 - `agent-watch-bridge`: static binary on the Mac/Linux host. Keep it thin: herdr ↔ relay translation plus on-demand transcript reads.
   - The herdr plugin (`herdr-plugin.toml`) only installs and controls this binary. Its actions are one-shot.
   - The long-running process is `agent-watch-bridge run`, supervised by launchd (macOS) or systemd `--user` (Linux). Never rely on herdr to keep it alive: plugin actions are one-shot, and the service manager restarts the bridge after a crash or reboot and outlives herdr restarts.
@@ -100,7 +100,7 @@ agent-watch/                      # the Go module keeps its old name, github.com
 │   ├── model/                    # shared contracts: state, API DTOs, wire envelopes
 │   ├── herdr/                    # socket client — agent-agnostic
 │   ├── herdrtest/                # fake herdr socket for tests
-│   ├── agents/                   # adapters: claude, agy, opencode, generic (+ testdata/)
+│   ├── agents/                   # agent adapters, generic included (+ testdata/)
 │   ├── bridge/                   # bridge core: engine, command executor, config, status file
 │   ├── buildinfo/                # version + commit stamped into the binaries
 │   ├── relayclient/              # bridge side of the WSS link
@@ -132,7 +132,7 @@ agent-watch/                      # the Go module keeps its old name, github.com
 - **Never log** tokens, `Authorization` headers, prompt text or transcript content; log lengths and ids.
 - **Tokens travel only in the `Authorization` header**, never in URLs or query strings (they end up in proxy logs).
 - **Personal deployment details** (the owner's domain, SSH target, IPs, device ids, project names) never go into tracked files: use placeholders such as `relay.<domain>`.
-- **Deploys and the owner's machines (owner's decision, 2026-09-29):** agents may deploy the relay, run commands on the VPS over SSH, roll it back, and install or uninstall the herdr detection overrides whenever their task needs it, and **must say so in their report** (and update `docs/STATUS.md` "Deployed"). Still the owner's: `herdr server stop` and `herdr integration install`/`uninstall` (the guards refuse them), Cloudflare dashboard changes, revoking his watch, rebooting the host, and pausing shared infrastructure such as the proxy container.
+- **Deploys and the owner's machines (the owner's decision):** agents may deploy the relay, run commands on the VPS over SSH, roll it back, and install or uninstall the herdr detection overrides whenever their task needs it, and **must say so in their report** (and update `docs/STATUS.md` "Deployed"). Still the owner's: `herdr server stop` and `herdr integration install`/`uninstall` (the guards refuse them), Cloudflare dashboard changes, revoking his watch, rebooting the host, and pausing shared infrastructure such as the proxy container.
 - The security design (hashed tokens, pairing limits, the bridge's checks before pressing keys) is described in [`docs/GUIDE.md` § Security Model](docs/GUIDE.md#security-model); the rules that implement it are in `relay-security.md` and `herdr-integration.md`.
 
 ---

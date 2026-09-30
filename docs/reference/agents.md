@@ -21,7 +21,7 @@ The interfaces (`Adapter`, the optional `FocusGuard`, `ScreenTurnReader`) and th
 - **Registry:** an exact match on herdr's `agent` field. Anything not registered uses `generic`.
 - **Focus guard:** only `opencode` implements it: §5.1.
 - **Overrides:** adapters embed the generic behaviour and override only what differs.
-- **Missing transcript:** `LastTurn` returns `ErrNoTranscript` when it cannot find or read one (a cancelled context returns `ctx.Err()`). On any error the bridge falls back to a screen capture (§6).
+- **Missing transcript:** `LastTurn` returns `ErrNoTranscript` when it cannot find or read one; a cancelled context returns `ctx.Err()` (claude, agy) or `ErrNoTranscript` (opencode). On any error the bridge falls back to a screen capture (§6).
 
 ---
 
@@ -67,7 +67,7 @@ The interfaces (`Adapter`, the optional `FocusGuard`, `ScreenTurnReader`) and th
 
 | Item | Status | Value |
 |---|---|---|
-| herdr session ref | ✅ | `agent_session.kind = "id"`, `value` = session UUID. A current integration (v10) may report `kind="path"` instead. Support both |
+| herdr session ref | ✅ | `agent_session.kind = "id"`, `value` = session UUID: herdr 0.9.1 reports `id` even with integration v10, which sends the path. The reader also accepts `kind="path"` |
 | File location | ✅ | `<config_dir>/projects/<slug>/<session_uuid>.jsonl` |
 | Slug | ✅ | The session's cwd with every `/` and `.` replaced by `-` (e.g. `/Users/me/Code/app` → `-Users-me-Code-app`) |
 | Config dirs | ✅ | `claude_config_dirs` from the bridge config first, then every `~/.claude*` dir (`~/.claude`, `~/.claude-*`, …) holding a `projects` dir (a user's `CLAUDE_CONFIG_DIR` profiles), listed again on each lookup so a new profile needs no restart. `claude_config_dirs` is only for profiles outside that pattern. Try `<dir>/projects/<slug>/<uuid>.jsonl` in every dir; if none exists, glob `<dir>/projects/*/<uuid>.jsonl`. Several matches (a session copied into a backup profile): the most recently modified wins. An id with `/`, `\`, `*`, `?` or `[` is refused |
@@ -175,9 +175,9 @@ LIMIT 40;
 
 ## 6. Screen-capture fallback (every agent)
 
-Used when an agent has no transcript reader, or when its reader returns an error.
+Used when an agent has no transcript reader, or when its reader returns an error. Budgets (`pkg/bridge/engine.go`): 3 s for `LastTurn`, 3 s for the capture, 5 s for the whole history capture.
 
-1. `agent.read {target: pane_id, source: "recent_unwrapped", lines: 200, format: "text"}`.
+1. Read the screen as `herdr-socket-api.md` §2.1 describes for history (the `recent_unwrapped` source, as text).
 2. Trim trailing blank lines.
 3. Drop the agent's input box: cut everything from the last run of lines that contain only box-drawing characters (light or heavy: `─ │ ┃ ╹ ▀ …`), a prompt marker (`❯`, `>`) or a `┃` frame downwards, if found within the last 15 lines. The status lines under the box go with it.
 4. **Last turn only** when the adapter recognises the user's message (`ScreenTurnReader`): the message becomes `query` and only what follows it the `response`, dedented:

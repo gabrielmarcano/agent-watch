@@ -219,7 +219,9 @@ Never accept a token in the query string.
 - `limit` defaults to 20, maximum 200. A missing, invalid or ≤ 0 value means 20.
 - Items are sorted newest first.
 
-**History retention** (`pkg/relay/store.go`): the relay keeps at most 20 items per pane and 200 in total (the oldest go first), and drops a pane whose newest item is older than 7 days. So a request with `pane_id` never returns more than 20.
+**History retention** (`pkg/relay/store.go`): the relay keeps at most 20 items per pane and 200 in total (the oldest go first), and, each time it stores a new item, drops every pane whose newest item is older than 7 days. So a request with `pane_id` never returns more than 20.
+
+**Pairing limits** (`pkg/relay/auth.go`): a code lives 5 minutes and works once; at most 3 codes are active (a new one evicts the oldest). `POST /v1/pair` allows 5 attempts per client IP and 20 in total per 10 minutes, and counts every attempt, not only failed ones; past that it answers `429 rate_limited`.
 
 ### 2.2 Bodies
 
@@ -415,7 +417,7 @@ type ResyncMsg struct {
 
 **In-flight commands** fail with `host_offline` as soon as their host disconnects, is dropped, or is replaced by a new connection, without waiting for the command budget (§2.4).
 
-**Reconnect backoff** (bridge side): 1 s, 2 s, 4 s … up to 60 s, each ±20 % jitter. The backoff resets after 60 s of healthy connection. A host token the relay rejects (401/403) waits the full 60 s before the next try.
+**Reconnect backoff** (bridge side): 1 s, 2 s, 4 s … up to 60 s, each ±20 % jitter. The backoff resets after 60 s of healthy connection. A host token the relay rejects (401/403) waits the maximum backoff (60 s, same jitter) before the next try.
 
 ---
 

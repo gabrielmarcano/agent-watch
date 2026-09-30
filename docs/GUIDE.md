@@ -12,12 +12,12 @@ The minimums below come from the build files named with each one; those files wi
 
 1. **herdr** 0.9.1 or later (`min_herdr_version` in `herdr-plugin.toml`) on the machine that runs your agents, with its integrations installed for your agents (`herdr integration status`).
 2. **Go** 1.22 or later (`go.mod`) to build the bridge and the relay (static binaries).
-3. **Cloud relay:** a small **x86-64 (amd64)** Linux VPS (1 vCPU, 512 MB RAM) with a public domain (e.g. `relay.example.com`). `make deploy-relay` builds linux/amd64 only; on an arm64 VPS install the release's `linux_arm64` relay binary by hand ([`deploy/relay/README.md`](../deploy/relay/README.md)).
+3. **Cloud relay:** a small **x86-64 (amd64)** Linux VPS (1 vCPU, 512 MB RAM) with a public domain (e.g. `relay.example.com`). For arm64: [`deploy/relay/README.md` § First-time setup](../deploy/relay/README.md#first-time-setup-once-per-vps).
    - **Any TLS reverse proxy** in front of it works if it passes WebSockets and unbuffered SSE (nginx, Caddy, Nginx Proxy Manager; Cloudflare optional): [`deploy/relay/README.md`](../deploy/relay/README.md).
 4. **Smartwatch:**
    - **Wear OS** 3 or later (`minSdk` 30 in `wearos-app/app/build.gradle.kts`) — *primary; verified only on a Google Pixel Watch 2*.
    - **watchOS** — *best-effort*, simulator-only ([status](STATUS.md)).
-   - **Network:** the watch needs only a path to the relay over HTTPS and to Firebase for push: Wi-Fi, LTE, or its phone's connection over Bluetooth (Wear OS routes it through the phone on its own; no companion app of ours is involved). Only Wi-Fi has been checked so far.
+   - **Network:** the watch needs only a path to the relay over HTTPS and to Firebase for push: Wi-Fi, LTE, or its phone's connection over Bluetooth (Wear OS routes it through the phone on its own; no companion app of ours is involved). Which paths have been checked: [STATUS](STATUS.md).
 5. **To build the Wear OS app:** JDK 17 (`wearos-app/app/build.gradle.kts`; Android Studio's bundled JBR works), the Android SDK, `adb`, and your own **Firebase project** for push.
 
 ---
@@ -99,7 +99,7 @@ On the machine that runs herdr:
 
 ### Alternative: Install the Bridge with herdr
 
-Agent Watch is a herdr plugin, listed on [herdr.dev/plugins](https://herdr.dev/plugins/). herdr can install it instead of step 2's `make bridge` and `herdr plugin link`. **Not yet tested end to end;** please report problems as issues.
+Agent Watch is a herdr plugin, listed on [herdr.dev/plugins](https://herdr.dev/plugins/). herdr can install it instead of step 2's `make bridge` and `herdr plugin link`. Whether it has been tested end to end: [STATUS](STATUS.md); please report problems as issues.
 
 1. Install it. herdr clones the repository, shows the source and the build command, and asks before running them. The build compiles the bridge on your machine, so it needs **Go** ([Requirements](#requirements)):
    ```bash
@@ -132,7 +132,7 @@ The relay (step 1), the watch app (step 3) and pairing (step 4) are unchanged. T
    - on the watch: Settings → Developer options → **Wireless debugging** → **Pair new device**;
    - on the computer: `adb pair <ip>:<pair-port> <code>`, then `adb connect <ip>:<port>` (the connect port is shown on the Wireless debugging screen and changes after a reboot).
 4. **Install:** `./gradlew :app:installDebug`.
-5. **Push on the relay:** copy the Firebase **service-account** JSON to the VPS only (e.g. `/etc/agent-watch-relay/firebase-service-account.json`, `root:agentwatch`, `0640`), set `AW_FCM_CREDENTIALS` to that server path in `agent-watch.env`, and run `make deploy-relay ARGS=--sync-env`. Without it the relay runs with push disabled.
+5. **Push on the relay:** copy the Firebase **service-account** JSON to the VPS only, as [`deploy/relay/README.md` § First-time setup](../deploy/relay/README.md#first-time-setup-once-per-vps) says, set `AW_FCM_CREDENTIALS` to its server path in `agent-watch.env`, and run `make deploy-relay ARGS=--sync-env`. Without it the relay runs with push disabled.
 
 **watchOS** ([status](STATUS.md)): `make watchos-config` writes the git-ignored `watchos-app/Config.generated.xcconfig` ([`contracts.md` §7](reference/contracts.md)).
 

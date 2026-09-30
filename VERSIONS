@@ -2,9 +2,10 @@
 #
 # Each component has its own version, and they may diverge: bump only the one
 # you change. Read by the Makefile (bridge and relay ldflags, `make bar`),
-# macos-bar/build.sh, deploy/relay/deploy.sh and the Wear OS Gradle build.
-# herdr-plugin.toml cannot read files: keep its `version` equal to
-# BRIDGE_VERSION (`make check-versions` fails when they differ).
+# macos-bar/build.sh, deploy/relay/deploy.sh, the Wear OS Gradle build,
+# herdr-plugin.toml's [[build]] and .github/workflows/release.yml. The
+# manifest's `version` field cannot read it: keep it equal to BRIDGE_VERSION
+# (`make check-versions` fails when they differ).
 #
 # The Go binaries add the commit they were built from on their own (format:
 # docs/reference/contracts.md §3): never write a commit here.
@@ -13,8 +14,7 @@
 # to install a lower code over a higher one, and an equal code hides which
 # build is on the watch.
 #
-# GitHub releases are date-tagged snapshots of the whole repo (vYYYY.MM.DD)
-# whose notes list the versions below.
+# Releases: docs/GUIDE.md § Versions and Releases.
 #
 # Syntax (make's, like agent-watch.env): bare KEY=value lines, no quotes, no
 # spaces, comments on their own line.
