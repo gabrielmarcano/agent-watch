@@ -164,7 +164,7 @@ type HistoryItem struct {
 ```
 
 - **`id`** is the first 16 hex characters of `sha256(pane_id + "\n" + session_value + "\n" + query + "\n" + response)`. It is deterministic, so a resent item deduplicates on the relay.
-- **`response`** is truncated to 16 384 bytes on a UTF-8 boundary, with `\n\n…[truncated]` appended when cut.
+- **`response`** is truncated to 65 536 bytes (`model.MaxResponseBytes`; why that bound: its comment) on a UTF-8 boundary, with `\n\n…[truncated]` appended when cut.
 - **`source`:**
   - `"transcript"` means `response` is the agent's own markdown.
   - `"screen"` means `response` is plain terminal text, so clients must not render it as markdown. One exception: a table the agent drew with box characters arrives as a markdown pipe table (header, `| --- |` separator, one line per row), and clients render those lines as a table (agents.md §6).

@@ -45,7 +45,7 @@ func screenItem(query string, lines []string) *model.HistoryItem {
 	return &model.HistoryItem{
 		Source:   "screen",
 		Query:    query,
-		Response: model.TruncateUTF8(strings.Join(lines, "\n"), 16384),
+		Response: model.TruncateUTF8(strings.Join(lines, "\n"), model.MaxResponseBytes),
 	}
 }
 

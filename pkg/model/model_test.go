@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/gabrielmarcano/agent-monitor/pkg/model"
@@ -334,5 +335,14 @@ func TestErrorCodeHTTPStatus(t *testing.T) {
 		if got := c.code.HTTPStatus(); got != c.wantStatus {
 			t.Errorf("ErrorCode(%s).HTTPStatus() = %d, want %d", c.code, got, c.wantStatus)
 		}
+	}
+}
+
+// The largest reply measured over 4 199 real turns (21 KB, 2026-10-01) fits
+// whole: the cap is a bound against a runaway reply, not a cut of real ones.
+func TestMaxResponseBytesKeepsRealReplies(t *testing.T) {
+	reply := strings.Repeat("a", 21*1024)
+	if got := model.TruncateUTF8(reply, model.MaxResponseBytes); got != reply {
+		t.Errorf("a 21 KB reply was cut to %d bytes", len(got))
 	}
 }

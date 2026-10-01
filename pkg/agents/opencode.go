@@ -409,7 +409,7 @@ func (o *opencodeAdapter) LastTurn(ctx context.Context, ref SessionRef) (*model.
 		return nil, ErrNoTranscript
 	}
 
-	response = model.TruncateUTF8(response, 16384)
+	response = model.TruncateUTF8(response, model.MaxResponseBytes)
 
 	return &model.HistoryItem{
 		Query:    query,

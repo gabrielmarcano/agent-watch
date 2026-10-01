@@ -184,7 +184,7 @@ func (c *claudeAdapter) LastTurn(ctx context.Context, ref SessionRef) (*model.Hi
 		}
 		return &model.HistoryItem{
 			Query:    query,
-			Response: model.TruncateUTF8(response, 16384),
+			Response: model.TruncateUTF8(response, model.MaxResponseBytes),
 			Source:   "transcript",
 		}, nil
 	}

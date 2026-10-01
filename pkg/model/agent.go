@@ -160,6 +160,14 @@ func HistoryID(paneID, sessionValue, query, response string) string {
 	return hex.EncodeToString(h[:8])
 }
 
+// MaxResponseBytes bounds a history reply (HistoryItem.Response). It guards
+// against a runaway reply (an agent pasting a whole log), not real ones: the
+// largest of 4 199 Claude turns measured on 2026-10-01 was 21 KB (p99 8 KB),
+// and this is about three times that. Its worst cases stay small: 200 items
+// in the relay's store, 20 per history page on the watch. The hard ceiling is
+// the 1 MB WebSocket message between the bridge and the relay.
+const MaxResponseBytes = 64 << 10
+
 // TruncateUTF8 cuts s to at most max bytes on a rune boundary and appends "\n\n…[truncated]" when cut.
 func TruncateUTF8(s string, max int) string {
 	if len(s) <= max {

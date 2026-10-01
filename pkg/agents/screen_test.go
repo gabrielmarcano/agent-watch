@@ -1,6 +1,7 @@
 package agents
 
 import (
+	"github.com/gabrielmarcano/agent-monitor/pkg/model"
 	"os"
 	"path/filepath"
 	"strings"
@@ -51,10 +52,9 @@ func TestScreenTurn_Max80Lines(t *testing.T) {
 }
 
 func TestScreenTurn_Truncation(t *testing.T) {
-	// Generate string > 16384 bytes
-	bigStr := strings.Repeat("A", 20000)
+	bigStr := strings.Repeat("A", model.MaxResponseBytes+4000)
 	item := ScreenTurn(bigStr)
-	if len(item.Response) > 16384+len("\n\n…[truncated]") {
+	if len(item.Response) > model.MaxResponseBytes+len("\n\n…[truncated]") {
 		t.Errorf("response exceeded max length: %d", len(item.Response))
 	}
 	if !strings.HasSuffix(item.Response, "\n\n…[truncated]") {

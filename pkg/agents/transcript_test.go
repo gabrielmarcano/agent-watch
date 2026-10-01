@@ -182,12 +182,13 @@ func TestLastTurnLeavesIDToCaller(t *testing.T) {
 	}
 }
 
-// A 20 KB answer is cut to 16 384 bytes on a rune boundary, plus the marker.
+// An answer over model.MaxResponseBytes is cut on a rune boundary, plus the marker.
 func TestTranscriptTruncation20KB(t *testing.T) {
 	ctx := context.Background()
-	answer := strings.Repeat("añ€ ", 2600) // 1+2+3+1 bytes: 18 200 bytes, cut lands mid-rune
-	answer += strings.Repeat("x", 20*1024-len(answer))
-	if len(answer) != 20*1024 {
+	size := model.MaxResponseBytes + 4096
+	answer := strings.Repeat("añ€ ", 9500) // 1+2+3+1 bytes: 66 500 bytes, the cut lands mid-rune
+	answer += strings.Repeat("x", size-len(answer))
+	if len(answer) != size {
 		t.Fatalf("setup: %d bytes", len(answer))
 	}
 	const marker = "\n\n…[truncated]"
@@ -201,8 +202,8 @@ func TestTranscriptTruncation20KB(t *testing.T) {
 			t.Errorf("%s: no truncation marker", name)
 		}
 		body := strings.TrimSuffix(item.Response, marker)
-		if len(body) > 16384 || len(body) < 16384-3 {
-			t.Errorf("%s: body is %d bytes, want 16381..16384", name, len(body))
+		if len(body) > model.MaxResponseBytes || len(body) < model.MaxResponseBytes-3 {
+			t.Errorf("%s: body is %d bytes, want %d..%d", name, len(body), model.MaxResponseBytes-3, model.MaxResponseBytes)
 		}
 		if !utf8.ValidString(item.Response) || !strings.HasPrefix(answer, body) {
 			t.Errorf("%s: response is not a clean UTF-8 prefix of the answer", name)
