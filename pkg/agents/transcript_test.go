@@ -301,6 +301,64 @@ func TestClaudeLastTurn_LongTurnGrowsTheRead(t *testing.T) {
 	}
 }
 
+// Claude Code can continue a conversation in a new session and leave a
+// `continued-in` pointer as the old file's last line, while herdr keeps
+// reporting the old session id. The reader follows the pointer to the file
+// that is still written; a loop, a bad id or a missing file stops the walk.
+func TestClaudeResolvePath_FollowsContinuation(t *testing.T) {
+	home := t.TempDir()
+	dir := filepath.Join(home, ".claude", "projects", "-tmp-aw-sandbox")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	turn := func(q, a string) string {
+		return `{"type":"user","message":{"role":"user","content":"` + q + `"}}` + "\n" +
+			`{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"` + a + `"}]}}` + "\n"
+	}
+	cont := func(from, to string) string {
+		return `{"type":"continued-in","sessionId":"` + from + `","continuedInSessionId":"` + to + `","timestamp":"2026-09-30T23:33:16.000Z"}` + "\n"
+	}
+	write := func(id, content string) string {
+		t.Helper()
+		path := filepath.Join(dir, id+".jsonl")
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return path
+	}
+	c := newClaudeAdapter(Config{Home: home})
+	ref := func(id string) SessionRef {
+		return SessionRef{Agent: "claude", Kind: "id", Value: id, CWD: "/tmp/aw-sandbox"}
+	}
+
+	// Two hops: a → b → c.
+	write("a", turn("old question", "old answer")+cont("a", "b"))
+	write("b", turn("middle question", "middle answer")+cont("b", "c"))
+	live := write("c", turn("new question", "new answer"))
+	if got := c.resolvePath(ref("a")); got != live {
+		t.Errorf("chain: got %q, want %q", got, live)
+	}
+	item, err := c.LastTurn(context.Background(), ref("a"))
+	if err != nil || item == nil || item.Query != "new question" || item.Response != "new answer" {
+		t.Errorf("LastTurn through the chain = %+v, %v; want the new turn", item, err)
+	}
+
+	// A loop stops at the last file not yet visited.
+	loopStart := write("l1", turn("q1", "a1")+cont("l1", "l2"))
+	write("l2", turn("q2", "a2")+cont("l2", "l1"))
+	if got := c.resolvePath(ref("l1")); got != filepath.Join(dir, "l2.jsonl") {
+		t.Errorf("loop: got %q, want l2 (started at %q)", got, loopStart)
+	}
+
+	// A pointer to an id that could leave projects/, or to a missing file: stay.
+	for _, bad := range []string{"../escape", "*", "missing"} {
+		stay := write("x", turn("q", "a")+cont("x", bad))
+		if got := c.resolvePath(ref("x")); got != stay {
+			t.Errorf("pointer %q: got %q, want %q", bad, got, stay)
+		}
+	}
+}
+
 // Claude profiles are found without configuration: ~/.claude and every
 // ~/.claude-* with a projects dir, read on each lookup. The newest copy of a
 // session wins over one in a backup profile; ids that could leave projects/

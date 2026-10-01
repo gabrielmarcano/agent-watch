@@ -71,6 +71,7 @@ The interfaces (`Adapter`, the optional `FocusGuard`, `ScreenTurnReader`) and th
 | File location | ✅ | `<config_dir>/projects/<slug>/<session_uuid>.jsonl` |
 | Slug | ✅ | The session's cwd with every `/` and `.` replaced by `-` (e.g. `/Users/me/Code/app` → `-Users-me-Code-app`) |
 | Config dirs | ✅ | `claude_config_dirs` from the bridge config first, then every `~/.claude*` dir (`~/.claude`, `~/.claude-*`, …) holding a `projects` dir (a user's `CLAUDE_CONFIG_DIR` profiles), listed again on each lookup so a new profile needs no restart. `claude_config_dirs` is only for profiles outside that pattern. Try `<dir>/projects/<slug>/<uuid>.jsonl` in every dir; if none exists, glob `<dir>/projects/*/<uuid>.jsonl`. Several matches (a session copied into a backup profile): the most recently modified wins. An id with `/`, `\`, `*`, `?` or `[` is refused |
+| Continued sessions | ✅ (2026-10-01) | Claude Code can continue a conversation in a new session and write `{"type":"continued-in","continuedInSessionId":"<uuid>",…}` as the old file's last line; herdr 0.9.1 keeps reporting the old id. The reader follows these pointers (at most 8 hops, no loops, valid ids only) to the file the chain ends at (`followContinuation`, `pkg/agents/claude.go`) |
 | Format | ✅ | JSONL. Each line has `type`, `uuid`, `timestamp`, `sessionId`, `isSidechain`, `message` |
 
 **Line kinds seen** (`type`): `user`, `assistant`, `attachment`, `system`, `queue-operation`, `last-prompt`, plus others. Ignore every type except `user` and `assistant`.

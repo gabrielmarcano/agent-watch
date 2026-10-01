@@ -53,7 +53,7 @@ Rules for every AI agent working in this repository: Claude Code, Antigravity, O
 - Reading an agent's **own transcript** for history is allowed, under three conditions:
   - it happens inside a `pkg/agents` adapter;
   - it is triggered on demand by a herdr status transition;
-  - the file is the one herdr's `agent_session` names (a path, or a session id the adapter resolves to that session's file).
+  - the file is the one herdr's `agent_session` names (a path, or a session id the adapter resolves to that session's file), or the continuation that file itself points to.
 
   Scanning directories for the "latest file" and continuous tailing are not allowed. Why transcripts at all: herdr exposes no reply text, and a screen capture loses the markdown.
 

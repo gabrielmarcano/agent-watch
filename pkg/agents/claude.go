@@ -315,34 +315,92 @@ func claudeLastTurn(ctx context.Context, content string) (query, response string
 }
 
 func (c *claudeAdapter) resolvePath(ref SessionRef) string {
-	if ref.Kind == "path" && ref.Value != "" {
-		return ref.Value
+	path := ""
+	switch {
+	case ref.Kind == "path" && ref.Value != "":
+		path = ref.Value
+	case ref.Kind == "id" && validSessionID(ref.Value):
+		path = c.findSession(ref.Value, ref.CWD)
 	}
+	if path == "" {
+		return ""
+	}
+	return c.followContinuation(path, ref.CWD)
+}
 
-	// A session id is a UUID: anything that could leave projects/ or act as
-	// a glob pattern is refused.
-	if ref.Kind == "id" && ref.Value != "" && !strings.ContainsAny(ref.Value, `/\*?[`) && ref.Value != ".." {
-		slug := ref.CWD
-		slug = strings.ReplaceAll(slug, "/", "-")
-		slug = strings.ReplaceAll(slug, ".", "-")
+// validSessionID refuses anything that could leave projects/ or act as a
+// glob pattern: a session id is a UUID.
+func validSessionID(id string) bool {
+	return id != "" && id != ".." && !strings.ContainsAny(id, `/\*?[`)
+}
 
-		dirs := c.configDirs()
-		var found []string
+// findSession returns the newest file of session id in the profiles,
+// looking first in the project of cwd, then in any project (the session's
+// cwd may have moved).
+func (c *claudeAdapter) findSession(id, cwd string) string {
+	slug := strings.ReplaceAll(strings.ReplaceAll(cwd, "/", "-"), ".", "-")
+	dirs := c.configDirs()
+	var found []string
+	for _, dir := range dirs {
+		target := filepath.Join(dir, "projects", slug, id+".jsonl")
+		if fi, err := os.Stat(target); err == nil && fi.Mode().IsRegular() {
+			found = append(found, target)
+		}
+	}
+	if len(found) == 0 {
 		for _, dir := range dirs {
-			target := filepath.Join(dir, "projects", slug, ref.Value+".jsonl")
-			if fi, err := os.Stat(target); err == nil && fi.Mode().IsRegular() {
-				found = append(found, target)
-			}
+			matches, _ := filepath.Glob(filepath.Join(dir, "projects", "*", id+".jsonl"))
+			found = append(found, matches...)
 		}
-		if len(found) == 0 { // the session's cwd moved: any project of the profile
-			for _, dir := range dirs {
-				matches, _ := filepath.Glob(filepath.Join(dir, "projects", "*", ref.Value+".jsonl"))
-				found = append(found, matches...)
-			}
-		}
-		return newestFile(found)
 	}
+	return newestFile(found)
+}
 
+// maxContinuationHops bounds the walk through continued-in pointers.
+const maxContinuationHops = 8
+
+// followContinuation walks the `continued-in` pointers Claude Code writes as
+// the last line of a session it continued in a new one: herdr keeps reporting
+// the old session, but the conversation goes on in the file the chain ends
+// at. A loop, an invalid id or a missing file ends the walk where it is.
+func (c *claudeAdapter) followContinuation(path, cwd string) string {
+	seen := map[string]bool{path: true}
+	for hop := 0; hop < maxContinuationHops; hop++ {
+		next := continuedIn(path)
+		if !validSessionID(next) {
+			break
+		}
+		nextPath := c.findSession(next, cwd)
+		if nextPath == "" || seen[nextPath] {
+			break
+		}
+		seen[nextPath] = true
+		path = nextPath
+	}
+	return path
+}
+
+// continuedIn returns the session id of the last continued-in pointer in the
+// tail of path, or "".
+func continuedIn(path string) string {
+	content, err := TailFile(path, 256<<10)
+	if err != nil {
+		return ""
+	}
+	lines := strings.Split(content, "\n")
+	for i := len(lines) - 1; i >= 0; i-- {
+		l := strings.TrimSpace(lines[i])
+		if !strings.Contains(l, `"continued-in"`) {
+			continue
+		}
+		var row struct {
+			Type                 string `json:"type"`
+			ContinuedInSessionID string `json:"continuedInSessionId"`
+		}
+		if json.Unmarshal([]byte(l), &row) == nil && row.Type == "continued-in" {
+			return row.ContinuedInSessionID
+		}
+	}
 	return ""
 }
 
