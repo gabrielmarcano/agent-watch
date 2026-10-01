@@ -64,6 +64,7 @@ type Server struct {
 	mu           sync.Mutex
 	agents       []map[string]any
 	workspaces   []map[string]any
+	tabs         []map[string]any
 	screens      map[string]map[string]string // paneID -> source -> text
 	ansiScreens  map[string]map[string]string // paneID -> source -> styled text (format "ansi")
 	calls        []Call
@@ -186,6 +187,14 @@ func (s *Server) SetAgents(agents []map[string]any) {
 	defer s.mu.Unlock()
 	s.agents = make([]map[string]any, len(agents))
 	copy(s.agents, agents)
+}
+
+// SetTabs replaces the tab.list payload.
+func (s *Server) SetTabs(tabs []map[string]any) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.tabs = make([]map[string]any, len(tabs))
+	copy(s.tabs, tabs)
 }
 
 // SetWorkspaces replaces the workspace.list payload.
@@ -461,6 +470,12 @@ func (s *Server) respond(id, method string, params map[string]any) map[string]an
 		copy(workspacesCopy, s.workspaces)
 		s.mu.Unlock()
 		return resultResp(id, map[string]any{"type": "workspace_list", "workspaces": workspacesCopy})
+	case "tab.list":
+		s.mu.Lock()
+		tabsCopy := make([]map[string]any, len(s.tabs))
+		copy(tabsCopy, s.tabs)
+		s.mu.Unlock()
+		return resultResp(id, map[string]any{"type": "tab_list", "tabs": tabsCopy})
 
 	case "agent.get":
 		target, _ := params["target"].(string)

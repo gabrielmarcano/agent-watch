@@ -91,6 +91,7 @@ type AgentState struct {
 	Agent          string         `json:"agent"`
 	Label          string         `json:"label"`
 	Name           string         `json:"name,omitempty"`
+	Title          string         `json:"title,omitempty"`
 	CWD            string         `json:"cwd,omitempty"`
 	WorkspaceID    string         `json:"workspace_id"`
 	Workspace      string         `json:"workspace,omitempty"`

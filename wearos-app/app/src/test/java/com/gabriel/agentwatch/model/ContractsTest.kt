@@ -24,6 +24,7 @@ class ContractsTest {
         assertEquals("claude", state.agent)
         assertEquals("my-app", state.label)
         assertEquals("my-app", state.name)
+        assertEquals("Fix the login loop", state.title)
         assertEquals("/Users/me/Code/app", state.cwd)
         assertEquals("w5", state.workspace_id)
         assertEquals("work", state.workspace)

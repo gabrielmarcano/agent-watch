@@ -147,6 +147,9 @@ func (h *testHarness) sendRelayToBridge(t *testing.T, msg any) {
 	}
 }
 
+// The label is the name the owner gave: herdr's agent name, else the tab's
+// label (unless it is only the tab's number), else the agent's own terminal
+// title, else the cwd's base name, else the pane id. The title travels apart.
 func TestEngine_AgentStateMapping(t *testing.T) {
 	name := "custom-name"
 	title := "stripped-title"
@@ -154,11 +157,12 @@ func TestEngine_AgentStateMapping(t *testing.T) {
 	fgCwd := "/Users/test/Code/repo/subdir"
 	agent := "claude"
 
-	e := &Engine{}
+	e := &Engine{tabs: map[string]string{"w1:t1": "tareas"}}
 
-	// 1. Task title is preferred as label, and Name is populated
+	// 1. herdr's agent name wins over the tab and the title.
 	st1, resolvedCwd := e.buildAgentState(herdr.AgentInfo{
 		PaneID:                "w1:p1",
+		TabID:                 "w1:t1",
 		Agent:                 &agent,
 		Name:                  &name,
 		TerminalTitleStripped: &title,
@@ -167,47 +171,108 @@ func TestEngine_AgentStateMapping(t *testing.T) {
 		AgentStatus:           "idle",
 		StateChangeSeq:        10,
 	})
-	if st1.Label != "stripped-title" {
-		t.Errorf("label = %q, want stripped-title", st1.Label)
-	}
-	if st1.Name != "custom-name" {
-		t.Errorf("name = %q, want custom-name", st1.Name)
+	if st1.Label != "custom-name" || st1.Name != "custom-name" || st1.Title != "stripped-title" {
+		t.Errorf("label/name/title = %q/%q/%q, want custom-name/custom-name/stripped-title", st1.Label, st1.Name, st1.Title)
 	}
 	if resolvedCwd != "/Users/test/Code/repo/subdir" || st1.CWD != "/Users/test/Code/repo/subdir" {
 		t.Errorf("cwd = %q, want /Users/test/Code/repo/subdir (foreground preference)", st1.CWD)
 	}
 
-	// 2. Name fallback when TerminalTitleStripped is nil
+	// 2. No agent name: the tab's label wins over the title.
 	st2, _ := e.buildAgentState(herdr.AgentInfo{
-		PaneID:      "w1:p2",
-		Agent:       &agent,
-		Name:        &name,
-		CWD:         &cwd,
-		AgentStatus: "working",
+		PaneID:                "w1:p2",
+		TabID:                 "w1:t1",
+		Agent:                 &agent,
+		TerminalTitleStripped: &title,
+		AgentStatus:           "working",
 	})
-	if st2.Label != "custom-name" {
-		t.Errorf("label = %q, want custom-name", st2.Label)
+	if st2.Label != "tareas" || st2.Title != "stripped-title" {
+		t.Errorf("label/title = %q/%q, want tareas/stripped-title", st2.Label, st2.Title)
 	}
 
-	// 3. Basename of CWD fallback when both name and title are nil
+	// 3. A tab without a label of its own (not in the map): the title.
 	st3, _ := e.buildAgentState(herdr.AgentInfo{
-		PaneID:      "w1:p3",
-		Agent:       &agent,
-		CWD:         &cwd,
-		AgentStatus: "idle",
+		PaneID:                "w1:p3",
+		TabID:                 "w1:t2",
+		Agent:                 &agent,
+		TerminalTitleStripped: &title,
+		CWD:                   &cwd,
+		AgentStatus:           "idle",
 	})
-	if st3.Label != "repo" {
-		t.Errorf("label = %q, want repo", st3.Label)
+	if st3.Label != "stripped-title" {
+		t.Errorf("label = %q, want stripped-title", st3.Label)
 	}
 
-	// 4. PaneID fallback when everything else is empty
-	st4, _ := e.buildAgentState(herdr.AgentInfo{
-		PaneID:      "w1:p4",
+	// 4. Titles that are only the program, not a task, are no title.
+	for _, generic := range []string{"OpenCode", "agy --conversation 1234"} {
+		g := generic
+		st, _ := e.buildAgentState(herdr.AgentInfo{PaneID: "w1:p4", Agent: &agent, TerminalTitleStripped: &g, CWD: &cwd})
+		if st.Label != "repo" || st.Title != "" {
+			t.Errorf("title %q: label/title = %q/%q, want repo/\"\"", generic, st.Label, st.Title)
+		}
+	}
+
+	// 5. PaneID fallback when everything else is empty
+	st5, _ := e.buildAgentState(herdr.AgentInfo{
+		PaneID:      "w1:p5",
 		Agent:       &agent,
 		AgentStatus: "idle",
 	})
-	if st4.Label != "w1:p4" {
-		t.Errorf("label = %q, want w1:p4", st4.Label)
+	if st5.Label != "w1:p5" {
+		t.Errorf("label = %q, want w1:p5", st5.Label)
+	}
+}
+
+// Tab labels come from tab.list with the workspace labels; a tab whose label
+// is only its number has no name. A rename reaches the relay on the next
+// refresh, as a new label for the agents in that tab.
+func TestEngine_TabLabelNamesTheAgent(t *testing.T) {
+	h := newTestHarness(t)
+	h.server.SetTabs([]map[string]any{
+		{"tab_id": "w1:t1", "workspace_id": "w1", "number": 1, "label": "tareas", "pane_count": 1},
+		{"tab_id": "w1:t2", "workspace_id": "w1", "number": 2, "label": "2", "pane_count": 1},
+	})
+	h.engine.OnHerdrOnline(true, herdr.Pong{Version: "0.9.1", Protocol: 22})
+	pollUntil(t, 3*time.Second, "tab labels", func() bool {
+		h.engine.mu.RLock()
+		defer h.engine.mu.RUnlock()
+		return h.engine.tabs["w1:t1"] == "tareas" && !h.engine.wsRefreshing
+	})
+	h.engine.mu.RLock()
+	numbered := h.engine.tabs["w1:t2"] != ""
+	h.engine.mu.RUnlock()
+	if numbered {
+		t.Error("a tab labelled with its own number is kept as a name")
+	}
+
+	agent, title := "claude", "Claude's own title"
+	h.engine.OnChanges([]herdr.Change{{Kind: herdr.Added, Agent: herdr.AgentInfo{
+		PaneID: "w1:p1", WorkspaceID: "w1", TabID: "w1:t1", Agent: &agent,
+		TerminalTitleStripped: &title, AgentStatus: "idle", StateChangeSeq: 1,
+	}}})
+	msg, _ := waitMsg(h, 3*time.Second, func(m any) bool {
+		u, ok := m.(model.AgentUpdateMsg)
+		return ok && u.Agent.PaneID == "w1:p1"
+	})
+	if msg == nil {
+		t.Fatal("no agent_update for w1:p1")
+	}
+	if u := msg.(model.AgentUpdateMsg); u.Agent.Label != "tareas" || u.Agent.Title != title {
+		t.Errorf("label/title = %q/%q, want tareas/%q", u.Agent.Label, u.Agent.Title, title)
+	}
+
+	// The tab is renamed: the next refresh republishes the agent.
+	h.server.SetTabs([]map[string]any{
+		{"tab_id": "w1:t1", "workspace_id": "w1", "number": 1, "label": "agenda", "pane_count": 1},
+	})
+	h.engine.mu.Lock()
+	h.engine.startWorkspaceRefreshLocked()
+	h.engine.mu.Unlock()
+	if msg, _ := waitMsg(h, 3*time.Second, func(m any) bool {
+		u, ok := m.(model.AgentUpdateMsg)
+		return ok && u.Agent.PaneID == "w1:p1" && u.Agent.Label == "agenda"
+	}); msg == nil {
+		t.Error("the renamed tab never reached the relay")
 	}
 }
 

@@ -26,6 +26,7 @@ data class AgentState(
     val agent: String = "",
     val label: String = "",
     val name: String? = null,
+    val title: String? = null,
     val cwd: String? = null,
     val workspace_id: String = "",
     val workspace: String? = null,

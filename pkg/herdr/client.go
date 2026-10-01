@@ -303,3 +303,15 @@ func (c *Client) ListWorkspaces(ctx context.Context) ([]WorkspaceInfo, error) {
 	}
 	return res.Workspaces, nil
 }
+
+// ListTabs retrieves every tab of every workspace from herdr.
+func (c *Client) ListTabs(ctx context.Context) ([]TabInfo, error) {
+	var res struct {
+		Type string    `json:"type"`
+		Tabs []TabInfo `json:"tabs"`
+	}
+	if err := c.Call(ctx, "tab.list", nil, &res); err != nil {
+		return nil, err
+	}
+	return res.Tabs, nil
+}

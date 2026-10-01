@@ -18,6 +18,7 @@ func TestGoldenAgentState(t *testing.T) {
 		Agent:          "claude",
 		Label:          "my-app",
 		Name:           "my-app",
+		Title:          "Fix the login loop",
 		CWD:            "/Users/me/Code/app",
 		WorkspaceID:    "w5",
 		Workspace:      "work",

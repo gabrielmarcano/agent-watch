@@ -52,6 +52,7 @@ struct AgentState: Codable {
     var status: String = "idle" // "idle" | "thinking" | "waiting_for_permission" | "done"
     var session_id: String?
     var name: String?
+    var title: String? // /v1 AgentState.title (contracts.md §1.2); unused by the legacy client until Phase 6
     var workspace: String?
     var cwd: String?
     var last_query: String?

@@ -572,6 +572,7 @@ func sessionEqual(a, b *AgentSession) bool {
 
 func agentDiffers(a, b AgentInfo) bool {
 	if a.AgentStatus != b.AgentStatus ||
+		a.TabID != b.TabID ||
 		a.StateChangeSeq != b.StateChangeSeq ||
 		a.Focused != b.Focused ||
 		!ptrStrEqual(a.Agent, b.Agent) ||

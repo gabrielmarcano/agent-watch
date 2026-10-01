@@ -257,7 +257,7 @@ fun AgentDetailScreen(
     )
 }
 
-/** Name first, anchored under the clock; then one status line and one line of context. Kept short so the prompt or the last reply shows on open. */
+/** Name first, anchored under the clock; then one status line and one line of context (the agent's own title, the workspace). Kept short so the prompt or the last reply shows on open. */
 @Composable
 private fun AgentHeader(agent: AgentState, modifier: Modifier) {
     val style = statusStyle(agent.status)
@@ -280,8 +280,8 @@ private fun AgentHeader(agent: AgentState, modifier: Modifier) {
             Text(statusLine, color = style.accent, style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
         val context = listOfNotNull(
-            agent.workspace?.takeIf { it.isNotBlank() && it != agent.label },
-            agent.name?.takeIf { it.isNotBlank() && it != agent.label }
+            agent.title?.takeIf { it.isNotBlank() && it != agent.label },
+            agent.workspace?.takeIf { it.isNotBlank() && it != agent.label }
         ).joinToString(" · ")
         if (context.isNotBlank()) {
             Text(context, color = OnSurfaceVariant, style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center, maxLines = 1, overflow = TextOverflow.Ellipsis)

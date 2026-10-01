@@ -3,6 +3,7 @@
   "agent": "claude",
   "label": "my-app",
   "name": "my-app",
+  "title": "Fix the login loop",
   "cwd": "/Users/me/Code/app",
   "workspace_id": "w5",
   "workspace": "work",

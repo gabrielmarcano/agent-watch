@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -41,6 +42,7 @@ type Engine struct {
 	mu            sync.RWMutex
 	states        map[string]*paneState
 	workspaces    map[string]string // workspace_id -> label ("" when unlabeled); from the last workspace.list
+	tabs          map[string]string // tab_id -> the owner's label ("" when it is only the tab's number); from the last tab.list
 	wsRefreshing  bool              // a workspace.list is in flight
 	wsRefreshedAt time.Time         // when the last workspace.list finished (ok or not)
 	wsRefreshes   int               // workspace refreshes started (tests)
@@ -82,6 +84,7 @@ func NewEngine(
 		HistoryDelay: 500 * time.Millisecond,
 		states:       make(map[string]*paneState),
 		workspaces:   make(map[string]string),
+		tabs:         make(map[string]string),
 	}
 }
 
@@ -409,6 +412,10 @@ func (e *Engine) maybeRefreshWorkspacesLocked(changes []herdr.Change) {
 			unknown = true
 			break
 		}
+		if _, ok := e.tabs[ch.Agent.TabID]; !ok && ch.Agent.TabID != "" {
+			unknown = true
+			break
+		}
 	}
 	age := time.Since(e.wsRefreshedAt)
 	if (unknown && age >= wsRetryInterval) || age >= wsMaxAge {
@@ -427,13 +434,19 @@ func (e *Engine) startWorkspaceRefreshLocked() {
 	go e.refreshWorkspaces(context.Background())
 }
 
-// refreshWorkspaces replaces the workspace label cache with herdr's list and
-// republishes agents whose workspace label changed.
+// refreshWorkspaces replaces the workspace and tab label caches with herdr's
+// lists and republishes agents whose workspace label or label changed (an
+// agent's label can be its tab's).
 func (e *Engine) refreshWorkspaces(ctx context.Context) {
 	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
 
 	wsList, err := e.Herdr.ListWorkspaces(ctx)
+	var tabList []herdr.TabInfo
+	var tabErr error
+	if err == nil {
+		tabList, tabErr = e.Herdr.ListTabs(ctx)
+	}
 
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -453,16 +466,35 @@ func (e *Engine) refreshWorkspaces(ctx context.Context) {
 	}
 	e.workspaces = labels
 
+	if tabErr != nil {
+		if e.Logger != nil {
+			e.Logger.Warn("refresh tabs failed", "err", tabErr)
+		}
+	} else {
+		tabs := make(map[string]string, len(tabList))
+		for _, t := range tabList {
+			label := strings.TrimSpace(t.Label)
+			if label == strconv.Itoa(t.Number) { // herdr's default: only the tab's number
+				label = ""
+			}
+			tabs[t.TabID] = label
+		}
+		e.tabs = tabs
+	}
+
 	if e.Logger != nil {
-		e.Logger.Debug("refreshed workspaces", "count", len(wsList), "workspaces", labels)
+		e.Logger.Debug("refreshed workspaces", "count", len(wsList), "workspaces", labels, "tabs", len(tabList))
 	}
 
 	for _, st := range e.states {
 		wsLabel := labels[st.info.WorkspaceID]
-		if st.public.Workspace == wsLabel {
+		name, title := agentNames(st.info)
+		label := e.labelFor(st.info, name, title, st.public.CWD)
+		if st.public.Workspace == wsLabel && st.public.Label == label {
 			continue
 		}
 		st.public.Workspace = wsLabel
+		st.public.Label = label
 		if e.Relay != nil {
 			e.Relay.Send(model.AgentUpdateMsg{
 				Type:  model.WireAgentUpdate,
@@ -470,6 +502,38 @@ func (e *Engine) refreshWorkspaces(ctx context.Context) {
 			})
 		}
 	}
+}
+
+// agentNames returns herdr's name for the agent and its terminal title, when
+// the title describes a task: a title that only names the program is none.
+func agentNames(info herdr.AgentInfo) (name, title string) {
+	if info.Name != nil {
+		name = strings.TrimSpace(*info.Name)
+	}
+	if info.TerminalTitleStripped != nil {
+		t := strings.TrimSpace(*info.TerminalTitleStripped)
+		if t != "" && !strings.HasPrefix(t, "agy --conversation") && t != "OpenCode" {
+			title = t
+		}
+	}
+	return name, title
+}
+
+// labelFor names the agent the way the owner did: herdr's agent name, else
+// its tab's label (unless it is only the tab's number), else its terminal
+// title, else the cwd's base name, else the pane id. Callers hold e.mu.
+func (e *Engine) labelFor(info herdr.AgentInfo, name, title, cwd string) string {
+	switch {
+	case name != "":
+		return name
+	case e.tabs[info.TabID] != "":
+		return e.tabs[info.TabID]
+	case title != "":
+		return title
+	case cwd != "" && filepath.Base(cwd) != "/" && filepath.Base(cwd) != ".":
+		return filepath.Base(cwd)
+	}
+	return info.PaneID
 }
 
 func (e *Engine) buildAgentState(info herdr.AgentInfo) (model.AgentState, string) {
@@ -485,29 +549,8 @@ func (e *Engine) buildAgentState(info herdr.AgentInfo) (model.AgentState, string
 		cwd = *info.CWD
 	}
 
-	taskTitle := ""
-	if info.TerminalTitleStripped != nil {
-		t := strings.TrimSpace(*info.TerminalTitleStripped)
-		if t != "" && !strings.HasPrefix(t, "agy --conversation") && t != "OpenCode" {
-			taskTitle = t
-		}
-	}
-
-	paneName := ""
-	if info.Name != nil && strings.TrimSpace(*info.Name) != "" {
-		paneName = strings.TrimSpace(*info.Name)
-	}
-
-	label := ""
-	if taskTitle != "" {
-		label = taskTitle
-	} else if paneName != "" {
-		label = paneName
-	} else if cwd != "" && filepath.Base(cwd) != "/" && filepath.Base(cwd) != "." {
-		label = filepath.Base(cwd)
-	} else {
-		label = info.PaneID
-	}
+	paneName, taskTitle := agentNames(info)
+	label := e.labelFor(info, paneName, taskTitle, cwd)
 
 	wsLabel := ""
 	if e.workspaces != nil {
@@ -519,6 +562,7 @@ func (e *Engine) buildAgentState(info herdr.AgentInfo) (model.AgentState, string
 		Agent:          agentName,
 		Label:          label,
 		Name:           paneName,
+		Title:          taskTitle,
 		CWD:            cwd,
 		WorkspaceID:    info.WorkspaceID,
 		Workspace:      wsLabel,

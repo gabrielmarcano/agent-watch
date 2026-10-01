@@ -12,7 +12,7 @@ Full reference, with the herdr version it was verified on: `docs/reference/herdr
 ## Safety (non-negotiable)
 - The herdr on this Mac runs the **owner's real agent sessions**.
 - **Never, outside panes you created in the `aw-sandbox` workspace:** anything that types, starts, closes, moves or renames: `agent.prompt`, `agent.send_keys`, `agent.start`, `pane.send_*`, `pane.run`, `pane.close`, `tab.close` (and their CLI forms).
-- **Safe anywhere (read-only):** `ping`, `agent.list`, `agent.get`, `agent.read`, `pane.get`, `pane.list`, `session.snapshot`, `workspace.list`, `events.subscribe` (listening only), and the CLI's `herdr --version`, `herdr api schema`, `herdr integration status`.
+- **Safe anywhere (read-only):** `ping`, `agent.list`, `agent.get`, `agent.read`, `pane.get`, `pane.list`, `session.snapshot`, `workspace.list`, `tab.list`, `events.subscribe` (listening only), and the CLI's `herdr --version`, `herdr api schema`, `herdr integration status`.
 - What the guards enforce, and for which tools: `tools/guards/README.md`. Where they don't reach, these rules still apply.
 - To start a new agent session for the owner, create a tab labelled `aw-session-<name>` and `herdr pane run` the agent with its whole task once (`tools/guards/README.md`); after that the pane is closed to input.
 - Tests never touch the real socket: use `pkg/herdrtest`.

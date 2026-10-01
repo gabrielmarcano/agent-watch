@@ -45,6 +45,7 @@ The implementation, with its default timeout and cancellation: `Client.Call` in 
 | `agent.prompt` | `{"target", "text", "wait"?}` | — | Never pass `wait` (it blocks); omit it or send `null` |
 | `session.snapshot` | `{}` | `session_snapshot` | Workspaces, tabs, panes, agents, `focused_pane_id`. Not called by the bridge; handy when probing |
 | `workspace.list` | `{}` | `workspace_list` | `{"workspaces":[{"workspace_id", "number", "label", ...}]}` — the bridge reads `label` for `AgentState.workspace` |
+| `tab.list` | `{}` (or `{"workspace_id"}`) | `tab_list` | `{"tabs":[{"tab_id", "workspace_id", "number", "label", "pane_count", ...}]}`, every workspace's tabs without params. A tab's default `label` is its `number`. The bridge reads `label` for `AgentState.label` (contracts §1.2) |
 | `notification.show` | `{"title", "body"?, "sound"?: none\|done\|request}` | — | Used by `pair`, because a plugin action's stdout may not be visible (`cmd/bridge/pair.go`) |
 | `events.subscribe` | `{"subscriptions":[...]}` | `subscription_started` | Streaming, §5 |
 
@@ -93,16 +94,16 @@ Real example (trimmed, values replaced with placeholders):
 | Field | Type | Required | Use |
 |---|---|---|---|
 | `pane_id` | string | yes | **Primary key** |
-| `workspace_id`, `tab_id`, `terminal_id` | string | yes | |
+| `workspace_id`, `tab_id`, `terminal_id` | string | yes | `tab_id` joins the agent to its tab's label (`tab.list`) |
 | `agent_status` | enum | yes | `idle` / `working` / `blocked` / `done` / `unknown` |
 | `focused` | bool | yes | |
 | `revision` | uint64 | yes | **Do not use** as a change detector (stub on some versions) |
 | `state_change_seq` | uint64 | default 0 | Increments on every status change — use this |
 | `agent` | string\|null | no | Herdr agent id (`claude`, `agy`, `opencode`, …) |
 | `display_agent` | string\|null | no | Human name; not used |
-| `name` | string\|null | no | User-set pane name |
+| `name` | string\|null | no | User-set pane name; `AgentState.name`, and the label's first choice |
 | `cwd`, `foreground_cwd` | string\|null | no | |
-| `terminal_title`, `terminal_title_stripped` | string\|null | no | `_stripped` has the spinner/emoji removed |
+| `terminal_title`, `terminal_title_stripped` | string\|null | no | `_stripped` has the spinner/emoji removed; `AgentState.title` |
 | `agent_session` | object\|null | no | See §3.1 |
 | `interactive_ready`, `launch_pending`, `screen_detection_skipped` | bool | no | Ignore |
 | `state_labels`, `tokens` | map | no | Ignore |

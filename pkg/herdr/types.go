@@ -50,6 +50,15 @@ type WorkspaceInfo struct {
 	Label       string `json:"label"`
 }
 
+// TabInfo represents a tab returned by tab.list.
+type TabInfo struct {
+	TabID       string `json:"tab_id"`
+	WorkspaceID string `json:"workspace_id"`
+	Number      int    `json:"number"`
+	Label       string `json:"label"`
+	PaneCount   int    `json:"pane_count"`
+}
+
 // Pong is the response payload from herdr's "ping" method.
 type Pong struct {
 	Version  string `json:"version"`

@@ -46,6 +46,8 @@ Known and accepted for now; none blocks a phase.
 - **Claude transcript:** herdr reports only the session id, not the transcript path its hook receives. A turn that ends while the bridge restarts gets the generic `Task finished` body.
 - **Wear OS release APK:** signed with the debug key.
 - **Notifications:** grouping is deferred (one notification per pane plus the digest already bound them).
+- **A transcript read that fails at the turn's end** falls back to a screen capture, and that path is slower than the relay's wait for the reply (`push.DefaultReplyWait`), so the done push says `Task finished`.
+- **Long replies lose their end:** a transcript reply over the limit keeps its beginning (`model.TruncateUTF8`). The owner's idea: keep the end, the latest and most important part, and drop the oldest.
 - **Tiles and complication:** a 401 from them may not revoke the pairing (`wearos-app/ARCHITECTURE.md` §3).
 - **Legacy Swift models** need a touch for every contract change until Phase 6 (`schema-sync` skill, step 6).
 - **Relay deploy is amd64-only** (`deploy/relay/README.md` § First-time setup).
@@ -79,4 +81,5 @@ Known and accepted for now; none blocks a phase.
 5. **Later ideas:**
    - a Telegram bot with inline approval buttons, for when the watch is charging;
    - Discord webhook summaries;
-   - dedicated adapters for Codex, Pi, Amp and other CLI agents.
+   - dedicated adapters for Codex, Pi, Amp and other CLI agents;
+   - opening an agent or its history on the watch marks it read (herdr `done` → `idle`); it needs a herdr call that marks a pane seen without focusing it.

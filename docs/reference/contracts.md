@@ -38,6 +38,7 @@ type AgentState struct {
     Agent          string         `json:"agent"`
     Label          string         `json:"label"`
     Name           string         `json:"name,omitempty"`
+    Title          string         `json:"title,omitempty"`
     CWD            string         `json:"cwd,omitempty"`
     WorkspaceID    string         `json:"workspace_id"`
     Workspace      string         `json:"workspace,omitempty"`
@@ -53,8 +54,9 @@ type AgentState struct {
 |---|---|---|
 | `pane_id` | herdr `pane_id` | Primary key everywhere. Contains `:` (e.g. `w5:pAW`) |
 | `agent` | herdr `agent` | Lowercase herdr id: `claude`, `agy`, `opencode`, `codex`, … Never empty: a pane whose herdr `agent` is null is not tracked (the relay gets `agent_removed`) |
-| `label` | computed | First non-empty of: descriptive task `terminal_title_stripped`, herdr `name`, `basename(cwd)`, `pane_id` |
+| `label` | computed | The name the owner gave, first non-empty of: herdr `name`; the tab's `label` from `tab.list` (ignored when it is only the tab's `number`, herdr's default); `title`; `basename(cwd)`; `pane_id`. Agents that share a tab share its label |
 | `name` | herdr `name` | Explicit pane name or slug if set, otherwise omitted |
+| `title` | herdr `terminal_title_stripped` | The agent's own task title (e.g. the one Claude Code sets); omitted when empty or when it only names the program (`OpenCode`, `agy --conversation …`) |
 | `cwd` | herdr `foreground_cwd`, else `cwd` | Omit if both are null |
 | `workspace_id` | herdr `workspace_id` | Internal workspace ID |
 | `workspace` | herdr workspace label | Human workspace name (e.g. `my-project`), otherwise omitted |
@@ -72,6 +74,7 @@ type AgentState struct {
   "agent": "claude",
   "label": "my-app",
   "name": "my-app",
+  "title": "Fix the login loop",
   "cwd": "/Users/me/Code/app",
   "workspace_id": "w5",
   "workspace": "work",
