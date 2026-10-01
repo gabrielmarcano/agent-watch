@@ -84,4 +84,4 @@ Known and accepted for now; none blocks a phase.
    - a Telegram bot with inline approval buttons, for when the watch is charging;
    - Discord webhook summaries;
    - dedicated adapters for Codex, Pi, Amp and other CLI agents;
-   - marking an agent read from the watch. herdr 0.9.1 has no call that marks a pane seen: only focusing it does (`agent.focus`/`pane.focus`), which moves the owner's terminal to that pane. A watch-only read mark (per pane and `state_change_seq`, no herdr call) would avoid that.
+   - marking an agent read from the watch. herdr 0.9.1 has no call that marks a pane seen: only focusing it does (`agent.focus`/`pane.focus`), which moves the owner's terminal to that pane. A watch-only read mark (per pane and `state_change_seq`, no herdr call) would avoid that. **Needs the owner's decision**; recommended: the watch-only mark, set automatically when the agent's screen or reply is opened (no button).
