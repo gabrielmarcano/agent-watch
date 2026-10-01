@@ -49,6 +49,7 @@ Known and accepted for now; none blocks a phase.
 - **A transcript read that fails at the turn's end** falls back to a screen capture, and that path is slower than the relay's wait for the reply (`push.DefaultReplyWait`), so the done push says `Task finished`.
 - **Trial (2026-10-01): reply previews show the start and the end.** The done push and the watch's last-reply card show a long reply's first line, "…" and its end, where the question or next step usually is (175 of 200 stored replies were longer than the push, 149 longer than the card). If the owner does not like it, go back to the start only: `replyPreview` (`pkg/push/push.go`) and `headTailPreview` (`wearos-app/.../ui/logic/TextPreview.kt`).
 - **A reply over the cap** (`model.MaxResponseBytes`, 64 KiB since 2026-10-01; no real reply has reached it) keeps its beginning. The owner's idea, if it ever bites: keep the end instead.
+- **To watch, not planned:** the screen-capture fallback reads the last 200 lines (`pkg/bridge/engine.go`), never measured; a very long reply on screen could lose its start there. Only the fallback path uses it (6 of 200 stored replies).
 - **Tiles and complication:** a 401 from them may not revoke the pairing (`wearos-app/ARCHITECTURE.md` §3).
 - **Legacy Swift models** need a touch for every contract change until Phase 6 (`schema-sync` skill, step 6).
 - **Relay deploy is amd64-only** (`deploy/relay/README.md` § First-time setup).
@@ -83,4 +84,4 @@ Known and accepted for now; none blocks a phase.
    - a Telegram bot with inline approval buttons, for when the watch is charging;
    - Discord webhook summaries;
    - dedicated adapters for Codex, Pi, Amp and other CLI agents;
-   - opening an agent or its history on the watch marks it read (herdr `done` → `idle`); it needs a herdr call that marks a pane seen without focusing it.
+   - marking an agent read from the watch. herdr 0.9.1 has no call that marks a pane seen: only focusing it does (`agent.focus`/`pane.focus`), which moves the owner's terminal to that pane. A watch-only read mark (per pane and `state_change_seq`, no herdr call) would avoid that.
