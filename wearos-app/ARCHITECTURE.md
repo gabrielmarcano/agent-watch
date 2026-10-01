@@ -81,7 +81,7 @@ commandErrorFeedback(error, surface)             // the message to show for a fa
 |---|---|
 | `pairing` | Relay URL (default `BuildConfig.DEFAULT_RELAY_URL`, edited with the system keyboard) and the 6-digit code |
 | `agents` | Sections by attention (`attentionSections`: needs you, done, working, idle, unknown state) across workspaces; the notice line; History and Settings |
-| `agent/{paneId}` | Name first (the label), then the status line, then the agent's own title and the workspace when they differ from it; the prompt as items (command head or `unknown` tail, View all, Deny · Allow, options with their description, a confirmation for `allow_always`); the last reply with Read all; Reply (dictation) as the edge button; "Pin to tile" |
+| `agent/{paneId}` | Name first (the label), then the status line, then the agent's own title and the workspace when they differ from it; the prompt as items (command head or `unknown` tail, View all, Deny · Allow, options with their description, a confirmation for `allow_always`); the last reply with Read all (whole when it fits, else its first line, a "…" line and its end: `headTailPreview`); Reply (dictation) as the edge button; "Pin to tile" |
 | `dictation/{paneId}` | What the recognizer understood and the target, then Send |
 | `history?paneId=`, `reader/{historyId}` | Cards with age; the answer rendered block by block (`screen` captures as monospace, except their tables, which the bridge sends as markdown and the reader shows as records) |
 | `settings` | Pair again, unpair, version |

@@ -1133,11 +1133,32 @@ func TestDispatcher_DoneAtOnceWithoutReplyWait(t *testing.T) {
 
 func TestReplyPreview(t *testing.T) {
 	long := strings.Repeat("word ", 100)
-	if got := replyPreview(long); utf8.RuneCountInString(got) != 240 || !strings.HasSuffix(got, "…") {
-		t.Errorf("preview not cut to 240 runes: %d", utf8.RuneCountInString(got))
+	got := replyPreview(long)
+	if n := utf8.RuneCountInString(got); n > 240 || !strings.Contains(got, " … ") {
+		t.Errorf("one long paragraph: %d runes, %q; want its start and end within 240", n, got)
 	}
 	if got := replyPreview("  \n\n "); got != "" {
 		t.Errorf("blank reply preview = %q", got)
+	}
+}
+
+// A long reply shows its first line (the conclusion, most important first)
+// and its end (the question or the next step), with the middle left out.
+func TestReplyPreview_HeadAndTail(t *testing.T) {
+	middle := strings.Repeat("- a detail line that only matters in the reader\n", 12)
+	reply := "# The app 1.2.0 is installed\n\nDetails follow.\n\n" + middle + "\nNo push yet: 4 local commits.\n\n**Shall I push?**"
+	got := replyPreview(reply)
+	if n := utf8.RuneCountInString(got); n > 240 {
+		t.Errorf("preview is %d runes, want at most 240: %q", n, got)
+	}
+	if !strings.HasPrefix(got, "The app 1.2.0 is installed") {
+		t.Errorf("preview does not start with the first line: %q", got)
+	}
+	if !strings.HasSuffix(got, "No push yet: 4 local commits. Shall I push?") {
+		t.Errorf("preview does not end with the reply's end: %q", got)
+	}
+	if !strings.Contains(got, " … ") {
+		t.Errorf("preview does not mark the cut: %q", got)
 	}
 }
 

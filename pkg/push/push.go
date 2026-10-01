@@ -312,39 +312,82 @@ func (d *Dispatcher) releaseDone(pane string, p *pendingDone) {
 	d.enqueueLocked(p.msg, p.cur)
 }
 
+// Reply previews fit in previewRunes. A longer reply keeps its first line, up
+// to previewHeadRunes, and its end: the first line usually holds the
+// conclusion and the end the question or the next step; the middle is detail.
+const (
+	previewRunes     = 240
+	previewHeadRunes = 110
+	previewCut       = " … "
+)
+
 // replyPreview turns an agent's reply into notification text: markdown
-// markers dropped, lines joined, at most 240 runes. A markdown table becomes
-// one line per row, "first cell: other cells · …", without its header.
+// markers dropped, lines joined, at most previewRunes; a longer reply is its
+// first line, previewCut and its end. A markdown table becomes one line per
+// row, "first cell: other cells · …", without its header.
 func replyPreview(response string) string {
 	text := strings.NewReplacer("**", "", "__", "", "`", "").Replace(response)
 	lines := strings.Split(text, "\n")
-	var b strings.Builder
-	ownLine := false // the last part was a table row
-	add := func(part string, row bool) {
-		if b.Len() > 0 {
-			if row || ownLine {
-				b.WriteByte('\n')
-			} else {
-				b.WriteByte(' ')
-			}
-		}
-		b.WriteString(part)
-		ownLine = row
+	type part struct {
+		text string
+		row  bool // a table row: it stays on its own line
 	}
+	var parts []part
 	for i := 0; i < len(lines); i++ {
 		if rows, n := tableRows(lines[i:]); n > 0 {
 			for _, r := range rows {
-				add(r, true)
+				parts = append(parts, part{r, true})
 			}
 			i += n - 1
 			continue
 		}
 		line := strings.TrimSpace(strings.TrimLeft(strings.TrimSpace(lines[i]), "#>*-•"))
 		if line != "" {
-			add(line, false)
+			parts = append(parts, part{line, false})
 		}
 	}
-	return TruncateRunes(b.String(), 240)
+	join := func(ps []part) string {
+		var b strings.Builder
+		ownLine := false // the last part was a table row
+		for _, p := range ps {
+			if b.Len() > 0 {
+				if p.row || ownLine {
+					b.WriteByte('\n')
+				} else {
+					b.WriteByte(' ')
+				}
+			}
+			b.WriteString(p.text)
+			ownLine = p.row
+		}
+		return b.String()
+	}
+
+	full := join(parts)
+	if utf8.RuneCountInString(full) <= previewRunes {
+		return full
+	}
+	head := TruncateRunes(parts[0].text, previewHeadRunes)
+	rest := join(parts[1:])
+	if rest == "" { // one long paragraph: its own end
+		rest = parts[0].text
+	}
+	budget := previewRunes - utf8.RuneCountInString(head) - utf8.RuneCountInString(previewCut)
+	return head + previewCut + lastRunes(rest, budget)
+}
+
+// lastRunes returns the end of s in at most n runes, starting at a word when
+// it is cut, with "…" in front.
+func lastRunes(s string, n int) string {
+	r := []rune(s)
+	if len(r) <= n {
+		return s
+	}
+	tail := r[len(r)-(n-1):]
+	if i := strings.IndexAny(string(tail), " \n"); i >= 0 && i < len(string(tail))/3 {
+		tail = []rune(strings.TrimLeft(string(tail)[i:], " \n"))
+	}
+	return "…" + string(tail)
 }
 
 // tableRows reads the markdown table lines starts with (a header, a "|---|"

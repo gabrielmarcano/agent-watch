@@ -47,7 +47,8 @@ Known and accepted for now; none blocks a phase.
 - **Wear OS release APK:** signed with the debug key.
 - **Notifications:** grouping is deferred (one notification per pane plus the digest already bound them).
 - **A transcript read that fails at the turn's end** falls back to a screen capture, and that path is slower than the relay's wait for the reply (`push.DefaultReplyWait`), so the done push says `Task finished`.
-- **Long replies lose their end:** a transcript reply over the limit keeps its beginning (`model.TruncateUTF8`). The owner's idea: keep the end, the latest and most important part, and drop the oldest.
+- **Trial (2026-10-01): reply previews show the start and the end.** The done push and the watch's last-reply card show a long reply's first line, "…" and its end, where the question or next step usually is (175 of 200 stored replies were longer than the push, 149 longer than the card). If the owner does not like it, go back to the start only: `replyPreview` (`pkg/push/push.go`) and `headTailPreview` (`wearos-app/.../ui/logic/TextPreview.kt`).
+- **The 16 KiB cap on a reply** (`model.TruncateUTF8`, contracts §1.4) keeps its beginning. It is a safety bound, never reached so far (largest stored reply: 11 KB). Idea for if it ever bites: keep the end instead.
 - **Tiles and complication:** a 401 from them may not revoke the pairing (`wearos-app/ARCHITECTURE.md` §3).
 - **Legacy Swift models** need a touch for every contract change until Phase 6 (`schema-sync` skill, step 6).
 - **Relay deploy is amd64-only** (`deploy/relay/README.md` § First-time setup).

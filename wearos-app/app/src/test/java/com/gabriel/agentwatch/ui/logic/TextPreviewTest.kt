@@ -7,6 +7,38 @@ import org.junit.Test
 
 class TextPreviewTest {
 
+    // A long reply shows its first line (the conclusion) and its end (the
+    // question or the next step); the middle is left out.
+    @Test
+    fun headTailKeepsTheFirstLineAndTheEnd() {
+        val reply = listOf(
+            "The app 1.2.0 is installed",
+            "Details follow."
+        ) + (1..10).map { "a detail line that only matters in the reader" } + listOf(
+            "No push yet: 4 local commits.",
+            "Shall I push?"
+        )
+        val preview = headTailPreview(reply.joinToString("\n"), headChars = 70, tailChars = 60)
+        assertEquals("The app 1.2.0 is installed\n…\nNo push yet: 4 local commits.\nShall I push?", preview)
+    }
+
+    @Test
+    fun headTailIsNullWhenTheTextFits() {
+        assertEquals(null, headTailPreview("Done.\nShall I push?", headChars = 70, tailChars = 100))
+    }
+
+    @Test
+    fun headTailCutsAnOverlongFirstLineAndLastLineAtWords() {
+        val first = "word ".repeat(30).trim()
+        val last = "end ".repeat(40).trim() + " question?"
+        val preview = headTailPreview(first + "\nmiddle\n" + last, headChars = 40, tailChars = 50)!!
+        val (head, cut, tail) = preview.split("\n")
+        assertTrue(head.length <= 40 && head.endsWith("…"))
+        assertEquals("…", cut)
+        assertTrue(tail.length <= 50 && tail.startsWith("…") && tail.endsWith("question?"))
+        assertFalse(tail.startsWith("…n") || tail.startsWith("…d")) // starts at a word
+    }
+
     private val twelve = (1..12).joinToString("\n") { "line $it" }
 
     @Test

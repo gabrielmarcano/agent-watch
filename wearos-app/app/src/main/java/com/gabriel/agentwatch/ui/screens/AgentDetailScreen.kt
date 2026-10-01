@@ -61,6 +61,7 @@ import com.gabriel.agentwatch.ui.components.transformedItem
 import com.gabriel.agentwatch.ui.theme.OnSurfaceVariant
 import com.gabriel.agentwatch.ui.theme.statusStyle
 import com.gabriel.agentwatch.util.MarkdownFormatter
+import com.gabriel.agentwatch.ui.logic.headTailPreview
 import kotlinx.coroutines.launch
 
 @Composable
@@ -290,11 +291,17 @@ private fun AgentHeader(agent: AgentState, modifier: Modifier) {
 }
 
 private const val REPLY_PREVIEW_LINES = 8
+// About 25 characters fit a line of the card: 3 lines of head, the "…" line, 4 of tail.
+private const val REPLY_HEAD_CHARS = 70
+private const val REPLY_TAIL_CHARS = 100
 
-/** The last reply as plain text (markdown stripped), cut at [REPLY_PREVIEW_LINES]; tapping opens the reader. */
+/** The last reply as plain text (markdown stripped): whole when it fits, else its start and its end (`headTailPreview`); tapping opens the reader. */
 @Composable
 private fun LastReplyCard(reply: HistoryItem, onClick: () -> Unit, modifier: Modifier, transformation: SurfaceTransformation) {
-    val preview = remember(reply.response) { MarkdownFormatter.clean(reply.response).replace(Regex("\n{2,}"), "\n") }
+    val preview = remember(reply.response) {
+        val clean = MarkdownFormatter.clean(reply.response).replace(Regex("\n{2,}"), "\n")
+        headTailPreview(clean, REPLY_HEAD_CHARS, REPLY_TAIL_CHARS) ?: clean
+    }
     Card(onClick = onClick, modifier = modifier, transformation = transformation) {
         reply.query?.takeIf { it.isNotBlank() }?.let { query ->
             Text(query, color = OnSurfaceVariant, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
