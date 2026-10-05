@@ -69,6 +69,7 @@ Known and accepted for now; none blocks a phase.
 - **agy 1.2.17 menus:** `Create file` and `Question` parse without a `detail`; picking `Write-in...` leaves a text field the watch cannot answer (`docs/reference/agents.md` §4.1).
 
 ### Checks nobody has done yet
+- Wear OS 1.2.2 on the watch: Reply, Change and Quick Dictate open the system input (voice, keyboard, handwriting); a typed prompt reaches the confirm screen and the relay; backing out is silent; an empty notification reply shows `Empty reply — nothing sent`.
 - ntfy delivery (watchOS push) has never been tested.
 - The watch over LTE or its phone's Bluetooth connection: only Wi-Fi has been checked.
 - `herdr plugin install gabrielmarcano/agent-watch` end to end.
