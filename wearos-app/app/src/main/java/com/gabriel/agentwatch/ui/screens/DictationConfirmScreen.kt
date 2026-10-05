@@ -65,9 +65,12 @@ fun DictationConfirmScreen(
     ScreenList(
         edgeButton = {
             EdgeButton(onClick = onSend, enabled = !sending) {
-                ResIcon(R.drawable.ic_send, null, MaterialTheme.colorScheme.onPrimary, Modifier.size(20.dp))
-                Spacer(Modifier.width(4.dp))
-                Text(stringResource(if (sending) R.string.loading else R.string.send))
+                // While sending, the longer label goes alone so it never wraps on the round screen.
+                if (!sending) {
+                    ResIcon(R.drawable.ic_send, null, MaterialTheme.colorScheme.onPrimary, Modifier.size(20.dp))
+                    Spacer(Modifier.width(4.dp))
+                }
+                Text(stringResource(if (sending) R.string.loading else R.string.send), maxLines = 1)
             }
         }
     ) { spec ->
