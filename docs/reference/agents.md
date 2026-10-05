@@ -10,7 +10,7 @@ Everything that depends on **which** coding agent runs in a pane lives in `pkg/a
 
 The rest of the system (`pkg/herdr`, the relay, the clients) must stay agent-agnostic.
 
-**✅** = verified on the development Mac on 2026-09-23; rows marked (2026-09-25) were re-captured with Claude Code 2.1.282, Antigravity CLI 1.2.10, OpenCode 1.18.32 and herdr 0.9.1. The captures are in `pkg/agents/testdata/<agent>/`.
+**✅** = verified on the development Mac on 2026-09-23; rows marked (2026-09-25) were re-captured with Claude Code 2.1.282, Antigravity CLI 1.2.10, OpenCode 1.18.32 and herdr 0.9.1. On 2026-10-05 (rows marked so) the permission and question menus of all three were re-audited with Claude Code 2.1.289, Antigravity CLI 1.2.17, OpenCode 1.18.34 and herdr 0.9.3 installed (the server answering was still 0.9.1; detection also checked offline with the 0.9.3 CLI): every menu parsed as before, apart from the agy rows below. The captures are in `pkg/agents/testdata/<agent>/`.
 
 ---
 
@@ -62,6 +62,7 @@ The interfaces (`Adapter`, the optional `FocusGuard`, `ScreenTurnReader`) and th
 | AskUserQuestion | ✅ | Numbered menu with digit selection; the line under each option is its `description`. `Type something.` (a free-text field) is left out of the options; the others keep their ids. Mapped to `kind: "question"`. Captured in `question-multiple.txt` and, asked in plan mode, `question-plan-mode.txt` |
 | Plan approval (ExitPlanMode) | ✅ (2026-09-25) | `Claude has written up a plan and is ready to execute. Would you like to proceed?` with `1. Yes, and use auto mode` (`allow_always`), `2. Yes, manually approve edits` (`allow_once`), `3. Tell Claude what to change` (`choice`; its hint line `shift+tab to approve with this feedback` is not part of the label). No deny option → `kind: "question"`, Deny uses `esc`. The plan's own numbered steps above the dialog are not the menu. Digit 2 approved immediately. `plan-approval.txt` |
 | Prompt while working | ✅ | Claude queues typed messages while working → `PromptWhileWorking() = true` |
+| Agents view (`← for agents`) | ✅ (2026-10-05) | `←` on an empty input (`/exit` did the same in this test) moves the conversation to the background: Claude's daemon resumes it as a fork with a new session id (the old transcript ends with `continued-in`, §3.2), and the pane shows Claude's agents list (`Needs input` / `Working` / `Completed`, with the owner's other background sessions) above a `❯ describe a task for a new session` box; `enter` reopens the conversation, which then shows its name in the top rule. **A dialog raised while the conversation is in the background is not on screen** (the list only says e.g. `approve Web Search`): herdr reported `done` (rule `live_prompt_box`, also with the 0.9.3 CLI) and nothing parses, so the watch cannot see or answer it. Back in the conversation the same dialog was `blocked` and parsed. Reopened conversations behave like normal ones (a dialog there was `blocked` by upstream's `bash_permission_prompt`) |
 
 ### 3.2 Transcript
 
@@ -101,11 +102,12 @@ The interfaces (`Adapter`, the optional `FocusGuard`, `ScreenTurnReader`) and th
 
 | Item | Status | Value |
 |---|---|---|
-| Approval menu | ✅ | Numbered vertical list inside a box. Header indicates tool/kind (e.g. `Command`, `Pending edit`). Captured in `permission-bash.txt` and `permission-edit.txt`. Multiple-choice and plan approval are unsupported (`.missing.md`). |
+| Approval menu | ✅ | Numbered vertical list inside a box. Header indicates tool/kind (e.g. `Command`, `Pending edit`, `Create file`). Captured in `permission-bash.txt`, `permission-edit.txt` and `permission-create.txt` (2026-10-05: `Allow creation of this file?` with `Yes, allow creation` / `No, deny creation`; its path line is not parsed into `detail`). Plan approval is unsupported (`.missing.md`) |
+| Question | ✅ (2026-10-05) | New in 1.2.17 (`ask_question`): title `Question`, `Question 1/1: …`, numbered answers plus `Write-in...`, footer `↑/↓ Navigate · enter Select · esc Skip`. The digit answers at once; `esc` skips. `Write-in...` opens a `Your answer:` field that herdr reports `done` while the menu still parses, so the watch can neither answer nor dictate there. The question line is not parsed into `detail`. `question-multiple.txt` |
 | Dialog detection | ✅ (2026-09-25) | The dialog replaces the input box (`>` between two rules); its tail is `↑/↓ Navigate · …` and `esc to cancel`. Same rule as Claude with `>` as the input line. Negative: `no-menu-idle-numbered-list.txt`; `no-menu-working.txt` is now captured while really working (`Generating...` spinner, herdr `working`) |
-| herdr status with the dialog open | ✅ (2026-09-25) | **herdr 0.9.1 does not report `blocked` for agy.** With the permission dialog open it reported `done` (`permission-bash-herdr-done.txt`), and `working` when a background task was running (`permission-bash-herdr-working.txt`); cause and mitigation: `tools/herdr-overrides/README.md`. The bridge refuses dictation whenever `ParsePrompt` finds a menu, so these screens must parse |
+| herdr status with the dialog open | ✅ (2026-10-05) | `blocked` with herdr's own manifest `agy` 2026.10.05.1 (`Command`, `Create file` and `Question` checked live). Older manifests (before 2026.10.05.1) reported `done` (`permission-bash-herdr-done.txt`), or `working` with a background task running (`permission-bash-herdr-working.txt`). The bridge refuses dictation whenever `ParsePrompt` finds a menu, so these screens must parse |
 | Digit selection vs arrows | ✅ | Digit selects immediately without Enter. |
-| Cancel | ✅ | `esc` cancels/rejects standard commands. **Crucial quirk:** In file edits, Esc is explicitly disabled by the TUI (`"Esc disabled during file edits — press 1 to accept or 2 to reject."`), so `cancel_keys` for file edits is `["2"]`. |
+| Cancel | ✅ | `esc` cancels/rejects standard commands (and `Create file`, 2026-10-05). **Crucial quirk:** In `Pending edit` file edits, Esc is explicitly disabled by the TUI (`"Esc disabled during file edits — press 1 to accept or 2 to reject."`), so `cancel_keys` for file edits is `["2"]`. |
 | Prompt while working | ✅ | Agy queues typed prompts while working → `PromptWhileWorking() = true`. |
 
 ### 4.2 Transcript

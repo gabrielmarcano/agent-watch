@@ -59,25 +59,28 @@ Known and accepted for now; none blocks a phase.
   - `TestGoldenFixtures` walks a fixed agent list (`pkg/agents/adapters_test.go`): a new agent's fixtures run only once it is added there;
   - the fake herdr delivers global events to a subscription with no event types, which real herdr does not (`pkg/herdrtest/server.go`, `EmitGlobal`);
   - `pkg/relay/state_test.go` and `pkg/bridge/engine_test.go` sleep longer than `go-backend.md` allows.
+- **Claude's agents view** (`← for agents`): a dialog raised while the conversation is in the background is not on screen, so herdr says `done` and the watch cannot see or answer it (`docs/reference/agents.md` §3.1). Not fixable from the screen; the owner reopens the conversation.
+- **agy 1.2.17 menus:** `Create file` and `Question` parse without a `detail`; picking `Write-in...` leaves a text field the watch cannot answer (`docs/reference/agents.md` §4.1).
 
 ### Checks nobody has done yet
 - ntfy delivery (watchOS push) has never been tested.
 - The watch over LTE or its phone's Bluetooth connection: only Wi-Fi has been checked.
 - `herdr plugin install gabrielmarcano/agent-watch` end to end.
+- **herdr 0.9.3 against a live 0.9.3 server:** on 2026-10-05 the owner's server was still 0.9.1 (it changes version only when restarted, the owner's call). Once it runs 0.9.3, re-probe (`herdr-probe` skill) `ping`, the new `completion_seq`/`title` fields and, from 0.9.2's changelog, the `events_lost` error on a slow subscription (the bridge skips error lines on the stream today; its polling covers missed events) and error responses keeping the request id.
 - The first `make deploy-relay ARGS=--sync-env` on the VPS: the merge is covered by `tools/config/test_awenv.sh` (BSD awk locally, Linux awk in CI) but has never run against the real server file. The owner's `agent-watch.env` was filled from the running deployment, so it must list `AW_HOST_TOKEN` as **unchanged**; `changed` means the file's token is not the server's.
 
 ---
 
 ## Blocked / waiting on upstream
 
-- **herdr misses some dialogs** (agy's, and Claude's after a relaunch): mitigated by the temporary overrides in [`tools/herdr-overrides/`](../tools/herdr-overrides/README.md), which explains the cause. Last check (`capture-fixture` skill, §0), 2026-09-29: still needed. The upstream issues are drafted (`tools/herdr-overrides/UPSTREAM-ISSUES.md`) and, by the owner's decision, not being filed for now.
+- **herdr misses Claude's dialogs after a relaunch in the same pane:** mitigated by the temporary override in [`tools/herdr-overrides/`](../tools/herdr-overrides/README.md), which explains the cause. Last check (`capture-fixture` skill, §0), 2026-10-05: still needed for claude; agy's override was uninstalled that day (upstream fixed it). The upstream issue is drafted (`tools/herdr-overrides/UPSTREAM-ISSUES.md`) and, by the owner's decision, not being filed for now.
 
 ---
 
 ## Next steps
 
 1. **Phase 5**, above.
-2. **Drop the herdr overrides** once herdr detects the dialogs by itself (the drafted upstream issues stay unfiled for now).
+2. **Drop the claude herdr override** once herdr detects the dialogs by itself (the drafted upstream issue stays unfiled for now).
 3. **Phase 7**, the Android phone client.
 4. **Phase 6**, the watchOS client.
 5. **Later ideas:**

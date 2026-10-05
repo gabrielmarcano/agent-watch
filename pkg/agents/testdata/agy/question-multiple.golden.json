@@ -1,0 +1,17 @@
+{
+  "prompt": {
+    "kind": "question",
+    "title": "Question",
+    "options": [
+      {"id": "opt-1", "label": "Red", "role": "choice"},
+      {"id": "opt-2", "label": "Green", "role": "choice"},
+      {"id": "opt-3", "label": "Blue", "role": "choice"},
+      {"id": "opt-4", "label": "Write-in...", "role": "choice"}
+    ]
+  },
+  "keys": {"opt-1": ["1"], "opt-2": ["2"], "opt-3": ["3"], "opt-4": ["4"]},
+  "cancel_keys": ["esc"],
+  "verified_keys": true,
+  "notes": "Antigravity CLI 1.2.17 ask_question dialog (footer '↑/↓ Navigate · enter Select · esc Skip'). Digit 2 answered 'Green' at once, no Enter. esc skips the question. Digit 4 opens a 'Your answer:' text field ('enter Submit · esc Back') that herdr reports as done; esc goes back to the menu. The question line ('Question 1/1: …') is not parsed into detail.",
+  "herdr_status": "blocked"
+}
