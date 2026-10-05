@@ -72,6 +72,12 @@ class RelayEngine(
     private var streamGeneration = 0L
     /** Bumped when the pairing changes; results of requests made under an older pairing are dropped. */
     private var pairingEpoch = 0L
+    /**
+     * Set when a stream dies after [start]: the next `snapshot` re-fetches history, since `history`
+     * events sent while the stream was down are never replayed. [start] fetches on its own, so the
+     * first snapshot does not.
+     */
+    private var historyStale = false
 
     /** A client for the stored pairing, or null when not paired. Rebuilt when the stored URL or token changes. */
     fun getClient(): RelayClient? = synchronized(lock) { clientLocked() }
@@ -138,6 +144,7 @@ class RelayEngine(
         }
         if (started) return
         started = true
+        historyStale = false
         state.update { it.copy(auth = AuthState.PAIRED) }
 
         val newScope = CoroutineScope(SupervisorJob() + dispatcher)
@@ -227,6 +234,7 @@ class RelayEngine(
         eventSource?.cancel()
         eventSource = null
         state.update { it.copy(connection = Connection.Offline(reason), stale = true) }
+        historyStale = true
 
         val delayMs = reconnectDelayMs(reconnectAttempt++)
         log("Reconnecting SSE in ${delayMs}ms")
@@ -253,6 +261,11 @@ class RelayEngine(
                     publishAgentsLocked()
                     reconnectAttempt = 0 // only a stream that delivered data resets the backoff
                     state.update { it.copy(connection = Connection.Live, stale = false) }
+                    if (historyStale) {
+                        // The snapshot carries the agents; only the turns finished meanwhile are missing.
+                        historyStale = false
+                        scope?.launch { refreshHistory() }
+                    }
                     return AgentsUpdate.All(store.agents())
                 }
                 "agent" -> {
@@ -297,13 +310,20 @@ class RelayEngine(
                     hooks.onAgentsUpdated(AgentsUpdate.All(merged))
                 }
             }
-            launch {
-                currentClient.history().onSuccess { items ->
-                    synchronized(lock) {
-                        if (epoch != pairingEpoch) return@onSuccess
-                        state.update { it.copy(history = mergeHistory(it.history, items)) }
-                    }
-                }
+            launch { fetchHistory(currentClient, epoch) }
+        }
+    }
+
+    private suspend fun refreshHistory() {
+        val (currentClient, epoch) = synchronized(lock) { (clientLocked() ?: return) to pairingEpoch }
+        fetchHistory(currentClient, epoch)
+    }
+
+    private suspend fun fetchHistory(currentClient: RelayClient, epoch: Long) {
+        currentClient.history().onSuccess { items ->
+            synchronized(lock) {
+                if (epoch != pairingEpoch) return@onSuccess
+                state.update { it.copy(history = mergeHistory(it.history, items)) }
             }
         }
     }
