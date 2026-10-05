@@ -166,6 +166,7 @@ func runDaemon(args []string) error {
 	logger.Info("starting agent-watch-bridge", "version", fullVersion, "socket", hClient.SocketPath, "config", targetConfig, "status", statusPath)
 
 	writerDone := engine.StartStatusWriter(ctx, 5*time.Second)
+	engine.StartTurnWatch(ctx)
 
 	go func() {
 		if err := syncer.Run(ctx); err != nil && ctx.Err() == nil {

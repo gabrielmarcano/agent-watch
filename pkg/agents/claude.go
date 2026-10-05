@@ -19,6 +19,7 @@ type claudeAdapter struct {
 	// first: a turn with many tool calls can put the user's message
 	// megabytes before the end of the file.
 	tailWindows []int64
+	turnEnds    turnEndCache
 }
 
 func newClaudeAdapter(cfg Config) *claudeAdapter {
@@ -142,6 +143,8 @@ type claudeLine struct {
 	UUID        string          `json:"uuid"`
 	SessionID   string          `json:"sessionId"`
 	IsSidechain bool            `json:"isSidechain"`
+	IsMeta      bool            `json:"isMeta"`
+	Subtype     string          `json:"subtype"`
 	Message     json.RawMessage `json:"message"`
 }
 
@@ -222,6 +225,7 @@ func claudeLastTurn(ctx context.Context, content string) (claudeTurn, error) {
 		queryText string
 		blocks    []claudeContentBlock
 		results   []string // the tool_use ids a tool_result line answers
+		turnEnd   bool     // Claude's turn_duration record
 	}
 
 	var entries []parsedEntry
@@ -240,6 +244,10 @@ func claudeLastTurn(ctx context.Context, content string) (claudeTurn, error) {
 			continue
 		}
 		if row.IsSidechain {
+			continue
+		}
+		if row.Type == "system" && row.Subtype == "turn_duration" {
+			entries = append(entries, parsedEntry{turnEnd: true})
 			continue
 		}
 		if row.Type != "user" && row.Type != "assistant" {
@@ -283,7 +291,15 @@ func claudeLastTurn(ctx context.Context, content string) (claudeTurn, error) {
 
 			// Filter out command wrappers and system reminders
 			t := strings.TrimSpace(textContent)
-			if t != "" &&
+			if row.IsMeta {
+				// Written by Claude Code, not typed by the user. Right after a
+				// turn ended (a background agent's notification) it starts a
+				// turn with no query to show; inside a turn (a skill's text)
+				// it is not a message at all.
+				if t != "" && (len(entries) == 0 || entries[len(entries)-1].turnEnd) {
+					entries = append(entries, parsedEntry{isUser: true})
+				}
+			} else if t != "" &&
 				!strings.HasPrefix(t, "<command-") &&
 				!strings.HasPrefix(t, "<local-command-") &&
 				!strings.HasPrefix(t, "<bash-") &&

@@ -22,6 +22,7 @@ type paneState struct {
 	public     model.AgentState
 	prompt     *agents.Prompt
 	lastHistID string
+	turnMarker string // the last turn end seen while working (StartTurnWatch)
 }
 
 // Engine connects herdr events and agent adapters to the remote relay.
@@ -41,6 +42,9 @@ type Engine struct {
 	TranscriptTimeout  time.Duration
 	ScreenReadTimeout  time.Duration
 	ScreenRetryTimeout time.Duration
+	// TurnCheckInterval is how often StartTurnWatch checks working panes for
+	// a turn that ended without a status change (set by NewEngine; 0 = off).
+	TurnCheckInterval time.Duration
 	// CommandTimeout bounds a command from its arrival, including the wait
 	// for the pane lock (defaults to commandTimeout, below the relay's wait).
 	CommandTimeout time.Duration
@@ -92,6 +96,7 @@ func NewEngine(
 		TranscriptTimeout:  3 * time.Second,
 		ScreenReadTimeout:  3 * time.Second,
 		ScreenRetryTimeout: 8 * time.Second,
+		TurnCheckInterval:  15 * time.Second,
 
 		states:     make(map[string]*paneState),
 		workspaces: make(map[string]string),
@@ -415,7 +420,12 @@ func (e *Engine) captureHistory(paneID, cwd, agent string, info herdr.AgentInfo)
 	if ref != nil {
 		sessionValue = ref.Value
 	}
+	e.publishHistory(paneID, agent, sessionValue, *item)
+}
 
+// publishHistory sends the pane's last reply to the relay unless it is the
+// one sent last for the pane. sessionValue is herdr's session value (or "").
+func (e *Engine) publishHistory(paneID, agent, sessionValue string, item model.HistoryItem) {
 	item.ID = model.HistoryID(paneID, sessionValue, item.Query, item.Response)
 	item.PaneID = paneID
 	item.Agent = agent
@@ -439,8 +449,97 @@ func (e *Engine) captureHistory(paneID, cwd, agent string, info herdr.AgentInfo)
 	if e.Relay != nil {
 		e.Relay.Send(model.HistoryItemMsg{
 			Type: model.WireHistoryItem,
-			Item: *item,
+			Item: item,
 		})
+	}
+}
+
+// StartTurnWatch checks, every TurnCheckInterval until ctx is done, the
+// panes herdr reports working whose adapter reads turn ends
+// (agents.TurnEndReader): a turn can end there without herdr ever reporting
+// done (Claude with background agents running), and its reply is published
+// like one captured on a working → done transition. It returns at once when
+// TurnCheckInterval is 0.
+func (e *Engine) StartTurnWatch(ctx context.Context) {
+	if e.TurnCheckInterval <= 0 {
+		return
+	}
+	go func() {
+		ticker := time.NewTicker(e.TurnCheckInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				e.checkWorkingTurns(ctx)
+			}
+		}
+	}()
+}
+
+// workingPane is a pane checked by checkWorkingTurns.
+type workingPane struct {
+	paneID, agent string
+	reader        agents.TurnEndReader
+	ref           agents.SessionRef
+}
+
+// checkWorkingTurns publishes the last completed turn of every working pane
+// whose turn-end marker changed since the last check. The first marker seen
+// for a pane is published too: the relay drops a reply it already holds.
+func (e *Engine) checkWorkingTurns(ctx context.Context) {
+	var panes []workingPane
+	e.mu.RLock()
+	for paneID, st := range e.states {
+		if st.public.Status != model.StatusWorking {
+			continue
+		}
+		ad := e.Agents.For(st.public.Agent)
+		reader, ok := ad.(agents.TurnEndReader)
+		if !ok {
+			continue
+		}
+		if v, ok := ad.(agents.ViewDetector); ok && !v.ShowsConversation(titleOf(st.info)) {
+			continue
+		}
+		ref := st.info.TrustedSession()
+		if ref == nil {
+			continue
+		}
+		panes = append(panes, workingPane{paneID: paneID, agent: st.public.Agent, reader: reader, ref: agents.SessionRef{
+			Agent: ref.Agent, Kind: ref.Kind, Value: ref.Value, CWD: st.public.CWD, Title: titleOf(st.info),
+		}})
+	}
+	e.mu.RUnlock()
+
+	for _, p := range panes {
+		if ctx.Err() != nil {
+			return
+		}
+		readCtx, cancel := context.WithTimeout(ctx, e.TranscriptTimeout)
+		item, marker, err := p.reader.LastCompletedTurn(readCtx, p.ref)
+		cancel()
+		if err != nil || marker == "" {
+			if err != nil && e.Logger != nil {
+				e.Logger.Debug("turn-end check failed", "pane_id", p.paneID, "agent", p.agent, "err", err)
+			}
+			continue
+		}
+		e.mu.Lock()
+		st, ok := e.states[p.paneID]
+		changed := ok && st.turnMarker != marker
+		if changed {
+			st.turnMarker = marker
+		}
+		e.mu.Unlock()
+		if !changed || item == nil {
+			continue
+		}
+		if e.Logger != nil {
+			e.Logger.Info("a turn ended while the pane stays working; publishing its reply", "pane_id", p.paneID, "agent", p.agent)
+		}
+		e.publishHistory(p.paneID, p.agent, p.ref.Value, *item)
 	}
 }
 
