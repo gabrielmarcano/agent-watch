@@ -2,7 +2,7 @@
 
 The one place for the project's state: what is done, what is open, what comes next. Other docs link here instead of restating it. History (how each phase went, fixes, deploys) lives in git: `git log -- <path>`.
 
-**Workflow for agents:** before starting a phase, put your name and the date in its **Claimed by** cell and commit that change alone; for work outside a phase, add your name and the date to its item under **Open items** (or add the item) the same way. When you finish, set its state, remove the items you closed from **Open items**, and add what you could not do. **Then delete the phase's guide:** anything in it still worth knowing moves first to its home (`AGENTS.md` §0), and the rest stays in git history.
+**Workflow for agents:** before starting a phase, put your name and the date in its **Claimed by** cell and commit that change alone; do the same under **Open items** for other work that spans several commits or sessions (add the item if it is missing). A fix that fits in one commit needs no claim of its own: update **Open items** in that same commit. When you finish, set its state, remove the items you closed from **Open items**, and add what you could not do. **Then delete the phase's guide:** anything in it still worth knowing moves first to its home (`AGENTS.md` §0), and the rest stays in git history.
 
 ---
 

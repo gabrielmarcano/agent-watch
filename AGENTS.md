@@ -32,7 +32,7 @@ Rules for every AI agent working in this repository: Claude Code, Antigravity, O
 | Procedures | `.agents/skills/*/SKILL.md`: `capture-fixture` (capture and audit agent CLIs; the checklist after a herdr upgrade), `add-agent-adapter`, `schema-sync`, `herdr-probe`, `wearos-deploy`, `relay-deploy` |
 | Reporting a vulnerability | [`SECURITY.md`](SECURITY.md) |
 
-**To start work:** claim it in `docs/STATUS.md` as its workflow line says (a phase, or an open item for anything else), then read the phase's guide or the rule and skill for the area.
+**To start work:** claim it in `docs/STATUS.md` when its workflow line asks for a claim (not every fix needs one), then read the phase's guide or the rule and skill for the area.
 
 > ⚠️ **The herdr on the development Mac runs the owner's real agent sessions.** Before any herdr command, read `.agents/rules/herdr-integration.md` § Safety.
 
@@ -132,6 +132,7 @@ agent-watch/                      # the Go module keeps its old name, github.com
 - **Never read, print or write `agent-watch.env`.** The owner creates it with `make config`. Tools take secrets from it directly (`configure --env-file`, `deploy.sh --sync-env`), never through argv, logs or output.
 - **Never log** tokens, `Authorization` headers, prompt text or transcript content; log lengths and ids.
 - **Tokens travel only in the `Authorization` header**, never in URLs or query strings (they end up in proxy logs).
+- **`******` where a credential-like string would be** (e.g. an `Authorization` header value) is your tool masking it on display; the file is fine. Don't "fix" it.
 - **Personal deployment details** (the owner's domain, SSH target, IPs, device ids, project names) never go into tracked files: use placeholders such as `relay.<domain>`.
 - **Deploys and the owner's machines (the owner's decision):** agents may deploy the relay, run commands on the VPS over SSH, roll it back, and install or uninstall the herdr detection overrides whenever their task needs it, and **must say so in their report** (and update `docs/STATUS.md` "Deployed"). Still the owner's: `herdr server stop` and `herdr integration install`/`uninstall` (the guards refuse them), Cloudflare dashboard changes, revoking his watch, rebooting the host, and pausing shared infrastructure such as the proxy container.
 - The security design (hashed tokens, pairing limits, the bridge's checks before pressing keys) is described in [`docs/GUIDE.md` § Security Model](docs/GUIDE.md#security-model); the rules that implement it are in `relay-security.md` and `herdr-integration.md`.
@@ -160,10 +161,10 @@ How they load:
 
 ## 5. Guards and Git
 
-- **Guards:** one implementation (`tools/guards/guards.py`), wired into Antigravity, OpenCode, Claude Code and the git pre-commit hook. What they block and how to set them up: [`tools/guards/README.md`](tools/guards/README.md). If a guard blocks you, fix the cause; never work around it.
-- **Codex, Cursor and other tools** get only the pre-commit hook: nothing stops them from sending input to the owner's herdr panes, so `herdr-integration.md` § Safety is entirely on them.
+- **Guards:** one implementation (`tools/guards/guards.py`), wired into the agent tools and the git pre-commit hook. Which tools load which guards, what they block and how to set them up: [`tools/guards/README.md`](tools/guards/README.md). If a guard blocks you, its message says the legitimate way forward: take it, or stop and tell the owner; never work around it.
+- **A tool with only the pre-commit hook** (that README lists which) has nothing stopping it from sending input to the owner's herdr panes, so `herdr-integration.md` § Safety is entirely on it.
 - **The working tree is shared with other sessions:**
-  - commit only the paths you changed, by name (never `git add -A` or `.`);
+  - commit only the paths you changed, by name (never `git add -A`, `-u` or `.`, nor `git commit -a`);
   - never `git commit --amend` or `--no-verify`;
   - commit after each verified step, so other sessions don't overwrite your work;
   - never `git push` unless the owner asks.
