@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Temporary herdr agent-detection overrides for agy and claude.
+# Temporary herdr agent-detection override for claude.
 #
 # herdr 0.9.1 misses some open permission dialogs (see README.md). Each
 # override is herdr's own cached remote manifest plus one rule from
@@ -19,24 +19,12 @@ REMOTE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/herdr/agent-detection/remote"
 CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/herdr/agent-detection"
 MARK="# agent-watch-override"
 SUFFIX="900"
-ALL_AGENTS=(agy claude)
+ALL_AGENTS=(claude)
 
 # Fixtures: "<file> <expected>", expected is "blocked" or "not-blocked".
 fixtures() {
 	local fx="$REPO/pkg/agents/testdata" td="$HERE/testdata"
 	case "$1" in
-	agy)
-		cat <<EOF
-$fx/agy/permission-bash.txt blocked
-$fx/agy/permission-edit.txt blocked
-$fx/agy/permission-bash-herdr-done.txt blocked
-$fx/agy/permission-bash-herdr-working.txt blocked
-$td/agy-1.2.11-dialog.txt blocked
-$td/agy-1.2.11-dialog-cursor2.txt blocked
-$fx/agy/no-menu-idle-numbered-list.txt not-blocked
-$fx/agy/no-menu-working.txt not-blocked
-EOF
-		;;
 	claude)
 		cat <<EOF
 $fx/claude/permission-bash.txt blocked

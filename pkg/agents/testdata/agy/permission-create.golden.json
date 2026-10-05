@@ -1,0 +1,15 @@
+{
+  "prompt": {
+    "kind": "permission",
+    "title": "Create file",
+    "options": [
+      {"id": "opt-1", "label": "Yes, allow creation", "role": "allow_once"},
+      {"id": "opt-2", "label": "No, deny creation", "role": "deny"}
+    ]
+  },
+  "keys": {"opt-1": ["1"], "opt-2": ["2"]},
+  "cancel_keys": ["esc"],
+  "verified_keys": false,
+  "notes": "Antigravity CLI 1.2.17 asked 'Allow creation of this file?' when told to append a line to an existing file. Unlike 'Pending edit', esc works here: it interrupted the tool call. The path line under the separator is not parsed into detail (only 'Pending edit' does that). Option keys not pressed in this capture; digits as in the other agy menus.",
+  "herdr_status": "blocked"
+}

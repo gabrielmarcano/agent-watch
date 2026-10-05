@@ -143,7 +143,7 @@ func TestSubscribeClearsHandshakeDeadline(t *testing.T) {
 	srv.EmitStatusChanged("w1:p1", "working")
 	select {
 	case ev, ok := <-stream:
-		if !ok || ev.Name != "pane_agent_status_changed" {
+		if !ok || ev.Name != "pane.agent_status_changed" {
 			t.Fatalf("got %+v, %v", ev, ok)
 		}
 	case <-time.After(2 * time.Second):
@@ -168,7 +168,7 @@ func TestSubscribeClearsHandshakeDeadline(t *testing.T) {
 func TestSubscribeKeepsEventBufferedWithAck(t *testing.T) {
 	sock := rawServerFunc(t, func(id string) string {
 		return `{"id":"` + id + `","result":{"type":"subscription_started"}}` + "\n" +
-			`{"event":"pane_agent_status_changed","data":{"pane_id":"w1:p1","agent_status":"working"}}` + "\n"
+			`{"event":"pane.agent_status_changed","data":{"pane_id":"w1:p1","agent_status":"working"}}` + "\n"
 	})
 	client := &herdr.Client{SocketPath: sock, Timeout: 2 * time.Second}
 
@@ -183,7 +183,7 @@ func TestSubscribeKeepsEventBufferedWithAck(t *testing.T) {
 		if !ok {
 			t.Fatal("stream closed; the event buffered with the ack was lost")
 		}
-		if ev.Name != "pane_agent_status_changed" || !strings.Contains(string(ev.Data), "w1:p1") {
+		if ev.Name != "pane.agent_status_changed" || !strings.Contains(string(ev.Data), "w1:p1") {
 			t.Errorf("unexpected event %+v", ev)
 		}
 	case <-time.After(2 * time.Second):

@@ -1,6 +1,6 @@
 # Herdr Socket API Reference (verified)
 
-Everything here was **probed live against herdr 0.9.1, socket protocol 22**, on 2026-09-23. When in doubt, re-derive it with the `herdr-probe` skill (`.agents/skills/herdr-probe/SKILL.md`). Do not trust memory or blog posts.
+Everything here was **probed live against herdr 0.9.1, socket protocol 22**, on 2026-09-23, and re-probed on 2026-10-05 after the upgrade to herdr 0.9.3: the running server was still 0.9.1 (a server only changes version when it restarts), and the 0.9.3 schema (`herdr api schema`) keeps protocol 22 and every method, param and field used here. When in doubt, re-derive it with the `herdr-probe` skill (`.agents/skills/herdr-probe/SKILL.md`). Do not trust memory or blog posts.
 
 > ⚠️ **Safety first.** The herdr on the development Mac runs the owner's **real** agent sessions: sending `"1"` to a real Claude pane approves whatever it was asking. Which methods are safe and which are never called on the owner's panes: `.agents/rules/herdr-integration.md` § Safety.
 
@@ -107,6 +107,7 @@ Real example (trimmed, values replaced with placeholders):
 | `agent_session` | object\|null | no | See §3.1 |
 | `interactive_ready`, `launch_pending`, `screen_detection_skipped` | bool | no | Ignore |
 | `state_labels`, `tokens` | map | no | Ignore |
+| `completion_seq`, `title` | uint64, string | no | In the 0.9.3 schema only; a 0.9.1 server does not send them. Not used |
 
 ### 3.1 `agent_session`
 
@@ -148,13 +149,13 @@ Request (keep the connection open afterwards):
 ```
 
 - **Ack line:** `{"id":"sub-1","result":{"type":"subscription_started"}}`. This was verified.
-- **Event lines:** `{"event":"<snake_case>","data":{...}}`.
+- **Event lines:** `{"event":"<name>","data":{...}}`.
   - The subscription `type` is dot-form (`pane.agent_status_changed`).
-  - The streamed `event` is snake_case (`pane_agent_status_changed`).
+  - The streamed `event` name is not consistent (re-probed 2026-10-05): status changes stream as `pane.agent_status_changed` (dot form), `pane.created` streams as `pane_created` (snake_case, `data.pane` holds the pane). The bridge never branches on the name.
 - **`pane.agent_status_changed` REQUIRES `pane_id`.** Omitting it fails with ``invalid_request: missing field `pane_id` ``. So you need one subscription per agent pane, and you must **re-subscribe** (close and reopen the stream with the new list) whenever the set of agent panes changes.
 - **Global events** (no `pane_id` needed): `pane.created`, `pane.closed`, `pane.exited`, `pane.agent_detected`, `pane.focused`, `workspace.*`, `tab.*`.
-- **`pane_agent_status_changed` payload:** `{pane_id, workspace_id, agent_status, agent?, display_agent?, title?, state_labels}`.
-- **`pane_agent_detected` bursts:** it can fire for the whole herd at once, so debounce it.
+- **Status change payload:** `{pane_id, workspace_id, agent_status, agent?, display_agent?, title?, state_labels?}`; empty optional fields are left out (a claude pane sent only `pane_id`, `workspace_id`, `agent_status`, `agent`).
+- **`pane.agent_detected` bursts:** it can fire for the whole herd at once, so debounce it.
 - **An empty `subscriptions` array** gets an ack but never any events.
 
 **Bridge policy:** events are only a **trigger**: on any event the bridge schedules a debounced `agent.list` and diffs the result, and it also polls `agent.list`, more often while the stream is down. Never build state from event payloads alone. The loop and its values: `Syncer.Run` in `pkg/herdr/sync.go`.

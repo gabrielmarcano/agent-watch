@@ -113,7 +113,7 @@ agent-watch/                      # the Go module keeps its old name, github.com
 ├── macos-bar/                    # macOS menu bar app over the bridge CLI (make bar, make bar-test)
 ├── tools/config/                 # awenv.sh: agent-watch.env reader for the Makefile and deploy.sh (+ test_awenv.sh)
 ├── tools/guards/                 # guard implementation (hooks, pre-commit)
-├── tools/herdr-overrides/        # TEMPORARY herdr detection overrides (agy, claude); remove when upstream fixes them
+├── tools/herdr-overrides/        # TEMPORARY herdr detection override (claude); remove when upstream fixes it
 ├── wearos-app/                   # Wear OS client (Kotlin, Jetpack Compose)
 └── watchos-app/                  # watchOS client (Swift, SwiftUI)
 ```

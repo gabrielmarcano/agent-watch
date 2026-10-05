@@ -203,8 +203,8 @@ func TestSubscribeAck(t *testing.T) {
 		if !ok {
 			t.Fatalf("stream closed unexpectedly")
 		}
-		if evt.Name != "pane_agent_status_changed" {
-			t.Errorf("expected event pane_agent_status_changed, got %s", evt.Name)
+		if evt.Name != "pane.agent_status_changed" {
+			t.Errorf("expected event pane.agent_status_changed, got %s", evt.Name)
 		}
 	case <-time.After(500 * time.Millisecond):
 		t.Fatalf("timed out waiting for event on stream")

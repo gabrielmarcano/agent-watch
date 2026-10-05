@@ -276,12 +276,13 @@ func (s *Server) Calls() []Call {
 	return out
 }
 
-// EmitStatusChanged pushes a pane_agent_status_changed event to matching subscribers.
+// EmitStatusChanged pushes a status event to matching subscribers. Real herdr
+// streams this one in dot form, unlike pane_created (herdr-socket-api.md §5).
 func (s *Server) EmitStatusChanged(paneID, status string) {
 	subs, timeout := s.eventTargets()
 
 	eventData := map[string]any{
-		"event": "pane_agent_status_changed",
+		"event": "pane.agent_status_changed",
 		"data": map[string]any{
 			"pane_id":      paneID,
 			"workspace_id": "w1",

@@ -13,7 +13,7 @@ import (
 
 // Event is an incoming notification from herdr's events.subscribe stream.
 type Event struct {
-	Name string // snake_case, e.g. "pane_agent_status_changed"
+	Name string // as herdr streams it: "pane.agent_status_changed" (dot form), "pane_created" (snake_case)
 	Data json.RawMessage
 }
 
