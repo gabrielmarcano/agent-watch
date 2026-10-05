@@ -66,6 +66,8 @@ Known and accepted for now; none blocks a phase.
   - a turn waiting on a question that herdr reports as `done` publishes nothing, and the watch cannot answer it either (the dialog-detection gap, `tools/herdr-overrides/README.md`).
 
   The watch side (history re-fetched after a reconnect and on screen start) is in PR #6.
+- **Claude turns that end while the pane stays `working`** (background agents running; herdr never reports `done`): bridge `0.4.3` checks working Claude panes every 15 s for a new turn end in the transcript and publishes its reply (`docs/reference/agents.md` §3.4). Not deployed nor verified on the watch yet. This periodic check widens `AGENTS.md` §1.1 (it was "on a status transition" only): **the owner must confirm it**. Turns that end within the same 15 s window as the next one publish only the last.
+- **A pane labelled with the generic terminal title `Claude Code`** (an untitled conversation, no herdr name or tab label) is hard to recognise on the watch.
 - **agy 1.2.17 menus:** `Create file` and `Question` parse without a `detail`; picking `Write-in...` leaves a text field the watch cannot answer (`docs/reference/agents.md` §4.1).
 
 ### Checks nobody has done yet

@@ -107,7 +107,7 @@ Real example (trimmed, values replaced with placeholders):
 | `agent_session` | object\|null | no | See §3.1 |
 | `interactive_ready`, `launch_pending`, `screen_detection_skipped` | bool | no | Ignore |
 | `state_labels`, `tokens` | map | no | Ignore |
-| `completion_seq`, `title` | uint64, string | no | In the 0.9.3 schema only; a 0.9.1 server does not send them. Not used |
+| `completion_seq`, `title` | uint64, string | no | In the 0.9.3 schema only; a 0.9.1 server does not send them. `completion_seq`: "the current idle transition completed work", so it does not mark a turn that ends while the pane stays `working` (`agents.md` §3.4). Not used |
 
 ### 3.1 `agent_session`
 

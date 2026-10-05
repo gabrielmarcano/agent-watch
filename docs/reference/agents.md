@@ -20,6 +20,7 @@ The interfaces (`Adapter`, the optional `FocusGuard`, `ViewDetector`, `ScreenTur
 
 - **Registry:** an exact match on herdr's `agent` field. Anything not registered uses `generic`.
 - **Focus guard:** only `opencode` implements it: §5.1.
+- **Turn-end reader:** only `claude` implements it (§3.4). Every 15 s (`TurnCheckInterval`, `pkg/bridge/engine.go`) the bridge asks it, for each pane herdr reports `working` (and showing a conversation), for the last turn that has ended; when its marker is new, the bridge publishes that reply like one captured on `working` → `done` (same id, so neither the bridge nor the relay sends it twice).
 - **View detector:** only `claude` implements it (its agents view, §3.1). While the pane's title says it shows no conversation, the bridge publishes no history for it; when the title comes back to a conversation with the agent `done` or `idle`, the bridge captures the pane's last reply (its turns can finish while out of sight). A screen capture that shows no conversation is never published (§6).
 - **Overrides:** adapters embed the generic behaviour and override only what differs.
 - **Missing transcript:** `LastTurn` returns `ErrNoTranscript` (possibly wrapped with the reason, ids only) when it cannot find or read one; a cancelled context returns `ctx.Err()` (opencode only when it is cancelled before its query; mid-query, `ErrNoTranscript`). On any error the bridge falls back to a screen capture (§6), except `ErrNoReply`.
@@ -94,7 +95,7 @@ The interfaces (`Adapter`, the optional `FocusGuard`, `ViewDetector`, `ScreenTur
 0. Pick the transcript of the conversation the pane shows (§3.3).
 1. Tail-read the file in growing windows, 256 KiB, then 1 MiB, then 4 MiB, until the window holds the query (step 3) or the whole file. Drop the first, partial line. A turn with many tool calls can put the query megabytes before the end (seen: 1.4 MB).
 2. Skip lines with `isSidechain == true` (sub-agents).
-3. **Query** = the last `user` line whose content is a string, or an array containing at least one `text` block and no `tool_result` block, and that is not a command wrapper (text starting with `<command-`, `<local-command-`, `<bash-` or `<system-reminder>`). Join its `text` blocks with `\n`. If even the 4 MiB window holds none, the query is empty and step 4 walks the whole window.
+3. **Query** = the last `user` line whose content is a string, or an array containing at least one `text` block and no `tool_result` block, and that is not a command wrapper (text starting with `<command-`, `<local-command-`, `<bash-` or `<system-reminder>`). Join its `text` blocks with `\n`. If even the 4 MiB window holds none, the query is empty and step 4 walks the whole window. A line with `isMeta: true` is Claude Code's own text, never the query: right after a turn end (`turn_duration`, §3.4; e.g. a background agent's notification) it starts a turn whose query is empty; anywhere else (e.g. a skill's text after its tool call) it is skipped.
 4. **Response** = walk forward from the query line and collect `text` blocks from `assistant` lines. Whenever a `tool_use` block appears, reset the collection. Join the remaining blocks with `\n\n`. This yields the **final** answer segment after the last tool call.
 5. If the response is empty: when the turn's last `tool_use` (by `id`) has no `tool_result` (by `tool_use_id`) and no text follows it, the turn waits on that call (an `AskUserQuestion`, or a permission herdr did not report as `blocked`): return `ErrNoReply`, naming the tool, and the bridge publishes nothing. Otherwise return `ErrNoTranscript` (fall back to screen).
 6. `LastTurn` fills only `query`, `response` and `source`. The bridge computes `HistoryItem.id` with `SessionRef.Value` as `session_value` (the UUID for `kind="id"`, the path for `kind="path"`), herdr's session even when §3.3 picked another.
@@ -113,6 +114,20 @@ herdr's `agent_session` can name another conversation than the one on screen: in
    - otherwise nothing contradicts herdr (terminal titles turned off, a title set by something else): use herdr's session.
 
 Every `ErrNoTranscript` here carries its reason with session ids only (first 8 characters), never titles; the bridge logs it and falls back to the screen, which shows the pane's own conversation. Verified live (read-only) on 2026-10-05 on 11 Claude panes, and the agents-view case in `aw-sandbox`: herdr kept naming the pane's first session while the pane showed a second background session; the title found it (`TestClaudeSessionPath_AgentsView` reproduces it).
+
+### 3.4 Turns that end while the pane stays `working`
+
+| Item | Status | Value |
+|---|---|---|
+| The gap | ✅ (2026-10-05) | With background agents (or tasks) still running, herdr 0.9.1 keeps the pane `working` after a turn ends: on the owner's pane, `state_change_seq` stayed the same through three turn ends, so no event or transition marks them. herdr 0.9.3's `completion_seq` counts idle transitions (its schema: "the current idle transition completed work"), so it does not mark these either |
+| Turn-end record | ✅ (2026-10-05) | Right after a turn's final answer (`stop_reason: end_turn`) Claude writes `{"type":"system","subtype":"turn_duration","durationMs":…,"messageCount":…,"pendingBackgroundAgentCount":…,"uuid":…,…}` (`pendingBackgroundAgentCount` only while background agents run), then a `stop_hook_summary` line. A background agent's report starts the next turn as an `isMeta` user line |
+
+**`LastCompletedTurn`** (`pkg/agents/claude_turnend.go`, the `TurnEndReader` of §1):
+1. If the transcript picked for the same `SessionRef` last time has the same size and modification time, return the cached result (no read).
+2. Otherwise pick the transcript (§3.3) and tail-read it in the windows of §3.2 step 1 until the window holds the last main-chain (`isSidechain` false) `turn_duration` line and the user message before it.
+3. Cut the content where that line starts, and run steps 2–4 of `LastTurn` on what precedes it: a turn still being written is never read. The marker is that line's `uuid` (else its `timestamp`). An ended turn with no text gives a marker and no item. No `turn_duration` in the window: no marker.
+
+Replayed read-only on the owner's pane (2026-10-05): each of its last five turn ends, none of them seen by herdr, gave a new marker and its reply; a check costs 2–28 ms cold and microseconds when nothing changed.
 
 ---
 
