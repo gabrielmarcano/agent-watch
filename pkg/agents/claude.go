@@ -3,6 +3,7 @@ package agents
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -150,17 +151,23 @@ type claudeMessage struct {
 }
 
 type claudeContentBlock struct {
-	Type string `json:"type"`
-	Text string `json:"text"`
+	Type      string `json:"type"`
+	Text      string `json:"text"`
+	ID        string `json:"id"`          // tool_use
+	Name      string `json:"name"`        // tool_use
+	ToolUseID string `json:"tool_use_id"` // tool_result
 }
 
-// LastTurn reads the transcript's tail, growing the read through tailWindows
-// until the user's last message is in it. If even the largest window does
-// not reach it, the item holds the final answer without its query.
+// LastTurn reads the transcript of the conversation the pane shows
+// (sessionPath), growing the tail read through tailWindows until the user's
+// last message is in it. If even the largest window does not reach it, the
+// item holds the final answer without its query. A turn that ends in a tool
+// call still waiting for its result (a question, or a permission herdr did
+// not report as blocked) has no reply yet: ErrNoReply.
 func (c *claudeAdapter) LastTurn(ctx context.Context, ref SessionRef) (*model.HistoryItem, error) {
-	path := c.resolvePath(ref)
-	if path == "" {
-		return nil, ErrNoTranscript
+	path, err := c.sessionPath(ctx, ref)
+	if err != nil {
+		return nil, err
 	}
 	fi, err := os.Stat(path)
 	if err != nil {
@@ -172,43 +179,56 @@ func (c *claudeAdapter) LastTurn(ctx context.Context, ref SessionRef) (*model.Hi
 		if err != nil {
 			return nil, ErrNoTranscript
 		}
-		query, response, found, err := claudeLastTurn(ctx, content)
+		turn, err := claudeLastTurn(ctx, content)
 		if err != nil {
 			return nil, err
 		}
-		if !found && fi.Size() > window && i < len(c.tailWindows)-1 {
+		if !turn.found && fi.Size() > window && i < len(c.tailWindows)-1 {
 			continue
 		}
-		if response == "" {
+		if turn.response == "" {
+			if turn.pendingTool != "" {
+				return nil, fmt.Errorf("%w: the turn waits on its %s call", ErrNoReply, turn.pendingTool)
+			}
 			return nil, ErrNoTranscript
 		}
 		return &model.HistoryItem{
-			Query:    query,
-			Response: model.TruncateUTF8(response, model.MaxResponseBytes),
+			Query:    turn.query,
+			Response: model.TruncateUTF8(turn.response, model.MaxResponseBytes),
 			Source:   "transcript",
 		}, nil
 	}
 	return nil, ErrNoTranscript
 }
 
+// claudeTurn is the last turn found in a transcript tail.
+type claudeTurn struct {
+	query, response string
+	// found is false when no message of the user is in the tail; the
+	// response is then the text after the last tool call in all of it.
+	found bool
+	// pendingTool names the tool of the turn's last call when no
+	// tool_result answered it and no text followed it; "" otherwise.
+	pendingTool string
+}
+
 // claudeLastTurn finds, in a transcript tail, the user's last message and the
-// answer after the last tool call that follows it. found is false when no
-// message of the user is in content; the answer is then the text after the
-// last tool call in all of content.
-func claudeLastTurn(ctx context.Context, content string) (query, response string, found bool, err error) {
+// answer after the last tool call that follows it.
+func claudeLastTurn(ctx context.Context, content string) (claudeTurn, error) {
 	lines := strings.Split(content, "\n")
 	type parsedEntry struct {
 		isUser    bool
 		isAssist  bool
 		queryText string
 		blocks    []claudeContentBlock
+		results   []string // the tool_use ids a tool_result line answers
 	}
 
 	var entries []parsedEntry
 
 	for _, l := range lines {
 		if err := ctx.Err(); err != nil {
-			return "", "", false, err
+			return claudeTurn{}, err
 		}
 		trimmed := strings.TrimSpace(l)
 		if trimmed == "" {
@@ -243,17 +263,19 @@ func claudeLastTurn(ctx context.Context, content string) (query, response string
 				var blocks []claudeContentBlock
 				if err := json.Unmarshal(msg.Content, &blocks); err == nil {
 					var textParts []string
-					hasToolResult := false
+					var results []string
 					for _, b := range blocks {
 						if b.Type == "tool_result" {
-							hasToolResult = true
-							break
+							results = append(results, b.ToolUseID)
 						}
 						if b.Type == "text" && b.Text != "" {
 							textParts = append(textParts, b.Text)
 						}
 					}
-					if !hasToolResult && len(textParts) > 0 {
+					if len(results) > 0 {
+						// Tool output, not a message of the user.
+						entries = append(entries, parsedEntry{results: results})
+					} else if len(textParts) > 0 {
 						textContent = strings.Join(textParts, "\n")
 					}
 				}
@@ -290,28 +312,41 @@ func claudeLastTurn(ctx context.Context, content string) (query, response string
 			break
 		}
 	}
+	var turn claudeTurn
 	if lastUserIdx >= 0 {
-		query, found = entries[lastUserIdx].queryText, true
+		turn.query, turn.found = entries[lastUserIdx].queryText, true
 	}
 
 	// Walk forward from lastUserIdx (from the start without one) and collect
-	// assistant text blocks, resetting on tool_use
+	// assistant text blocks, resetting on tool_use. Track the calls still
+	// waiting for their tool_result.
 	var responseBlocks []string
+	pending := map[string]string{} // tool_use id -> tool name
+	lastCall := ""                 // the last tool_use, while no text follows it
 	for i := lastUserIdx + 1; i < len(entries); i++ {
 		e := entries[i]
-		if !e.isAssist {
-			continue
+		for _, id := range e.results {
+			delete(pending, id)
 		}
 		for _, b := range e.blocks {
 			if b.Type == "tool_use" {
 				responseBlocks = nil
+				pending[b.ID] = b.Name
+				lastCall = b.ID
 			} else if b.Type == "text" && b.Text != "" {
 				responseBlocks = append(responseBlocks, b.Text)
+				lastCall = ""
 			}
 		}
 	}
-
-	return query, strings.TrimSpace(strings.Join(responseBlocks, "\n\n")), found, nil
+	if name, ok := pending[lastCall]; ok && lastCall != "" {
+		turn.pendingTool = name
+		if turn.pendingTool == "" {
+			turn.pendingTool = "tool"
+		}
+	}
+	turn.response = strings.TrimSpace(strings.Join(responseBlocks, "\n\n"))
+	return turn, nil
 }
 
 func (c *claudeAdapter) resolvePath(ref SessionRef) string {
@@ -334,12 +369,16 @@ func validSessionID(id string) bool {
 	return id != "" && id != ".." && !strings.ContainsAny(id, `/\*?[`)
 }
 
-// findSession returns the newest file of session id in the profiles,
-// looking first in the project of cwd, then in any project (the session's
-// cwd may have moved).
+// findSession returns the newest file of session id in the profiles.
 func (c *claudeAdapter) findSession(id, cwd string) string {
+	return findSessionIn(c.configDirs(), id, cwd)
+}
+
+// findSessionIn returns the newest file of session id in dirs, looking first
+// in the project of cwd, then in any project (the session's cwd may have
+// moved).
+func findSessionIn(dirs []string, id, cwd string) string {
 	slug := strings.ReplaceAll(strings.ReplaceAll(cwd, "/", "-"), ".", "-")
-	dirs := c.configDirs()
 	var found []string
 	for _, dir := range dirs {
 		target := filepath.Join(dir, "projects", slug, id+".jsonl")

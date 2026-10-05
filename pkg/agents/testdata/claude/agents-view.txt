@@ -1,0 +1,43 @@
+
+ ▐▛███▛█   Claude Code v2.1.289
+▝▜██████▀  Opus 5.5 · /private/tmp/aw-sandbox
+ ▝▝   ▝▝   1 awaiting input · 1 working · 2 completed
+
+Your conversation moved to the background — enter opens it · esc returns to it · ctrl+c twice quits
+
+Needs input
+ ✻ Sandbox hello                               ¡Hola desde el sandbox!                                                                          3s
+
+Working
+ ✽ Other project: nightly cleanup              running the test suites                                                                          4d
+
+Completed
+ ∙ List directory contents                     stopped                                                                                         12m
+ ✻ Other project: review                       Implemented the requested change and updated its tests.                                    3 ⧉   3d
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯ describe a task for a new session
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  ⏵⏵ auto mode · enter to return · space to reply · ctrl+x to delete · ? for shortcuts

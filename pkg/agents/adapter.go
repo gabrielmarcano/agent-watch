@@ -14,12 +14,34 @@ import (
 // The bridge uses this to fall back to screen-capture history (ScreenTurn).
 var ErrNoTranscript = errors.New("no transcript available")
 
+// ErrNoReply is returned when the pane's last turn has no reply to publish
+// yet (it waits on a question, for instance). The bridge then publishes
+// nothing, not even a screen capture: the screen would show no reply either.
+var ErrNoReply = errors.New("no reply yet")
+
 // SessionRef is what herdr knows about the agent's session (already filtered by TrustedSession).
 type SessionRef struct {
 	Agent string // herdr agent id
 	Kind  string // "id" | "path"
 	Value string
 	CWD   string // pane cwd; Claude uses it to build the project slug
+	// Title is the pane's terminal title (herdr's terminal_title_stripped).
+	// Claude uses it to check that the session is the one the pane shows.
+	Title string
+}
+
+// ViewDetector is implemented by adapters whose TUI can fill the pane with
+// something other than a conversation (Claude Code's agents view). While a
+// pane shows such a view, the bridge publishes no history for it, and it
+// captures the pane's last reply again when the pane is back on a
+// conversation.
+type ViewDetector interface {
+	// ShowsConversation reports whether a pane with this terminal title
+	// shows a conversation. Unknown titles count as a conversation.
+	ShowsConversation(title string) bool
+	// ConversationScreen reports whether a screen capture shows a
+	// conversation, the same way.
+	ConversationScreen(screen string) bool
 }
 
 // Prompt = public model + private key map. Keys never leave the Mac.
