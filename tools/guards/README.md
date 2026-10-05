@@ -1,6 +1,6 @@
 # Repo guards
 
-One Python script (`guards.py`, standard library only) holds every safety rule. Thin adapters call it (agent tools plus git), so every covered tool gets the same rules. Every block message says the legitimate way forward; a guard that crashes lets the call through with a warning on stderr instead of blocking it.
+One Python script (`guards.py`, standard library only) holds every safety rule. Thin adapters call it (agent tools plus git), so every covered tool gets the same rules. Every block message says the legitimate way forward; a tool hook that crashes lets the call through with a warning on stderr instead of blocking it; the pre-commit hook fails closed.
 
 | Adapter | File | Covers |
 |---|---|---|

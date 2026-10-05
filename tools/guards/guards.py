@@ -722,6 +722,11 @@ def main(argv):
     try:
         return COMMANDS[argv[1]](argv[2:])
     except Exception as e:  # a guard bug must never turn into a silent deny (or a stack trace)
+        if argv[1] == "precommit":
+            # Fail closed here: git shows this message, and a commit is the last check before secrets leave.
+            print(f"pre-commit BLOCKED: the check itself failed ({type(e).__name__}: {e}). "
+                  f"Fix tools/guards/guards.py, or ask the owner; do not use --no-verify.", file=sys.stderr)
+            return 1
         print(f"guards: warning: {argv[1]} failed ({type(e).__name__}: {e}); this call was not "
               f"checked. Please report it (tools/guards/guards.py).", file=sys.stderr)
         if argv[1] in ("agy-pretool", "agy-stop"):

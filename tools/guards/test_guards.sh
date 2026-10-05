@@ -148,7 +148,7 @@ expect "deny yes" "$(printf '%s' "$DENY" | python3 -c 'import json,sys; d=json.l
 DENYERR="$(printf '%s' "$PUSH" | python3 "$G" claude-pretool 2>&1 >/dev/null)"
 expect "BLOCKED:" "${DENYERR%% *}" "claude: reason on stderr"
 
-# ── an internal error never blocks (or crashes) a hook ──
+# ── an internal error never blocks (or crashes) a tool hook; pre-commit fails closed ──
 crash() { # entry expected_stdout description
   local out rc
   out="$(python3 -c 'import sys
@@ -157,11 +157,11 @@ import guards
 def boom(_argv): raise RuntimeError("synthetic")
 guards.COMMANDS[sys.argv[2]] = boom
 sys.exit(guards.main(["guards.py", sys.argv[2]]))' "$DIR" "$1" 2>/dev/null)"; rc=$?
-  expect "0 $2" "$rc $out" "crash: $3"
+  expect "${4:-0} $2" "$rc $out" "crash: $3"
 }
 crash claude-pretool "" "claude-pretool exits 0"
 crash agy-pretool '{"decision": "allow"}' "agy-pretool allows"
-crash precommit "" "precommit exits 0"
+crash precommit "" "precommit blocks" 1
 
 # ── pre-commit in a throw-away repo ──
 TMP="$(mktemp -d)"; (
