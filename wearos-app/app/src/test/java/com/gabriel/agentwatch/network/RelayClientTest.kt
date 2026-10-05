@@ -107,6 +107,24 @@ class RelayClientTest {
     }
 
     @Test
+    fun promptSendsBearerTokenAndPromptBody() = runBlocking {
+        server.enqueue(MockResponse().setBody("""{"ok":true}"""))
+        val client = RelayClient(baseUrl(), "tok")
+
+        val res = client.prompt("w5:pAE", "continue from the last step", 334)
+
+        assertTrue(res.isSuccess)
+        val req = server.takeRequest()
+        assertEquals("POST", req.method)
+        assertEquals("/v1/agents/w5%3ApAE/prompt", req.path)
+        assertEquals("Bearer tok", req.getHeader("Authorization"))
+        assertEquals(
+            """{"text":"continue from the last step","expected_seq":334}""",
+            req.body.readUtf8()
+        )
+    }
+
+    @Test
     fun cancelSendsTheFingerprintWhenGiven() = runBlocking {
         server.enqueue(MockResponse().setBody("""{"ok":true}"""))
         val client = RelayClient(baseUrl(), "tok")
