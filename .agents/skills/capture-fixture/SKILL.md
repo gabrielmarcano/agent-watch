@@ -59,7 +59,7 @@ herdr agent read $SBX --source visible --format text > pkg/agents/testdata/<agen
 - **A case the agent cannot produce:** write `<case>.missing.md` with one line saying why.
 - **An agent that runs `ls -la` without asking** (a sandboxed default mode): ask for something outside its sandbox instead, e.g. reading a file outside `/tmp/aw-sandbox`, and note the mode in the golden's `notes`.
 - **Extra cases** use a descriptive suffix: `permission-webfetch.txt`, `permission-bash-herdr-done.txt`, `no-menu-idle-numbered-list.txt`.
-- **No `blocked`?** Check step 0 before assuming the TUI changed: agy's dialogs, and Claude's after a relaunch in the same pane, depend on the herdr overrides (`docs/reference/agents.md` §3.1, §4.1).
+- **No `blocked`?** Check step 0 before assuming the TUI changed: Claude's dialogs after a relaunch in the same pane depend on the herdr override (`docs/reference/agents.md` §3.1).
 - **Focus fixtures** (OpenCode's button bar): capture with `--format ansi` into `pkg/agents/testdata/opencode/focus/` (`docs/reference/agents.md` §5.1). The text format drops the colours that show focus.
 - **An audit** runs every case for every first-class agent and diffs each screen against the committed `<case>.txt`.
 

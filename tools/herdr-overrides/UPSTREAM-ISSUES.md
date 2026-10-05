@@ -1,53 +1,12 @@
-# Draft issues for herdr
+# Draft issue for herdr
 
-Drafts from a sandbox investigation with herdr 0.9.1; whether they are filed: `docs/STATUS.md`. There is already an upstream issue about agy dialogs; draft 1 adds the root cause and a candidate rule to it.
+Draft from a sandbox investigation with herdr 0.9.1; whether it is filed: `docs/STATUS.md`. (The agy draft was dropped on 2026-10-05: upstream manifest `agy` 2026.10.05.1 fixed it.)
 
-Once upstream fixes either one, run `tools/herdr-overrides/herdr-overrides.sh check` and uninstall the matching override (see [`README.md`](README.md)).
-
----
-
-## Draft 1 — Antigravity CLI 1.2.x permission dialogs are never detected as `blocked`
-
-**Versions:** herdr 0.9.1, agent manifest `agy` 2026.06.24.1, Antigravity CLI 1.2.10 and 1.2.11 (macOS).
-
-**What happens:** while agy shows a permission dialog, herdr reports the pane as `done`/`idle`, or `working` when a background task is running. `herdr agent explain` shows no matching rule (`default_known_agent_idle_fallback`) or `background_tasks_working`.
-
-**Why:** the `permission_prompt` rule requires `requesting permission for:` and then either `do you want to proceed?`, or both `tab amend` and `edit command`. agy 1.2.x renders neither:
-
-```
-Requesting permission for:
-   touch aw1.txt
-
-Run this command?                  (file edits: "Accept this file edit?")
-> 1. Yes, run command
-  2. Yes, and always allow in this conversation for commands that start with 'touch'
-  3. Yes, and always allow for commands that start with 'touch' (Persist to settings.json)
-  4. No, cancel
-
-  ↑/↓ Navigate · tab Amend · ctrl+g edit/expand command
-esc to cancel
-```
-
-`ctrl+g edit/expand command` does not contain `edit command`, and there is no "Do you want to proceed?".
-
-**Integrations can't work around it:** agy's hooks (`PreToolUse`, `PostToolUse`, `PreInvocation`, `PostInvocation`, `Stop`) have no permission event, and `pane.report_agent` with source `herdr:antigravity_cli` is identity-only, so its state is ignored.
-
-**Candidate rule** (validated against captured dialogs and idle/working screens, including an idle screen whose last answer contains a numbered list):
-
-```toml
-[[rules]]
-id = "permission_dialog_1_2"
-state = "blocked"
-priority = 310
-region = "bottom_non_empty_lines(12)"
-visible_blocker = true
-regex = ['(?m)^\s*(?:>\s*)?[1-9]\.\s+\S']
-all = [ { regex = ['(?im)^\s*↑/↓\s+navigate\s+·\s+tab\s+amend\b[^\n]*\n\s*esc to cancel[^\n]*\s*\z'] } ]
-```
+Once upstream fixes it, run `tools/herdr-overrides/herdr-overrides.sh check` and uninstall the override (see [`README.md`](README.md)).
 
 ---
 
-## Draft 2 — Claude permission dialog reported `idle` when an old input box is still on screen
+## Draft — Claude permission dialog reported `idle` when an old input box is still on screen
 
 **Versions:** herdr 0.9.1, agent manifest `claude` 2026.09.11.1, Claude Code 2.1.x (macOS).
 
