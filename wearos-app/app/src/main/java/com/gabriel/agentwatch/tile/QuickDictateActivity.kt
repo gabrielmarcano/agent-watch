@@ -4,7 +4,6 @@ import android.app.Activity
 import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.os.Bundle
-import android.speech.RecognizerIntent
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
@@ -40,7 +39,9 @@ import com.gabriel.agentwatch.data.Prefs
 import com.gabriel.agentwatch.model.AgentState
 import com.gabriel.agentwatch.network.RelayClient
 import com.gabriel.agentwatch.network.RelayRepository
-import com.gabriel.agentwatch.ui.components.RecognizerIntentFactory
+import com.gabriel.agentwatch.ui.components.PromptInput
+import com.gabriel.agentwatch.ui.logic.InputResult
+import com.gabriel.agentwatch.ui.logic.inputFeedback
 import com.gabriel.agentwatch.ui.screens.DictationFlow
 import com.gabriel.agentwatch.ui.theme.AgentWatchTheme
 import kotlinx.coroutines.Dispatchers
@@ -48,7 +49,7 @@ import kotlinx.coroutines.withContext
 
 /**
  * Quick Dictate, opened by the tile with the `pane_id` it displayed: fetch that agent (fresh seq),
- * listen, show what was understood, send on confirmation. Errors stay on screen, mapped by
+ * take the prompt (voice, keyboard or handwriting), show it, send on confirmation. Errors stay on screen, mapped by
  * [commandErrorFeedback]; nothing is sent to an agent other than the one the tile named.
  */
 class QuickDictateActivity : ComponentActivity() {
@@ -83,6 +84,7 @@ private fun QuickDictate(prefs: Prefs, launchPaneId: String?, onFinish: () -> Un
     val closed = stringResource(R.string.dictation_agent_closed)
     val noTarget = stringResource(R.string.dictation_no_target)
     val unavailable = stringResource(R.string.dictation_unavailable)
+    val context = LocalContext.current
 
     LaunchedEffect(Unit) {
         if (!prefs.isPaired) {
@@ -110,17 +112,16 @@ private fun QuickDictate(prefs: Prefs, launchPaneId: String?, onFinish: () -> Un
         is Phase.Message -> MessageWithOpenApp(p.text)
         is Phase.Listening -> {
             val prompt = stringResource(R.string.dictation_prompt, p.target.label.ifBlank { p.target.pane_id })
+            // Backing out closes Quick Dictate; any other result without text says why.
             val listen = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
-                val text = result.data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)?.firstOrNull()
-                if (result.resultCode == Activity.RESULT_OK && !text.isNullOrBlank()) {
-                    phase = Phase.Confirm(p.target, text)
-                } else {
-                    onFinish()
+                when (val input = PromptInput.result(result.resultCode, result.data)) {
+                    is InputResult.Text -> phase = Phase.Confirm(p.target, input.text)
+                    else -> inputFeedback(input)?.let { phase = Phase.Message(context.getString(it)) } ?: onFinish()
                 }
             }
             LaunchedEffect(p) {
                 try {
-                    listen.launch(RecognizerIntentFactory.freeForm(prompt))
+                    listen.launch(PromptInput.intent(prompt))
                 } catch (_: ActivityNotFoundException) {
                     phase = Phase.Message(unavailable)
                 }
