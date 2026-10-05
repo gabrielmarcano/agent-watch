@@ -16,12 +16,14 @@ The rest of the system (`pkg/herdr`, the relay, the clients) must stay agent-agn
 
 ## 1. Adapter contract
 
-The interfaces (`Adapter`, the optional `FocusGuard`, `ScreenTurnReader`) and the registry: `pkg/agents/adapter.go` and `pkg/agents/screen.go`.
+The interfaces (`Adapter`, the optional `FocusGuard`, `ViewDetector`, `ScreenTurnReader`) and the registry: `pkg/agents/adapter.go` and `pkg/agents/screen.go`.
 
 - **Registry:** an exact match on herdr's `agent` field. Anything not registered uses `generic`.
 - **Focus guard:** only `opencode` implements it: §5.1.
+- **View detector:** only `claude` implements it (its agents view, §3.1). While the pane's title says it shows no conversation, the bridge publishes no history for it; when the title comes back to a conversation with the agent `done` or `idle`, the bridge captures the pane's last reply (its turns can finish while out of sight). A screen capture that shows no conversation is never published (§6).
 - **Overrides:** adapters embed the generic behaviour and override only what differs.
-- **Missing transcript:** `LastTurn` returns `ErrNoTranscript` when it cannot find or read one; a cancelled context returns `ctx.Err()` (opencode only when it is cancelled before its query; mid-query, `ErrNoTranscript`). On any error the bridge falls back to a screen capture (§6).
+- **Missing transcript:** `LastTurn` returns `ErrNoTranscript` (possibly wrapped with the reason, ids only) when it cannot find or read one; a cancelled context returns `ctx.Err()` (opencode only when it is cancelled before its query; mid-query, `ErrNoTranscript`). On any error the bridge falls back to a screen capture (§6), except `ErrNoReply`.
+- **No reply yet:** `LastTurn` returns `ErrNoReply` when the last turn has no reply to publish yet (claude: §3.2 step 5). The bridge then publishes nothing, not even a screen capture.
 
 ---
 
@@ -62,7 +64,7 @@ The interfaces (`Adapter`, the optional `FocusGuard`, `ScreenTurnReader`) and th
 | AskUserQuestion | ✅ | Numbered menu with digit selection; the line under each option is its `description`. `Type something.` (a free-text field) is left out of the options; the others keep their ids. Mapped to `kind: "question"`. Captured in `question-multiple.txt` and, asked in plan mode, `question-plan-mode.txt` |
 | Plan approval (ExitPlanMode) | ✅ (2026-09-25) | `Claude has written up a plan and is ready to execute. Would you like to proceed?` with `1. Yes, and use auto mode` (`allow_always`), `2. Yes, manually approve edits` (`allow_once`), `3. Tell Claude what to change` (`choice`; its hint line `shift+tab to approve with this feedback` is not part of the label). No deny option → `kind: "question"`, Deny uses `esc`. The plan's own numbered steps above the dialog are not the menu. Digit 2 approved immediately. `plan-approval.txt` |
 | Prompt while working | ✅ | Claude queues typed messages while working → `PromptWhileWorking() = true` |
-| Agents view (`← for agents`) | ✅ (2026-10-05) | `←` on an empty input (`/exit` did the same in this test) moves the conversation to the background: Claude's daemon resumes it as a fork with a new session id (the old transcript ends with `continued-in`, §3.2), and the pane shows Claude's agents list (`Needs input` / `Working` / `Completed`, with the owner's other background sessions) above a `❯ describe a task for a new session` box; `enter` reopens the conversation, which then shows its name in the top rule. **A dialog raised while the conversation is in the background is not on screen** (the list only says e.g. `approve Web Search`): herdr reported `done` (rule `live_prompt_box`, also with the 0.9.3 CLI) and nothing parses, so the watch cannot see or answer it. Back in the conversation the same dialog was `blocked` and parsed. Reopened conversations behave like normal ones (a dialog there was `blocked` by upstream's `bash_permission_prompt`) |
+| Agents view (`← for agents`) | ✅ (2026-10-05) | `←` on an empty input (`/exit` did the same in this test) moves the conversation to the background: Claude's daemon resumes it as a fork with a new session id (the old transcript ends with `continued-in`, §3.2), and the pane shows Claude's agents list (`Needs input` / `Working` / `Completed`, with the owner's other background sessions) above a `❯ describe a task for a new session` box; `enter` opens the selected conversation (typing a task there starts a new background session), which then shows its name in the top rule. `ctrl+x` (pressed again to confirm) stops the selected session; a stopped one is removed from the list the same way. **The pane's title** (herdr's `terminal_title_stripped`) is `claude agents`, or `<n> awaiting input · claude agents`, while the list is up, and the shown conversation's title otherwise. **Pressing `←` mid-turn** makes herdr report `working` → `done` with the list on screen; the turn goes on in the background. **herdr's `agent_session` keeps naming the pane's first session** whatever the pane opens next (its background workers' `pane.report_agent_session` calls fail): §3.3. Captures: `agents-view.txt` (visible), `agents-view-recent.txt` (`recent_unwrapped`, what the history fallback reads). **A dialog raised while the conversation is in the background is not on screen** (the list only says e.g. `approve Web Search`): herdr reported `done` (rule `live_prompt_box`, also with the 0.9.3 CLI) and nothing parses, so the watch cannot see or answer it. Back in the conversation the same dialog was `blocked` and parsed. Reopened conversations behave like normal ones (a dialog there was `blocked` by upstream's `bash_permission_prompt`) |
 
 ### 3.2 Transcript
 
@@ -75,7 +77,9 @@ The interfaces (`Adapter`, the optional `FocusGuard`, `ScreenTurnReader`) and th
 | Continued sessions | ✅ (2026-10-01) | Claude Code can continue a conversation in a new session and write `{"type":"continued-in","continuedInSessionId":"<uuid>",…}` as the old file's last line; herdr 0.9.1 keeps reporting the old id. The reader follows these pointers (at most 8 hops, no loops, valid ids only) to the file the chain ends at (`followContinuation`, `pkg/agents/claude.go`) |
 | Format | ✅ | JSONL. Each line has `type`, `uuid`, `timestamp`, `sessionId`, `isSidechain`, `message` |
 
-**Line kinds seen** (`type`): `user`, `assistant`, `attachment`, `system`, `queue-operation`, `last-prompt`, plus others. Ignore every type except `user` and `assistant`.
+| Titles | ✅ (2026-10-05) | `{"type":"ai-title","aiTitle":"…","sessionId":…}` at every user message, and in background sessions `{"type":"agent-name","agentName":"…",…}` with the same text. The latest one is the pane's terminal title while the conversation is on screen (all 14 live panes on 2026-10-05); a conversation without one yet shows `Claude Code` |
+
+**Line kinds seen** (`type`): `user`, `assistant`, `attachment`, `system`, `queue-operation`, `last-prompt`, `ai-title`, `agent-name`, `continued-in`, plus others. `LastTurn` ignores every type except `user` and `assistant`; the title lines serve §3.3.
 
 `message.content` is a string **or** an array of blocks with a `type` field:
 
@@ -87,12 +91,28 @@ The interfaces (`Adapter`, the optional `FocusGuard`, `ScreenTurnReader`) and th
 | `assistant` | `tool_use`, `thinking` | Not answer text |
 
 **`LastTurn` algorithm:**
+0. Pick the transcript of the conversation the pane shows (§3.3).
 1. Tail-read the file in growing windows, 256 KiB, then 1 MiB, then 4 MiB, until the window holds the query (step 3) or the whole file. Drop the first, partial line. A turn with many tool calls can put the query megabytes before the end (seen: 1.4 MB).
 2. Skip lines with `isSidechain == true` (sub-agents).
 3. **Query** = the last `user` line whose content is a string, or an array containing at least one `text` block and no `tool_result` block, and that is not a command wrapper (text starting with `<command-`, `<local-command-`, `<bash-` or `<system-reminder>`). Join its `text` blocks with `\n`. If even the 4 MiB window holds none, the query is empty and step 4 walks the whole window.
 4. **Response** = walk forward from the query line and collect `text` blocks from `assistant` lines. Whenever a `tool_use` block appears, reset the collection. Join the remaining blocks with `\n\n`. This yields the **final** answer segment after the last tool call.
-5. If the response is empty, return `ErrNoTranscript` (fall back to screen).
-6. `LastTurn` fills only `query`, `response` and `source`. The bridge computes `HistoryItem.id` with `SessionRef.Value` as `session_value` (the UUID for `kind="id"`, the path for `kind="path"`).
+5. If the response is empty: when the turn's last `tool_use` (by `id`) has no `tool_result` (by `tool_use_id`) and no text follows it, the turn waits on that call (an `AskUserQuestion`, or a permission herdr did not report as `blocked`): return `ErrNoReply`, naming the tool, and the bridge publishes nothing. Otherwise return `ErrNoTranscript` (fall back to screen).
+6. `LastTurn` fills only `query`, `response` and `source`. The bridge computes `HistoryItem.id` with `SessionRef.Value` as `session_value` (the UUID for `kind="id"`, the path for `kind="path"`), herdr's session even when §3.3 picked another.
+
+### 3.3 Which session the pane shows
+
+herdr's `agent_session` can name another conversation than the one on screen: in the agents view (§3.1) herdr keeps the pane's first session while the pane opens others, and Claude's background workers inherit the `HERDR_PANE_ID` of the pane that started the daemon (seen: a spare carrying a pane that no longer exists). Reading herdr's session then gives an older reply or none. The pane's title (`SessionRef.Title`, from herdr's `terminal_title_stripped`) is the shown conversation's title (§3.2), so `sessionPath` (`pkg/agents/claude_session.go`) checks it. Read-only, on the same history trigger, by the exception in `AGENTS.md` §1.1:
+
+1. Resolve herdr's session as §3.2 says (following `continued-in`). No pane title, or a title equal to the transcript's latest `aiTitle` or `agentName` (tail windows as in step 1 of `LastTurn`): use it.
+2. Otherwise find the **profile**: the config dir above herdr's transcript (`<dir>/projects/<slug>/<id>.jsonl`), else the one whose session index lists herdr's id (a background worker with no transcript yet). Neither: `ErrNoTranscript`. Other profiles are never searched.
+3. Read that profile's **session index**: `<dir>/sessions/<pid>.json`, one per running Claude process (`kind` `interactive` or `bg`; fields used: `sessionId`, `cwd`; samples: `testdata/claude/session-index-*.json`). Only file names of digits + `.json` (never the `.key` files next to them), at most 256 entries of at most 64 KiB. An interactive entry keeps its first `sessionId` after `←` (it may also hold `parkedJobId`); its `continued-in` chain leads to the live session. `daemon/roster.json` is never read (it carries auth material).
+4. For each entry, resolve its transcript in that profile, follow `continued-in`, and keep those whose latest title is the pane's title (counted once per final file).
+5. One match: read it. Several: the one whose entry `cwd` is the pane's cwd, else `ErrNoTranscript` (ambiguous). None:
+   - herdr's session has no transcript: `ErrNoTranscript`;
+   - the pane title is `Claude Code` (untitled) while herdr's transcript has a title: `ErrNoTranscript` (another conversation);
+   - otherwise nothing contradicts herdr (terminal titles turned off, a title set by something else): use herdr's session.
+
+Every `ErrNoTranscript` here carries its reason with session ids only (first 8 characters), never titles; the bridge logs it and falls back to the screen, which shows the pane's own conversation. Verified live (read-only) on 2026-10-05 on 11 Claude panes, and the agents-view case in `aw-sandbox`: herdr kept naming the pane's first session while the pane showed a second background session; the title found it (`TestClaudeSessionPath_AgentsView` reproduces it).
 
 ---
 
@@ -178,9 +198,10 @@ LIMIT 40;
 
 ## 6. Screen-capture fallback (every agent)
 
-Used when an agent has no transcript reader, when herdr gives no trusted `agent_session` (`TrustedSession`), or when the reader returns an error. Budgets (`pkg/bridge/engine.go`): 3 s for `LastTurn`, 3 s for the capture, 5 s for the whole history capture.
+Used when an agent has no transcript reader, when herdr gives no trusted `agent_session` (`TrustedSession`), or when the reader returns an error other than `ErrNoReply`. Budgets (`pkg/bridge/engine.go`): 3 s for `LastTurn`, 3 s for the capture and, if it fails (a busy herdr took longer than that on 2026-10-05), one retry with 8 s; 15 s for the whole history capture.
 
 1. Read the screen as `herdr-socket-api.md` §2.1 describes for history (the `recent_unwrapped` source, as text).
+   - **No conversation on screen** (a `ViewDetector` says so: claude's agents view, recognised by `❯ describe a task for a new session`, `· space to reply ·`, `ctrl+x to delete` or `ctrl+x to confirm` among the last 4 non-empty lines): publish nothing.
 2. Trim trailing blank lines.
 3. Drop the agent's input box: cut everything from the last run of lines that contain only box-drawing characters (light or heavy: `─ │ ┃ ╹ ▀ …`), a prompt marker (`❯`, `>`) or a `┃` frame downwards, if found within the last 15 lines. The status lines under the box go with it.
 4. **Last turn only** when the adapter recognises the user's message (`ScreenTurnReader`): the message becomes `query` and only what follows it the `response`, dedented:

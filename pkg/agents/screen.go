@@ -18,8 +18,13 @@ type ScreenTurnReader interface {
 }
 
 // ScreenTurnFor formats a screen capture into a HistoryItem with ad's help
-// when ad implements ScreenTurnReader, and like ScreenTurn otherwise.
+// when ad implements ScreenTurnReader, and like ScreenTurn otherwise. It
+// returns nil when ad (a ViewDetector) sees no conversation on the screen:
+// such a screen holds no reply.
 func ScreenTurnFor(ad Adapter, text string) *model.HistoryItem {
+	if v, ok := ad.(ViewDetector); ok && !v.ConversationScreen(text) {
+		return nil
+	}
 	lines := screenBody(text)
 	if r, ok := ad.(ScreenTurnReader); ok {
 		if query, reply, ok := r.SplitScreenTurn(lines); ok {

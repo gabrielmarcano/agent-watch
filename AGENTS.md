@@ -56,6 +56,7 @@ Rules for every AI agent working in this repository: Claude Code, Antigravity, O
   - the file is the one herdr's `agent_session` names (a path, or a session id the adapter resolves to that session's file), or the continuation that file itself points to.
 
   Scanning directories for the "latest file" and continuous tailing are not allowed. Why transcripts at all: herdr exposes no reply text, and a screen capture loses the markdown.
+- **One exception (the owner's decision, 2026-10-05):** the Claude adapter may read, read-only and on the same on-demand trigger, Claude Code's session index (`<config dir>/sessions/<pid>.json`), only in the config dir that holds herdr's `agent_session` (its transcript or its index entry), and only to find which session a pane really shows when herdr's session does not match the pane (Claude's agents view switches conversations without telling herdr). It then reads that session's transcript under the same conditions. Nothing else in Claude's config dir (e.g. `daemon/roster.json`, the `.key` files). How: [`docs/reference/agents.md` §3.3](docs/reference/agents.md).
 
 ### 1.2 Multi-agent by design
 - Priority agents: **Claude (`claude`), Antigravity (`agy`), OpenCode (`opencode`)**. Every other agent herdr detects works through the **generic adapter** until it gets its own adapter (`add-agent-adapter` skill), which makes it first-class.

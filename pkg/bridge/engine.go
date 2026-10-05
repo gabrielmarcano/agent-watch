@@ -2,6 +2,7 @@ package bridge
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -35,6 +36,11 @@ type Engine struct {
 	Logger       *slog.Logger
 	RetryDelay   time.Duration // delay between prompt parse retries (defaults to 300ms)
 	HistoryDelay time.Duration // delay before capturing history (defaults to 500ms)
+	// History budgets (docs/reference/agents.md §6), set by NewEngine: the
+	// transcript read, the screen capture, and its one retry after a failure.
+	TranscriptTimeout  time.Duration
+	ScreenReadTimeout  time.Duration
+	ScreenRetryTimeout time.Duration
 	// CommandTimeout bounds a command from its arrival, including the wait
 	// for the pane lock (defaults to commandTimeout, below the relay's wait).
 	CommandTimeout time.Duration
@@ -82,9 +88,14 @@ func NewEngine(
 		Logger:       logger,
 		RetryDelay:   300 * time.Millisecond,
 		HistoryDelay: 500 * time.Millisecond,
-		states:       make(map[string]*paneState),
-		workspaces:   make(map[string]string),
-		tabs:         make(map[string]string),
+
+		TranscriptTimeout:  3 * time.Second,
+		ScreenReadTimeout:  3 * time.Second,
+		ScreenRetryTimeout: 8 * time.Second,
+
+		states:     make(map[string]*paneState),
+		workspaces: make(map[string]string),
+		tabs:       make(map[string]string),
 	}
 }
 
@@ -205,9 +216,11 @@ func (e *Engine) OnChanges(changes []herdr.Change) {
 				})
 			}
 
-			// History trigger: working -> done|idle
-			if prevStatus == string(model.StatusWorking) &&
-				(pub.Status == model.StatusDone || pub.Status == model.StatusIdle) {
+			// History triggers: working -> done|idle, and a pane coming back
+			// to a conversation from a view without one (Claude's agents
+			// view), whose turns may have finished out of sight.
+			settled := pub.Status == model.StatusDone || pub.Status == model.StatusIdle
+			if settled && (prevStatus == string(model.StatusWorking) || e.backToConversation(agentName, ch.Prev, info)) {
 				delay := e.HistoryDelay
 				go func(paneID, cwd, agent string, info herdr.AgentInfo) {
 					if delay > 0 {
@@ -310,43 +323,88 @@ func (e *Engine) adoptPrompt(paneID string, seq uint64, p agents.Prompt) {
 	}
 }
 
+// backToConversation reports whether an update brings a pane back to a
+// conversation from a view without one, by its adapter's reading of the
+// terminal titles (agents.ViewDetector).
+func (e *Engine) backToConversation(agent string, prev *herdr.AgentInfo, info herdr.AgentInfo) bool {
+	if prev == nil {
+		return false
+	}
+	v, ok := e.Agents.For(agent).(agents.ViewDetector)
+	if !ok {
+		return false
+	}
+	return !v.ShowsConversation(titleOf(*prev)) && v.ShowsConversation(titleOf(info))
+}
+
+func titleOf(info herdr.AgentInfo) string {
+	if info.TerminalTitleStripped == nil {
+		return ""
+	}
+	return *info.TerminalTitleStripped
+}
+
 func (e *Engine) captureHistory(paneID, cwd, agent string, info herdr.AgentInfo) {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	budget := e.TranscriptTimeout + e.ScreenReadTimeout + e.ScreenRetryTimeout + time.Second
+	ctx, cancel := context.WithTimeout(context.Background(), budget)
 	defer cancel()
+
+	// The pane's title now, not when the capture was scheduled: it says what
+	// the pane shows.
+	e.mu.RLock()
+	if st, ok := e.states[paneID]; ok && st.info.TerminalTitleStripped != nil {
+		info.TerminalTitleStripped = st.info.TerminalTitleStripped
+	}
+	e.mu.RUnlock()
 
 	ref := info.TrustedSession()
 	ad := e.Agents.For(agent)
+
+	if v, ok := ad.(agents.ViewDetector); ok && !v.ShowsConversation(titleOf(info)) {
+		if e.Logger != nil {
+			e.Logger.Info("no history: the pane shows no conversation", "pane_id", paneID, "agent", agent)
+		}
+		return
+	}
 
 	var item *model.HistoryItem
 	var err error
 
 	if ref != nil {
-		readCtx, readCancel := context.WithTimeout(ctx, 3*time.Second)
+		readCtx, readCancel := context.WithTimeout(ctx, e.TranscriptTimeout)
 		item, err = ad.LastTurn(readCtx, agents.SessionRef{
 			Agent: ref.Agent,
 			Kind:  ref.Kind,
 			Value: ref.Value,
 			CWD:   cwd,
+			Title: titleOf(info),
 		})
 		readCancel()
+		if errors.Is(err, agents.ErrNoReply) {
+			if e.Logger != nil {
+				e.Logger.Info("no history: the last turn has no reply yet", "pane_id", paneID, "agent", agent, "reason", err)
+			}
+			return
+		}
 		if (err != nil || item == nil) && e.Logger != nil {
-			// Never log the transcript itself; the error names the cause.
+			// Never log the transcript itself; the error names the cause (ids only).
 			e.Logger.Warn("LastTurn failed; falling back to a screen capture for history",
 				"pane_id", paneID, "agent", agent, "session_kind", ref.Kind, "err", err)
 		}
 	}
 
 	if err != nil || item == nil {
-		readCtx, readCancel := context.WithTimeout(ctx, 3*time.Second)
-		text, readErr := e.Herdr.Read(readCtx, paneID, herdr.SourceRecentUnwrapped, 200)
-		readCancel()
+		text, readErr := e.readScreenForHistory(ctx, paneID)
 		if readErr != nil {
 			if e.Logger != nil {
 				e.Logger.Warn("screen read fallback failed for history", "pane_id", paneID, "err", readErr)
 			}
 			return
 		}
-		item = agents.ScreenTurnFor(e.Agents.For(agent), text)
+		item = agents.ScreenTurnFor(ad, text)
+		if item == nil && e.Logger != nil {
+			e.Logger.Info("no history: the screen shows no conversation", "pane_id", paneID, "agent", agent)
+		}
 	}
 
 	if item == nil {
@@ -384,6 +442,24 @@ func (e *Engine) captureHistory(paneID, cwd, agent string, info herdr.AgentInfo)
 			Item: *item,
 		})
 	}
+}
+
+// readScreenForHistory captures the pane's recent screen for history. A
+// failed capture (a busy herdr can take longer than ScreenReadTimeout) is
+// retried once with ScreenRetryTimeout.
+func (e *Engine) readScreenForHistory(ctx context.Context, paneID string) (string, error) {
+	readCtx, readCancel := context.WithTimeout(ctx, e.ScreenReadTimeout)
+	text, err := e.Herdr.Read(readCtx, paneID, herdr.SourceRecentUnwrapped, 200)
+	readCancel()
+	if err == nil || ctx.Err() != nil {
+		return text, err
+	}
+	if e.Logger != nil {
+		e.Logger.Info("screen read for history failed; retrying once", "pane_id", paneID, "err", err)
+	}
+	readCtx, readCancel = context.WithTimeout(ctx, e.ScreenRetryTimeout)
+	defer readCancel()
+	return e.Herdr.Read(readCtx, paneID, herdr.SourceRecentUnwrapped, 200)
 }
 
 const (

@@ -115,7 +115,7 @@ Real example (trimmed, values replaced with placeholders):
 
 - **`kind: "id"`:** `value` is a session id (a UUID for claude, `ses_…` for opencode).
 - **`kind: "path"`:** `value` is an absolute transcript path (pi; agy reports a transcript path when available).
-- **It can be stale.** Herdr keeps the last session any harness announced for the pane. **Only trust it when `agent_session.agent == agent`.**
+- **It can be stale.** Herdr keeps the last session any harness announced for the pane. **Only trust it when `agent_session.agent == agent`.** Even then it can name another conversation of the same agent than the one on screen (Claude's agents view: `agents.md` §3.3).
 - **It can be missing.** The agent's herdr integration may not be installed or up to date. Check with `herdr integration status`.
 
 The agent ids herdr knows are the `kinds:` line of `herdr agent` (its help output).
