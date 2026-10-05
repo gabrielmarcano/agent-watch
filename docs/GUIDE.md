@@ -179,13 +179,9 @@ The release build (`assembleRelease`, R8 on) is signed with the debug key: fine 
 
 **Where to see them:** `agent-watch-bridge version`, `agent-watch-relay version`, the menu bar's **Versions** section ([`macos-bar/README.md`](../macos-bar/README.md)), and the watch's Settings.
 
-**A release is a dated snapshot of the whole system.** Tag the commit with the date, `vYYYY.MM.DD` (`.2`, `.3`… for more on the same day), and push the tag:
+**A release is a dated snapshot of the whole system.** Every push to `main` that changes a released component (bridge, relay, menu bar), `VERSIONS` or the release workflow publishes one automatically, once the Go tests pass. Documentation-only and Wear OS-only changes do not publish releases (the watch app is not part of a release). The workflow chooses `vYYYY.MM.DD` for the first release on a UTC day and `vYYYY.MM.DD.2`, `.3`… for later pushes that day.
 
-```bash
-git tag vYYYY.MM.DD && git push origin vYYYY.MM.DD
-```
-
-The [release workflow](../.github/workflows/release.yml) then publishes a GitHub release with:
+The [release workflow](../.github/workflows/release.yml) publishes a GitHub release with:
 - `agent-watch-bridge` for macOS (arm64, amd64) and Linux (amd64, arm64), and `agent-watch-relay` for Linux (amd64, arm64), as static binaries;
 - `AgentWatchBar.app` (universal) as a zip;
 - `SHA256SUMS`, and notes with each component's version and the commits since the previous tag.
@@ -206,7 +202,7 @@ GitHub Actions, sized for the free plan (macOS minutes count ten times, so macOS
 | [`ci.yml`](../.github/workflows/ci.yml) | Linux | every push to `main` and pull request | `gofmt`, `go vet`, `go test -race`, static cross-builds; guard and `agent-watch.env` tool tests |
 | [`wearos.yml`](../.github/workflows/wearos.yml) | Linux | changes under `wearos-app/` or `VERSIONS` | unit tests, lint and a debug build (with a placeholder `google-services.json`) |
 | [`macos-bar.yml`](../.github/workflows/macos-bar.yml) | macOS | changes to the menu bar, the bridge CLI or `VERSIONS` | `make bar-test` and `make bar` |
-| [`release.yml`](../.github/workflows/release.yml) | Linux + macOS | a `v*` tag (or by hand, as a dry run without publishing) | the release above |
+| [`release.yml`](../.github/workflows/release.yml) | Linux + macOS | changes to released components on `main` (or by hand, as a dry run without publishing) | the release above |
 
 ---
 
