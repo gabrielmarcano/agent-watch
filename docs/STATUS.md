@@ -31,6 +31,8 @@ The one place for the project's state: what is done, what is open, what comes ne
 - Run the whole of [`phases/5-e2e.md`](phases/5-e2e.md) (every row and the security checks). No row has a valid result yet. Row 23 (`AW_PUSH_RESOLVED=1`) is unblocked: the watch runs the app that handles `resolved`.
 
 ### Code debt (for later)
+- **Automatic GitHub releases:** limit releases to changes affecting distributable components; claimed by Copilot, 2026-10-05.
+
 
 Known and accepted for now; none blocks a phase.
 
