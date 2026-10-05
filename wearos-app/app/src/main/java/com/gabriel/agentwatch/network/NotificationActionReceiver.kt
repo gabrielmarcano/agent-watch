@@ -77,7 +77,7 @@ class NotificationActionReceiver : BroadcastReceiver() {
                             val fingerprint = intent.getStringExtra("fingerprint")?.takeIf { it.isNotBlank() }
                             client.cancel(paneId, expectedSeq, fingerprint)
                         }
-                        ACTION_PROMPT -> client.prompt(paneId, replyText!!, expectedSeq)
+                        ACTION_PROMPT -> RelayRepository.prompt(paneId, replyText!!, expectedSeq)
                         else -> null
                     }
                 } ?: return@launch
@@ -87,8 +87,8 @@ class NotificationActionReceiver : BroadcastReceiver() {
                     },
                     onFailure = { error ->
                         // Same mapping as the app screen (contracts §2.4), worded for a notification.
-                        val message = commandErrorFeedback(error, FeedbackSurface.NOTIFICATION).message
-                        showFeedback(context, notifManager, notifId, paneId, message, isSuccess = false)
+                        val feedback = commandErrorFeedback(error, FeedbackSurface.NOTIFICATION)
+                        showFeedback(context, notifManager, notifId, paneId, feedback.message, isSuccess = !feedback.isError)
                     }
                 )
             } catch (e: TimeoutCancellationException) {

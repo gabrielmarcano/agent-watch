@@ -34,8 +34,6 @@ The one place for the project's state: what is done, what is open, what comes ne
 
 Known and accepted for now; none blocks a phase.
 
-- **Wear OS offline prompt queue:** implement a safe persisted queue for prompts created while the relay is known offline; claimed by Copilot, 2026-10-05.
-
 - **`AW_ANDROID_APPLICATION_ID`:** nothing in the app depends on the application id any more. Left to wire:
   - `applicationId` in `wearos-app/app/build.gradle.kts`;
   - the placeholder `google-services.json` in `.github/workflows/wearos.yml`;

@@ -62,6 +62,7 @@ fun commandErrorFeedback(error: Throwable, surface: FeedbackSurface = FeedbackSu
             "agent_state_unknown" -> problem("Agent state unknown", refresh = true)
             "unauthorized" -> sessionExpired
             "not_paired" -> problem("Not paired — pair again", needsPairing = true)
+            "prompt_queued" -> CommandFeedback("Queued until relay reconnects", isError = false)
             "host_offline" -> problem("Device offline")
             "herdr_offline" -> problem("herdr stopped")
             "timeout" -> problem("No answer from device", refresh = true) // the device may still have acted

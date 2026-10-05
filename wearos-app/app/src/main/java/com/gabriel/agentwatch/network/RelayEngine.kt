@@ -1,6 +1,8 @@
 package com.gabriel.agentwatch.network
 
 import com.gabriel.agentwatch.approval.commandErrorFeedback
+import com.gabriel.agentwatch.data.PromptQueueStore
+import com.gabriel.agentwatch.data.QueuedPrompt
 import com.gabriel.agentwatch.data.AgentStore
 import com.gabriel.agentwatch.data.mergeHistory
 import com.gabriel.agentwatch.model.*
@@ -52,6 +54,7 @@ interface RelayEngineHooks {
 class RelayEngine(
     private val state: MutableStateFlow<UiState>,
     private val credentials: RelayCredentials,
+    private val promptQueue: PromptQueueStore = InMemoryPromptQueueStore(),
     private val http: RelayHttpClients = RelayHttpClients.shared,
     private val hooks: RelayEngineHooks = object : RelayEngineHooks {},
     private val reconnectDelayMs: (attempt: Int) -> Long = ::defaultReconnectDelayMs,
@@ -68,6 +71,7 @@ class RelayEngine(
     private var scope: CoroutineScope? = null
     private var reconnectAttempt = 0
     private var started = false
+    private var flushingPromptQueue = false
     /** Bumped whenever a stream is replaced or stopped; callbacks from older streams are ignored. */
     private var streamGeneration = 0L
     /** Bumped when the pairing changes; results of requests made under an older pairing are dropped. */
@@ -184,6 +188,7 @@ class RelayEngine(
                 var update: AgentsUpdate? = null
                 onStream(generation) { update = handleEventLocked(type ?: "", data) }
                 update?.let(hooks::onAgentsUpdated)
+                if (update is AgentsUpdate.All) flushQueuedPrompts(update.agents)
             }
 
             override fun onClosed(eventSource: EventSource) {
@@ -308,6 +313,38 @@ class RelayEngine(
         }
     }
 
+    private fun flushQueuedPrompts(agents: List<AgentState>) {
+        val (queued, currentClient) = synchronized(lock) {
+            if (flushingPromptQueue) return
+            val pending = promptQueue.queuedPrompts
+            if (pending.isEmpty()) return
+            flushingPromptQueue = true
+            pending to clientLocked()
+        }
+        if (currentClient == null) {
+            synchronized(lock) { flushingPromptQueue = false }
+            return
+        }
+        scope?.launch {
+            val delivered = mutableSetOf<QueuedPrompt>()
+            try {
+                for (pending in queued) {
+                    val agent = agents.firstOrNull { it.pane_id == pending.paneId }
+                    if (agent == null || agent.state_change_seq != pending.expectedSeq) continue
+                    val result = currentClient.prompt(pending.paneId, pending.text, pending.expectedSeq)
+                    if (result.isSuccess) delivered += pending
+                }
+            } finally {
+                synchronized(lock) {
+                    if (credentials.isPaired) {
+                        promptQueue.queuedPrompts = promptQueue.queuedPrompts.filterNot { it in delivered }
+                    }
+                    flushingPromptQueue = false
+                }
+            }
+        }
+    }
+
     private fun notPaired(): Result<Unit> =
         Result.failure(RelayError("not_paired", "Client not configured", 0))
 
@@ -331,6 +368,16 @@ class RelayEngine(
     }
 
     suspend fun prompt(paneId: String, text: String, expectedSeq: Long): Result<Unit> {
+        val offline = synchronized(lock) { state.value.connection !is Connection.Live }
+        if (offline) {
+            synchronized(lock) {
+                val current = promptQueue.queuedPrompts
+                if (current.none { it.paneId == paneId && it.text == text && it.expectedSeq == expectedSeq }) {
+                    promptQueue.queuedPrompts = (current + QueuedPrompt(paneId, text, expectedSeq)).takeLast(10)
+                }
+            }
+            return Result.failure(RelayError("prompt_queued", "Prompt queued until the relay reconnects", 0))
+        }
         val currentClient = getClient() ?: return notPaired()
         return refreshAfter(currentClient.prompt(paneId, text, expectedSeq))
     }
@@ -339,3 +386,7 @@ class RelayEngine(
 /** SSE reconnect backoff (contracts §2.3): 1 s, 2 s, 4 s … capped at 30 s. */
 fun defaultReconnectDelayMs(attempt: Int): Long =
     (1_000L shl attempt.coerceIn(0, 5)).coerceAtMost(30_000L)
+
+private class InMemoryPromptQueueStore : PromptQueueStore {
+    override var queuedPrompts: List<QueuedPrompt> = emptyList()
+}

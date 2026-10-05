@@ -72,6 +72,7 @@ commandErrorFeedback(error, surface)             // the message to show for a fa
 - **Check `auth` first:** `UNPAIRED` or `REVOKED` → pairing screen, never the device-offline notice or an empty list.
 - **`stale`:** the list is not backed by a live stream (before the first snapshot, reconnecting, stopped): dim it and show the connecting or relay-offline notice (`listStatus`), never the device-offline one.
 - **Commands:** use the `state_change_seq` and `fingerprint` of the `AgentState` shown at tap time; disable the buttons while in flight and, after a success, until the agent's state changes (`isAwaitingUpdate`); never auto-retry after a 409.
+  Prompts created while the relay is known offline are persisted locally and retried once after a fresh snapshot only when the pane's `state_change_seq` still matches. Transport timeouts are never auto-retried because the prompt may already have reached the agent; a queued prompt whose sequence changed remains pending and is not sent blindly.
 - **Pairing:** save the token, then `RelayRepository.restart(context)`. Do not call `registerPush` or write `fcmRegisteredToken` (ignored); `FcmRegistrar` registers when the stream opens and records it only after the relay accepts it.
 - **How the UI uses it:** `MainActivity` observes `auth` at runtime (anything but `PAIRED` → pairing; `REVOKED` adds the `session_expired` line); each screen collects only its own slice of `state`; every command error goes through `commandErrorFeedback`, including Quick Dictate.
 

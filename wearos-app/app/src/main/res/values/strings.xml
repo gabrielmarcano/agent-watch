@@ -54,6 +54,7 @@
     <string name="feedback_answered">Answered</string>
     <string name="feedback_canceled">Canceled</string>
     <string name="feedback_sent">Sent</string>
+    <string name="feedback_queued">Queued until relay reconnects</string>
 
     <!-- Dictation -->
     <string name="dictation_prompt">To: %s</string>

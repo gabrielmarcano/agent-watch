@@ -132,6 +132,10 @@ class FakeRelay : Closeable {
 }
 
 /** In-memory credentials for engine tests. */
+class FakePromptQueueStore : com.gabriel.agentwatch.data.PromptQueueStore {
+    override var queuedPrompts: List<com.gabriel.agentwatch.data.QueuedPrompt> = emptyList()
+}
+
 class FakeCredentials(
     @Volatile override var relayUrl: String,
     @Volatile override var deviceToken: String?

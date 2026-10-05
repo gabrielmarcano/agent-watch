@@ -4,7 +4,7 @@ import android.content.Context
 import android.content.SharedPreferences
 import com.gabriel.agentwatch.network.ResolvedSeqs
 
-class Prefs(context: Context) : FcmRegistrationStore {
+class Prefs(context: Context) : FcmRegistrationStore, PromptQueueStore {
     private val prefs: SharedPreferences = context.getSharedPreferences("AgentWatchPrefs", Context.MODE_PRIVATE)
 
     init {
@@ -54,6 +54,10 @@ class Prefs(context: Context) : FcmRegistrationStore {
         @Deprecated("Ignored. Use PushRegistration.ensure(context); it records the token only after the relay accepts it.")
         set(@Suppress("UNUSED_PARAMETER") value) {}
 
+    override var queuedPrompts: List<QueuedPrompt>
+        get() = decodeQueuedPrompts(prefs.getString("queued_prompts", null))
+        set(value) = prefs.edit().putString("queued_prompts", encodeQueuedPrompts(value)).apply()
+
     var pinnedPaneId: String?
         get() = prefs.getString("pinned_pane_id", null)
         set(value) = prefs.edit().putString("pinned_pane_id", value).apply()
@@ -72,6 +76,7 @@ class Prefs(context: Context) : FcmRegistrationStore {
             .remove("device_id")
             .remove("fcm_registration")
             .remove("resolved_seqs")
+            .remove("queued_prompts")
             .apply()
     }
 }

@@ -128,6 +128,7 @@ fun DictationFlow(target: AgentState?, text: String, onTextChange: (String) -> U
     val view = LocalView.current
     var sending by remember { mutableStateOf(false) }
     var sent by remember { mutableStateOf(false) }
+    var queued by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<CommandFeedback?>(null) }
     val closed = stringResource(R.string.dictation_agent_closed)
     val unavailable = stringResource(R.string.dictation_unavailable)
@@ -158,8 +159,15 @@ fun DictationFlow(target: AgentState?, text: String, onTextChange: (String) -> U
                         sent = true
                     },
                     onFailure = {
-                        view.performHapticFeedback(HapticFeedbackConstants.REJECT)
-                        error = commandErrorFeedback(it)
+                        val feedback = commandErrorFeedback(it)
+                        if (feedback.isError) {
+                            view.performHapticFeedback(HapticFeedbackConstants.REJECT)
+                            error = feedback
+                        } else {
+                            view.performHapticFeedback(HapticFeedbackConstants.CONFIRM)
+                            queued = true
+                            sent = true
+                        }
                     }
                 )
                 sending = false
@@ -174,7 +182,7 @@ fun DictationFlow(target: AgentState?, text: String, onTextChange: (String) -> U
         }
     )
 
-    val sentText = stringResource(R.string.feedback_sent)
+    val sentText = stringResource(if (queued) R.string.feedback_queued else R.string.feedback_sent)
     val curvedStyle = ConfirmationDialogDefaults.curvedTextStyle
     SuccessConfirmationDialog(
         visible = sent,

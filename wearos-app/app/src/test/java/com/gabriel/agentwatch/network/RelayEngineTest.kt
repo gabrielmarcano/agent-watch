@@ -5,6 +5,8 @@ import com.gabriel.agentwatch.model.AgentsSnapshot
 import kotlinx.coroutines.flow.MutableStateFlow
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
+import kotlinx.coroutines.runBlocking
 import org.junit.Before
 import org.junit.Test
 
@@ -71,6 +73,37 @@ class RelayEngineTest {
             updates.any { it is AgentsUpdate.Changed && it.agent.state_change_seq == 2L } &&
                 updates.any { it == AgentsUpdate.Removed("A") }
         }
+    }
+
+    @Test
+    fun promptQueuedOfflineIsSentAfterFreshSnapshot() = runBlocking {
+        val queue = FakePromptQueueStore()
+        engine.stop()
+        engine = RelayEngine(state, FakeCredentials(relay.url, "tok"), promptQueue = queue, reconnectDelayMs = { 50 })
+
+        val queued = engine.prompt("A", "continue", 1)
+        assertEquals("prompt_queued", (queued.exceptionOrNull() as RelayError).code)
+        assertEquals(1, queue.queuedPrompts.size)
+
+        engine.start()
+        awaitValue(state, what = "queued prompt delivery") { it.connection == Connection.Live && relay.requests.any { r -> r.path == "/v1/agents/A/prompt" } }
+        assertTrue(queue.queuedPrompts.isEmpty())
+    }
+
+    @Test
+    fun queuedPromptStaysPendingWhenAgentSequenceChanged() = runBlocking {
+        val queue = FakePromptQueueStore()
+        engine.stop()
+        engine = RelayEngine(state, FakeCredentials(relay.url, "tok"), promptQueue = queue, reconnectDelayMs = { 50 })
+        val queued = engine.prompt("A", "continue", 1)
+        assertEquals("prompt_queued", (queued.exceptionOrNull() as RelayError).code)
+
+        relay.agents = AgentsSnapshot(host_online = true, herdr_online = true, agents = listOf(agent("A", 2)))
+        engine.start()
+        awaitValue(state, what = "fresh changed snapshot") { it.connection == Connection.Live && it.agents.first().state_change_seq == 2L }
+        Thread.sleep(100)
+        assertTrue(queue.queuedPrompts.isNotEmpty())
+        assertTrue(relay.requests.none { it.path == "/v1/agents/A/prompt" })
     }
 
     @Test
