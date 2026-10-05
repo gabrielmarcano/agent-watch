@@ -446,8 +446,8 @@ func TestEventsSubscribe(t *testing.T) {
 	if err := json.Unmarshal(evtLine, &evt); err != nil {
 		t.Fatalf("unmarshal event failed: %v", err)
 	}
-	if evt["event"] != "pane_agent_status_changed" {
-		t.Errorf("expected pane_agent_status_changed, got %v", evt["event"])
+	if evt["event"] != "pane.agent_status_changed" {
+		t.Errorf("expected pane.agent_status_changed, got %v", evt["event"])
 	}
 	evtData := evt["data"].(map[string]any)
 	if evtData["pane_id"] != "w1:target" || evtData["agent_status"] != "working" {

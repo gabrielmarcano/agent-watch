@@ -54,7 +54,7 @@ func TestSubscribeRegisteredBeforeAck(t *testing.T) {
 	if err != nil {
 		t.Fatalf("event emitted right after the ack was lost: %v", err)
 	}
-	if !strings.Contains(string(line), "pane_agent_status_changed") {
+	if !strings.Contains(string(line), "pane.agent_status_changed") {
 		t.Errorf("unexpected line %s", line)
 	}
 }
