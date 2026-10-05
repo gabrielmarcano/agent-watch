@@ -20,7 +20,7 @@ The Wear OS app is the primary client of the relay's `/v1` API (`docs/reference/
 | `approval/` | `PromptActions` (primary buttons by role: ALLOW only ever maps to `allow_once`; the answered-prompt lock); `CommandFeedback` (relay error code → short wrist message) |
 | `ui/theme/` | Fixed palette (no dynamic colour; every text pair ≥ 6.6:1) and `statusStyle()`: icon, word and colours per herdr status |
 | `ui/logic/` | Pure presentation logic with JVM tests: `attentionSections` (list order), `headPreview`/`tailPreview`, `ageOf`, `listStatus` (the list's notice and dimming), relay URL checks |
-| `ui/components/` | `ScreenList` (`ScreenScaffold` + `TransformingLazyColumn`), `transformedItem`, age text, voice and text input intents, `rememberPaneHistory` (the state's items merged with one `GET /v1/history?pane_id=`) |
+| `ui/components/` | `ScreenList` (`ScreenScaffold` + `TransformingLazyColumn`), `transformedItem`, age text, the system input intents (`PromptInput`, `TextInput`), `rememberPaneHistory` (the state's items merged with `GET /v1/history?pane_id=`, fetched each time the screen starts) |
 | `ui/screens/` | Agent list, agent screen + `PromptSection`, dictation confirm (`DictationFlow`), full text, history, reader, pairing, settings |
 | `complication/` | `complicationContent` (state → count and the agent a tap opens), `complicationBadge` (the short type: glyph and how many need the user, a problem's own glyph and a dash) and the data source: SHORT_TEXT, LONG_TEXT and MONOCHROMATIC_IMAGE |
 | `tile/` | Quick Dictate (`tileContent`, `dictationTarget`, `QuickDictateActivity`); Agents (`agentsTile`: the two most urgent agents, each opening its screen, and how many more); `TileCommon` (palette, the 3 s fetch, launching into the app) |
@@ -49,7 +49,7 @@ The Wear OS app is the primary client of the relay's `/v1` API (`docs/reference/
 - **One engine per process.** `RelayRepository.init` builds it and makes it the process-wide 401 listener (`RelayClient.unauthorizedListener`). Quick Dictate, notification actions and push registration call `init` themselves, so their 401s revoke the pairing; the tiles and the complication build a plain `RelayClient` and do not, so their 401 revokes it only if `init` already ran in that process.
 - **SSE lifecycle:** started in `MainActivity.onStart`, stopped in `onStop` (battery). Notifications cover the background. Tiles and the complication make one `GET /v1/agents` per update and do no heavy parsing.
 - **Network:** HTTPS only; release builds allow no cleartext (the debug build allows a local relay: `src/debug/res/xml/network_security_config.xml`). Pane ids are URL-encoded in paths.
-- **Reconnect:** the backoff and silence rules of `contracts.md` §2.3; only a stream that delivered a `snapshot` resets the backoff. The SSE client's read timeout detects a silent (half-open) stream.
+- **Reconnect:** the backoff and silence rules of `contracts.md` §2.3; only a stream that delivered a `snapshot` resets the backoff. The SSE client's read timeout detects a silent (half-open) stream. `history` events sent while the stream was down are not replayed, so the first `snapshot` after a reconnect re-fetches `GET /v1/history` (the snapshot carries the agents); `start` fetches both on its own.
 - **Merging:** a refresh never overrides a pane that SSE touched after the refresh started; within a pane the higher `state_change_seq` wins. History from both sources is merged by `id`.
 - **Thread safety:** the engine guards its state with one lock; SSE callbacks arrive on OkHttp threads and callbacks from a replaced stream are ignored (stream generation). Hooks run outside the lock.
 
@@ -81,8 +81,8 @@ commandErrorFeedback(error, surface)             // the message to show for a fa
 |---|---|
 | `pairing` | Relay URL (default `BuildConfig.DEFAULT_RELAY_URL`, edited with the system keyboard) and the 6-digit code |
 | `agents` | Sections by attention (`attentionSections`: needs you, done, working, idle, unknown state) across workspaces; the notice line; History and Settings |
-| `agent/{paneId}` | Name first (the label), then the status line, then the agent's own title and the workspace when they differ from it; the prompt as items (command head or `unknown` tail, View all, Deny · Allow, options with their description, a confirmation for `allow_always`); the last reply with Read all (whole when it fits, else its first line, a "…" line and its end: `headTailPreview`); Reply (dictation) as the edge button; "Pin to tile" |
-| `dictation/{paneId}` | What the recognizer understood and the target, then Send |
+| `agent/{paneId}` | Name first (the label), then the status line, then the agent's own title and the workspace when they differ from it; the prompt as items (command head or `unknown` tail, View all, Deny · Allow, options with their description, a confirmation for `allow_always`); the last reply with Read all (whole when it fits, else its first line, a "…" line and its end: `headTailPreview`); Reply (system input) as the edge button; "Pin to tile" |
+| `dictation/{paneId}` | The text entered and the target, then Send (Change enters it again) |
 | `history?paneId=`, `reader/{historyId}` | Cards with age; the answer rendered block by block (`screen` captures as monospace, except their tables, which the bridge sends as markdown and the reader shows as records) |
 | `settings` | Pair again, unpair, version |
 | `text` | A command or screen tail in full |
@@ -92,6 +92,7 @@ commandErrorFeedback(error, surface)             // the message to show for a fa
 Other clients (watchOS, the phone app) copy these.
 
 - **Target agent** for Quick Dictate and the tile: the pinned agent (set only with "Pin to tile"), else the latest `done`, else herdr's focused pane, else none. Never an arbitrary agent: a dictated prompt must not land in a pane the user did not choose (`resolveTargetAgent` in `model/Contracts.kt`). The tile passes the `pane_id` it showed, and a closed pane gets nothing (`tile/DictationTarget.kt`). The target label is always shown before sending.
+- **Prompt input** (Reply, Change, Quick Dictate): Wear's system RemoteInput, where the user picks voice, keyboard or handwriting. Not `ACTION_RECOGNIZE_SPEECH`: it is documented for voice only (`EXTRA_RESULTS`), and a prompt typed from the voice screen's keyboard never reached the relay. RemoteInput has no voice-first option, so voice costs one tap. Never drop input silently (`ui/logic/InputResult.kt`): text in any known form goes to the confirm screen whatever the result code; only backing out is silent; anything else shows a line and a reject haptic. Logs carry the result code and extra keys, never text.
 - **Approvals:** Deny · Allow with the positive action on the right (Wear convention), full-height buttons 8 dp apart; every other option sits apart under More options, and `allow_always` asks for confirmation. An `unknown` prompt shows the screen tail, a line asking to answer on the device, and Cancel only (`ui/screens/PromptSection.kt`).
 - **Readability and feedback:** status is icon + word + colour, never truncated, colour never alone; no text under 12 sp, checked at font scale 1.24; feedback where the finger is (a confirmation dialog plus haptics, errors right above the buttons); no Back buttons (swipe to dismiss).
 
@@ -100,7 +101,7 @@ Other clients (watchOS, the phone app) copy these.
 - One notification per pane (`pane_id.hashCode()`); digests use a fixed id. Channels: `agent_blocked` (high), `agent_done` (default), `agent_watch_feedback` (low, silent action results).
 - Every `PendingIntent` carries a data URI unique per pane and action (`agentwatch://notification/<action>/<pane>`), so extras from different panes can never be swapped. Request codes alone are not enough: they can collide across panes.
 - `resolved` pushes and live state (SSE/refresh) dismiss approvals that no longer match the agent. The relay sends `resolved` only with `AW_PUSH_RESOLVED` enabled.
-- Buttons (`blockedButtons`): a question's answers (the push's `options`, `contracts.md` §4.1), a permission's Allow and Deny, nothing for an `unknown` prompt, then Open. Cancel is never offered for a question; it appears only for a push without `kind` (sent by relays older than the `kind` key) that has no deny option. A finished agent's notification shows its reply and offers Reply (keyboard or voice → `prompt`).
+- Buttons (`blockedButtons`): a question's answers (the push's `options`, `contracts.md` §4.1), a permission's Allow and Deny, nothing for an `unknown` prompt, then Open. Cancel is never offered for a question; it appears only for a push without `kind` (sent by relays older than the `kind` key) that has no deny option. A finished agent's notification shows its reply and offers Reply (keyboard or voice → `prompt`); an empty reply replaces it with an error, never a silent drop.
 - Action results: a short confirmation per action (auto-dismissed after 3 s), or an error message with an Open action.
 
 ## 6. Tests

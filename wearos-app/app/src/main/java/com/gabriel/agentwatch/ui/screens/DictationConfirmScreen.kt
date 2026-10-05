@@ -1,8 +1,6 @@
 package com.gabriel.agentwatch.ui.screens
 
-import android.app.Activity
 import android.content.ActivityNotFoundException
-import android.speech.RecognizerIntent
 import android.view.HapticFeedbackConstants
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -19,6 +17,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
@@ -39,18 +38,20 @@ import com.gabriel.agentwatch.approval.CommandFeedback
 import com.gabriel.agentwatch.approval.commandErrorFeedback
 import com.gabriel.agentwatch.model.AgentState
 import com.gabriel.agentwatch.network.RelayRepository
-import com.gabriel.agentwatch.ui.components.RecognizerIntentFactory
+import com.gabriel.agentwatch.ui.components.PromptInput
 import com.gabriel.agentwatch.ui.components.ResIcon
 import com.gabriel.agentwatch.ui.components.ScreenList
 import com.gabriel.agentwatch.ui.components.transformedItem
+import com.gabriel.agentwatch.ui.logic.InputResult
+import com.gabriel.agentwatch.ui.logic.inputFeedback
 import com.gabriel.agentwatch.ui.theme.OnSurface
 import com.gabriel.agentwatch.ui.theme.OnSurfaceVariant
 import com.gabriel.agentwatch.ui.theme.SurfaceLow
 import kotlinx.coroutines.launch
 
 /**
- * What the recognizer understood and where it goes, before anything is sent. Used from the agent
- * screen and from Quick Dictate (the tile).
+ * The text entered (spoken, typed or handwritten) and where it goes, before anything is sent. Used
+ * from the agent screen and from Quick Dictate (the tile).
  */
 @Composable
 fun DictationConfirmScreen(
@@ -59,14 +60,17 @@ fun DictationConfirmScreen(
     sending: Boolean,
     error: CommandFeedback?,
     onSend: () -> Unit,
-    onSpeakAgain: () -> Unit
+    onEnterAgain: () -> Unit
 ) {
     ScreenList(
         edgeButton = {
             EdgeButton(onClick = onSend, enabled = !sending) {
-                ResIcon(R.drawable.ic_send, null, MaterialTheme.colorScheme.onPrimary, Modifier.size(20.dp))
-                Spacer(Modifier.width(4.dp))
-                Text(stringResource(if (sending) R.string.loading else R.string.send))
+                // While sending, the longer label goes alone so it never wraps on the round screen.
+                if (!sending) {
+                    ResIcon(R.drawable.ic_send, null, MaterialTheme.colorScheme.onPrimary, Modifier.size(20.dp))
+                    Spacer(Modifier.width(4.dp))
+                }
+                Text(stringResource(if (sending) R.string.loading else R.string.send), maxLines = 1)
             }
         }
     ) { spec ->
@@ -105,13 +109,13 @@ fun DictationConfirmScreen(
         }
         item(key = "again") {
             CompactButton(
-                onClick = onSpeakAgain,
+                onClick = onEnterAgain,
                 enabled = !sending,
                 modifier = Modifier.transformedHeight(this, spec),
                 transformation = SurfaceTransformation(spec),
                 colors = ButtonDefaults.filledTonalButtonColors(),
-                icon = { ResIcon(R.drawable.ic_mic, null, OnSurfaceVariant, Modifier.size(18.dp)) },
-                label = { Text(stringResource(R.string.speak_again)) }
+                icon = { ResIcon(R.drawable.ic_edit, null, OnSurfaceVariant, Modifier.size(18.dp)) },
+                label = { Text(stringResource(R.string.enter_again)) }
             )
         }
     }
@@ -134,11 +138,16 @@ fun DictationFlow(target: AgentState?, text: String, onTextChange: (String) -> U
     val label = target?.label?.ifBlank { target.pane_id }.orEmpty()
     val prompt = stringResource(R.string.dictation_prompt, label)
 
-    val speak = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
-        if (result.resultCode == Activity.RESULT_OK) {
-            result.data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)?.firstOrNull()
-                ?.takeIf { it.isNotBlank() }
-                ?.let { onTextChange(it); error = null }
+    // Enter again: the new text replaces the old one; a result without text keeps the old one and
+    // says why (only backing out is silent).
+    val context = LocalContext.current
+    val reenter = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        when (val input = PromptInput.result(result.resultCode, result.data)) {
+            is InputResult.Text -> { onTextChange(input.text); error = null }
+            else -> inputFeedback(input)?.let {
+                view.performHapticFeedback(HapticFeedbackConstants.REJECT)
+                error = CommandFeedback(context.getString(it), isError = true)
+            }
         }
     }
 
@@ -165,9 +174,9 @@ fun DictationFlow(target: AgentState?, text: String, onTextChange: (String) -> U
                 sending = false
             }
         },
-        onSpeakAgain = {
+        onEnterAgain = {
             try {
-                speak.launch(RecognizerIntentFactory.freeForm(prompt))
+                reenter.launch(PromptInput.intent(prompt))
             } catch (_: ActivityNotFoundException) {
                 error = CommandFeedback(unavailable, isError = true)
             }

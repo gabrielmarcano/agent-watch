@@ -58,8 +58,11 @@
     <!-- Dictation -->
     <string name="dictation_prompt">To: %s</string>
     <string name="send">Send</string>
-    <string name="speak_again">Speak again</string>
-    <string name="dictation_unavailable">Voice input isn\'t available</string>
+    <string name="enter_again">Change</string>
+    <string name="dictation_unavailable">Text input isn\'t available</string>
+    <string name="input_empty">No text came back — nothing sent</string>
+    <string name="input_failed">Input failed — nothing sent</string>
+    <string name="reply_empty">Empty reply — nothing sent</string>
     <string name="dictation_no_target">No agent to dictate to</string>
     <string name="dictation_agent_closed">That agent has closed</string>
     <string name="dictation_not_paired">Pair the watch first</string>

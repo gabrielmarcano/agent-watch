@@ -16,7 +16,7 @@ The one place for the project's state: what is done, what is open, what comes ne
 | [6 watchOS](phases/6-watchos.md) (best-effort) | not started; after 5 | — |
 | [7 Android phone client](phases/7-android-mobile.md) | not started; after 5 | — |
 
-**Deployed** (2026-10-01): the relay at `0.4.1` (commit `46ece7c`); the bridge at `0.4.1` (commit `f6479dd`) on the owner's Mac; the Wear OS app `1.2.1` (release build) on the owner's Pixel Watch 2; the menu bar `0.3.1`, built from `main` into `bin/`. The component versions are in `VERSIONS`.
+**Deployed** (2026-10-05): the relay at `0.4.1` (commit `46ece7c`); the bridge at `0.4.2` (commit `e3b95ca`) on the owner's Mac; the Wear OS app `1.2.2` (release build, version code 6) on the owner's Pixel Watch 2; the menu bar `0.3.1`, built from `main` into `bin/`. The component versions are in `VERSIONS`.
 
 **What can run in parallel:**
 - **5 runs alone:** it tests the whole system.
@@ -60,7 +60,7 @@ Known and accepted for now; none blocks a phase.
   - the fake herdr delivers global events to a subscription with no event types, which real herdr does not (`pkg/herdrtest/server.go`, `EmitGlobal`);
   - `pkg/relay/state_test.go` and `pkg/bridge/engine_test.go` sleep longer than `go-backend.md` allows.
 - **Claude's agents view** (`← for agents`): a dialog raised while the conversation is in the background is not on screen, so herdr says `done` and the watch cannot see or answer it (`docs/reference/agents.md` §3.1). Not fixable from the screen; the owner reopens the conversation.
-- **The watch could show an older reply than the Mac** (Claude's agents view): fixed in bridge `0.4.2`, not deployed nor verified on the watch yet. The Claude adapter checks herdr's session against the pane title and finds the shown one in Claude's session index (`docs/reference/agents.md` §3.3, the exception in `AGENTS.md` §1.1); the agents view is never published as a reply, a turn waiting on `AskUserQuestion` publishes nothing, a failed screen read is retried once, and coming back from the agents view captures the shown conversation's last reply. What remains:
+- **The watch could show an older reply than the Mac** (Claude's agents view): fixed in bridge `0.4.2`, deployed 2026-10-05, not verified on the watch yet. The Claude adapter checks herdr's session against the pane title and finds the shown one in Claude's session index (`docs/reference/agents.md` §3.3, the exception in `AGENTS.md` §1.1); the agents view is never published as a reply, a turn waiting on `AskUserQuestion` publishes nothing, a failed screen read is retried once, and coming back from the agents view captures the shown conversation's last reply. What remains:
   - a conversation reopened from the agents view whose last reply the relay already holds does not come back to the top of the watch's list (the relay drops an item with a known id);
   - when herdr names a session that is in no profile any more (a retired background worker) and the title is not herdr's, the watch gets a screen capture, not the transcript;
   - a turn waiting on a question that herdr reports as `done` publishes nothing, and the watch cannot answer it either (the dialog-detection gap, `tools/herdr-overrides/README.md`).
@@ -69,6 +69,7 @@ Known and accepted for now; none blocks a phase.
 - **agy 1.2.17 menus:** `Create file` and `Question` parse without a `detail`; picking `Write-in...` leaves a text field the watch cannot answer (`docs/reference/agents.md` §4.1).
 
 ### Checks nobody has done yet
+- Wear OS 1.2.2 on the watch, still unchecked: Quick Dictate and Change with the system input; backing out is silent; an empty notification reply shows `Empty reply — nothing sent`; after the stream drops (Wi-Fi off and on) or the app returns from the background, the agent screen shows the latest reply. (Verified by the owner on 2026-10-05: Reply with voice and with the keyboard reaches the confirm screen and the agent.)
 - ntfy delivery (watchOS push) has never been tested.
 - The watch over LTE or its phone's Bluetooth connection: only Wi-Fi has been checked.
 - `herdr plugin install gabrielmarcano/agent-watch` end to end.

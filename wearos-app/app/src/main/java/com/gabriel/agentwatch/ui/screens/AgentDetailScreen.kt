@@ -1,8 +1,6 @@
 package com.gabriel.agentwatch.ui.screens
 
-import android.app.Activity
 import android.content.ActivityNotFoundException
-import android.speech.RecognizerIntent
 import android.view.HapticFeedbackConstants
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -23,6 +21,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
@@ -53,7 +52,7 @@ import com.gabriel.agentwatch.model.AgentState
 import com.gabriel.agentwatch.model.HistoryItem
 import com.gabriel.agentwatch.model.PromptOption
 import com.gabriel.agentwatch.network.RelayRepository
-import com.gabriel.agentwatch.ui.components.RecognizerIntentFactory
+import com.gabriel.agentwatch.ui.components.PromptInput
 import com.gabriel.agentwatch.ui.components.ResIcon
 import com.gabriel.agentwatch.ui.components.ScreenList
 import com.gabriel.agentwatch.ui.components.ageText
@@ -61,7 +60,9 @@ import com.gabriel.agentwatch.ui.components.transformedItem
 import com.gabriel.agentwatch.ui.theme.OnSurfaceVariant
 import com.gabriel.agentwatch.ui.theme.statusStyle
 import com.gabriel.agentwatch.util.MarkdownFormatter
+import com.gabriel.agentwatch.ui.logic.InputResult
 import com.gabriel.agentwatch.ui.logic.headTailPreview
+import com.gabriel.agentwatch.ui.logic.inputFeedback
 import kotlinx.coroutines.launch
 
 @Composable
@@ -128,11 +129,16 @@ fun AgentDetailScreen(
         RelayRepository.cancel(t.paneId, t.seq, fingerprint = t.fingerprint)
     }
 
+    // Reply: voice, keyboard or handwriting. Text goes to the confirm screen; a result without text
+    // shows a line (only backing out is silent).
+    val context = LocalContext.current
     val dictate = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
-        if (result.resultCode == Activity.RESULT_OK) {
-            result.data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)?.firstOrNull()
-                ?.takeIf { it.isNotBlank() }
-                ?.let(onDictated)
+        when (val input = PromptInput.result(result.resultCode, result.data)) {
+            is InputResult.Text -> onDictated(input.text)
+            else -> inputFeedback(input)?.let {
+                view.performHapticFeedback(HapticFeedbackConstants.REJECT)
+                error = CommandFeedback(context.getString(it), isError = true)
+            }
         }
     }
     val dictationPrompt = stringResource(R.string.dictation_prompt, agent.label.ifBlank { agent.pane_id })
@@ -146,13 +152,17 @@ fun AgentDetailScreen(
     }
 
     val blocked = agent.status == "blocked"
+    // Reply sits at the end of the list and its errors under the header: bring them into view.
+    LaunchedEffect(error) {
+        if (error != null && !blocked) listState.animateScrollToItem(0)
+    }
     ScreenList(
         state = listState,
         edgeButton = if (blocked) null else {
             {
                 EdgeButton(onClick = {
                     try {
-                        dictate.launch(RecognizerIntentFactory.freeForm(dictationPrompt))
+                        dictate.launch(PromptInput.intent(dictationPrompt))
                     } catch (_: ActivityNotFoundException) {
                         error = CommandFeedback(unavailable, isError = true)
                     }
