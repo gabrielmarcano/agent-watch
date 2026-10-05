@@ -159,7 +159,7 @@ How they load:
 
 ---
 
-## 5. Guards and Git
+## 5. Guards, Git and Language
 
 - **Guards:** one implementation (`tools/guards/guards.py`), wired into the agent tools and the git pre-commit hook. Which tools load which guards, what they block and how to set them up: [`tools/guards/README.md`](tools/guards/README.md). If a guard blocks you, its message says the legitimate way forward: take it, or stop and tell the owner; never work around it.
 - **A tool with only the pre-commit hook** (that README lists which) has nothing stopping it from sending input to the owner's herdr panes, so `herdr-integration.md` § Safety is entirely on it.
@@ -168,6 +168,7 @@ How they load:
   - never `git commit --amend` or `--no-verify`;
   - commit after each verified step, so other sessions don't overwrite your work;
   - never `git push` unless the owner asks.
+- **English only, everywhere:** code, comments, docs, commit messages, branch names, PR and issue titles, descriptions and comments, and release notes, whatever language the owner writes to you in. Non-English text is allowed only as test data (e.g. multi-byte input).
 
 ---
 
