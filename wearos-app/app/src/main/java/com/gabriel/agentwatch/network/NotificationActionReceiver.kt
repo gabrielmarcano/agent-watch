@@ -29,6 +29,10 @@ class NotificationActionReceiver : BroadcastReceiver() {
         private const val ACTION_TIMEOUT_MS = 9_000L
         /** How long a success confirmation stays before the system removes it. */
         private const val SUCCESS_FEEDBACK_MS = 3_000L
+
+        /** A Reply action that carries no text: shown as an error, never sent. */
+        fun isBlankReply(action: String, replyText: String?): Boolean =
+            action == ACTION_PROMPT && replyText.isNullOrBlank()
     }
 
     override fun onReceive(context: Context, intent: Intent) {
@@ -57,7 +61,12 @@ class NotificationActionReceiver : BroadcastReceiver() {
         } else {
             null
         }
-        if (action == ACTION_PROMPT && replyText.isNullOrBlank()) return
+        if (isBlankReply(action, replyText)) {
+            // Never a silent drop: the reply's notification says nothing was sent. Keys only, never text.
+            Log.d(TAG, "Reply without text; extras keys=${intent.extras?.keySet()} clipData=${intent.clipData != null}")
+            showFeedback(context, notifManager, notifId, paneId, context.getString(R.string.reply_empty), isSuccess = false)
+            return
+        }
 
         val isDeny = intent.getBooleanExtra("is_deny", false)
         val isChoice = intent.getBooleanExtra("is_choice", false)
