@@ -7,6 +7,18 @@ name: Release
 on:
   push:
     branches: [main]
+    paths:
+      - VERSIONS
+      - go.mod
+      - go.sum
+      - cmd/**
+      - pkg/**
+      - deploy/launchd/**
+      - macos-bar/**
+      - wearos-app/**
+      - herdr-plugin.toml
+      - Makefile
+      - .github/workflows/release.yml
   workflow_dispatch:
 
 permissions:

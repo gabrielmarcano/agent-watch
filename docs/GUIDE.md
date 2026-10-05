@@ -179,7 +179,7 @@ The release build (`assembleRelease`, R8 on) is signed with the debug key: fine 
 
 **Where to see them:** `agent-watch-bridge version`, `agent-watch-relay version`, the menu bar's **Versions** section ([`macos-bar/README.md`](../macos-bar/README.md)), and the watch's Settings.
 
-**A release is a dated snapshot of the whole system.** Every push to `main` publishes one automatically. The workflow chooses `vYYYY.MM.DD` for the first release on a UTC day and `vYYYY.MM.DD.2`, `.3`… for later pushes that day.
+**A release is a dated snapshot of the whole system.** Every push to `main` that changes a distributable component, its version, or the release workflow publishes one automatically. Documentation-only and other unrelated changes do not publish releases. The workflow chooses `vYYYY.MM.DD` for the first release on a UTC day and `vYYYY.MM.DD.2`, `.3`… for later pushes that day.
 
 The [release workflow](../.github/workflows/release.yml) publishes a GitHub release with:
 - `agent-watch-bridge` for macOS (arm64, amd64) and Linux (amd64, arm64), and `agent-watch-relay` for Linux (amd64, arm64), as static binaries;
@@ -202,7 +202,7 @@ GitHub Actions, sized for the free plan (macOS minutes count ten times, so macOS
 | [`ci.yml`](../.github/workflows/ci.yml) | Linux | every push to `main` and pull request | `gofmt`, `go vet`, `go test -race`, static cross-builds; guard and `agent-watch.env` tool tests |
 | [`wearos.yml`](../.github/workflows/wearos.yml) | Linux | changes under `wearos-app/` or `VERSIONS` | unit tests, lint and a debug build (with a placeholder `google-services.json`) |
 | [`macos-bar.yml`](../.github/workflows/macos-bar.yml) | macOS | changes to the menu bar, the bridge CLI or `VERSIONS` | `make bar-test` and `make bar` |
-| [`release.yml`](../.github/workflows/release.yml) | Linux + macOS | every push to `main` (or by hand, as a dry run without publishing) | the release above |
+| [`release.yml`](../.github/workflows/release.yml) | Linux + macOS | changes to distributable components on `main` (or by hand, as a dry run without publishing) | the release above |
 
 ---
 
