@@ -99,7 +99,7 @@ class RelayClient(
         val url = if (path.startsWith("http://") || path.startsWith("https://")) path else "${cleanBaseUrl()}$path"
         val builder = Request.Builder().url(url)
         if (!token.isNullOrBlank()) {
-            builder.header("Authorization", "Bearer " + token)
+            builder.header("Authorization", "Bearer $token")
         }
         return builder
     }

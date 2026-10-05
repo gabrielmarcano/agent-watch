@@ -103,7 +103,7 @@ class RelayClientTest {
         assertTrue(res.isSuccess)
         val req = server.takeRequest()
         assertEquals("/v1/agents/w5%3ApAE/answer", req.path)
-        assertEquals("Bearer " + "tok", req.getHeader("Authorization"))
+        assertEquals("Bearer tok", req.getHeader("Authorization"))
     }
 
     @Test
@@ -117,7 +117,7 @@ class RelayClientTest {
         val req = server.takeRequest()
         assertEquals("POST", req.method)
         assertEquals("/v1/agents/w5%3ApAE/prompt", req.path)
-        assertEquals("Bearer " + "tok", req.getHeader("Authorization"))
+        assertEquals("Bearer tok", req.getHeader("Authorization"))
         assertEquals(
             """{"text":"continue from the last step","expected_seq":334}""",
             req.body.readUtf8()
