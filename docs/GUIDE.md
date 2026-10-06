@@ -242,6 +242,7 @@ How each agent's menus, keys and history work: [`docs/reference/agents.md`](refe
 - **OpenCode approvals need the default focus.** If someone moves the focus in OpenCode's dialog at the computer (arrow keys or mouse hover), the watch's Allow is refused with nothing pressed: answer at the computer. Deny always works. Why: [`agents.md` §5.1](reference/agents.md).
 - **The watchOS app is not on the relay API yet** ([status](STATUS.md)).
 - **An approval answered at the computer can stay in the watch's notifications** until the app next sees the live state (e.g. when you open it). The `resolved` push that withdraws them is off by default (`AW_PUSH_RESOLVED`). The current app handles it; whether the relay has it on yet is in [STATUS](STATUS.md).
+- **Quiet pushes while the owner is at the Mac:** While you use the Mac (input in the last 10 minutes, screen unlocked), the watch does not buzz; a prompt still waiting when you leave is pushed then. Rules and the setting: [`contracts.md` §4.3](reference/contracts.md).
 
 ---
 

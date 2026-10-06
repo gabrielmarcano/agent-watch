@@ -31,7 +31,8 @@ The one place for the project's state: what is done, what is open, what comes ne
 - Run the whole of [`phases/5-e2e.md`](phases/5-e2e.md) (every row and the security checks). No row has a valid result yet. Row 23 (`AW_PUSH_RESOLVED=1`) is unblocked: the watch runs the app that handles `resolved`.
 
 ### Quiet pushes while the owner is at the Mac
-- Design approved by the owner (2026-10-05): [`phases/quiet-at-mac.md`](phases/quiet-at-mac.md); plan: [`phases/quiet-at-mac-plan.md`](phases/quiet-at-mac-plan.md), waiting for the owner's review. Claimed by Claude (2026-10-05).
+- Implemented in bridge `0.5.0` and relay `0.5.0` (design: [`phases/quiet-at-mac.md`](phases/quiet-at-mac.md), plan: [`phases/quiet-at-mac-plan.md`](phases/quiet-at-mac-plan.md)), not deployed yet; claimed by Claude (2026-10-05).
+- Left to check on the owner's Mac and watch: the screen-lock key `ioreg` shows while locked (`CGSSessionScreenIsLocked`, or the top-level `IOConsoleLocked`), no buzz while at the Mac, a push about 10 minutes after the last input for a prompt still waiting, a push within 15 s of locking the screen, and an immediate push when away.
 
 ### Code debt (for later)
 
