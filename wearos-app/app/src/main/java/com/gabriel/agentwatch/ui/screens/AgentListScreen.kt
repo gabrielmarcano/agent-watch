@@ -38,6 +38,7 @@ import com.gabriel.agentwatch.R
 import com.gabriel.agentwatch.model.AgentState
 import com.gabriel.agentwatch.network.UiState
 import com.gabriel.agentwatch.ui.components.ResIcon
+import com.gabriel.agentwatch.ui.components.agentStatus
 import com.gabriel.agentwatch.ui.components.ScreenList
 import com.gabriel.agentwatch.ui.components.transformedItem
 import com.gabriel.agentwatch.ui.logic.AttentionSection
@@ -47,7 +48,6 @@ import com.gabriel.agentwatch.ui.logic.listStatus
 import com.gabriel.agentwatch.ui.theme.Amber
 import com.gabriel.agentwatch.ui.theme.OnSurfaceVariant
 import com.gabriel.agentwatch.ui.theme.Red
-import com.gabriel.agentwatch.ui.theme.statusStyle
 
 private const val DIMMED_ALPHA = 0.6f
 
@@ -174,8 +174,7 @@ fun AgentRow(
     modifier: Modifier,
     transformation: SurfaceTransformation?
 ) {
-    val style = statusStyle(agent.status)
-    val statusWord = stringResource(style.label)
+    val (style, statusWord) = agentStatus(agent)
     val secondary = buildAnnotatedString {
         withStyle(SpanStyle(color = style.accent, fontWeight = FontWeight.SemiBold)) { append(statusWord) }
         agent.agent.takeIf { it.isNotBlank() }?.let { append(" · $it") }

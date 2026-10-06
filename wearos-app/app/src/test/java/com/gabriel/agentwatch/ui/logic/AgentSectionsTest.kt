@@ -60,4 +60,21 @@ class AgentSectionsTest {
     fun noAgentsNoSections() {
         assertEquals(emptyList<SectionedAgents>(), attentionSections(emptyList()))
     }
+
+    @Test
+    fun aWorkingAgentWaitingOnBackgroundAgentsShowsAsDoneButStaysInWorking() {
+        val waiting = agent("w", "working").copy(background_agents = 2)
+        assertEquals(2, waiting.waitingOnBackground())
+        assertEquals("done", waiting.shownStatus())
+        assertEquals(AttentionSection.WORKING, waiting.attentionSection())
+
+        val generating = agent("g", "working")
+        assertEquals(0, generating.waitingOnBackground())
+        assertEquals("working", generating.shownStatus())
+
+        // The count means nothing outside working (the bridge never sends it there).
+        val blocked = agent("b", "blocked").copy(background_agents = 1)
+        assertEquals(0, blocked.waitingOnBackground())
+        assertEquals("blocked", blocked.shownStatus())
+    }
 }

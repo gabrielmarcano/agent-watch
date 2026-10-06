@@ -76,6 +76,20 @@ func TestOmittedFields(t *testing.T) {
 	if bytes.Contains(data, []byte(`"prompt"`)) {
 		t.Errorf("Expected prompt to be omitted in non-blocked state, got: %s", string(data))
 	}
+	if bytes.Contains(data, []byte(`"background_agents"`)) {
+		t.Errorf("Expected background_agents to be omitted when 0, got: %s", string(data))
+	}
+
+	// A working agent that only waits on its background agents (contracts.md §1.2).
+	state.BackgroundAgents = 2
+	data, _ = json.Marshal(state)
+	if !bytes.Contains(data, []byte(`"background_agents":2`)) {
+		t.Errorf("Expected background_agents:2, got: %s", string(data))
+	}
+	var back model.AgentState
+	if err := json.Unmarshal(data, &back); err != nil || back.BackgroundAgents != 2 {
+		t.Errorf("round trip: %+v, %v", back, err)
+	}
 
 	// Unknown prompt should serialize options as [] not null
 	prompt := model.PendingPrompt{

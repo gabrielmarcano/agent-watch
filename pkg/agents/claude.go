@@ -204,6 +204,16 @@ func (c *claudeAdapter) LastTurn(ctx context.Context, ref SessionRef) (*model.Hi
 	return nil, ErrNoTranscript
 }
 
+// isCommandWrapper reports whether a user line's trimmed text is Claude
+// Code's wrapper around a slash command, a local command's output, `!` shell
+// input or output, or a system reminder: never a message of the user.
+func isCommandWrapper(t string) bool {
+	return strings.HasPrefix(t, "<command-") ||
+		strings.HasPrefix(t, "<local-command-") ||
+		strings.HasPrefix(t, "<bash-") ||
+		strings.HasPrefix(t, "<system-reminder>")
+}
+
 // claudeTurn is the last turn found in a transcript tail.
 type claudeTurn struct {
 	query, response string
@@ -299,11 +309,7 @@ func claudeLastTurn(ctx context.Context, content string) (claudeTurn, error) {
 				if t != "" && (len(entries) == 0 || entries[len(entries)-1].turnEnd) {
 					entries = append(entries, parsedEntry{isUser: true})
 				}
-			} else if t != "" &&
-				!strings.HasPrefix(t, "<command-") &&
-				!strings.HasPrefix(t, "<local-command-") &&
-				!strings.HasPrefix(t, "<bash-") &&
-				!strings.HasPrefix(t, "<system-reminder>") {
+			} else if t != "" && !isCommandWrapper(t) {
 				entries = append(entries, parsedEntry{
 					isUser:    true,
 					queryText: textContent,

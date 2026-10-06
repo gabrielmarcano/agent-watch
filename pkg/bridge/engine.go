@@ -213,6 +213,12 @@ func (e *Engine) OnChanges(changes []herdr.Change) {
 				pub.Prompt = nil
 			}
 
+			// The turn watch owns the background count; it holds only while
+			// herdr keeps the pane working.
+			if pub.Status == model.StatusWorking {
+				pub.BackgroundAgents = st.public.BackgroundAgents
+			}
+
 			st.public = pub
 			if e.Relay != nil {
 				e.Relay.Send(model.AgentUpdateMsg{
@@ -458,7 +464,8 @@ func (e *Engine) publishHistory(paneID, agent, sessionValue string, item model.H
 // panes herdr reports working whose adapter reads turn ends
 // (agents.TurnEndReader): a turn can end there without herdr ever reporting
 // done (Claude with background agents running), and its reply is published
-// like one captured on a working → done transition. It returns at once when
+// like one captured on a working → done transition. The check also keeps
+// the pane's background_agents current. It returns at once when
 // TurnCheckInterval is 0.
 func (e *Engine) StartTurnWatch(ctx context.Context) {
 	if e.TurnCheckInterval <= 0 {
@@ -486,10 +493,12 @@ type workingPane struct {
 }
 
 // checkWorkingTurns publishes the last completed turn of every working pane
-// whose turn-end marker changed since the last check. The first marker seen
-// for a pane is published too: the relay drops a reply it already holds.
+// whose turn-end marker changed since the last check, then the pane's
+// background count when it changed. The first marker seen for a pane is
+// published too: the relay drops a reply it already holds.
 func (e *Engine) checkWorkingTurns(ctx context.Context) {
 	var panes []workingPane
+	var hidden []string // working panes whose conversation the reader cannot see
 	e.mu.RLock()
 	for paneID, st := range e.states {
 		if st.public.Status != model.StatusWorking {
@@ -501,10 +510,12 @@ func (e *Engine) checkWorkingTurns(ctx context.Context) {
 			continue
 		}
 		if v, ok := ad.(agents.ViewDetector); ok && !v.ShowsConversation(titleOf(st.info)) {
+			hidden = append(hidden, paneID)
 			continue
 		}
 		ref := st.info.TrustedSession()
 		if ref == nil {
+			hidden = append(hidden, paneID)
 			continue
 		}
 		panes = append(panes, workingPane{paneID: paneID, agent: st.public.Agent, reader: reader, ref: agents.SessionRef{
@@ -513,33 +524,59 @@ func (e *Engine) checkWorkingTurns(ctx context.Context) {
 	}
 	e.mu.RUnlock()
 
+	for _, paneID := range hidden {
+		e.setBackground(paneID, 0)
+	}
 	for _, p := range panes {
 		if ctx.Err() != nil {
 			return
 		}
 		readCtx, cancel := context.WithTimeout(ctx, e.TranscriptTimeout)
-		item, marker, err := p.reader.LastCompletedTurn(readCtx, p.ref)
+		end, err := p.reader.LastCompletedTurn(readCtx, p.ref)
 		cancel()
-		if err != nil || marker == "" {
-			if err != nil && e.Logger != nil {
+		if err != nil {
+			// The count stays: a failed read says nothing new.
+			if e.Logger != nil {
 				e.Logger.Debug("turn-end check failed", "pane_id", p.paneID, "agent", p.agent, "err", err)
 			}
 			continue
 		}
 		e.mu.Lock()
 		st, ok := e.states[p.paneID]
-		changed := ok && st.turnMarker != marker
+		changed := ok && end.Marker != "" && st.turnMarker != end.Marker
 		if changed {
-			st.turnMarker = marker
+			st.turnMarker = end.Marker
 		}
 		e.mu.Unlock()
-		if !changed || item == nil {
-			continue
+		if changed && end.Item != nil {
+			if e.Logger != nil {
+				e.Logger.Info("a turn ended while the pane stays working; publishing its reply", "pane_id", p.paneID, "agent", p.agent)
+			}
+			e.publishHistory(p.paneID, p.agent, p.ref.Value, *end.Item)
 		}
-		if e.Logger != nil {
-			e.Logger.Info("a turn ended while the pane stays working; publishing its reply", "pane_id", p.paneID, "agent", p.agent)
-		}
-		e.publishHistory(p.paneID, p.agent, p.ref.Value, *item)
+		e.setBackground(p.paneID, end.Background)
+	}
+}
+
+// setBackground stores n as the pane's background_agents and publishes the
+// agent when it changed, as long as herdr still reports the pane working.
+func (e *Engine) setBackground(paneID string, n int) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	st, ok := e.states[paneID]
+	if !ok || st.public.Status != model.StatusWorking || st.public.BackgroundAgents == n {
+		return
+	}
+	if e.Logger != nil {
+		e.Logger.Info("background agents changed", "pane_id", paneID, "from", st.public.BackgroundAgents, "to", n)
+	}
+	st.public.BackgroundAgents = n
+	st.public.UpdatedAt = model.Now()
+	if e.Relay != nil {
+		e.Relay.Send(model.AgentUpdateMsg{
+			Type:  model.WireAgentUpdate,
+			Agent: st.public,
+		})
 	}
 }
 

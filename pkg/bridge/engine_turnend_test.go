@@ -4,11 +4,13 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strconv"
 	"testing"
 	"time"
 
 	"github.com/gabrielmarcano/agent-monitor/pkg/agents"
 	"github.com/gabrielmarcano/agent-monitor/pkg/herdr"
+	"github.com/gabrielmarcano/agent-monitor/pkg/model"
 )
 
 // A Claude pane with background agents stays working while its turns end
@@ -81,4 +83,105 @@ func TestEngine_TurnEndWhileWorking(t *testing.T) {
 	if item := waitHistory(h, 200*time.Millisecond); item != nil {
 		t.Fatalf("turn watch published %+v for a pane that is not working", item)
 	}
+}
+
+// background_agents follows the transcript while herdr keeps the pane
+// working: the count of the last turn end while Claude waits, 0 while a newer
+// turn is generated, kept across herdr updates that stay working, and
+// dropped when the pane leaves working. A check that changes nothing sends
+// nothing.
+func TestEngine_BackgroundAgents(t *testing.T) {
+	h := newTestHarness(t)
+	home := t.TempDir()
+	dir := filepath.Join(home, ".claude", "projects", "-tmp-aw-sandbox")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "s1.jsonl")
+	write := func(s string) {
+		t.Helper()
+		f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := f.WriteString(s); err != nil {
+			t.Fatal(err)
+		}
+		f.Close()
+	}
+	end := func(uuid string, n int) string {
+		pending := ""
+		if n > 0 {
+			pending = `"pendingBackgroundAgentCount":` + strconv.Itoa(n) + `,`
+		}
+		return `{"type":"system","subtype":"turn_duration",` + pending + `"uuid":"` + uuid + `"}` + "\n"
+	}
+	h.engine.Agents = agents.NewRegistry(agents.Config{Home: home})
+	session := &herdr.AgentSession{Agent: "claude", Kind: "id", Value: "s1"}
+	cwd := "/tmp/aw-sandbox"
+	pane := func(status string, seq uint64, focused bool) herdr.AgentInfo {
+		p := claudePane(status, "", seq, session)
+		p.CWD = &cwd
+		p.Focused = focused
+		return p
+	}
+	ctx := context.Background()
+	isUpdate := func(msg any) bool { _, ok := msg.(model.AgentUpdateMsg); return ok }
+	nextCount := func(step string) int {
+		t.Helper()
+		msg, _ := waitMsg(h, 3*time.Second, isUpdate)
+		if msg == nil {
+			t.Fatalf("%s: no agent_update", step)
+		}
+		return msg.(model.AgentUpdateMsg).Agent.BackgroundAgents
+	}
+	noUpdate := func(step string) {
+		t.Helper()
+		if msg, _ := waitMsg(h, 200*time.Millisecond, isUpdate); msg != nil {
+			t.Fatalf("%s: unexpected %+v", step, msg)
+		}
+	}
+
+	working := pane("working", 7, false)
+	h.track(working)
+	if n := nextCount("tracked"); n != 0 {
+		t.Fatalf("tracked: background %d", n)
+	}
+
+	write(`{"type":"user","message":{"content":"launch two agents"}}` + "\n" +
+		`{"type":"assistant","message":{"content":[{"type":"text","text":"launched"}]}}` + "\n" + end("u1", 2))
+	h.engine.checkWorkingTurns(ctx)
+	if n := nextCount("turn ended with 2 running"); n != 2 {
+		t.Fatalf("turn ended with 2 running: background %d", n)
+	}
+	h.engine.checkWorkingTurns(ctx)
+	noUpdate("unchanged transcript")
+
+	// A herdr update that stays working keeps the count.
+	focused := pane("working", 7, true)
+	h.engine.OnChanges([]herdr.Change{{Kind: herdr.Updated, Agent: focused, Prev: &working}})
+	if n := nextCount("focus change"); n != 2 {
+		t.Fatalf("focus change: background %d, want 2", n)
+	}
+
+	// An agent's report starts a turn: Claude is generating again.
+	write(`{"type":"user","isMeta":true,"message":{"content":"<task-notification>one finished</task-notification>"}}` + "\n")
+	h.engine.checkWorkingTurns(ctx)
+	if n := nextCount("report turn"); n != 0 {
+		t.Fatalf("report turn: background %d, want 0", n)
+	}
+	write(`{"type":"assistant","message":{"content":[{"type":"text","text":"one left"}]}}` + "\n" + end("u2", 1))
+	h.engine.checkWorkingTurns(ctx)
+	if n := nextCount("report turn ended"); n != 1 {
+		t.Fatalf("report turn ended: background %d, want 1", n)
+	}
+
+	// Leaving working drops it.
+	done := pane("done", 8, true)
+	h.engine.OnChanges([]herdr.Change{{Kind: herdr.Updated, Agent: done, Prev: &focused}})
+	if n := nextCount("done"); n != 0 {
+		t.Fatalf("done: background %d, want 0", n)
+	}
+	h.engine.checkWorkingTurns(ctx)
+	noUpdate("not working")
 }

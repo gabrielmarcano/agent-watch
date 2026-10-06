@@ -8,6 +8,11 @@
     <string name="status_working">Working</string>
     <string name="status_idle">Idle</string>
     <string name="status_unknown">Unknown</string>
+    <!-- A working agent whose turn ended while its background agents still run -->
+    <plurals name="status_done_background">
+        <item quantity="one">Done · %d in background</item>
+        <item quantity="other">Done · %d in background</item>
+    </plurals>
 
     <!-- List -->
     <string name="section_needs_you">Needs you</string>

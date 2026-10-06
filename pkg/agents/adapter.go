@@ -36,11 +36,22 @@ type SessionRef struct {
 // done). The bridge asks it periodically, only for panes herdr reports
 // working.
 type TurnEndReader interface {
-	// LastCompletedTurn returns the last turn that has ended and a marker
-	// that changes whenever a newer turn ends ("" while none has). A turn
-	// still being written is never returned. item is nil when that turn has
-	// no reply. Reads are bounded and cheap when nothing changed.
-	LastCompletedTurn(ctx context.Context, ref SessionRef) (item *model.HistoryItem, marker string, err error)
+	// LastCompletedTurn returns the last turn that has ended (TurnEnd). A
+	// turn still being written is never returned. Reads are bounded and
+	// cheap when nothing changed.
+	LastCompletedTurn(ctx context.Context, ref SessionRef) (TurnEnd, error)
+}
+
+// TurnEnd is what a TurnEndReader found at the last turn end.
+type TurnEnd struct {
+	// Item is that turn's reply; nil when it has none.
+	Item *model.HistoryItem
+	// Marker changes whenever a newer turn ends; "" while none has.
+	Marker string
+	// Background counts the background agents that turn left running, while
+	// the agent only waits on them: 0 once a newer turn has started (the
+	// agent is generating again) or when none run.
+	Background int
 }
 
 // ViewDetector is implemented by adapters whose TUI can fill the pane with
