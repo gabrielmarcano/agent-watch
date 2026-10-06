@@ -49,6 +49,9 @@ Known and accepted for now; none blocks a phase.
 - **OpenCode focus guard:** a millisecond window remains between the ANSI read and `send_keys`.
 - **Claude transcript:** herdr reports only the session id, not the transcript path its hook receives. A turn that ends while the bridge restarts gets the generic `Task finished` body.
 - **Wear OS release APK:** signed with the debug key.
+- **macOS Background App Activity (the owner's request, 2026-10-06, for later):** System Settings lists the bridge as `agent-watch-bridge` with the generic `exec` icon, and the menu bar as `AgentWatchBar` with a blank icon. Ideas, not checked yet:
+  - the menu bar app has no icon (`CFBundleIconFile`), and Settings shows the bundle's file name, not `CFBundleDisplayName`;
+  - `AssociatedBundleIdentifiers` in the LaunchAgent plist (macOS 13+) may list the bridge under the menu bar app's name and icon.
 - **Notifications:** grouping is deferred (one notification per pane plus the digest already bound them).
 - **A transcript read that fails at the turn's end** falls back to a screen capture, and that path is slower than the relay's wait for the reply (`push.DefaultReplyWait`), so the done push says `Task finished`.
 - **Trial (2026-10-01): reply previews show the start and the end.** The done push and the watch's last-reply card show a long reply's first line, "…" and its end, where the question or next step usually is (175 of 200 stored replies were longer than the push, 149 longer than the card). If the owner does not like it, go back to the start only: `replyPreview` (`pkg/push/push.go`) and `headTailPreview` (`wearos-app/.../ui/logic/TextPreview.kt`).
