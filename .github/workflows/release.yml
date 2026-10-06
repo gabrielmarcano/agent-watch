@@ -71,7 +71,7 @@ jobs:
           set -a; . ./VERSIONS; set +a
           make bar
           mkdir -p "$RUNNER_TEMP/dist"
-          ditto -c -k --keepParent bin/AgentWatchBar.app "$RUNNER_TEMP/dist/AgentWatchBar_${MENUBAR_VERSION}_macos_universal.zip"
+          ditto -c -k --keepParent "bin/Agent Watch.app" "$RUNNER_TEMP/dist/AgentWatchBar_${MENUBAR_VERSION}_macos_universal.zip"
       - uses: actions/upload-artifact@v4
         with:
           name: menubar

@@ -52,7 +52,7 @@ Minimum versions and details: [Requirements](docs/GUIDE.md#requirements).
 4. **Watch app:** put your `google-services.json` in `wearos-app/app/`, connect the watch over wireless `adb`, and run `./gradlew :app:installDebug` in `wearos-app/`.
 5. **Pair:** `./bin/agent-watch-bridge pair`, and enter the code on the watch.
 
-**Optional:** the macOS menu bar app shows whether the bridge and the relay are up: `make bar && open bin/AgentWatchBar.app`.
+**Optional:** the macOS menu bar app shows whether the bridge and the relay are up: `make bar && open "bin/Agent Watch.app"`.
 
 Every step in detail, the day-to-day commands and troubleshooting are in **[the full guide](docs/GUIDE.md)**.
 

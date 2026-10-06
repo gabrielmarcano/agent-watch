@@ -5,13 +5,15 @@
     <key>CFBundleInfoDictionaryVersion</key>
     <string>6.0</string>
     <key>CFBundleExecutable</key>
-    <string>AgentWatchBar</string>
+    <string>Agent Watch</string>
     <key>CFBundleIdentifier</key>
     <string>com.gabrielmarcano.AgentWatchBar</string>
     <key>CFBundleName</key>
     <string>Agent Watch</string>
     <key>CFBundleDisplayName</key>
     <string>Agent Watch</string>
+    <key>CFBundleIconFile</key>
+    <string>AppIcon</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <!-- Placeholders: build.sh writes MENUBAR_VERSION from VERSIONS into the built app. -->

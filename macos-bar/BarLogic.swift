@@ -159,6 +159,7 @@ struct Presentation: Equatable, Sendable {
     var tooltip: String
     var headline: String
     var details: [String]
+    var detailHelp: String? // the raw error behind the first detail line, as its tooltip
     var hint: String?       // what to do next, when the user must act outside the bar
     var canStart: Bool
     var canStop: Bool
@@ -166,6 +167,10 @@ struct Presentation: Equatable, Sendable {
     var canPair: Bool
     var canOpenLogs: Bool
     var canRevealConfig: Bool
+    // The on/off switch at the top of the menu: on while the bridge runs;
+    // flipping it starts or stops the service.
+    var switchOn: Bool
+    var switchEnabled: Bool
 }
 
 enum Symbols {
@@ -190,17 +195,57 @@ func versionLines(barVersion: String, status: LocalStatus?) -> [String] {
     return lines
 }
 
-let configureHint = "Configure it in a terminal: make configure-bridge in the repo, or agent-watch-bridge configure --env-file agent-watch.env (the token never goes on the command line)"
+/// The longest line the menu shows: the menu is as wide as its longest
+/// item, so a raw Go error (URLs, wrapped causes) would stretch it across
+/// the screen. The full text stays in the bridge log and the line's tooltip.
+let maxMenuLine = 64
+
+/// The menu's short form of configureHelp.
+let configureHint = "Run make configure-bridge in a terminal."
+let configureHelp = "Configure it in a terminal: make configure-bridge in the repo, or agent-watch-bridge configure --env-file agent-watch.env (the token never goes on the command line)"
+
+/// One menu line for a bridge error: what failed and, for an unreachable
+/// relay, why, in a few words; anything else is cut to maxMenuLine.
+/// The bridge's wording: pkg/relayclient (relay), pkg/bridge (herdr, config).
+func errorSummary(_ raw: String) -> String {
+    let line = raw.split(separator: "\n", omittingEmptySubsequences: true).first
+        .map { $0.trimmingCharacters(in: .whitespaces) } ?? ""
+    let lower = line.lowercased()
+    if lower.contains("rejected the host token") { return "The relay rejected the host token" }
+    if lower.hasPrefix("relay connection lost") { return "Connection to the relay lost" }
+    if lower.hasPrefix("relay unreachable") {
+        let causes: [(String, [String])] = [
+            ("timed out", ["deadline exceeded", "timeout", "timed out"]),
+            ("connection refused", ["connection refused"]),
+            ("host not found", ["no such host"]),
+            ("no network", ["network is unreachable", "no route to host"]),
+            ("TLS certificate", ["x509", "certificate"]),
+        ]
+        for (label, needles) in causes where needles.contains(where: { lower.contains($0) }) {
+            return "Relay unreachable (\(label))"
+        }
+        return "Relay unreachable"
+    }
+    return line.count <= maxMenuLine ? line : String(line.prefix(maxMenuLine - 1)) + "…"
+}
+
+/// The detail line and its tooltip for a raw error: the tooltip only when
+/// the line had to be shortened.
+private func errorLine(_ raw: String) -> (line: String, help: String?) {
+    let line = errorSummary(raw)
+    return (line, line == raw ? nil : raw)
+}
 
 func present(state: BarState, status: LocalStatus?, busy: String? = nil, barVersion: String = "") -> Presentation {
     let s = status ?? LocalStatus()
     let host = s.relayHost.isEmpty ? "the relay" : s.relayHost
     var p = Presentation(
         symbolName: Symbols.neutral, dot: .gray, versions: versionLines(barVersion: barVersion, status: status),
-        tooltip: "", headline: "", details: [],
+        tooltip: "", headline: "", details: [], detailHelp: nil,
         hint: nil,
         canStart: false, canStop: s.installed, canRestart: s.installed && s.configured,
-        canPair: s.configured, canOpenLogs: !s.logPath.isEmpty, canRevealConfig: !s.configPath.isEmpty
+        canPair: s.configured, canOpenLogs: !s.logPath.isEmpty, canRevealConfig: !s.configPath.isEmpty,
+        switchOn: false, switchEnabled: false
     )
 
     switch state {
@@ -208,7 +253,7 @@ func present(state: BarState, status: LocalStatus?, busy: String? = nil, barVers
         p.symbolName = Symbols.problem
         p.dot = .red
         p.headline = "agent-watch-bridge not found"
-        p.details = ["No installed LaunchAgent names it, and it is not next to this app."]
+        p.details = ["Not in the LaunchAgent, nor next to this app."]
         p.hint = "Build it (make bridge) and run: bin/agent-watch-bridge start"
         p.canStop = false; p.canRestart = false; p.canPair = false
         p.canOpenLogs = false; p.canRevealConfig = false
@@ -216,11 +261,15 @@ func present(state: BarState, status: LocalStatus?, busy: String? = nil, barVers
         p.symbolName = Symbols.problem
         p.dot = .red
         p.headline = "Bridge status unavailable"
-        p.details = [err]
+        let e = errorLine(err)
+        p.details = [e.line]; p.detailHelp = e.help
     case .notConfigured(let err):
         p.symbolName = Symbols.off
         p.headline = "Bridge not configured"
-        p.details = err.isEmpty ? [] : [err]
+        if !err.isEmpty {
+            let e = errorLine(err)
+            p.details = [e.line]; p.detailHelp = e.help
+        }
         p.hint = configureHint
         p.canRestart = false
     case .notInstalled:
@@ -232,7 +281,12 @@ func present(state: BarState, status: LocalStatus?, busy: String? = nil, barVers
         p.symbolName = Symbols.off
         p.dot = err.isEmpty ? .gray : .red // an error means it failed to start
         p.headline = "Bridge stopped"
-        p.details = err.isEmpty ? ["Your watch shows this Mac as offline."] : [err]
+        if err.isEmpty {
+            p.details = ["Your watch shows this Mac as offline."]
+        } else {
+            let e = errorLine(err)
+            p.details = [e.line]; p.detailHelp = e.help
+        }
         p.canStart = true
     case .stale(let age):
         p.symbolName = Symbols.problem
@@ -244,7 +298,8 @@ func present(state: BarState, status: LocalStatus?, busy: String? = nil, barVers
         p.symbolName = Symbols.problem
         p.dot = .red
         p.headline = "Relay error"
-        p.details = [err, "Retrying \(host) in the background."]
+        let e = errorLine(err)
+        p.details = [e.line, "Retrying \(host) in the background."]; p.detailHelp = e.help
     case .connecting:
         p.symbolName = Symbols.neutral
         p.dot = .yellow
@@ -254,7 +309,8 @@ func present(state: BarState, status: LocalStatus?, busy: String? = nil, barVers
         p.symbolName = Symbols.neutral
         p.dot = .yellow
         p.headline = "herdr is not running"
-        p.details = [err.isEmpty ? "The bridge cannot reach the herdr socket." : err, "Connected to \(host)."]
+        let e = errorLine(err.isEmpty ? "The bridge cannot reach the herdr socket." : err)
+        p.details = [e.line, "Connected to \(host)."]; p.detailHelp = e.help
     case .connected:
         p.symbolName = Symbols.connected
         p.dot = .green
@@ -265,15 +321,19 @@ func present(state: BarState, status: LocalStatus?, busy: String? = nil, barVers
     var isStale = false
     if case .stale = state { isStale = true }
     if s.running, !isStale, !s.daemonVersion.isEmpty, !s.version.isEmpty, s.daemonVersion != s.version {
-        p.details.append("The bridge runs \(s.daemonVersion); restart it to run \(s.version).")
+        p.details.append("Running \(s.daemonVersion); restart for \(s.version).")
     }
     p.canStart = p.canStart && s.configured && !s.running
 
     p.tooltip = tooltip(state: state, status: s)
 
+    p.switchOn = s.running
+    p.switchEnabled = s.running ? p.canStop : p.canStart
+
     if let busy {
         p.headline = "\(busy)…"
         p.canStart = false; p.canStop = false; p.canRestart = false; p.canPair = false
+        p.switchEnabled = false
     }
     return p
 }
@@ -286,7 +346,7 @@ func tooltip(state: BarState, status s: LocalStatus) -> String {
     case .connecting:
         return "Agent Watch: connecting to \(host)"
     case .relayError(let err):
-        return "Agent Watch: relay error: \(err)"
+        return "Agent Watch: \(errorSummary(err))"
     case .herdrOffline:
         return "Agent Watch: herdr is not running"
     case .stale:
@@ -298,7 +358,7 @@ func tooltip(state: BarState, status s: LocalStatus) -> String {
     case .notConfigured:
         return "Agent Watch: bridge not configured"
     case .statusUnavailable(let err):
-        return "Agent Watch: status unavailable: \(err)"
+        return "Agent Watch: status unavailable: \(errorSummary(err))"
     case .binaryMissing:
         return "Agent Watch: agent-watch-bridge not found"
     }
