@@ -145,7 +145,7 @@ let pNI = present(state: .notInstalled, status: st { $0.running = false; $0.inst
 check(pNI.canStart && !pNI.canStop && !pNI.canRestart, "not installed: Start only")
 
 let pErr = present(state: .relayError("relay rejected the host token (HTTP 401)"), status: st { $0.relayConnected = false })
-check(pErr.details.first == "relay rejected the host token (HTTP 401)", "relay error shows last_error: \(pErr.details)")
+check(pErr.details.first == "The relay rejected the host token" && pErr.detailHelp == "relay rejected the host token (HTTP 401)", "relay error: summary in the menu, last_error as its tooltip: \(pErr.details)")
 
 let pMissing = present(state: .binaryMissing, status: nil)
 check(!pMissing.canStart && !pMissing.canStop && !pMissing.canPair && pMissing.hint != nil, "binary missing: nothing to run")
@@ -154,7 +154,7 @@ let pBusy = present(state: .connected, status: connected2, busy: "Restarting")
 check(!pBusy.canStart && !pBusy.canStop && !pBusy.canRestart && !pBusy.canPair && pBusy.headline == "Restarting…", "busy disables actions")
 
 let pOld = present(state: .connected, status: st { $0.daemonVersion = "0.1.0" })
-check(pOld.details.contains { $0.contains("restart it to run 0.2.0") }, "version mismatch hint")
+check(pOld.details.contains { $0.contains("restart for 0.2.0") }, "version mismatch hint")
 
 // The spec's states must be distinguishable at a glance (icon + title).
 let glance: [(String, BarState, LocalStatus)] = [
@@ -180,6 +180,68 @@ for name in Symbols.all {
     check(NSImage(systemSymbolName: name, accessibilityDescription: nil) != nil, "SF Symbol \(name) exists")
 }
 
+// MARK: the on/off switch
+
+// The switch is on while the bridge runs, and flips the service: on starts
+// it, off stops it. It is disabled while an action runs or when the flip
+// would fail (not configured, binary missing).
+let switchCases: [(String, BarState, LocalStatus?, String?, Bool, Bool)] = [
+    ("connected", .connected, st { _ in }, nil, true, true),
+    ("relay error", .relayError("x"), st { $0.relayConnected = false }, nil, true, true),
+    ("stale still runs", .stale(40), st { $0.stale = true }, nil, true, true),
+    ("stopped", .stopped(""), st { $0.running = false }, nil, false, true),
+    ("not installed", .notInstalled, st { $0.running = false; $0.installed = false }, nil, false, true),
+    ("not configured", .notConfigured("c"), st { $0.running = false; $0.configured = false }, nil, false, false),
+    ("binary missing", .binaryMissing, nil, nil, false, false),
+    ("busy", .connected, st { _ in }, "Stopping", true, false),
+]
+for (name, state, status, busy, on, enabled) in switchCases {
+    let p = present(state: state, status: status, busy: busy)
+    check(p.switchOn == on && p.switchEnabled == enabled, "switch \(name): on \(p.switchOn) enabled \(p.switchEnabled), want \(on) \(enabled)")
+}
+
+// MARK: short error lines
+
+// The menu is as wide as its longest line: raw Go errors never go in it.
+let dialTimeout = "relay unreachable: failed to WebSocket dial: failed to send handshake request: Get \"https://relay.example.com/v1/host\": context deadline exceeded"
+let errorCases: [(String, String)] = [
+    (dialTimeout, "Relay unreachable (timed out)"),
+    ("relay unreachable: failed to WebSocket dial: failed to send handshake request: Get \"https://relay.example.com/v1/host\": dial tcp 1.2.3.4:443: connect: connection refused", "Relay unreachable (connection refused)"),
+    ("relay unreachable: failed to WebSocket dial: failed to send handshake request: Get \"https://relay.example.com/v1/host\": dial tcp: lookup relay.example.com: no such host", "Relay unreachable (host not found)"),
+    ("relay unreachable: failed to WebSocket dial: Get \"https://relay.example.com/v1/host\": dial tcp 1.2.3.4:443: connect: network is unreachable", "Relay unreachable (no network)"),
+    ("relay unreachable: failed to WebSocket dial: Get \"https://relay.example.com/v1/host\": tls: failed to verify certificate: x509: certificate has expired", "Relay unreachable (TLS certificate)"),
+    ("relay unreachable: failed to WebSocket dial: expected handshake response status code 101 but got 502", "Relay unreachable"),
+    ("relay connection lost: failed to get reader: failed to read frame header: EOF", "Connection to the relay lost"),
+    ("relay rejected the host token (HTTP 401); re-run configure with the relay's AW_HOST_TOKEN", "The relay rejected the host token"),
+    ("herdr unreachable at /s", "herdr unreachable at /s"),
+    ("config gone", "config gone"),
+]
+for (raw, want) in errorCases {
+    let got = errorSummary(raw)
+    check(got == want, "errorSummary: got \(got), want \(want) for \(raw.prefix(60))")
+}
+let longUnknown = String(repeating: "word ", count: 40)
+let longSummary = errorSummary(longUnknown)
+check(longSummary.count <= maxMenuLine && longSummary.hasSuffix("…"), "a long unknown error is cut: \(longSummary)")
+check(errorSummary("first line\nsecond line") == "first line", "only the first line")
+
+let pRelay = present(state: .relayError(dialTimeout), status: st { $0.relayConnected = false; $0.relayError = dialTimeout })
+check(pRelay.details.first == "Relay unreachable (timed out)", "relay error detail is the summary: \(pRelay.details)")
+check(pRelay.detailHelp == dialTimeout, "the raw error is the detail's tooltip")
+check(pRelay.tooltip == "Agent Watch: Relay unreachable (timed out)", "icon tooltip is short: \(pRelay.tooltip)")
+
+// No menu line is longer than maxMenuLine, whatever the error.
+let longStates: [BarState] = [
+    .relayError(dialTimeout), .stopped(dialTimeout), .statusUnavailable(dialTimeout),
+    .notConfigured(dialTimeout), .herdrOffline(dialTimeout + dialTimeout),
+]
+for state in longStates {
+    let p = present(state: state, status: st { $0.relayConnected = false; $0.running = false })
+    for line in [p.headline, p.hint ?? ""] + p.details {
+        check(line.count <= maxMenuLine, "\(state): line too long (\(line.count)): \(line)")
+    }
+}
+
 // MARK: pairing
 
 let pair = decodePairInfo(#"{"code":"417293","expires_at":"2026-09-25T15:05:00Z","expires_in_seconds":300,"relay_host":"relay.example.com"}"#)
@@ -196,7 +258,7 @@ check(decodePairInfo(#"{"code":""}"#) == nil, "empty code rejected")
 let exe = tmp.appendingPathComponent("bin/agent-watch-bridge")
 try? FileManager.default.createDirectory(at: exe.deletingLastPathComponent(), withIntermediateDirectories: true)
 FileManager.default.createFile(atPath: exe.path, contents: Data("#!/bin/sh\n".utf8), attributes: [.posixPermissions: 0o755])
-let bundle = tmp.appendingPathComponent("bin/AgentWatchBar.app")
+let bundle = tmp.appendingPathComponent("bin/Agent Watch.app")
 let plistURL = tmp.appendingPathComponent("agent.plist")
 let isExec: (String) -> Bool = { FileManager.default.isExecutableFile(atPath: $0) }
 

@@ -16,7 +16,7 @@ The one place for the project's state: what is done, what is open, what comes ne
 | [6 watchOS](phases/6-watchos.md) (best-effort) | not started; after 5 | — |
 | [7 Android phone client](phases/7-android-mobile.md) | not started; after 5 | — |
 
-**Deployed** (2026-10-06): the relay at `0.5.0` (commit `bd16d60`); the bridge at `0.5.0` (commit `bd16d60`) on the owner's Mac; the Wear OS app `1.2.4` (release build, version code 9) on the owner's Pixel Watch 2; the menu bar `0.4.0`, built from `main` into `bin/` (2026-10-05). The component versions are in `VERSIONS`.
+**Deployed** (2026-10-06): the relay at `0.5.0` (commit `bd16d60`); on the owner's Mac, the bridge `0.5.1` and the menu bar `0.5.0`, built from the branch `menubar-toggle` (2026-10-06); the Wear OS app `1.2.4` (release build, version code 9) on the owner's Pixel Watch 2. The component versions are in `VERSIONS`.
 
 **What can run in parallel:**
 - **5 runs alone:** it tests the whole system.
@@ -49,6 +49,12 @@ Known and accepted for now; none blocks a phase.
 - **OpenCode focus guard:** a millisecond window remains between the ANSI read and `send_keys`.
 - **Claude transcript:** herdr reports only the session id, not the transcript path its hook receives. A turn that ends while the bridge restarts gets the generic `Task finished` body.
 - **Wear OS release APK:** signed with the debug key.
+- **macOS Background App Activity** (the owner's request, 2026-10-06): menu bar `0.5.0` shows as **Agent Watch** with the Wear OS app's icon (checked by the owner on 2026-10-06, after turning Open at Login off and on). The bridge still shows as `agent-watch-bridge` with the `exec` icon: its LaunchAgent names the app in `AssociatedBundleIdentifiers` (bridge `0.5.1`), but macOS lists it on its own (`sfltool dumpbtm`), probably because the key needs both signed with the same Team ID (there is no Developer ID account). The fix that needs no Team ID is the packaging below (the bridge inside the app).
+- **Tailscale-like packaging (the owner's idea, 2026-10-06, for later):** one `Agent Watch.app` that carries the bridge binary and registers it with `SMAppService.agent`, so Settings shows one item. Linux keeps what it has (the same bridge under systemd `--user`, driven by the CLI, like `tailscaled` and `tailscale up`/`down`); a Linux tray app would be a separate, optional client of the same CLI. Costs found in the code:
+  - the bundled plist is fixed, so the `HERDR_*` paths `start` pins today must come from `config.toml` or defaults;
+  - one owner of the macOS service (the app, or the CLI and the herdr plugin), never both;
+  - ad-hoc signing may ask for approval again after each rebuild (untested);
+  - updating the bridge means rebuilding the app.
 - **Notifications:** grouping is deferred (one notification per pane plus the digest already bound them).
 - **A transcript read that fails at the turn's end** falls back to a screen capture, and that path is slower than the relay's wait for the reply (`push.DefaultReplyWait`), so the done push says `Task finished`.
 - **Trial (2026-10-01): reply previews show the start and the end.** The done push and the watch's last-reply card show a long reply's first line, "…" and its end, where the question or next step usually is (175 of 200 stored replies were longer than the push, 149 longer than the card). If the owner does not like it, go back to the start only: `replyPreview` (`pkg/push/push.go`) and `headTailPreview` (`wearos-app/.../ui/logic/TextPreview.kt`).
@@ -81,7 +87,7 @@ Known and accepted for now; none blocks a phase.
 
 ### Checks nobody has done yet
 - Wear OS 1.2.2 on the watch, still unchecked: Quick Dictate and Change with the system input; backing out is silent; an empty notification reply shows `Empty reply — nothing sent`; after the stream drops (Wi-Fi off and on) or the app returns from the background, the agent screen shows the latest reply. (Verified by the owner on 2026-10-05: Reply with voice and with the keyboard reaches the confirm screen and the agent.)
-- Menu bar 0.4.0 on the owner's Mac: **Open at Login** registers the app (it opens after logging out and in), turning it off removes it, and the check follows a change made in System Settings.
+- Menu bar 0.5.0 on the owner's Mac (the switch is blue when on: checked by the owner on 2026-10-06): the switch in the first row starts and stops the bridge, and the focus goes back to the previous app when the menu closes; **Open at Login** registers the app (it opens after logging out and in), turning it off removes it, and the check follows a change made in System Settings; a relay error shows a short line, with the full error as its tooltip.
 - Wear OS 1.2.4 on the watch: an agent waiting on background agents shows `Done` with `N in background` on its own line. (The agent brand marks were checked by the owner on 2026-10-06: legible and like herdr's GUI app.)
 - ntfy delivery (watchOS push) has never been tested.
 - The watch over LTE or its phone's Bluetooth connection: only Wi-Fi has been checked.

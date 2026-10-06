@@ -90,6 +90,7 @@ func TestLaunchd_RenderHasEveryKey(t *testing.T) {
 		"<key>ThrottleInterval</key><integer>10</integer>",
 		"<key>StandardOutPath</key><string>" + spec.LogPath + "</string>",
 		"<key>StandardErrorPath</key><string>" + spec.LogPath + "</string>",
+		"<key>AssociatedBundleIdentifiers</key><array><string>com.gabrielmarcano.AgentWatchBar</string></array>",
 	} {
 		if !strings.Contains(rendered, want) {
 			t.Errorf("plist lacks %s", want)
