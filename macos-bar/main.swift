@@ -148,8 +148,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     func menuWillOpen(_ menu: NSMenu) {
         // The switch shows its accent only while the app is active. The
-        // cooperative NSApp.activate() is refused here, so force it (as
-        // Tailscale does), and give the focus back when the menu closes.
+        // cooperative NSApp.activate() is refused here, so force it, and
+        // give the focus back when the menu closes.
         let front = NSWorkspace.shared.frontmostApplication
         appBeforeMenu = front?.processIdentifier == ProcessInfo.processInfo.processIdentifier ? nil : front
         (self as ForceActivating).forceActivate()
