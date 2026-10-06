@@ -153,7 +153,7 @@ When the bridge runs on macOS, quiet pushes apply: while you use the Mac (input 
 
 ### 5. Optional: macOS Menu Bar App
 
-`make bar && open bin/AgentWatchBar.app`: a menu bar companion for the bridge. What it shows and does: [`macos-bar/README.md`](../macos-bar/README.md).
+`make bar && open "bin/Agent Watch.app"`: a menu bar companion for the bridge. What it shows and does: [`macos-bar/README.md`](../macos-bar/README.md).
 
 ### Day-to-day
 
@@ -169,7 +169,7 @@ When the bridge runs on macOS, quiet pushes apply: while you use the Mac (input 
 | `./bin/agent-watch-bridge status` | Human status, including the relay's view; exit 1 when the bridge is not running |
 | `./bin/agent-watch-bridge status --json --local` | Local files only, no network: what the menu bar reads ([`contracts.md` §6.2](reference/contracts.md)) |
 | `sudo agent-watch-relay devices list` / `devices revoke <id>` | On the VPS ([`deploy/relay/README.md`](../deploy/relay/README.md) § Devices) |
-| `make bar` | Rebuild the menu bar app (quit the running one and `open bin/AgentWatchBar.app` again) |
+| `make bar` | Rebuild the menu bar app (quit the running one and `open "bin/Agent Watch.app"` again) |
 | `make check` | Format, vet and test the Go code (`make bar-test` for the menu bar logic) |
 | `tools/herdr-overrides/herdr-overrides.sh check` | After a herdr update: are the temporary detection overrides still needed? ([Known issues](#known-issues)) |
 
@@ -185,7 +185,7 @@ When the bridge runs on macOS, quiet pushes apply: while you use the Mac (input 
 
 The [release workflow](../.github/workflows/release.yml) publishes a GitHub release with:
 - `agent-watch-bridge` for macOS (arm64, amd64) and Linux (amd64, arm64), and `agent-watch-relay` for Linux (amd64, arm64), as static binaries;
-- `AgentWatchBar.app` (universal) as a zip;
+- `Agent Watch.app` (universal) as a zip (`AgentWatchBar_<version>_macos_universal.zip`);
 - `SHA256SUMS`, and notes with each component's version and the commits since the previous tag.
 
 The Wear OS app is not attached: it needs your own `google-services.json` and signing key, so build it from source ([step 3](#3-build-and-install-the-wear-os-app)).

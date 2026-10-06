@@ -12,6 +12,8 @@
     <string>Agent Watch</string>
     <key>CFBundleDisplayName</key>
     <string>Agent Watch</string>
+    <key>CFBundleIconFile</key>
+    <string>AppIcon</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <!-- Placeholders: build.sh writes MENUBAR_VERSION from VERSIONS into the built app. -->

@@ -258,7 +258,7 @@ check(decodePairInfo(#"{"code":""}"#) == nil, "empty code rejected")
 let exe = tmp.appendingPathComponent("bin/agent-watch-bridge")
 try? FileManager.default.createDirectory(at: exe.deletingLastPathComponent(), withIntermediateDirectories: true)
 FileManager.default.createFile(atPath: exe.path, contents: Data("#!/bin/sh\n".utf8), attributes: [.posixPermissions: 0o755])
-let bundle = tmp.appendingPathComponent("bin/AgentWatchBar.app")
+let bundle = tmp.appendingPathComponent("bin/Agent Watch.app")
 let plistURL = tmp.appendingPathComponent("agent.plist")
 let isExec: (String) -> Bool = { FileManager.default.isExecutableFile(atPath: $0) }
 

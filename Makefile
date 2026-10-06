@@ -38,7 +38,7 @@ relay-linux:
 	@:$(call need-version,RELAY_VERSION)
 	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags "$(RELAY_LDFLAGS)" -o bin/agent-watch-relay-linux-amd64 ./cmd/relay
 
-# macOS menu bar companion (bin/AgentWatchBar.app), stamped with MENUBAR_VERSION.
+# macOS menu bar companion ("bin/Agent Watch.app"), stamped with MENUBAR_VERSION.
 bar:
 ifeq ($(UNAME_S),Darwin)
 	@:$(call need-version,MENUBAR_VERSION)

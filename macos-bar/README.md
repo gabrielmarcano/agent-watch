@@ -11,14 +11,15 @@ services: every 2.5 s it runs `agent-watch-bridge status --json --local`
 
 ```bash
 make bar            # or: macos-bar/build.sh
-open bin/AgentWatchBar.app
+open "bin/Agent Watch.app"
 ```
 
 - Universal (Apple silicon + Intel), macOS 13 or later, ad-hoc signed.
+- Its icon is drawn at build time from the Wear OS launcher icon's vector drawables (`make-icon.swift`), so both apps share one artwork.
 - The bundle version is `MENUBAR_VERSION` from `VERSIONS` (bump it as that
   file says). `build.sh` writes it into the built `Info.plist` before
   signing; the committed `Info.plist` holds a `0.0.0` placeholder.
-- `APP_DIR=/path/AgentWatchBar.app macos-bar/build.sh` builds somewhere else;
+- `APP_DIR=/path/AgentWatch.app macos-bar/build.sh` builds somewhere else;
   `MENUBAR_VERSION=x.y.z` overrides the version for one build.
 - To update a running copy: quit it from its menu, rebuild, open it again.
 - `make bar-test` tests the decision logic (`BarLogic.swift`) with the
@@ -33,7 +34,7 @@ item then opens System Settings → General → Login Items (Login Items &
 Extensions on macOS 15 and later), where you allow it. A change made there
 shows in the menu too.
 
-After moving the app to another folder, turn the item off and on again.
+After moving or renaming the app (up to menu bar 0.4.0 it was `bin/AgentWatchBar.app`), turn the item off and on again.
 
 ## Which bridge binary it uses
 
