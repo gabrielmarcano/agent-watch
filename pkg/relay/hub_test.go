@@ -4,9 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -603,5 +605,100 @@ func TestHub_CancelledCallerDoesNotKillHost(t *testing.T) {
 	}
 	if !hh.state.HostOnline() {
 		t.Fatalf("host went offline after cancelled callers")
+	}
+}
+
+// presenceNotifier records the presence calls the hub makes.
+type presenceNotifier struct {
+	NoopNotifier
+	mu       sync.Mutex
+	idles    []time.Duration
+	locked   []bool
+	offlines int
+}
+
+func (n *presenceNotifier) OnHostPresence(idle time.Duration, locked bool) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	n.idles = append(n.idles, idle)
+	n.locked = append(n.locked, locked)
+}
+
+func (n *presenceNotifier) OnHostOffline() {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	n.offlines++
+}
+
+func (n *presenceNotifier) offlineCount() int {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	return n.offlines
+}
+
+func TestHub_PassesHostPresence(t *testing.T) {
+	n := &presenceNotifier{}
+	h := NewHub(nil, NewState(), nil, n)
+	h.handleWireMessage(model.HostPresenceMsg{Type: model.WireHostPresence, IdleSeconds: 42, Locked: true})
+	h.handleWireMessage(model.HostPresenceMsg{Type: model.WireHostPresence, IdleSeconds: math.MaxUint64})
+	if len(n.idles) != 2 || n.idles[0] != 42*time.Second || !n.locked[0] {
+		t.Fatalf("presence calls = %v %v", n.idles, n.locked)
+	}
+	if n.idles[1] != maxPresenceIdle {
+		t.Fatalf("huge idle = %v, want it clamped to %v", n.idles[1], maxPresenceIdle)
+	}
+}
+
+func TestHub_DisconnectReportsHostOffline(t *testing.T) {
+	hh := newHubHarness(t)
+	n := &presenceNotifier{}
+	hh.hub.notifier = n
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	sub, ch := hh.state.Subscribe()
+	defer hh.state.Unsubscribe(sub)
+	conn := hh.connectHost(t, ctx, "mac-a")
+	waitHostOnline(t, ch, true, 5*time.Second)
+	_ = conn.CloseNow()
+	waitHostOnline(t, ch, false, 5*time.Second)
+	deadline := time.Now().Add(5 * time.Second)
+	for n.offlineCount() != 1 && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if got := n.offlineCount(); got != 1 {
+		t.Fatalf("OnHostOffline calls = %d, want 1", got)
+	}
+}
+
+// A host replaced by a new connection is not offline: the new one is current.
+func TestHub_ReplaceIsNotOffline(t *testing.T) {
+	hh := newHubHarness(t)
+	n := &presenceNotifier{}
+	hh.hub.notifier = n
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	sub, ch := hh.state.Subscribe()
+	defer hh.state.Unsubscribe(sub)
+	connA := hh.connectHost(t, ctx, "mac-a")
+	waitHostOnline(t, ch, true, 5*time.Second)
+	connB := hh.connectHost(t, ctx, "mac-b")
+	// The replaced connection is closed with 4000; wait for that to land.
+	_, _, err := connA.Read(ctx)
+	if websocket.CloseStatus(err) != 4000 {
+		t.Fatalf("conn A close status = %v, want 4000", websocket.CloseStatus(err))
+	}
+	if got := n.offlineCount(); got != 0 {
+		t.Fatalf("OnHostOffline calls after a replace = %d, want 0", got)
+	}
+	// Closing the current connection is the one real offline. A wrong offline
+	// from the replaced connection would make it 2.
+	_ = connB.CloseNow()
+	deadline := time.Now().Add(5 * time.Second)
+	for n.offlineCount() < 1 && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	time.Sleep(50 * time.Millisecond)
+	if got := n.offlineCount(); got != 1 {
+		t.Fatalf("OnHostOffline calls after closing the current host = %d, want exactly 1", got)
 	}
 }

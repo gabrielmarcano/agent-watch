@@ -27,9 +27,13 @@ open bin/AgentWatchBar.app
 
 ## Launch at login
 
-System Settings → General → Login Items (Login Items & Extensions on macOS 15
-and later) → **Open at Login** → `+` → choose
-`bin/AgentWatchBar.app`.
+**Open at Login** in the menu turns it on and off (`SMAppService`). It is
+checked while on, and shows a dash while macOS waits for your approval: the
+item then opens System Settings → General → Login Items (Login Items &
+Extensions on macOS 15 and later), where you allow it. A change made there
+shows in the menu too.
+
+After moving the app to another folder, turn the item off and on again.
 
 ## Which bridge binary it uses
 
@@ -78,5 +82,6 @@ The version strings' format is in `docs/reference/contracts.md` §3.
   "Copy Code" marks the clipboard entry as concealed.
 - **Open Bridge Log** (⌘L) and **Show Configuration in Finder** (⌘,): the
   config holds the host token, so it is revealed, not opened in an editor.
+- **Open at Login**: § Launch at login.
 
 Any failed action shows an alert with the CLI's output.

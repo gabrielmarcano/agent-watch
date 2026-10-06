@@ -10,6 +10,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // Default configuration values.
@@ -17,6 +18,9 @@ const (
 	DefaultListenAddr = ":8080"
 	DefaultDataDir    = "/var/lib/agent-watch-relay"
 )
+
+// DefaultPushPresenceIdle is AW_PUSH_PRESENCE_IDLE's default.
+const DefaultPushPresenceIdle = 10 * time.Minute
 
 // Config holds runtime configuration loaded from environment variables.
 type Config struct {
@@ -39,6 +43,10 @@ type Config struct {
 	// installed watch app handles "resolved" (older builds show it as a bogus
 	// approval).
 	PushResolved bool
+	// PushPresenceIdle (AW_PUSH_PRESENCE_IDLE) is how long without input on
+	// the host the owner counts as away; pushes wait while they are there.
+	// 0 turns it off. Default DefaultPushPresenceIdle.
+	PushPresenceIdle time.Duration
 
 	// Version is the relay's own version with its commit, e.g.
 	// "0.3.0 (c8aa72e)" (set by cmd/relay, not from the environment). Only
@@ -101,17 +109,27 @@ func LoadConfig() (*Config, error) {
 		pushResolved = b
 	}
 
+	presenceIdle := DefaultPushPresenceIdle
+	if v := strings.TrimSpace(os.Getenv("AW_PUSH_PRESENCE_IDLE")); v != "" {
+		d, err := time.ParseDuration(v)
+		if err != nil || d < 0 {
+			return nil, fmt.Errorf("AW_PUSH_PRESENCE_IDLE must be a duration such as 10m, or 0 to turn it off, got %q", v)
+		}
+		presenceIdle = d
+	}
+
 	cfg := &Config{
-		ListenAddr:     listenAddr,
-		HostToken:      hostToken,
-		DataDir:        dataDir,
-		FCMCredentials: os.Getenv("AW_FCM_CREDENTIALS"),
-		NtfyURL:        os.Getenv("AW_NTFY_URL"),
-		NtfyTopic:      os.Getenv("AW_NTFY_TOPIC"),
-		NtfyToken:      os.Getenv("AW_NTFY_TOKEN"),
-		TrustedProxies: trustedProxies,
-		ClientIPHeader: clientIPHeader,
-		PushResolved:   pushResolved,
+		ListenAddr:       listenAddr,
+		HostToken:        hostToken,
+		DataDir:          dataDir,
+		FCMCredentials:   os.Getenv("AW_FCM_CREDENTIALS"),
+		NtfyURL:          os.Getenv("AW_NTFY_URL"),
+		NtfyTopic:        os.Getenv("AW_NTFY_TOPIC"),
+		NtfyToken:        os.Getenv("AW_NTFY_TOKEN"),
+		TrustedProxies:   trustedProxies,
+		ClientIPHeader:   clientIPHeader,
+		PushResolved:     pushResolved,
+		PushPresenceIdle: presenceIdle,
 	}
 
 	return cfg, nil

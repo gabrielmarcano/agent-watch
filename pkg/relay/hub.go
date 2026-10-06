@@ -40,6 +40,12 @@ type Notifier interface {
 	// OnHistoryItem reports a pane's new reply (never a resent duplicate), so
 	// a "finished" push can show it.
 	OnHistoryItem(item model.HistoryItem)
+	// OnHostPresence reports the host's input idle time and screen lock
+	// (host_presence, contracts.md §3): pushes wait while the owner is there.
+	OnHostPresence(idle time.Duration, locked bool)
+	// OnHostOffline reports that the current host disconnected or was dropped
+	// (not replaced by a new connection).
+	OnHostOffline()
 }
 
 // NoopNotifier is a placeholder notifier that does nothing.
@@ -50,6 +56,16 @@ func (NoopNotifier) OnAgentUpdate(prev *model.AgentState, cur model.AgentState) 
 
 // OnHistoryItem is a no-op implementation.
 func (NoopNotifier) OnHistoryItem(item model.HistoryItem) {}
+
+// OnHostPresence is a no-op implementation.
+func (NoopNotifier) OnHostPresence(idle time.Duration, locked bool) {}
+
+// OnHostOffline is a no-op implementation.
+func (NoopNotifier) OnHostOffline() {}
+
+// maxPresenceIdle caps a reported idle time: anything longer is just "away",
+// and the cap keeps the conversion to time.Duration from overflowing.
+const maxPresenceIdle = 365 * 24 * time.Hour
 
 // hostConnection is one bridge WebSocket. gone is closed exactly once, as soon
 // as the connection stops being the current host (replaced, disconnected or
@@ -206,11 +222,15 @@ func (h *Hub) ServeHost(w http.ResponseWriter, r *http.Request) {
 	defer func() {
 		host.markGone()
 		h.mu.Lock()
-		if h.currentHost == host {
+		wasCurrent := h.currentHost == host
+		if wasCurrent {
 			h.currentHost = nil
 			h.state.SetHost(false, false)
 		}
 		h.mu.Unlock()
+		if wasCurrent {
+			h.notifier.OnHostOffline()
+		}
 		// Only now: closing a dead peer can take seconds, and watches must
 		// see the host go offline at once.
 		_ = conn.Close(websocket.StatusNormalClosure, "")
@@ -354,6 +374,12 @@ func (h *Hub) handleWireMessage(msg any) {
 		}
 	case model.HerdrStatusMsg:
 		h.state.SetHost(true, m.HerdrOnline)
+	case model.HostPresenceMsg:
+		idle := maxPresenceIdle
+		if m.IdleSeconds < uint64(maxPresenceIdle/time.Second) {
+			idle = time.Duration(m.IdleSeconds) * time.Second
+		}
+		h.notifier.OnHostPresence(idle, m.Locked)
 	case model.CommandResultMsg:
 		h.mu.Lock()
 		ch, ok := h.pending[m.RequestID]

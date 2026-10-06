@@ -374,6 +374,11 @@ type HerdrStatusMsg struct {
     Type        string `json:"type"` // "herdr_status"
     HerdrOnline bool   `json:"herdr_online"`
 }
+type HostPresenceMsg struct {
+    Type        string `json:"type"` // "host_presence"
+    IdleSeconds uint64 `json:"idle_seconds"`
+    Locked      bool   `json:"locked"`
+}
 type SnapshotMsg struct {
     Type   string       `json:"type"` // "snapshot"
     Agents []AgentState `json:"agents"`
@@ -417,6 +422,7 @@ type ResyncMsg struct {
 1. The bridge sends `hello`.
 2. The bridge sends `snapshot`.
 3. From then on, it sends `agent_update`, `agent_removed`, `history_item` and `herdr_status` as things change.
+4. On macOS the bridge sends `host_presence` right after `snapshot`, then every 15 s while connected (the relay's use: §4.3). Each read is bounded to 2 s (`presenceTimeout`, `pkg/bridge/presence.go`); a failed read sends nothing.
 
 On a `resync` the bridge sends `hello` and `snapshot` again (the current relay never sends one).
 
@@ -515,6 +521,7 @@ ntfy never gets `resolved`: it cannot withdraw a notification it already deliver
   - A pane that leaves `blocked` through a `snapshot` gets its `resolved` with its next `agent_update`.
   - A pane removed while blocked (`agent_removed`, or missing from a `snapshot`) gets none; its notification stays until dismissed.
 
+- **Held back while the owner is at the host** (`AW_PUSH_PRESENCE_IDLE`, §5): while the host's last `host_presence` (§3) is under 45 s old, its screen is unlocked and its last input is under that threshold, `blocked` and `done` pushes are not sent. When presence ends (the threshold passes, the screen locks, or no report for 45 s), each pane whose `blocked` push was held back and that the relay still shows `blocked` gets one, built from its current state, through the debounce, window and digest below. A held-back `done` is not sent later. A host that disconnects ends presence without a catch-up; what was held back waits for its next report (a reconnected bridge reports right after its snapshot). A relay restart forgets it. A push already held in a window, or a `done` waiting for its reply, still goes out when its wait ends, whatever the presence is then. A host that never reports (Linux, an older bridge) is never held back.
 - **Turns that end while the pane stays `working`** (background agents still running, §1.2) push nothing: their reply reaches the watch as a `history_item`, and the agent shows as done with its count. The `done` push comes once herdr reports `working` → `done`, after the last background agent's report turn, with that turn's reply. Why: a coordinator gets one report turn per finished agent, and a push for each would be noise.
 - **`done` waits for the reply:** the bridge sends the turn's `history_item` right after the transition. The relay holds the `done` push up to 3 s for that pane's next new history item and uses its response as the body; when none arrives, it pushes with `Task finished`. The debounce and the window below apply when it goes out.
 - **Debounce** (the same pane pushed the same event less than 5 s ago):
@@ -548,6 +555,7 @@ The relay reads them from `/etc/agent-watch-relay/env` (systemd `EnvironmentFile
 | `AW_NTFY_TOPIC` | with ntfy | — | Random, unguessable topic name |
 | `AW_NTFY_TOKEN` | no | — | ntfy access token |
 | `AW_PUSH_RESOLVED` | no | `false` | `1`/`true` sends the FCM `resolved` push that withdraws an answered approval (§4.1 says when it is safe to enable) |
+| `AW_PUSH_PRESENCE_IDLE` | no | `10m` | Input idle time on the host after which the owner counts as away; pushes are held back while they are there (§4.3). A Go duration (`90s`, `10m`); `0` turns it off |
 | `AW_TRUSTED_PROXIES` | no | empty | Comma-separated CIDRs (a bare IP counts as one host) of the reverse proxies allowed to report the client IP. Empty: the TCP peer address is the client IP and every forwarding header is ignored |
 | `AW_CLIENT_IP_HEADER` | no | empty | A single-IP header, e.g. `CF-Connecting-IP`, honored from a trusted proxy before `X-Forwarded-For`. Requires `AW_TRUSTED_PROXIES`. Set it only when nothing but that CDN can reach the proxy, or clients can spoof it |
 
@@ -679,7 +687,7 @@ One file at the repo root holds everything a deployment needs. `agent-watch.env.
 | `AW_HOST_TOKEN` | bridge `configure --env-file`, `deploy.sh --sync-env` | 64 hex chars shared by the relay (§5) and the bridge (§6). `make config` fills it when empty and never prints it |
 | `AW_RELAY_SSH` | `make deploy-relay` / `deploy.sh` without a target | SSH target of the VPS (root) |
 | `AW_RELAY_SSH_OPTS` | same | Extra `ssh`/`scp` options, word-split (`-i <key> -o Port=<n>`). `SSH_OPTS` in the environment overrides it |
-| `AW_LISTEN`, `AW_TRUSTED_PROXIES`, `AW_CLIENT_IP_HEADER`, `AW_PUSH_RESOLVED`, `AW_FCM_CREDENTIALS`, `AW_NTFY_URL`, `AW_NTFY_TOPIC`, `AW_NTFY_TOKEN` | `deploy.sh --sync-env` only | Relay variables (§5). Commented out in the example; `AW_FCM_CREDENTIALS` is a path **on the server** |
+| `AW_LISTEN`, `AW_TRUSTED_PROXIES`, `AW_CLIENT_IP_HEADER`, `AW_PUSH_RESOLVED`, `AW_PUSH_PRESENCE_IDLE`, `AW_FCM_CREDENTIALS`, `AW_NTFY_URL`, `AW_NTFY_TOPIC`, `AW_NTFY_TOKEN` | `deploy.sh --sync-env` only | Relay variables (§5). Commented out in the example; `AW_FCM_CREDENTIALS` is a path **on the server** |
 | `AW_WATCHOS_BUNDLE_ID` | `make watchos-config` | Bundle id for the Phase 6 watchOS project. Empty: the project's own |
 
 How `deploy.sh --sync-env` copies the relay keys to the server: `deploy/relay/README.md` § `--sync-env`.

@@ -254,3 +254,14 @@ func TestState_BroadcastUnsubscribeChurn(t *testing.T) {
 		t.Fatal("broadcasters or subscribers did not finish (blocked broadcaster?)")
 	}
 }
+
+func TestState_Get(t *testing.T) {
+	s := NewState()
+	s.Upsert(model.AgentState{PaneID: "w1:p1", Agent: "claude", Status: model.StatusBlocked})
+	if a, ok := s.Get("w1:p1"); !ok || a.Status != model.StatusBlocked {
+		t.Fatalf("Get(w1:p1) = %+v, %v", a, ok)
+	}
+	if _, ok := s.Get("w1:none"); ok {
+		t.Fatal("Get(w1:none) found a pane")
+	}
+}
