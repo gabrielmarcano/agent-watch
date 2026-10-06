@@ -33,6 +33,7 @@ import androidx.wear.compose.material3.MaterialTheme
 import androidx.wear.compose.material3.Text
 import com.gabriel.agentwatch.R
 import com.gabriel.agentwatch.model.HistoryItem
+import com.gabriel.agentwatch.ui.components.AgentLogo
 import com.gabriel.agentwatch.ui.components.ScreenList
 import com.gabriel.agentwatch.ui.components.ageText
 import com.gabriel.agentwatch.ui.components.transformedItem
@@ -65,12 +66,14 @@ fun ResponseReaderScreen(item: HistoryItem) {
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis
                 )
-                val meta = listOfNotNull(
-                    item.agent.takeIf { it.isNotBlank() },
-                    ageText(item.completed_at).takeIf { it.isNotBlank() },
-                    if (item.source == "screen") stringResource(R.string.reader_screen_source) else null
-                ).joinToString(" · ")
-                Text(meta, color = OnSurfaceVariant, style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    AgentLogo(item.agent, OnSurfaceVariant)
+                    Spacer(Modifier.width(4.dp))
+                    Text(ageText(item.completed_at), color = OnSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+                }
+                if (item.source == "screen") {
+                    Text(stringResource(R.string.reader_screen_source), color = OnSurfaceVariant, style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center)
+                }
             }
         }
         item.query?.takeIf { it.isNotBlank() }?.let { query ->

@@ -1,6 +1,7 @@
 package com.gabriel.agentwatch.ui.screens
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -15,12 +16,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.SpanStyle
-import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.wear.compose.foundation.lazy.items
 import androidx.wear.compose.foundation.lazy.rememberTransformingLazyColumnState
@@ -37,6 +35,7 @@ import androidx.wear.compose.material3.lazy.transformedHeight
 import com.gabriel.agentwatch.R
 import com.gabriel.agentwatch.model.AgentState
 import com.gabriel.agentwatch.network.UiState
+import com.gabriel.agentwatch.ui.components.AgentLogo
 import com.gabriel.agentwatch.ui.components.ResIcon
 import com.gabriel.agentwatch.ui.components.agentStatus
 import com.gabriel.agentwatch.ui.components.ScreenList
@@ -166,7 +165,11 @@ private fun Notice(notice: ListNotice, modifier: Modifier) {
     }
 }
 
-/** One agent: status icon, name (2 lines), then the status word first so it is never cut, agent and workspace. */
+/**
+ * One agent: status icon, name (2 lines), then one short fact per line (`ARCHITECTURE.md` §4b): the
+ * agent's logo and the status word, never cut; the background agents' count, when it waits on them;
+ * the workspace, cut at its end when it does not fit.
+ */
 @Composable
 fun AgentRow(
     agent: AgentState,
@@ -174,24 +177,32 @@ fun AgentRow(
     modifier: Modifier,
     transformation: SurfaceTransformation?
 ) {
-    val (style, statusWord) = agentStatus(agent)
-    val secondary = buildAnnotatedString {
-        withStyle(SpanStyle(color = style.accent, fontWeight = FontWeight.SemiBold)) { append(statusWord) }
-        agent.agent.takeIf { it.isNotBlank() }?.let { append(" · $it") }
-        agent.workspace?.takeIf { it.isNotBlank() }?.let { append(" · $it") }
-    }
+    val status = agentStatus(agent)
     Button(
         onClick = onClick,
         modifier = modifier,
         transformation = transformation,
         colors = ButtonDefaults.buttonColors(
-            containerColor = style.container,
-            contentColor = style.onContainer,
-            secondaryContentColor = style.onContainer,
-            iconColor = style.accent
+            containerColor = status.style.container,
+            contentColor = status.style.onContainer,
+            secondaryContentColor = status.style.onContainer,
+            iconColor = status.style.accent
         ),
-        icon = { ResIcon(style.icon, stringResource(R.string.cd_status, statusWord), style.accent) },
-        secondaryLabel = { Text(secondary, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+        icon = { ResIcon(status.style.icon, stringResource(R.string.cd_status, status.word), status.style.accent) },
+        secondaryLabel = {
+            Column {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    AgentLogo(agent.agent)
+                    Spacer(Modifier.width(4.dp))
+                    Text(status.word, color = status.style.accent, fontWeight = FontWeight.SemiBold, maxLines = 1)
+                }
+                // Wraps rather than cut at large font scales.
+                status.background?.let { Text(it, color = status.style.accent, maxLines = 2) }
+                agent.workspace?.takeIf { it.isNotBlank() }?.let {
+                    Text(it, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+            }
+        },
         label = { Text(agent.label.ifBlank { agent.pane_id }, maxLines = 2, overflow = TextOverflow.Ellipsis) }
     )
 }

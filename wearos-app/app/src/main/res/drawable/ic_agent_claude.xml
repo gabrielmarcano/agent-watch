@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Claude (claude): our own "C" monogram, not Anthropic's mark. Anthropic's trademark guidelines
+     require approval and forbid recolouring, so the watch identifies the agent with this badge
+     (wearos-app/ARCHITECTURE.md §4b). A rounded square (a circle would read as ©) with the letter cut
+     out; white so the UI tints it. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="16dp"
+    android:height="16dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:fillType="evenOdd"
+        android:pathData="M7,2H17A5,5 0,0 1,22 7V17A5,5 0,0 1,17 22H7A5,5 0,0 1,2 17V7A5,5 0,0 1,7 2ZM16.9,7.89A6.4,6.4 0,1 0,16.9 16.11L14.99,14.51A3.9,3.9 0,1 1,14.99 9.49Z" />
+</vector>
