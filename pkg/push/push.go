@@ -117,6 +117,13 @@ type Dispatcher struct {
 	// notification shows the reply instead of "Task finished". 0 pushes at
 	// once, without it. The relay sets DefaultReplyWait.
 	ReplyWait time.Duration
+	// PresenceIdle is how long without input on the host the owner counts as
+	// away (AW_PUSH_PRESENCE_IDLE). While they are there, blocked and done
+	// pushes are held back (contracts.md §4.3). 0 turns presence off.
+	PresenceIdle time.Duration
+	// Current returns a pane's current state (the relay's State.Get), for the
+	// catch-up when presence ends. nil: no catch-up.
+	Current func(paneID string) (model.AgentState, bool)
 
 	mu        sync.Mutex
 	afterFunc func(time.Duration, func()) stopper // time.AfterFunc; tests fake it
@@ -138,6 +145,8 @@ type Dispatcher struct {
 
 	// pendingDone holds the done pushes waiting for their pane's reply.
 	pendingDone map[string]*pendingDone
+
+	presence presenceState // guarded by mu; presence.go
 
 	wg sync.WaitGroup
 }
@@ -212,6 +221,9 @@ func (d *Dispatcher) initLocked() {
 	if d.pendingDone == nil {
 		d.pendingDone = make(map[string]*pendingDone)
 	}
+	if d.presence.quiet == nil {
+		d.presence.quiet = make(map[string]struct{})
+	}
 }
 
 // TruncateRunes cuts s to at most maxRunes on a rune boundary and appends "…" when cut.
@@ -260,6 +272,9 @@ func (d *Dispatcher) OnAgentUpdate(prev *model.AgentState, cur model.AgentState)
 		p.cur = cur
 	}
 
+	if shouldPush && d.heldBackLocked(msg) {
+		return
+	}
 	if shouldPush {
 		if msg.Event == EventDone && d.ReplyWait > 0 {
 			d.waitForReplyLocked(msg, cur)
