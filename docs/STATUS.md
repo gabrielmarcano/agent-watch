@@ -16,7 +16,7 @@ The one place for the project's state: what is done, what is open, what comes ne
 | [6 watchOS](phases/6-watchos.md) (best-effort) | not started; after 5 | — |
 | [7 Android phone client](phases/7-android-mobile.md) | not started; after 5 | — |
 
-**Deployed** (2026-10-06): the relay at `0.4.2` (commit `904df4a`); the bridge at `0.4.4` (commit `904df4a`) on the owner's Mac; the Wear OS app `1.2.4` (release build, version code 9) on the owner's Pixel Watch 2; the menu bar `0.3.1`, built from `main` into `bin/`. The component versions are in `VERSIONS`.
+**Deployed** (2026-10-06): the relay at `0.4.2` (commit `904df4a`); the bridge at `0.4.4` (commit `904df4a`) on the owner's Mac; the Wear OS app `1.2.4` (release build, version code 9) on the owner's Pixel Watch 2; the menu bar `0.4.0`, built from `main` into `bin/` (2026-10-05). The component versions are in `VERSIONS`.
 
 **What can run in parallel:**
 - **5 runs alone:** it tests the whole system.
@@ -80,7 +80,7 @@ Known and accepted for now; none blocks a phase.
 
 ### Checks nobody has done yet
 - Wear OS 1.2.2 on the watch, still unchecked: Quick Dictate and Change with the system input; backing out is silent; an empty notification reply shows `Empty reply — nothing sent`; after the stream drops (Wi-Fi off and on) or the app returns from the background, the agent screen shows the latest reply. (Verified by the owner on 2026-10-05: Reply with voice and with the keyboard reaches the confirm screen and the agent.)
-- Menu bar 0.4.0 on the owner's Mac (not built into `bin/` yet): **Open at Login** registers the app (it opens after logging out and in), turning it off removes it, and the check follows a change made in System Settings.
+- Menu bar 0.4.0 on the owner's Mac: **Open at Login** registers the app (it opens after logging out and in), turning it off removes it, and the check follows a change made in System Settings.
 - Wear OS 1.2.4 on the watch: an agent waiting on background agents shows `Done` with `N in background` on its own line. (The agent brand marks were checked by the owner on 2026-10-06: legible and like herdr's GUI app.)
 - ntfy delivery (watchOS push) has never been tested.
 - The watch over LTE or its phone's Bluetooth connection: only Wi-Fi has been checked.
