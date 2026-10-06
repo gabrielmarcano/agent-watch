@@ -30,6 +30,9 @@ The one place for the project's state: what is done, what is open, what comes ne
 ### Phase 5 (release gate)
 - Run the whole of [`phases/5-e2e.md`](phases/5-e2e.md) (every row and the security checks). No row has a valid result yet. Row 23 (`AW_PUSH_RESOLVED=1`) is unblocked: the watch runs the app that handles `resolved`.
 
+### Quiet pushes while the owner is at the Mac
+- Design: [`phases/quiet-at-mac.md`](phases/quiet-at-mac.md), waiting for the owner's review. Claimed by Claude (2026-10-05).
+
 ### Code debt (for later)
 
 Known and accepted for now; none blocks a phase.
