@@ -374,6 +374,11 @@ type HerdrStatusMsg struct {
     Type        string `json:"type"` // "herdr_status"
     HerdrOnline bool   `json:"herdr_online"`
 }
+type HostPresenceMsg struct {
+    Type        string `json:"type"` // "host_presence"
+    IdleSeconds uint64 `json:"idle_seconds"`
+    Locked      bool   `json:"locked"`
+}
 type SnapshotMsg struct {
     Type   string       `json:"type"` // "snapshot"
     Agents []AgentState `json:"agents"`
@@ -416,7 +421,8 @@ type ResyncMsg struct {
 
 1. The bridge sends `hello`.
 2. The bridge sends `snapshot`.
-3. From then on, it sends `agent_update`, `agent_removed`, `history_item` and `herdr_status` as things change.
+3. From then on, it sends `agent_update`, `agent_removed`, `history_item`, `herdr_status` and `host_presence` as things change.
+4. On macOS the bridge sends `host_presence` right after `snapshot`, then every 15 s while connected (the relay's use: §4.3).
 
 On a `resync` the bridge sends `hello` and `snapshot` again (the current relay never sends one).
 

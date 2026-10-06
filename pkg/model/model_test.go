@@ -177,6 +177,7 @@ func TestRoundTrip(t *testing.T) {
 			HerdrOnline:   true,
 		},
 		model.HerdrStatusMsg{Type: model.WireHerdrStatus, HerdrOnline: false},
+		model.HostPresenceMsg{Type: model.WireHostPresence, IdleSeconds: 30, Locked: false},
 		model.SnapshotMsg{Type: model.WireSnapshot, Agents: []model.AgentState{}},
 		model.AgentUpdateMsg{Type: model.WireAgentUpdate, Agent: model.AgentState{PaneID: "p1"}},
 		model.AgentRemovedMsg{Type: model.WireAgentRemoved, PaneID: "p1"},
@@ -220,6 +221,7 @@ func TestDecodeWire(t *testing.T) {
 	}{
 		{`{"type":"hello","version":"0.2.0","host":"mac","herdr_version":"0.9.1","herdr_protocol":22,"herdr_online":true}`, reflect.TypeOf(model.HelloMsg{})},
 		{`{"type":"herdr_status","herdr_online":true}`, reflect.TypeOf(model.HerdrStatusMsg{})},
+		{`{"type":"host_presence","idle_seconds":42,"locked":false}`, reflect.TypeOf(model.HostPresenceMsg{})},
 		{`{"type":"snapshot","agents":[]}`, reflect.TypeOf(model.SnapshotMsg{})},
 		{`{"type":"agent_update","agent":{"pane_id":"p1","agent":"claude","label":"l","workspace_id":"w","status":"idle","focused":false,"state_change_seq":1,"updated_at":"2026-09-23T17:04:05Z"}}`, reflect.TypeOf(model.AgentUpdateMsg{})},
 		{`{"type":"agent_removed","pane_id":"p1"}`, reflect.TypeOf(model.AgentRemovedMsg{})},

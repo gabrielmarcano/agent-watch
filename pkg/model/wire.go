@@ -10,6 +10,7 @@ import (
 const (
 	WireHello         = "hello"
 	WireHerdrStatus   = "herdr_status"
+	WireHostPresence  = "host_presence"
 	WireSnapshot      = "snapshot"
 	WireAgentUpdate   = "agent_update"
 	WireAgentRemoved  = "agent_removed"
@@ -36,6 +37,15 @@ type HelloMsg struct {
 type HerdrStatusMsg struct {
 	Type        string `json:"type"` // "herdr_status"
 	HerdrOnline bool   `json:"herdr_online"`
+}
+
+// HostPresenceMsg reports whether the owner is using the host (macOS only):
+// whole seconds since the last keyboard or mouse input, and whether the
+// screen is locked. The relay holds back pushes while the owner is there.
+type HostPresenceMsg struct {
+	Type        string `json:"type"` // "host_presence"
+	IdleSeconds uint64 `json:"idle_seconds"`
+	Locked      bool   `json:"locked"`
 }
 
 // SnapshotMsg transmits the full set of active agents from bridge to relay.
@@ -108,6 +118,12 @@ func DecodeWire(data []byte) (any, error) {
 		var msg HerdrStatusMsg
 		if err := json.Unmarshal(data, &msg); err != nil {
 			return nil, fmt.Errorf("decode herdr_status: %w", err)
+		}
+		return msg, nil
+	case WireHostPresence:
+		var msg HostPresenceMsg
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return nil, fmt.Errorf("decode host_presence: %w", err)
 		}
 		return msg, nil
 	case WireSnapshot:
