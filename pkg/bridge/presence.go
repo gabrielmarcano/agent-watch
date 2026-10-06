@@ -3,6 +3,7 @@ package bridge
 import (
 	"bytes"
 	"context"
+	"math"
 	"regexp"
 	"strconv"
 	"time"
@@ -42,9 +43,9 @@ func parsePresence(hid, root []byte) (Presence, bool) {
 	if err != nil {
 		return Presence{}, false
 	}
-	idle := time.Duration(ns)
-	if ns > uint64(1<<63-1) {
-		idle = time.Duration(1<<63 - 1)
+	idle := time.Duration(math.MaxInt64)
+	if ns <= math.MaxInt64 { // checked before converting: a larger value would wrap negative
+		idle = time.Duration(ns)
 	}
 	return Presence{Idle: idle, Locked: screenLockedRe.Match(root)}, true
 }

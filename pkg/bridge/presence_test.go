@@ -2,6 +2,7 @@ package bridge
 
 import (
 	"context"
+	"math"
 	"os"
 	"path/filepath"
 	"testing"
@@ -80,5 +81,14 @@ func TestConnectMessages_NoPresenceReader(t *testing.T) {
 	e.Presence = func(context.Context) (Presence, bool) { return Presence{}, false }
 	if n := len(e.ConnectMessages(context.Background())); n != 2 {
 		t.Fatalf("with a failed read: %d messages, want 2", n)
+	}
+}
+
+func TestParsePresence_HugeIdleIsClamped(t *testing.T) {
+	hid := []byte("  |   \"HIDIdleTime\" = 18446744073709551615\n")
+	root := []byte(`"IOConsoleUsers" = ({"kCGSSessionOnConsoleKey"=Yes})`)
+	p, ok := parsePresence(hid, root)
+	if !ok || p.Idle != time.Duration(math.MaxInt64) {
+		t.Fatalf("parsePresence = %+v, %v; want the idle clamped to MaxInt64", p, ok)
 	}
 }
