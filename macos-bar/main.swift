@@ -65,6 +65,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var loginItem = NSMenuItem()
 
     private var timer: Timer?
+    private var appBeforeMenu: NSRunningApplication?
     private var pollInFlight = false
     private var binary: String?
     private var status: LocalStatus?
@@ -146,8 +147,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     func menuWillOpen(_ menu: NSMenu) {
+        // An inactive app's menu draws its switch gray: activate while the
+        // menu is open (as Tailscale does) and give the focus back after.
+        let front = NSWorkspace.shared.frontmostApplication
+        appBeforeMenu = front?.processIdentifier == ProcessInfo.processInfo.processIdentifier ? nil : front
+        activate()
         poll() // refresh right away; items update in place while the menu is open
         renderLoginItem() // it can change in System Settings while the app runs
+    }
+
+    func menuDidClose(_ menu: NSMenu) {
+        guard let previous = appBeforeMenu else { return }
+        appBeforeMenu = nil
+        // Shortly after the chosen item's action: an alert it opened keeps
+        // the focus, and so does an app it opened (Finder, the log viewer),
+        // which makes this app inactive.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+            guard NSApp.isActive, NSApp.modalWindow == nil,
+                  !NSApp.windows.contains(where: { $0.isVisible && $0.isKeyWindow }) else { return }
+            if #available(macOS 14.0, *) {
+                NSApp.yieldActivation(to: previous)
+                previous.activate()
+            } else {
+                previous.activate(options: [])
+            }
+        }
     }
 
     // MARK: Polling
@@ -213,7 +237,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
 
         header?.subtitle.stringValue = p.headline
-        header?.toggle.isOn = p.switchOn
+        header?.toggle.state = p.switchOn ? .on : .off
         header?.toggle.isEnabled = p.switchEnabled
         for (i, item) in detailItems.enumerated() {
             let text = i < p.details.count ? p.details[i] : ""
@@ -239,8 +263,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     /// The header switch: on starts the bridge service, off stops it. A flip
     /// that cannot run snaps back to the real state.
-    @objc private func toggleBridge(_ sender: AccentSwitch) {
-        let started = sender.isOn
+    @objc private func toggleBridge(_ sender: NSSwitch) {
+        let started = sender.state == .on
         let ran = started
             ? runCLI(["start"], busy: "Starting", failure: "Could not start the bridge")
             : runCLI(["stop"], busy: "Stopping", failure: "Could not stop the bridge")
