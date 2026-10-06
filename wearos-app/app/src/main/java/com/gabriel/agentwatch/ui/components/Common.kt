@@ -10,13 +10,17 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.wear.compose.foundation.lazy.TransformingLazyColumn
 import androidx.wear.compose.foundation.lazy.TransformingLazyColumnItemScope
 import androidx.wear.compose.foundation.lazy.TransformingLazyColumnScope
 import androidx.wear.compose.foundation.lazy.TransformingLazyColumnState
 import androidx.wear.compose.foundation.lazy.rememberTransformingLazyColumnState
 import androidx.wear.compose.material3.Icon
+import androidx.wear.compose.material3.LocalContentColor
 import androidx.wear.compose.material3.ScreenScaffold
 import androidx.wear.compose.material3.lazy.TransformationSpec
 import androidx.wear.compose.material3.lazy.rememberTransformationSpec
@@ -26,26 +30,26 @@ import com.gabriel.agentwatch.R
 import com.gabriel.agentwatch.model.AgentState
 import com.gabriel.agentwatch.ui.logic.Age
 import com.gabriel.agentwatch.ui.logic.ageOf
+import com.gabriel.agentwatch.ui.logic.agentBrand
 import com.gabriel.agentwatch.ui.logic.shownStatus
 import com.gabriel.agentwatch.ui.logic.waitingOnBackground
 import com.gabriel.agentwatch.ui.theme.StatusStyle
 import com.gabriel.agentwatch.ui.theme.statusStyle
 import java.time.Instant
 
+/** How an agent's status shows: its style, its word, and the short line for its background agents, if any. */
+data class ShownStatus(val style: StatusStyle, val word: String, val background: String?)
+
 /**
- * How [agent]'s status shows in the list and on its screen: its style and its word. An agent that
- * only waits on its background agents shows as done with their count (`ARCHITECTURE.md` §4b).
+ * How [agent]'s status shows in the list and on its screen. An agent that only waits on its
+ * background agents shows as done, with their count on a line of its own (`ARCHITECTURE.md` §4b).
  */
 @Composable
-fun agentStatus(agent: AgentState): Pair<StatusStyle, String> {
+fun agentStatus(agent: AgentState): ShownStatus {
     val style = statusStyle(agent.shownStatus())
     val waiting = agent.waitingOnBackground()
-    val word = if (waiting > 0) {
-        pluralStringResource(R.plurals.status_done_background, waiting, waiting)
-    } else {
-        stringResource(style.label)
-    }
-    return style to word
+    val background = if (waiting > 0) pluralStringResource(R.plurals.status_background, waiting, waiting) else null
+    return ShownStatus(style, stringResource(style.label), background)
 }
 
 /**
@@ -98,4 +102,15 @@ fun ageText(timestamp: String): String = ageText(remember(timestamp) { ageOf(tim
 @Composable
 fun ResIcon(icon: Int, contentDescription: String?, tint: Color, modifier: Modifier = Modifier.size(24.dp)) {
     Icon(painter = painterResource(icon), contentDescription = contentDescription, tint = tint, modifier = modifier)
+}
+
+/**
+ * The agent type as a small monochrome logo (`agentBrand`), tinted like the text next to it and sized
+ * in sp so it grows with the font scale. Its content description is the agent's name.
+ */
+@Composable
+fun AgentLogo(agent: String, tint: Color = LocalContentColor.current, size: TextUnit = 14.sp) {
+    val brand = agentBrand(agent)
+    val side = with(LocalDensity.current) { size.toDp() }
+    ResIcon(brand.icon, brand.name.ifBlank { null }, tint, Modifier.size(side))
 }

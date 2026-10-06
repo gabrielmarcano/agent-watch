@@ -1,16 +1,21 @@
 package com.gabriel.agentwatch.ui.screens
 
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.wear.compose.foundation.lazy.items
 import androidx.wear.compose.material3.ListHeader
 import androidx.wear.compose.material3.MaterialTheme
@@ -21,6 +26,7 @@ import androidx.wear.compose.material3.lazy.transformedHeight
 import com.gabriel.agentwatch.R
 import com.gabriel.agentwatch.model.HistoryItem
 import com.gabriel.agentwatch.network.RelayRepository
+import com.gabriel.agentwatch.ui.components.AgentLogo
 import com.gabriel.agentwatch.ui.components.ScreenList
 import com.gabriel.agentwatch.ui.components.ageText
 import com.gabriel.agentwatch.ui.components.transformedItem
@@ -70,10 +76,9 @@ fun HistoryListScreen(
             val preview = remember(entry.response) {
                 MarkdownFormatter.truncate(entry.response, 120).replace(Regex("\\s*\\n+\\s*"), " ")
             }
-            val meta = listOfNotNull(
-                ageText(entry.completed_at).takeIf { it.isNotBlank() },
-                entry.agent.takeIf { it.isNotBlank() && paneId.isNullOrBlank() }
-            ).joinToString(" · ")
+            // Across all panes, the agent's logo leads the age; one pane's history leaves it out.
+            val showAgent = entry.agent.isNotBlank() && paneId.isNullOrBlank()
+            val age = ageText(entry.completed_at)
             TitleCard(
                 onClick = { onSelectHistoryItem(entry) },
                 modifier = Modifier.fillMaxWidth().transformedHeight(this, spec),
@@ -81,7 +86,15 @@ fun HistoryListScreen(
                 title = {
                     Text(entry.label.ifBlank { entry.agent }, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 },
-                subtitle = { Text(meta, color = OnSurfaceVariant, style = MaterialTheme.typography.labelSmall, maxLines = 1) }
+                subtitle = {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        if (showAgent) {
+                            AgentLogo(entry.agent, OnSurfaceVariant, 12.sp)
+                            Spacer(Modifier.width(4.dp))
+                        }
+                        Text(age, color = OnSurfaceVariant, style = MaterialTheme.typography.labelSmall, maxLines = 1)
+                    }
+                }
             ) {
                 entry.query?.takeIf { it.isNotBlank() }?.let { query ->
                     Text(

@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Pi (pi): lobe-icons packages/static-svg/icons/pi.svg at 82e641b4fece, MIT, Copyright (c) 2023
+     LobeHub (see NOTICE). Paths unchanged (separators normalized); white so the UI tints it. The mark remains its owner's trademark. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="16dp"
+    android:height="16dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:fillType="evenOdd"
+        android:pathData="M1 1h16.5v11H12v5.5H6.5V23H1V1zm5.5 5.5V12H12V6.5H6.5z" />
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:fillType="evenOdd"
+        android:pathData="M17.5 12H23v11h-5.5V12z" />
+</vector>

@@ -16,7 +16,7 @@ The one place for the project's state: what is done, what is open, what comes ne
 | [6 watchOS](phases/6-watchos.md) (best-effort) | not started; after 5 | — |
 | [7 Android phone client](phases/7-android-mobile.md) | not started; after 5 | — |
 
-**Deployed** (2026-10-06): the relay at `0.4.2` (commit `904df4a`); the bridge at `0.4.4` (commit `904df4a`) on the owner's Mac; the Wear OS app `1.2.3` (release build, version code 7) on the owner's Pixel Watch 2; the menu bar `0.3.1`, built from `main` into `bin/`. The component versions are in `VERSIONS`.
+**Deployed** (2026-10-06): the relay at `0.4.2` (commit `904df4a`); the bridge at `0.4.4` (commit `904df4a`) on the owner's Mac; the Wear OS app `1.2.4` (release build, version code 9) on the owner's Pixel Watch 2; the menu bar `0.3.1`, built from `main` into `bin/`. The component versions are in `VERSIONS`.
 
 **What can run in parallel:**
 - **5 runs alone:** it tests the whole system.
@@ -67,12 +67,17 @@ Known and accepted for now; none blocks a phase.
 
   The watch side (history re-fetched after a reconnect and on screen start) is in PR #6.
 - **Claude turns that end while the pane stays `working`** (background agents running; herdr never reports `done`): bridge `0.4.3` checks working Claude panes every 15 s for a new turn end in the transcript and publishes its reply (`docs/reference/agents.md` §3.4). Not deployed nor verified on the watch yet. This periodic check widens `AGENTS.md` §1.1 (it was "on a status transition" only); the owner approved it. Turns that end within the same 15 s window as the next one publish only the last.
-  - **Background agents on the watch** (bridge `0.4.4`, relay `0.4.2`, Wear OS `1.2.3`): the same check publishes `background_agents` (`contracts.md` §1.2, `agents.md` §3.4), and the watch shows such an agent as `Done · N in background`; no push until herdr reports `done` (`contracts.md` §4.3). Needs the relay deployed first (an older relay drops the field), then the bridge restarted and the app installed. Not verified on the watch. Known gaps: the count lags up to 15 s (a report turn can show as done for that long), and after a turn interrupted with `esc` the agent shows `Working`. watchOS only got the model field (Phase 6).
+  - **Background agents on the watch** (bridge `0.4.4`, relay `0.4.2`, Wear OS `1.2.3`): the same check publishes `background_agents` (`contracts.md` §1.2, `agents.md` §3.4), and the watch shows such an agent as `Done`, with `N in background` on its own line since Wear OS `1.2.4`; no push until herdr reports `done` (`contracts.md` §4.3). Needs the relay deployed first (an older relay drops the field), then the bridge restarted and the app installed. Not verified on the watch. Known gaps: the count lags up to 15 s (a report turn can show as done for that long), and after a turn interrupted with `esc` the agent shows `Working`. watchOS only got the model field (Phase 6).
 - **A pane labelled with the generic terminal title `Claude Code`** (an untitled conversation, no herdr name or tab label) is hard to recognise on the watch.
+- **Long single-line texts left** (the short-lines rule, `wearos-app/ARCHITECTURE.md` §4b; the list card and the agent screen's header follow it since Wear OS `1.2.4`):
+  - the history screen's title `History · <name>` (`HistoryListScreen.kt`) cuts a long name;
+  - the agents tile's second line chains the status and the agent id as text (`AgentsTileService.kt`), and has no logo;
+  - the complication's text chains `<status> · <agent>` and `· +N more` (`complication_status_agent`, `complication_status_more`).
 - **agy 1.2.17 menus:** `Create file` and `Question` parse without a `detail`; picking `Write-in...` leaves a text field the watch cannot answer (`docs/reference/agents.md` §4.1).
 
 ### Checks nobody has done yet
 - Wear OS 1.2.2 on the watch, still unchecked: Quick Dictate and Change with the system input; backing out is silent; an empty notification reply shows `Empty reply — nothing sent`; after the stream drops (Wi-Fi off and on) or the app returns from the background, the agent screen shows the latest reply. (Verified by the owner on 2026-10-05: Reply with voice and with the keyboard reaches the confirm screen and the agent.)
+- Wear OS 1.2.4 on the watch: an agent waiting on background agents shows `Done` with `N in background` on its own line. (The agent brand marks were checked by the owner on 2026-10-06: legible and like herdr's GUI app.)
 - ntfy delivery (watchOS push) has never been tested.
 - The watch over LTE or its phone's Bluetooth connection: only Wi-Fi has been checked.
 - `herdr plugin install gabrielmarcano/agent-watch` end to end.

@@ -53,6 +53,7 @@ import com.gabriel.agentwatch.model.HistoryItem
 import com.gabriel.agentwatch.model.PromptOption
 import com.gabriel.agentwatch.network.RelayRepository
 import com.gabriel.agentwatch.ui.components.PromptInput
+import com.gabriel.agentwatch.ui.components.AgentLogo
 import com.gabriel.agentwatch.ui.components.ResIcon
 import com.gabriel.agentwatch.ui.components.agentStatus
 import com.gabriel.agentwatch.ui.components.ScreenList
@@ -268,10 +269,14 @@ fun AgentDetailScreen(
     )
 }
 
-/** Name first, anchored under the clock; then one status line and one line of context (the agent's own title, the workspace). Kept short so the prompt or the last reply shows on open. */
+/**
+ * Name first, anchored under the clock; then one short fact per line (`ARCHITECTURE.md` §4b): the
+ * status word, the background agents' count when it waits on them, the age of the status, the agent's
+ * logo with the workspace, and the agent's own title. Kept short so the prompt or the last reply shows on open.
+ */
 @Composable
 private fun AgentHeader(agent: AgentState, modifier: Modifier) {
-    val (style, statusWord) = agentStatus(agent)
+    val status = agentStatus(agent)
     Column(modifier, horizontalAlignment = Alignment.CenterHorizontally) {
         Text(
             agent.label.ifBlank { agent.pane_id },
@@ -281,21 +286,25 @@ private fun AgentHeader(agent: AgentState, modifier: Modifier) {
             overflow = TextOverflow.Ellipsis
         )
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center) {
-            ResIcon(style.icon, null, style.accent, Modifier.size(16.dp))
+            ResIcon(status.style.icon, null, status.style.accent, Modifier.size(16.dp))
             Spacer(Modifier.width(4.dp))
-            val statusLine = listOfNotNull(
-                statusWord,
-                agent.agent.takeIf { it.isNotBlank() },
-                ageText(agent.updated_at).takeIf { it.isNotBlank() }
-            ).joinToString(" · ")
-            Text(statusLine, color = style.accent, style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(status.word, color = status.style.accent, style = MaterialTheme.typography.labelSmall, maxLines = 1)
         }
-        val context = listOfNotNull(
-            agent.title?.takeIf { it.isNotBlank() && it != agent.label },
-            agent.workspace?.takeIf { it.isNotBlank() && it != agent.label }
-        ).joinToString(" · ")
-        if (context.isNotBlank()) {
-            Text(context, color = OnSurfaceVariant, style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        status.background?.let {
+            Text(it, color = status.style.accent, style = MaterialTheme.typography.labelSmall, textAlign = TextAlign.Center, maxLines = 2)
+        }
+        ageText(agent.updated_at).takeIf { it.isNotBlank() }?.let {
+            Text(it, color = OnSurfaceVariant, style = MaterialTheme.typography.labelSmall, maxLines = 1)
+        }
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center) {
+            AgentLogo(agent.agent, OnSurfaceVariant)
+            agent.workspace?.takeIf { it.isNotBlank() && it != agent.label }?.let { workspace ->
+                Spacer(Modifier.width(4.dp))
+                Text(workspace, color = OnSurfaceVariant, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+        }
+        agent.title?.takeIf { it.isNotBlank() && it != agent.label }?.let { title ->
+            Text(title, color = OnSurfaceVariant, style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
     }
 }
