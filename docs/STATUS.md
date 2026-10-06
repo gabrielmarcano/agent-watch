@@ -87,7 +87,7 @@ Known and accepted for now; none blocks a phase.
 
 ### Checks nobody has done yet
 - Wear OS 1.2.2 on the watch, still unchecked: Quick Dictate and Change with the system input; backing out is silent; an empty notification reply shows `Empty reply — nothing sent`; after the stream drops (Wi-Fi off and on) or the app returns from the background, the agent screen shows the latest reply. (Verified by the owner on 2026-10-05: Reply with voice and with the keyboard reaches the confirm screen and the agent.)
-- Menu bar 0.5.0 on the owner's Mac: the switch in the first row starts and stops the bridge; **Open at Login** registers the app (it opens after logging out and in), turning it off removes it, and the check follows a change made in System Settings; a relay error shows a short line, with the full error as its tooltip.
+- Menu bar 0.5.0 on the owner's Mac (the switch is blue when on: checked by the owner on 2026-10-06): the switch in the first row starts and stops the bridge, and the focus goes back to the previous app when the menu closes; **Open at Login** registers the app (it opens after logging out and in), turning it off removes it, and the check follows a change made in System Settings; a relay error shows a short line, with the full error as its tooltip.
 - Wear OS 1.2.4 on the watch: an agent waiting on background agents shows `Done` with `N in background` on its own line. (The agent brand marks were checked by the owner on 2026-10-06: legible and like herdr's GUI app.)
 - ntfy delivery (watchOS push) has never been tested.
 - The watch over LTE or its phone's Bluetooth connection: only Wi-Fi has been checked.
