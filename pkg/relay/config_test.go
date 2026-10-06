@@ -6,6 +6,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 )
 
 // captureLogs sends the default slog logger to a buffer for the test.
@@ -140,6 +141,41 @@ func TestLoadConfig_PushResolved(t *testing.T) {
 		}
 		if cfg.PushResolved != tc.want {
 			t.Errorf("AW_PUSH_RESOLVED=%q (set=%v): PushResolved = %v, want %v", tc.env, tc.set, cfg.PushResolved, tc.want)
+		}
+	}
+}
+
+func TestLoadConfig_PushPresenceIdle(t *testing.T) {
+	cases := []struct {
+		env     string
+		set     bool
+		want    time.Duration
+		wantErr bool
+	}{
+		{set: false, want: 10 * time.Minute},
+		{env: "5m", set: true, want: 5 * time.Minute},
+		{env: "0", set: true, want: 0},
+		{env: "-1m", set: true, wantErr: true},
+		{env: "ten", set: true, wantErr: true},
+	}
+	for _, tc := range cases {
+		setBaseEnv(t)
+		t.Setenv("AW_PUSH_PRESENCE_IDLE", tc.env)
+		if !tc.set {
+			os.Unsetenv("AW_PUSH_PRESENCE_IDLE")
+		}
+		cfg, err := LoadConfig()
+		if tc.wantErr {
+			if err == nil {
+				t.Errorf("AW_PUSH_PRESENCE_IDLE=%q: want an error", tc.env)
+			}
+			continue
+		}
+		if err != nil {
+			t.Fatalf("AW_PUSH_PRESENCE_IDLE=%q: %v", tc.env, err)
+		}
+		if cfg.PushPresenceIdle != tc.want {
+			t.Errorf("AW_PUSH_PRESENCE_IDLE=%q: got %v, want %v", tc.env, cfg.PushPresenceIdle, tc.want)
 		}
 	}
 }

@@ -106,6 +106,17 @@ func (s *State) HerdrOnline() bool {
 	return s.herdrOnline
 }
 
+// Get returns a pane's current state.
+func (s *State) Get(paneID string) (model.AgentState, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	a, ok := s.agents[paneID]
+	if !ok {
+		return model.AgentState{}, false
+	}
+	return a, true
+}
+
 // HasPane returns whether a pane exists in the current agents map.
 func (s *State) HasPane(paneID string) bool {
 	s.mu.RLock()
