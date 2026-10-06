@@ -52,7 +52,7 @@ Rules for every AI agent working in this repository: Claude Code, Antigravity, O
 - Do **NOT** add backward-compatibility shims, dual-write adapters, or fallback modes for non-herdr environments. An agent running outside herdr is out of scope.
 - Reading an agent's **own transcript** for history is allowed, under three conditions:
   - it happens inside a `pkg/agents` adapter;
-  - it is triggered on demand by a herdr status transition;
+  - it is triggered on demand by a herdr status transition, or, only while herdr reports the pane `working`, by a periodic bounded check for a turn that ended without a transition (a stat first, a bounded tail read only when the file changed: [`docs/reference/agents.md` §3.4](docs/reference/agents.md));
   - the file is the one herdr's `agent_session` names (a path, or a session id the adapter resolves to that session's file), or the continuation that file itself points to.
 
   Scanning directories for the "latest file" and continuous tailing are not allowed. Why transcripts at all: herdr exposes no reply text, and a screen capture loses the markdown.
