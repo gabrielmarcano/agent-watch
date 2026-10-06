@@ -52,13 +52,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let menu = NSMenu()
 
     // Built once; render() only updates titles, visibility and enablement.
-    private let headlineItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
+    private let headerItem = NSMenuItem()
+    private var header: HeaderView?
     private var detailItems: [NSMenuItem] = []
     private var versionItems: [NSMenuItem] = []
     private let barVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? ""
     private let hintItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
-    private var startItem = NSMenuItem()
-    private var stopItem = NSMenuItem()
     private var restartItem = NSMenuItem()
     private var pairItem = NSMenuItem()
     private var logsItem = NSMenuItem()
@@ -100,8 +99,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.autoenablesItems = false
         menu.delegate = self
 
-        headlineItem.isEnabled = false
-        menu.addItem(headlineItem)
+        let h = HeaderView(target: self, action: #selector(toggleBridge(_:)))
+        header = h
+        headerItem.view = h
+        menu.addItem(headerItem)
         for _ in 0..<3 {
             let d = NSMenuItem(title: "", action: nil, keyEquivalent: "")
             d.isEnabled = false
@@ -114,8 +115,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(hintItem)
 
         menu.addItem(.separator())
-        startItem = addAction("Start Bridge", #selector(startBridge), "s")
-        stopItem = addAction("Stop Bridge…", #selector(stopBridge), ".")
         restartItem = addAction("Restart Bridge", #selector(restartBridge), "r")
         menu.addItem(.separator())
         pairItem = addAction("Pair a Watch…", #selector(pairWatch), "p")
@@ -213,7 +212,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             button.toolTip = p.tooltip
         }
 
-        headlineItem.title = p.headline
+        header?.subtitle.stringValue = p.headline
+        header?.toggle.state = p.switchOn ? .on : .off
+        header?.toggle.isEnabled = p.switchEnabled
         for (i, item) in detailItems.enumerated() {
             let text = i < p.details.count ? p.details[i] : ""
             item.title = "   " + text
@@ -228,10 +229,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         hintItem.title = "   " + (p.hint ?? "")
         hintItem.isHidden = p.hint == nil
 
-        let running = status?.running ?? false
-        startItem.isEnabled = p.canStart
-        startItem.isHidden = running
-        stopItem.isEnabled = p.canStop
         restartItem.isEnabled = p.canRestart
         pairItem.isEnabled = p.canPair
         logsItem.isEnabled = p.canOpenLogs
@@ -240,24 +237,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     // MARK: Actions
 
-    @objc private func startBridge() { runCLI(["start"], busy: "Starting", failure: "Could not start the bridge") }
+    /// The header switch: on starts the bridge service, off stops it. A flip
+    /// that cannot run snaps back to the real state.
+    @objc private func toggleBridge(_ sender: NSSwitch) {
+        let started = sender.state == .on
+        let ran = started
+            ? runCLI(["start"], busy: "Starting", failure: "Could not start the bridge")
+            : runCLI(["stop"], busy: "Stopping", failure: "Could not stop the bridge")
+        if !ran {
+            lastPresentation = nil
+            render()
+        }
+    }
 
     @objc private func restartBridge() { runCLI(["restart"], busy: "Restarting", failure: "Could not restart the bridge") }
 
-    @objc private func stopBridge() {
-        let alert = NSAlert()
-        alert.messageText = "Stop the bridge?"
-        alert.informativeText = "Your watch will show this Mac as offline until you start it again."
-        alert.addButton(withTitle: "Stop")
-        alert.addButton(withTitle: "Cancel")
-        activate()
-        guard alert.runModal() == .alertFirstButtonReturn else { return }
-        runCLI(["stop"], busy: "Stopping", failure: "Could not stop the bridge")
-    }
-
     /// Runs one CLI action off the main thread and reports any failure.
-    private func runCLI(_ args: [String], busy label: String, failure: String) {
-        guard let bin = binary, busy == nil else { return }
+    /// Returns false when it could not start (no binary, or another runs).
+    @discardableResult
+    private func runCLI(_ args: [String], busy label: String, failure: String) -> Bool {
+        guard let bin = binary, busy == nil else { return false }
         busy = label
         render()
         let env = cliEnvironment
@@ -273,6 +272,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             self.render()
             self.poll()
         }
+        return true
     }
 
     @objc private func pairWatch() {

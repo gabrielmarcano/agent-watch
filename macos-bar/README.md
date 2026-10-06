@@ -47,7 +47,7 @@ If neither exists the icon shows the watch with `!` and a red dot, and the menu 
 
 ## What the icon says
 
-The bar reports the health of the bridge and the relay, and pairs watches. It never shows agents or blocked counts: that is the watch's job. Next to the clock there is only the icon and a small status circle: **green** connected, **yellow** running but not fully connected yet, **red** it should be working and is not, **gray** off on purpose. The menu's first line says which state it is.
+The bar reports the health of the bridge and the relay, and pairs watches. It never shows agents or blocked counts: that is the watch's job. Next to the clock there is only the icon and a small status circle: **green** connected, **yellow** running but not fully connected yet, **red** it should be working and is not, **gray** off on purpose. The menu's first row says which state it is, under "Agent Watch".
 
 | Icon | Dot | Menu says | What to do |
 |---|---|---|---|
@@ -56,9 +56,9 @@ The bar reports the health of the bridge and the relay, and pairs watches. It ne
 | watch | yellow | herdr is not running | Start herdr |
 | watch with `!` | red | Relay error, with a short reason (for example `Relay unreachable (timed out)` or `The relay rejected the host token`); hover over it for the full error, also in the bridge log | Fix the cause; it keeps retrying |
 | watch with `!` | red | Bridge not responding (its status file is stale: `contracts.md` §6) | Restart |
-| crossed watch | gray, or red if it failed to start | Bridge stopped (and why, if it failed) | Start |
-| crossed watch | gray | Bridge service not installed | Start |
-| crossed watch | gray | Bridge not configured; Start is disabled | Run `make configure-bridge` (or `agent-watch-bridge configure --env-file agent-watch.env`) in a terminal |
+| crossed watch | gray, or red if it failed to start | Bridge stopped (and why, if it failed) | Turn the switch on |
+| crossed watch | gray | Bridge service not installed | Turn the switch on |
+| crossed watch | gray | Bridge not configured; the switch is disabled | Run `make configure-bridge` (or `agent-watch-bridge configure --env-file agent-watch.env`) in a terminal |
 | watch with `!` | red | agent-watch-bridge not found, or status unavailable | See the menu |
 
 The tooltip repeats the state. No menu line is longer than `maxMenuLine` (`BarLogic.swift`): errors are shortened there. The **Versions** section of the menu shows:
@@ -71,10 +71,7 @@ The version strings' format is in `docs/reference/contracts.md` §3.
 
 ## Menu actions
 
-- **Start Bridge** (⌘S): `agent-watch-bridge start`. It keeps the installed
-  LaunchAgent's paths, so starting from here never moves the state dir or the
-  binary.
-- **Stop Bridge…** (⌘.): asks first, then `agent-watch-bridge stop`.
+- **The switch** in the first row (next to "Agent Watch" and the state): on runs `agent-watch-bridge start`, off runs `agent-watch-bridge stop`. Start keeps the installed LaunchAgent's paths, so it never moves the state dir or the binary. Off asks nothing: your watch shows this Mac as offline until you turn it on again. The switch is disabled while an action runs, and while the bridge is not configured.
 - **Restart Bridge** (⌘R): `agent-watch-bridge restart`, which restarts the
   installed service without rewriting it (use it after `make bridge`).
 - **Pair a Watch…** (⌘P): `agent-watch-bridge pair --json`; shows the code and

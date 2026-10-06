@@ -167,6 +167,10 @@ struct Presentation: Equatable, Sendable {
     var canPair: Bool
     var canOpenLogs: Bool
     var canRevealConfig: Bool
+    // The on/off switch at the top of the menu: on while the bridge runs;
+    // flipping it starts or stops the service.
+    var switchOn: Bool
+    var switchEnabled: Bool
 }
 
 enum Symbols {
@@ -240,7 +244,8 @@ func present(state: BarState, status: LocalStatus?, busy: String? = nil, barVers
         tooltip: "", headline: "", details: [], detailHelp: nil,
         hint: nil,
         canStart: false, canStop: s.installed, canRestart: s.installed && s.configured,
-        canPair: s.configured, canOpenLogs: !s.logPath.isEmpty, canRevealConfig: !s.configPath.isEmpty
+        canPair: s.configured, canOpenLogs: !s.logPath.isEmpty, canRevealConfig: !s.configPath.isEmpty,
+        switchOn: false, switchEnabled: false
     )
 
     switch state {
@@ -322,9 +327,13 @@ func present(state: BarState, status: LocalStatus?, busy: String? = nil, barVers
 
     p.tooltip = tooltip(state: state, status: s)
 
+    p.switchOn = s.running
+    p.switchEnabled = s.running ? p.canStop : p.canStart
+
     if let busy {
         p.headline = "\(busy)…"
         p.canStart = false; p.canStop = false; p.canRestart = false; p.canPair = false
+        p.switchEnabled = false
     }
     return p
 }

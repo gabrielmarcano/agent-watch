@@ -21,7 +21,7 @@ fi
 [ -n "$MENUBAR_VERSION" ] || { echo "build.sh: MENUBAR_VERSION is not set in VERSIONS" >&2; exit 1; }
 MIN_MACOS="13.0"
 ARCHS=(arm64 x86_64)
-SOURCES=("$SCRIPT_DIR/BarLogic.swift" "$SCRIPT_DIR/main.swift")
+SOURCES=("$SCRIPT_DIR/BarLogic.swift" "$SCRIPT_DIR/HeaderView.swift" "$SCRIPT_DIR/main.swift")
 
 echo "Building AgentWatchBar $MENUBAR_VERSION (macOS $MIN_MACOS+, ${ARCHS[*]})..."
 WORK="$(mktemp -d)"

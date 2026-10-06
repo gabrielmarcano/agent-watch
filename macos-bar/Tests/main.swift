@@ -180,6 +180,26 @@ for name in Symbols.all {
     check(NSImage(systemSymbolName: name, accessibilityDescription: nil) != nil, "SF Symbol \(name) exists")
 }
 
+// MARK: the on/off switch
+
+// The switch is on while the bridge runs, and flips the service: on starts
+// it, off stops it. It is disabled while an action runs or when the flip
+// would fail (not configured, binary missing).
+let switchCases: [(String, BarState, LocalStatus?, String?, Bool, Bool)] = [
+    ("connected", .connected, st { _ in }, nil, true, true),
+    ("relay error", .relayError("x"), st { $0.relayConnected = false }, nil, true, true),
+    ("stale still runs", .stale(40), st { $0.stale = true }, nil, true, true),
+    ("stopped", .stopped(""), st { $0.running = false }, nil, false, true),
+    ("not installed", .notInstalled, st { $0.running = false; $0.installed = false }, nil, false, true),
+    ("not configured", .notConfigured("c"), st { $0.running = false; $0.configured = false }, nil, false, false),
+    ("binary missing", .binaryMissing, nil, nil, false, false),
+    ("busy", .connected, st { _ in }, "Stopping", true, false),
+]
+for (name, state, status, busy, on, enabled) in switchCases {
+    let p = present(state: state, status: status, busy: busy)
+    check(p.switchOn == on && p.switchEnabled == enabled, "switch \(name): on \(p.switchOn) enabled \(p.switchEnabled), want \(on) \(enabled)")
+}
+
 // MARK: short error lines
 
 // The menu is as wide as its longest line: raw Go errors never go in it.
