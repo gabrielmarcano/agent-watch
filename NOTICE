@@ -6,34 +6,32 @@ This product is licensed under the Apache License, Version 2.0 (see LICENSE).
 Third-party material
 --------------------
 
-The OpenCode mark (wearos-app/app/src/main/res/drawable/ic_agent_opencode.xml)
-is adapted from the OpenCode project's brand assets
-(https://github.com/anomalyco/opencode), redrawn in one colour:
+The agent marks in wearos-app/app/src/main/res/drawable/ic_agent_*.xml (all but
+ic_agent.xml) are from lobe-icons
+(https://github.com/lobehub/lobe-icons/tree/master/packages/static-svg/icons,
+revision 82e641b4fece9d1028a127149af9ded00df5ac0c); each file names its source.
+They were converted to Android vector drawables and drawn in one colour; paths
+are unchanged (only number separators were normalized for Android's parser). Brand marks identify their respective products and remain their
+owners' trademarks.
 
-  Copyright (c) 2025 opencode
+MIT License
 
-  Permission is hereby granted, free of charge, to any person obtaining a copy
-  of this software and associated documentation files (the "Software"), to deal
-  in the Software without restriction, including without limitation the rights
-  to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-  copies of the Software, and to permit persons to whom the Software is
-  furnished to do so, subject to the following conditions:
+Copyright (c) 2023 LobeHub
 
-  The above copyright notice and this permission notice shall be included in all
-  copies or substantial portions of the Software.
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
 
-  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-  IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-  FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-  AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-  LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-  OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-  SOFTWARE.
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
 
-Trademarks
-----------
-
-OpenCode, Claude and Antigravity are trademarks of their respective owners.
-Agent Watch uses their names, and the OpenCode mark, only to identify the
-agents it works with; this implies no affiliation with or endorsement by them.
-The "C" and "A" badges are Agent Watch's own monograms, not their owners' logos.
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.

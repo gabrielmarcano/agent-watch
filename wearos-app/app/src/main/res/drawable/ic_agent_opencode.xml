@@ -1,9 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- OpenCode (opencode): the OpenCode mark from the project's own brand assets
-     (anomalyco/opencode, packages/console/app/src/asset/brand/opencode-logo-dark-square.svg),
-     Copyright (c) 2025 opencode, MIT License (see NOTICE). Rendered monochrome: white so the UI
-     tints it, the inner block at partial alpha like the original's darker grey. Used only to
-     identify the agent; no affiliation or endorsement. -->
+<!-- OpenCode (opencode): lobe-icons packages/static-svg/icons/opencode.svg at 82e641b4fece, MIT, Copyright (c) 2023
+     LobeHub (see NOTICE). Paths unchanged (separators normalized); white so the UI tints it. The mark remains its owner's trademark. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="16dp"
     android:height="16dp"
@@ -12,9 +9,5 @@
     <path
         android:fillColor="#FFFFFFFF"
         android:fillType="evenOdd"
-        android:pathData="M4.8,3H19.2V21H4.8ZM8.4,6.6V17.4H15.6V6.6Z" />
-    <path
-        android:fillColor="#FFFFFFFF"
-        android:fillAlpha="0.45"
-        android:pathData="M8.4,10.2H15.6V17.4H8.4Z" />
+        android:pathData="M16 6H8v12h8V6zm4 16H4V2h16v20z" />
 </vector>
