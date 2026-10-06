@@ -29,7 +29,7 @@ trap 'rm -rf "$WORK"' EXIT
 
 slices=()
 for arch in "${ARCHS[@]}"; do
-    swiftc -O -target "$arch-apple-macos$MIN_MACOS" -framework AppKit \
+    swiftc -O -target "$arch-apple-macos$MIN_MACOS" -framework AppKit -framework ServiceManagement \
         -o "$WORK/AgentWatchBar-$arch" "${SOURCES[@]}"
     slices+=("$WORK/AgentWatchBar-$arch")
 done

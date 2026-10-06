@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import ServiceManagement
 
 // Agent Watch menu bar companion. It shows the bridge's health and drives the
 // agent-watch-bridge CLI; all decisions live in BarLogic.swift.
@@ -62,6 +63,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var pairItem = NSMenuItem()
     private var logsItem = NSMenuItem()
     private var configItem = NSMenuItem()
+    private var loginItem = NSMenuItem()
 
     private var timer: Timer?
     private var pollInFlight = false
@@ -132,6 +134,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             menu.addItem(v)
         }
         menu.addItem(.separator())
+        loginItem = addAction("Open at Login", #selector(toggleOpenAtLogin), "")
+        renderLoginItem()
         _ = addAction("Quit Agent Watch Menu", #selector(quit), "q")
     }
 
@@ -144,6 +148,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     func menuWillOpen(_ menu: NSMenu) {
         poll() // refresh right away; items update in place while the menu is open
+        renderLoginItem() // it can change in System Settings while the app runs
     }
 
     // MARK: Polling
@@ -339,6 +344,40 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             NSWorkspace.shared.activateFileViewerSelecting([dir])
         }
         showAlert("No configuration yet", "\(path) does not exist.\n\n\(configureHint)")
+    }
+
+    /// Registers or removes this app as a login item (SMAppService, macOS 13+).
+    /// When macOS wants the owner's approval, it opens the Login Items settings.
+    @objc private func toggleOpenAtLogin() {
+        let service = SMAppService.mainApp
+        if service.status == .requiresApproval {
+            SMAppService.openSystemSettingsLoginItems()
+            return
+        }
+        let wasEnabled = service.status == .enabled
+        do {
+            if wasEnabled {
+                try service.unregister()
+            } else {
+                try service.register()
+            }
+        } catch {
+            showAlert(wasEnabled ? "Could not stop opening at login" : "Could not open at login",
+                      error.localizedDescription)
+        }
+        if service.status == .requiresApproval {
+            SMAppService.openSystemSettingsLoginItems()
+        }
+        renderLoginItem()
+    }
+
+    /// Checked when enabled; a dash while macOS waits for approval in System Settings.
+    private func renderLoginItem() {
+        switch SMAppService.mainApp.status {
+        case .enabled: loginItem.state = .on
+        case .requiresApproval: loginItem.state = .mixed
+        default: loginItem.state = .off
+        }
     }
 
     @objc private func quit() {
