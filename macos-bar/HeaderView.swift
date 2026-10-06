@@ -1,12 +1,21 @@
 import AppKit
 
+/// The system switch. It shows the accent colour (blue by default) only
+/// while the app is active: AppKit draws an inactive app's controls gray,
+/// so the app activates while its menu is open (AppDelegate.menuWillOpen),
+/// as Tailscale's does. The first click counts even before that.
+@MainActor
+final class MenuSwitch: NSSwitch {
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+}
+
 /// The menu's first row: "Agent Watch", the state under it, and the on/off
 /// switch that starts or stops the bridge service (like Tailscale's).
 @MainActor
 final class HeaderView: NSView {
     let title = NSTextField(labelWithString: "Agent Watch")
     let subtitle = NSTextField(labelWithString: "")
-    let toggle = NSSwitch()
+    let toggle = MenuSwitch()
 
     init(target: AnyObject, action: Selector) {
         super.init(frame: NSRect(x: 0, y: 0, width: 280, height: 46))

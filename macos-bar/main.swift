@@ -147,11 +147,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     func menuWillOpen(_ menu: NSMenu) {
-        // An inactive app's menu draws its switch gray: activate while the
-        // menu is open (as Tailscale does) and give the focus back after.
+        // The switch shows its accent only while the app is active. The
+        // cooperative NSApp.activate() is refused here, so force it (as
+        // Tailscale does), and give the focus back when the menu closes.
         let front = NSWorkspace.shared.frontmostApplication
         appBeforeMenu = front?.processIdentifier == ProcessInfo.processInfo.processIdentifier ? nil : front
-        activate()
+        (self as ForceActivating).forceActivate()
         poll() // refresh right away; items update in place while the menu is open
         renderLoginItem() // it can change in System Settings while the app runs
     }
@@ -428,6 +429,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         alert.addButton(withTitle: "OK")
         activate()
         alert.runModal()
+    }
+}
+
+/// activate(ignoringOtherApps:) is deprecated since macOS 14, but it is the
+/// call that still activates a menu bar app from its own menu. Called
+/// through this protocol so the one deliberate use does not warn.
+@MainActor
+private protocol ForceActivating {
+    func forceActivate()
+}
+
+extension AppDelegate: ForceActivating {
+    @available(macOS, deprecated: 14.0)
+    func forceActivate() {
+        NSApp.activate(ignoringOtherApps: true)
     }
 }
 
