@@ -1,6 +1,6 @@
 # Quiet pushes while the owner is at the Mac (design)
 
-A temporary guide: delete it when the work is done (`docs/STATUS.md` workflow), after moving what stays true to its home (`AGENTS.md` §0).
+The plan: [`quiet-at-mac-plan.md`](quiet-at-mac-plan.md). A temporary guide: delete it when the work is done (`docs/STATUS.md` workflow), after moving what stays true to its home (`AGENTS.md` §0).
 
 ## Goal
 
@@ -18,7 +18,7 @@ The watch should buzz only when the owner is away from the Mac or has left it fo
 | Last input ≥ 10 min ago, or screen locked | Normal (`contracts.md` §4.3) |
 | No fresh presence report (Linux host, old bridge, bridge restarting, host offline) | Normal: when in doubt, push |
 
-**Catch-up when the owner leaves.** A `blocked` push held back while they were at the Mac goes out at the moment presence ends, if that pane is **still blocked on the same prompt** (same `state_change_seq` and `fingerprint`). It goes through the normal debounce, window and digest. Example: a prompt appears, the owner walks away without answering, and the watch buzzes 10 minutes after their last input (at once if they lock the screen).
+**Catch-up when the owner leaves.** A `blocked` push held back while they were at the Mac goes out at the moment presence ends, if the relay's current state shows that pane **still blocked**. The push is built from that current state (its prompt now, like a held push at the end of a window), and goes through the normal debounce, window and digest. Example: a prompt appears, the owner walks away without answering, and the watch buzzes 10 minutes after their last input (at once if they lock the screen).
 
 - A held-back `done` is **not** caught up: the reply is already in the history and on the watch's list.
 - No catch-up when presence ends because the host disconnected (the watch could not answer anyway). The pane gets its push on its next transition.
@@ -58,7 +58,7 @@ type HostPresenceMsg struct {
   - `t − last_input_at < AW_PUSH_PRESENCE_IDLE`.
 - **Where it applies:** in `OnAgentUpdate`, before a `blocked` or `done` push is enqueued or waits for its reply.
   - Present: the push is not sent.
-  - A `blocked` push is remembered per pane (seq and fingerprint) for the catch-up; the newest prompt replaces an older one.
+  - A `blocked` push remembers its pane id for the catch-up. The catch-up reads the pane's current state from the relay (`State.Get`), so a pane answered, changed or removed meanwhile needs no bookkeeping.
   - A held push at the end of a window, or a `done` released after its reply wait, is sent whatever the presence is at that moment (keeps the window logic as it is).
 - **When presence ends** (a timer at `last_input_at + AW_PUSH_PRESENCE_IDLE`, re-armed on each report; a report with `locked`; or no report for 45 s): run the catch-up, then clear what is remembered.
   - On a host disconnect: clear it without a catch-up.
@@ -78,14 +78,14 @@ type HostPresenceMsg struct {
 |---|---|
 | `pkg/model/wire.go` | `WireHostPresence`, `HostPresenceMsg`, `DecodeWire` case (follow the `schema-sync` skill; §3 is Go only) |
 | `pkg/bridge` | Presence reader behind an interface: `presence_darwin.go` (runs `ioreg`), the parsing in a portable file, a no-op elsewhere; the 15 s loop calls `relayclient.Client.Send` while `Connected()`, and `OnConnect` adds one report after the `snapshot` |
-| `pkg/relayclient/client.go` | `host_presence` is coalesced like `herdr_status` and `snapshot` (only the newest waits in the queue) |
-| `pkg/relay/hub.go` | Pass `host_presence` and host disconnects to the Notifier (new methods on the `Notifier` interface and `NoopNotifier`) |
+| `pkg/relayclient/client.go` | `describe` names `host_presence` (for logs). While disconnected it is dropped, like `herdr_status` |
+| `pkg/relay/hub.go`, `pkg/relay/state.go` | Pass `host_presence` and host disconnects to the Notifier (new methods on the `Notifier` interface and `NoopNotifier`); `State.Get` for the catch-up |
 | `pkg/push/push.go` | Presence state, the suppression, the end-of-presence timer and the catch-up |
 | `pkg/relay/config.go`, `cmd/relay` | `AW_PUSH_PRESENCE_IDLE` |
 | `docs/reference/contracts.md` | §3 (message, sequence), §4.3 (the rule above), §5 (variable) |
 | `AGENTS.md` §1.3 | The bridge's widened scope |
 | `docs/GUIDE.md` | One line on the behaviour where push is explained, linking to §4.3 |
-| `agent-watch.env.example` | The variable, commented out |
+| `agent-watch.env.example`, `tools/config/awenv.sh` | The variable, commented out; added to `RELAY_KEYS` so `deploy.sh --sync-env` carries it (and to `contracts.md` §6's relay row) |
 | `VERSIONS` | `BRIDGE_VERSION` and `RELAY_VERSION` minor bumps |
 
 ## Testing
@@ -93,8 +93,8 @@ type HostPresenceMsg struct {
 - **`pkg/push`:** fake clock and `afterFunc`:
   - suppressed while present;
   - normal when the report is stale, locked, idle ≥ threshold, or the threshold is 0;
-  - catch-up for a still-blocked pane with the same prompt;
-  - no catch-up for an answered or changed prompt, nor on disconnect;
+  - catch-up for a still-blocked pane, with its current prompt;
+  - no catch-up for a pane answered or removed meanwhile, nor on disconnect;
   - `done` is never caught up;
   - catch-up goes through the window and digest.
 - **Bridge:** parse captured `ioreg` outputs (`testdata`: idle and unlocked, locked, garbage). The loop is tested with a fake reader; no test runs `ioreg`.
