@@ -21,7 +21,7 @@ The watch should buzz only when the owner is away from the Mac or has left it fo
 **Catch-up when the owner leaves.** A `blocked` push held back while they were at the Mac goes out at the moment presence ends, if the relay's current state shows that pane **still blocked**. The push is built from that current state (its prompt now, like a held push at the end of a window), and goes through the normal debounce, window and digest. Example: a prompt appears, the owner walks away without answering, and the watch buzzes 10 minutes after their last input (at once if they lock the screen).
 
 - A held-back `done` is **not** caught up: the reply is already in the history and on the watch's list.
-- No catch-up when presence ends because the host disconnected (the watch could not answer anyway). The pane gets its push on its next transition.
+- A host disconnect ends presence without a catch-up; what was held back waits for the host's next report (a reconnected bridge reports right after its snapshot), and the catch-up then reads the panes' current state. A relay restart forgets it.
 - A held-back `blocked` never went out, so it never gets a `resolved` either (as today for a dropped push).
 
 ## The signal (bridge, macOS only)
@@ -61,7 +61,7 @@ type HostPresenceMsg struct {
   - A `blocked` push remembers its pane id for the catch-up. The catch-up reads the pane's current state from the relay (`State.Get`), so a pane answered, changed or removed meanwhile needs no bookkeeping.
   - A held push at the end of a window, or a `done` released after its reply wait, is sent whatever the presence is at that moment (keeps the window logic as it is).
 - **When presence ends** (a timer at `last_input_at + AW_PUSH_PRESENCE_IDLE`, re-armed on each report; a report with `locked`; or no report for 45 s): run the catch-up, then clear what is remembered.
-  - On a host disconnect: clear it without a catch-up.
+  - On a host disconnect: end presence without a catch-up and keep what is remembered for the host's next report (a pane that leaves `blocked` is dropped meanwhile).
 - **Log** one info line per push held back: event, pane id, `reason=host_present`. Never the idle value at info level.
 
 ## Config (`contracts.md` §5, `agent-watch.env.example`)
@@ -94,7 +94,7 @@ type HostPresenceMsg struct {
   - suppressed while present;
   - normal when the report is stale, locked, idle ≥ threshold, or the threshold is 0;
   - catch-up for a still-blocked pane, with its current prompt;
-  - no catch-up for a pane answered or removed meanwhile, nor on disconnect;
+  - no catch-up for a pane answered or removed meanwhile, and a disconnect keeps the held-back panes for the next report;
   - `done` is never caught up;
   - catch-up goes through the window and digest.
 - **Bridge:** parse captured `ioreg` outputs (`testdata`: idle and unlocked, locked, garbage). The loop is tested with a fake reader; no test runs `ioreg`.

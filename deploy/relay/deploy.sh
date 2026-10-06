@@ -14,9 +14,8 @@
 #                 -o forms (scp spells the port -P, ssh -p; -o Port= works for both):
 #                 SSH_OPTS="-i ~/.ssh/relay_ed25519 -o Port=2222" deploy/relay/deploy.sh root@vps
 #   --sync-env    also update /etc/agent-watch-relay/env from agent-watch.env, key
-#                 by key: each relay key the file sets (AW_HOST_TOKEN, AW_LISTEN,
-#                 AW_TRUSTED_PROXIES, AW_CLIENT_IP_HEADER, AW_PUSH_RESOLVED,
-#                 AW_FCM_CREDENTIALS, AW_NTFY_*) replaces the server's line; other
+#                 by key: each relay key the file sets (the list is in
+#                 docs/reference/contracts.md §7) replaces the server's line; other
 #                 lines and comments stay. The old file is kept as env.bak-<UTC time>.
 #                 Values travel in a 0600 file over scp and are never printed.
 #   AW_ENV_FILE   the config file (default: agent-watch.env at the repo root).
