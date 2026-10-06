@@ -54,11 +54,11 @@ import com.gabriel.agentwatch.model.PromptOption
 import com.gabriel.agentwatch.network.RelayRepository
 import com.gabriel.agentwatch.ui.components.PromptInput
 import com.gabriel.agentwatch.ui.components.ResIcon
+import com.gabriel.agentwatch.ui.components.agentStatus
 import com.gabriel.agentwatch.ui.components.ScreenList
 import com.gabriel.agentwatch.ui.components.ageText
 import com.gabriel.agentwatch.ui.components.transformedItem
 import com.gabriel.agentwatch.ui.theme.OnSurfaceVariant
-import com.gabriel.agentwatch.ui.theme.statusStyle
 import com.gabriel.agentwatch.util.MarkdownFormatter
 import com.gabriel.agentwatch.ui.logic.InputResult
 import com.gabriel.agentwatch.ui.logic.headTailPreview
@@ -271,7 +271,7 @@ fun AgentDetailScreen(
 /** Name first, anchored under the clock; then one status line and one line of context (the agent's own title, the workspace). Kept short so the prompt or the last reply shows on open. */
 @Composable
 private fun AgentHeader(agent: AgentState, modifier: Modifier) {
-    val style = statusStyle(agent.status)
+    val (style, statusWord) = agentStatus(agent)
     Column(modifier, horizontalAlignment = Alignment.CenterHorizontally) {
         Text(
             agent.label.ifBlank { agent.pane_id },
@@ -284,7 +284,7 @@ private fun AgentHeader(agent: AgentState, modifier: Modifier) {
             ResIcon(style.icon, null, style.accent, Modifier.size(16.dp))
             Spacer(Modifier.width(4.dp))
             val statusLine = listOfNotNull(
-                stringResource(style.label),
+                statusWord,
                 agent.agent.takeIf { it.isNotBlank() },
                 ageText(agent.updated_at).takeIf { it.isNotBlank() }
             ).joinToString(" · ")

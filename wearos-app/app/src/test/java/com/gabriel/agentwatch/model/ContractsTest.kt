@@ -33,6 +33,7 @@ class ContractsTest {
         assertEquals(334L, state.state_change_seq)
         assertEquals("2026-09-23T17:04:05Z", state.updated_at)
         assertEquals(4, state.severity())
+        assertEquals(0, state.background_agents) // omitted in the golden (omitempty)
 
         val prompt = state.prompt
         assertNotNull(prompt)
@@ -56,6 +57,16 @@ class ContractsTest {
         assertEquals("opt-3", opt3.id)
         assertEquals("No, and tell Claude what to do differently", opt3.label)
         assertEquals("deny", opt3.role)
+    }
+
+    @Test
+    fun backgroundAgentsParses() {
+        // contracts §1.2: a working agent that only waits on its background agents.
+        val state = Gson().fromJson(
+            """{"pane_id":"w5:pAE","agent":"claude","label":"x","workspace_id":"w5","status":"working","focused":false,"state_change_seq":7,"background_agents":2,"updated_at":"2026-10-05T23:45:11Z"}""",
+            AgentState::class.java
+        )
+        assertEquals(2, state.background_agents)
     }
 
     @Test

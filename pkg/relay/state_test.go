@@ -55,6 +55,7 @@ func TestState_UpsertAndRemove(t *testing.T) {
 	// Update agent (prev should reflect old state)
 	a1Updated := a1
 	a1Updated.Status = model.StatusWorking
+	a1Updated.BackgroundAgents = 2
 	prev = state.Upsert(a1Updated)
 	if prev == nil || prev.Status != model.StatusIdle {
 		t.Fatalf("expected prev status idle, got %+v", prev)
@@ -63,6 +64,11 @@ func TestState_UpsertAndRemove(t *testing.T) {
 	ev = <-subCh
 	if ev.Name != "agent" {
 		t.Fatalf("expected 'agent' event, got %s", ev.Name)
+	}
+	// The relay forwards the bridge's fields as they are (contracts.md §1.2).
+	var got model.AgentState
+	if err := json.Unmarshal(ev.Data, &got); err != nil || got.BackgroundAgents != 2 {
+		t.Fatalf("agent event lost background_agents: %s", ev.Data)
 	}
 
 	// Remove agent

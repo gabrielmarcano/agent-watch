@@ -99,7 +99,12 @@ type AgentState struct {
 	Focused        bool           `json:"focused"`
 	StateChangeSeq uint64         `json:"state_change_seq"`
 	Prompt         *PendingPrompt `json:"prompt,omitempty"`
-	UpdatedAt      string         `json:"updated_at"`
+	// BackgroundAgents counts the background agents (sub-agents) the
+	// agent's last turn left running, while the agent only waits on them:
+	// set only with StatusWorking, after a completed turn and before the
+	// next one starts. 0 (omitted) otherwise.
+	BackgroundAgents int    `json:"background_agents,omitempty"`
+	UpdatedAt        string `json:"updated_at"`
 }
 
 // HistoryItem represents a single completed query-response turn for a pane.

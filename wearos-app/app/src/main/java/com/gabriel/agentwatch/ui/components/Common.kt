@@ -21,10 +21,32 @@ import androidx.wear.compose.material3.ScreenScaffold
 import androidx.wear.compose.material3.lazy.TransformationSpec
 import androidx.wear.compose.material3.lazy.rememberTransformationSpec
 import androidx.wear.compose.material3.lazy.transformedHeight
+import androidx.compose.ui.res.pluralStringResource
 import com.gabriel.agentwatch.R
+import com.gabriel.agentwatch.model.AgentState
 import com.gabriel.agentwatch.ui.logic.Age
 import com.gabriel.agentwatch.ui.logic.ageOf
+import com.gabriel.agentwatch.ui.logic.shownStatus
+import com.gabriel.agentwatch.ui.logic.waitingOnBackground
+import com.gabriel.agentwatch.ui.theme.StatusStyle
+import com.gabriel.agentwatch.ui.theme.statusStyle
 import java.time.Instant
+
+/**
+ * How [agent]'s status shows in the list and on its screen: its style and its word. An agent that
+ * only waits on its background agents shows as done with their count (`ARCHITECTURE.md` §4b).
+ */
+@Composable
+fun agentStatus(agent: AgentState): Pair<StatusStyle, String> {
+    val style = statusStyle(agent.shownStatus())
+    val waiting = agent.waitingOnBackground()
+    val word = if (waiting > 0) {
+        pluralStringResource(R.plurals.status_done_background, waiting, waiting)
+    } else {
+        stringResource(style.label)
+    }
+    return style to word
+}
 
 /**
  * A scrolling screen: [ScreenScaffold] (the clock moves away as the list scrolls, native rotary input)

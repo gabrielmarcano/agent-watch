@@ -46,6 +46,7 @@ type AgentState struct {
     Focused        bool           `json:"focused"`
     StateChangeSeq uint64         `json:"state_change_seq"`
     Prompt         *PendingPrompt `json:"prompt,omitempty"`
+    BackgroundAgents int          `json:"background_agents,omitempty"`
     UpdatedAt      string         `json:"updated_at"`
 }
 ```
@@ -64,7 +65,8 @@ type AgentState struct {
 | `focused` | herdr `focused` | |
 | `state_change_seq` | herdr `state_change_seq` | Used as the optimistic-concurrency token for commands |
 | `prompt` | parsed by the adapter | Present **only** when `status == "blocked"`, otherwise omitted |
-| `updated_at` | bridge clock | Set each time the bridge rebuilds the state from a herdr change or publishes a newly parsed prompt; a workspace rename alone does not change it |
+| `background_agents` | the adapter's turn-end reader (Claude only: `agents.md` §3.4) | The background agents (sub-agents) the agent's last turn left running, **while the agent only waits on them**: its turn has ended, no newer turn has started, and herdr still reports `working`. Present **only** with `status == "working"` and a count > 0, otherwise omitted (0). Refreshed by the bridge's periodic turn check, so it can lag up to that interval (`agents.md` §1). Clients show such an agent as done with the count; `status` stays herdr's |
+| `updated_at` | bridge clock | Set each time the bridge rebuilds the state from a herdr change, publishes a newly parsed prompt or a new `background_agents`; a workspace rename alone does not change it |
 
 **Example:**
 
@@ -94,6 +96,12 @@ type AgentState struct {
   },
   "updated_at": "2026-09-23T17:04:05Z"
 }
+```
+
+A Claude agent whose turn ended while two of its background agents still run (only the fields that differ):
+
+```json
+{ "status": "working", "background_agents": 2 }
 ```
 
 The `fingerprint` above is the real `model.Fingerprint` of this prompt (§1.3); `TestFingerprintKnownAnswers` in `pkg/agents` checks it. The golden file `pkg/model/testdata/agent_state.json` carries the same value.
@@ -498,7 +506,7 @@ ntfy never gets `resolved`: it cannot withdraw a notification it already deliver
 | any → `blocked` | `blocked` |
 | `working` → `done` | `done` |
 | `blocked` → any other status, when that pane's own `blocked` push went out | `resolved` (FCM only, and only when enabled: §4.1) |
-| anything else | no push |
+| anything else (e.g. `working` → `working` with a new `background_agents`) | no push |
 
 - **`resolved`** goes out at once, once per `blocked` push:
   - no debounce, no window, never counted toward or included in a `digest`, never sent to ntfy;
@@ -507,6 +515,7 @@ ntfy never gets `resolved`: it cannot withdraw a notification it already deliver
   - A pane that leaves `blocked` through a `snapshot` gets its `resolved` with its next `agent_update`.
   - A pane removed while blocked (`agent_removed`, or missing from a `snapshot`) gets none; its notification stays until dismissed.
 
+- **Turns that end while the pane stays `working`** (background agents still running, §1.2) push nothing: their reply reaches the watch as a `history_item`, and the agent shows as done with its count. The `done` push comes once herdr reports `working` → `done`, after the last background agent's report turn, with that turn's reply. Why: a coordinator gets one report turn per finished agent, and a push for each would be noise.
 - **`done` waits for the reply:** the bridge sends the turn's `history_item` right after the transition. The relay holds the `done` push up to 3 s for that pane's next new history item and uses its response as the body; when none arrives, it pushes with `Task finished`. The debounce and the window below apply when it goes out.
 - **Debounce** (the same pane pushed the same event less than 5 s ago):
   - `done`: skip it. The pane's notification already says it finished.

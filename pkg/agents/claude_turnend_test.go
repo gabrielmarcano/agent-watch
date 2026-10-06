@@ -3,6 +3,7 @@ package agents
 import (
 	"context"
 	"os"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -10,11 +11,21 @@ import (
 // Record shapes as Claude Code 2.1.289 writes them (keys checked on the
 // owner's transcripts, 2026-10-05; values made up).
 func turnDuration(uuid string, sidechain bool) string {
+	return turnDurationN(uuid, sidechain, 1)
+}
+
+// turnDurationN is a turn end with n background agents still running; Claude
+// leaves the key out when there are none.
+func turnDurationN(uuid string, sidechain bool, n int) string {
 	sc := "false"
 	if sidechain {
 		sc = "true"
 	}
-	return `{"type":"system","subtype":"turn_duration","durationMs":1200,"messageCount":4,"pendingBackgroundAgentCount":1,"isMeta":false,"isSidechain":` + sc + `,"uuid":"` + uuid + `","timestamp":"2026-10-05T23:45:11.000Z"}` + "\n"
+	pending := ""
+	if n > 0 {
+		pending = `"pendingBackgroundAgentCount":` + strconv.Itoa(n) + `,`
+	}
+	return `{"type":"system","subtype":"turn_duration","durationMs":1200,"messageCount":4,` + pending + `"isMeta":false,"isSidechain":` + sc + `,"uuid":"` + uuid + `","timestamp":"2026-10-05T23:45:11.000Z"}` + "\n"
 }
 
 func metaUser(text string) string {
@@ -46,7 +57,8 @@ func TestClaudeLastCompletedTurn(t *testing.T) {
 
 	check := func(step, wantQuery, wantResponse, wantMarker string) {
 		t.Helper()
-		item, marker, err := c.LastCompletedTurn(ctx, ref)
+		end, err := c.LastCompletedTurn(ctx, ref)
+		item, marker := end.Item, end.Marker
 		if err != nil || marker != wantMarker {
 			t.Fatalf("%s: marker %q, err %v; want %q", step, marker, err, wantMarker)
 		}
@@ -88,9 +100,9 @@ func TestClaudeLastCompletedTurn_GrowsAndCaches(t *testing.T) {
 	c.tailWindows = []int64{2 << 10, 64 << 10}
 	ref := SessionRef{Kind: "path", Value: path}
 
-	item, marker, err := c.LastCompletedTurn(context.Background(), ref)
-	if err != nil || marker != "u1" || item == nil || item.Response != "a" || item.Query != "q" {
-		t.Fatalf("got %+v, %q, %v", item, marker, err)
+	end, err := c.LastCompletedTurn(context.Background(), ref)
+	if item := end.Item; err != nil || end.Marker != "u1" || item == nil || item.Response != "a" || item.Query != "q" || end.Background != 0 {
+		t.Fatalf("got %+v, %v", end, err)
 	}
 
 	fi, _ := os.Stat(path)
@@ -100,8 +112,8 @@ func TestClaudeLastCompletedTurn_GrowsAndCaches(t *testing.T) {
 	if err := os.Chtimes(path, fi.ModTime(), fi.ModTime()); err != nil {
 		t.Fatal(err)
 	}
-	if item, marker, err := c.LastCompletedTurn(context.Background(), ref); err != nil || marker != "u1" || item == nil || item.Response != "a" {
-		t.Errorf("unchanged file: got %+v, %q, %v; want the cached turn", item, marker, err)
+	if end, err := c.LastCompletedTurn(context.Background(), ref); err != nil || end.Marker != "u1" || end.Item == nil || end.Item.Response != "a" {
+		t.Errorf("unchanged file: got %+v, %v; want the cached turn", end, err)
 	}
 }
 
@@ -125,5 +137,58 @@ func TestClaudeLastTurn_MetaLines(t *testing.T) {
 	item, err = c.LastTurn(context.Background(), SessionRef{Kind: "path", Value: writeFile(t, "n.jsonl", notified)})
 	if err != nil || item.Query != "" || item.Response != "the agent finished" {
 		t.Errorf("notification turn: %+v, %v", item, err)
+	}
+}
+
+// The background agents a turn end leaves running count only while Claude
+// waits on them: a newer turn (a background agent's report, a prompt) sets
+// the count to 0 until that turn ends with its own count; a local command
+// or `!` shell input starts no turn. Sequences as on the owner's
+// transcripts (2026-10-05; values made up).
+func TestClaudeLastCompletedTurn_Background(t *testing.T) {
+	ctx := context.Background()
+	path := writeFile(t, "bg.jsonl", claudeTurnLines("launch three agents", "launched"))
+	ref := SessionRef{Agent: "claude", Kind: "path", Value: path}
+	c := newClaudeAdapter(Config{})
+	answer := func(text string) string {
+		return `{"type":"assistant","message":{"content":[{"type":"text","text":"` + text + `"}]}}` + "\n"
+	}
+	steps := []struct {
+		name   string
+		add    string
+		want   int
+		marker string
+	}{
+		{"no turn end yet", "", 0, ""},
+		{"turn ends with 3 running", turnDurationN("u1", false, 3) +
+			`{"type":"system","subtype":"stop_hook_summary","isSidechain":false}` + "\n" +
+			`{"type":"queue-operation","operation":"enqueue"}` + "\n" +
+			`{"type":"ai-title","aiTitle":"t"}` + "\n", 3, "u1"},
+		{"a sub-agent's own lines change nothing",
+			`{"type":"assistant","isSidechain":true,"message":{"content":[{"type":"text","text":"x"}]}}` + "\n" +
+				turnDurationN("s1", true, 0), 3, "u1"},
+		{"a local command starts no turn",
+			metaUser("<local-command-caveat>Caveat</local-command-caveat>") +
+				`{"type":"user","message":{"content":"<command-name>/model</command-name>"}}` + "\n" +
+				`{"type":"user","message":{"content":"<local-command-stdout>Set model</local-command-stdout>"}}` + "\n" +
+				`{"type":"user","message":{"content":"<bash-input>ls</bash-input>"}}` + "\n", 3, "u1"},
+		{"an agent's report starts a turn", metaUser("<task-notification>agent done</task-notification>"), 0, "u1"},
+		{"that turn ends with 2 running", answer("noted") + turnDurationN("u2", false, 2), 2, "u2"},
+		{"a task notification string starts a turn", `{"type":"user","message":{"content":"<task-notification>x</task-notification>"}}` + "\n", 0, "u2"},
+		{"it ends with 1 running", answer("ok") + turnDurationN("u3", false, 1), 1, "u3"},
+		{"the owner prompts", `{"type":"user","message":{"content":"status?"}}` + "\n", 0, "u3"},
+		{"generating", answer("still 1 running"), 0, "u3"},
+		{"ends with 1 running", turnDurationN("u4", false, 1), 1, "u4"},
+		{"the last report", metaUser("<task-notification>last</task-notification>") + answer("all done"), 0, "u4"},
+		{"the last turn ends with none", turnDurationN("u5", false, 0), 0, "u5"},
+	}
+	for _, s := range steps {
+		if s.add != "" {
+			appendFile(t, path, s.add)
+		}
+		end, err := c.LastCompletedTurn(ctx, ref)
+		if err != nil || end.Background != s.want || end.Marker != s.marker {
+			t.Fatalf("%s: background %d, marker %q, err %v; want %d, %q", s.name, end.Background, end.Marker, err, s.want, s.marker)
+		}
 	}
 }
