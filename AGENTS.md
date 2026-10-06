@@ -65,7 +65,7 @@ Rules for every AI agent working in this repository: Claude Code, Antigravity, O
 
 ### 1.3 Two Go binaries, one module
 - One Go module (`go.mod`; its name: §2).
-- `agent-watch-bridge`: static binary on the Mac/Linux host. Keep it thin: herdr ↔ relay translation plus on-demand transcript reads.
+- `agent-watch-bridge`: static binary on the Mac/Linux host. Keep it thin: herdr ↔ relay translation, on-demand transcript reads, and (macOS only, the owner's decision of 2026-10-05) the host's input idle time and screen lock, read with `ioreg`, for push presence (`contracts.md` §4.3).
   - The herdr plugin (`herdr-plugin.toml`) only installs and controls this binary. Its actions are one-shot.
   - The long-running process is `agent-watch-bridge run`, supervised by launchd (macOS) or systemd `--user` (Linux). Never rely on herdr to keep it alive: plugin actions are one-shot, and the service manager restarts the bridge after a crash or reboot and outlives herdr restarts.
 - `agent-watch-relay`: static Linux binary on the VPS. It owns state aggregation, history storage, push, pairing and auth. History lives on the relay so the watch can read it while the host sleeps.

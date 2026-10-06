@@ -159,6 +159,7 @@ func runDaemon(args []string) error {
 	syncer.Listener = engine
 	rClient.OnConnect = engine.ConnectMessages
 	rClient.OnMessage = engine.HandleRelayMessage
+	engine.Presence = bridge.ReadPresence
 
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
@@ -167,6 +168,7 @@ func runDaemon(args []string) error {
 
 	writerDone := engine.StartStatusWriter(ctx, 5*time.Second)
 	engine.StartTurnWatch(ctx)
+	engine.StartPresence(ctx)
 
 	go func() {
 		if err := syncer.Run(ctx); err != nil && ctx.Err() == nil {

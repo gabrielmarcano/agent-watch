@@ -45,6 +45,11 @@ type Engine struct {
 	// TurnCheckInterval is how often StartTurnWatch checks working panes for
 	// a turn that ended without a status change (set by NewEngine; 0 = off).
 	TurnCheckInterval time.Duration
+	// Presence reads whether the owner is using the host, for the relay's
+	// push presence (nil: no reports). PresenceInterval is how often
+	// StartPresence reports (set by NewEngine).
+	Presence         PresenceReader
+	PresenceInterval time.Duration
 	// CommandTimeout bounds a command from its arrival, including the wait
 	// for the pane lock (defaults to commandTimeout, below the relay's wait).
 	CommandTimeout time.Duration
@@ -97,6 +102,7 @@ func NewEngine(
 		ScreenReadTimeout:  3 * time.Second,
 		ScreenRetryTimeout: 8 * time.Second,
 		TurnCheckInterval:  15 * time.Second,
+		PresenceInterval:   15 * time.Second,
 
 		states:     make(map[string]*paneState),
 		workspaces: make(map[string]string),
@@ -787,6 +793,9 @@ func (e *Engine) buildAgentState(info herdr.AgentInfo) (model.AgentState, string
 
 // ConnectMessages returns the initial hello and snapshot messages for OnConnect.
 func (e *Engine) ConnectMessages(ctx context.Context) []any {
+	// Read the presence before taking e.mu: it runs a subprocess.
+	presence, hasPresence := e.presenceMsg(ctx)
+
 	e.mu.RLock()
 	defer e.mu.RUnlock()
 
@@ -810,7 +819,11 @@ func (e *Engine) ConnectMessages(ctx context.Context) []any {
 		Agents: agentsList,
 	}
 
-	return []any{hello, snapshot}
+	msgs := []any{hello, snapshot}
+	if hasPresence {
+		msgs = append(msgs, presence)
+	}
+	return msgs
 }
 
 // Status returns a StatusFile snapshot for the status file writer or CLI status command.

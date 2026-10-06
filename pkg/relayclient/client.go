@@ -102,7 +102,7 @@ func (c *Client) setLastError(msg string) {
 //     agent state; the relay times out an unanswered command).
 //   - Disconnected: history_item joins the bounded history queue (oldest
 //     dropped), flushed after the next hello + snapshot. agent_update,
-//     agent_removed, herdr_status and command_result are dropped.
+//     agent_removed, herdr_status, host_presence and command_result are dropped.
 func (c *Client) Send(msg any) {
 	data, err := json.Marshal(msg)
 	if err != nil {
@@ -168,6 +168,8 @@ func describe(msg any) outMsg {
 		return outMsg{typ: model.WireHistoryItem, id: m.Item.PaneID, hist: &h}
 	case model.HerdrStatusMsg, *model.HerdrStatusMsg:
 		return outMsg{typ: model.WireHerdrStatus}
+	case model.HostPresenceMsg, *model.HostPresenceMsg:
+		return outMsg{typ: model.WireHostPresence}
 	case model.HelloMsg, *model.HelloMsg:
 		return outMsg{typ: model.WireHello}
 	case model.SnapshotMsg, *model.SnapshotMsg:

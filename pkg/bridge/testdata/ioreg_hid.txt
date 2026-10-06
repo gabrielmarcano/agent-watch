@@ -1,0 +1,33 @@
++-o IOHIDSystem  <class IOHIDSystem, id 0x10000069d, registered, matched, active, busy 0 (5 ms), retain 12>
+  | {
+  |   "IOClass" = "IOHIDSystem"
+  |   "HIDScrollCountMaxTimeDeltaBetween" = 600
+  |   "IOPersonalityPublisher" = "com.apple.iokit.IOHIDFamily"
+  |   "IOResourceMatch" = "IOBSD"
+  |   "IOMatchedAtBoot" = Yes
+  |   "HIDServiceGlobalModifiersUsage" = 1
+  |   "IOProviderClass" = "IOResources"
+  |   "IOReportLegendPublic" = Yes
+  |   "IOProbeScore" = 0
+  |   "HIDIdleTime" = 372262926541
+  |   "HIDScrollCountIgnoreMomentumScrolls" = Yes
+  |   "HIDScrollCountAccelerationFactor" = 163840
+  |   "HIDServiceSupport" = Yes
+  |   "HIDScrollCountMouseCanReset" = Yes
+  |   "IOCFPlugInTypes" = {"0516B563-B15B-11DA-96EB-0014519758EF"="IOHIDFamily.kext/Contents/PlugIns/IOHIDNXEventRouter.plugin"}
+  |   "VendorID" = 1452
+  |   "CFBundleIdentifierKernel" = "com.apple.iokit.IOHIDFamily"
+  |   "HIDScrollCountMinDeltaToSustain" = 20
+  |   "IOMatchCategory" = "IOHID"
+  |   "CFBundleIdentifier" = "com.apple.iokit.IOHIDFamily"
+  |   "PrimaryUsage" = 23
+  |   "CursorState" = {}
+  |   "HIDPowerOnDelayNS" = 500000000
+  |   "IOGeneralInterest" = "IOCommand is not serializable"
+  |   "PrimaryUsagePage" = 65280
+  |   "HIDScrollCountMinDeltaToStart" = 30
+  |   "HIDScrollCountMaxTimeDeltaToSustain" = 250
+  |   "HIDScrollCountMax" = 2000
+  | }
+  | 
+

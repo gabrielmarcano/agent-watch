@@ -1,0 +1,12 @@
++-o Root  <class IORegistryEntry, id 0x100000100, retain 31>
+    {
+      "IOKitBuildVersion" = "Darwin Kernel Version 27.0.0: Tue Aug 11 21:02:16 PDT 2026; root:xnu-13432.1.9~1/RELEASE_ARM64_T8112"
+      "OS Build Version" = "26A434"
+      "OSKernelCPUSubtype" = 18446744072635809794
+      "OSKernelCPUType" = 16777228
+      "OSPrelinkKextCount" = 11
+      "IORegistryPlanes" = {"IOPort"="IOPort","IOPower"="IOPower","IOService"="IOService","IOAccessory"="IOAccessory","IOUSB"="IOUSB","CoreCapture"="CoreCapture","WiFiDKCoreCapture"="WiFiDKCoreCapture","IODeviceTree"="IODeviceTree"}
+      "IOConsoleLocked" = No
+      "IOConsoleUsers" = ({"kCGSSessionOnConsoleKey"=Yes,"kSCSecuritySessionID"=100002,"kCGSSessionSystemSafeBoot"=No,"kCGSessionLoginDoneKey"=Yes,"kCGSSessionIDKey"=257,"kCGSSessionUserNameKey"="user","kCGSSessionGroupIDKey"=20,"CGSSessionUniqueSessionUUID"="00000000-0000-0000-0000-000000000000","kCGSessionLongUserNameKey"="User","kCGSSessionAuditIDKey"=100002,"kCGSSessionLoginwindowSafeLogin"=No,"kCGSSessionUserIDKey"=501})
+    }
+    
