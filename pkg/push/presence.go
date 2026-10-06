@@ -34,7 +34,9 @@ func (d *Dispatcher) OnHostPresence(idle time.Duration, locked bool) {
 	p := &d.presence
 	p.reported, p.reportAt, p.locked = true, now, locked
 	p.lastInputAt = now.Add(-idle)
-	if idle < 0 || p.lastInputAt.After(now) { // overflowed: treat as long idle
+	// A negative idle, or one that puts the last input in the future, is
+	// unknown (away). A huge idle reads as long idle: Time.Sub saturates.
+	if idle < 0 || p.lastInputAt.After(now) {
 		p.lastInputAt = time.Time{}
 	}
 	d.Logger.Debug("host presence", "idle", idle, "locked", locked)
@@ -47,14 +49,15 @@ func (d *Dispatcher) OnHostPresence(idle time.Duration, locked bool) {
 }
 
 // OnHostOffline implements relay.Notifier: the host disconnected. Presence
-// ends without a catch-up (the watch could not answer anyway).
+// ends without a catch-up. The held-back panes wait for the host's next report
+// (a reconnected bridge reports right after its snapshot), and the catch-up
+// then reads their current state.
 func (d *Dispatcher) OnHostOffline() {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	d.initLocked()
 
 	d.stopPresenceTimerLocked()
-	clear(d.presence.quiet)
 	d.presence.reported = false
 }
 

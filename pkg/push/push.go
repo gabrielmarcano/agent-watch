@@ -267,6 +267,11 @@ func (d *Dispatcher) OnAgentUpdate(prev *model.AgentState, cur model.AgentState)
 		d.dispatchLocked(Message{Event: EventResolved, PaneID: cur.PaneID, StateChangeSeq: cur.StateChangeSeq})
 	}
 
+	// A held-back prompt is stale once its pane leaves blocked.
+	if _, held := d.presence.quiet[cur.PaneID]; held && cur.Status != model.StatusBlocked {
+		delete(d.presence.quiet, cur.PaneID)
+	}
+
 	// A done push waiting for its reply follows the pane's newest state.
 	if p, ok := d.pendingDone[cur.PaneID]; ok {
 		p.cur = cur

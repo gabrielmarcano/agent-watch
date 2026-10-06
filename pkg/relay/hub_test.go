@@ -681,14 +681,24 @@ func TestHub_ReplaceIsNotOffline(t *testing.T) {
 	defer hh.state.Unsubscribe(sub)
 	connA := hh.connectHost(t, ctx, "mac-a")
 	waitHostOnline(t, ch, true, 5*time.Second)
-	hh.connectHost(t, ctx, "mac-b")
+	connB := hh.connectHost(t, ctx, "mac-b")
 	// The replaced connection is closed with 4000; wait for that to land.
 	_, _, err := connA.Read(ctx)
 	if websocket.CloseStatus(err) != 4000 {
 		t.Fatalf("conn A close status = %v, want 4000", websocket.CloseStatus(err))
 	}
-	time.Sleep(50 * time.Millisecond)
 	if got := n.offlineCount(); got != 0 {
 		t.Fatalf("OnHostOffline calls after a replace = %d, want 0", got)
+	}
+	// Closing the current connection is the one real offline. A wrong offline
+	// from the replaced connection would make it 2.
+	_ = connB.CloseNow()
+	deadline := time.Now().Add(5 * time.Second)
+	for n.offlineCount() < 1 && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	time.Sleep(50 * time.Millisecond)
+	if got := n.offlineCount(); got != 1 {
+		t.Fatalf("OnHostOffline calls after closing the current host = %d, want exactly 1", got)
 	}
 }

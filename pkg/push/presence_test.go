@@ -162,7 +162,7 @@ func TestPresence_DoneIsNotCaughtUp(t *testing.T) {
 	}
 }
 
-func TestPresence_OfflineClearsWithoutCatchUp(t *testing.T) {
+func TestPresence_OfflineKeepsHeldBackForReconnect(t *testing.T) {
 	d, clock, timers, sender, states := presenceDispatcher(t)
 	d.OnHostPresence(time.Second, false)
 	block(d, states, "w1:p1", 10)
@@ -171,12 +171,62 @@ func TestPresence_OfflineClearsWithoutCatchUp(t *testing.T) {
 	clock.Advance(time.Hour)
 	timers.Fire()
 	if n := pushed(d, sender); n != 0 {
-		t.Fatalf("pushes after offline = %d, want 0", n)
+		t.Fatalf("pushes while offline = %d, want 0", n)
 	}
-	// Offline means away: the next prompt pushes at once.
+	// Offline means away: a new prompt pushes at once.
 	block(d, states, "w1:p2", 20)
 	if n := pushed(d, sender); n != 1 {
-		t.Fatalf("pushes after the next prompt = %d, want 1", n)
+		t.Fatalf("pushes after a new prompt offline = %d, want 1", n)
+	}
+
+	// The reconnected host reports an owner who is gone: the held-back prompt
+	// is caught up, in the window the w1:p2 push opened.
+	d.OnHostPresence(20*time.Minute, false)
+	flushWindow(d, timers)
+	msgs := sender.getMessages()
+	if len(msgs) != 2 || msgs[1].PaneID != "w1:p1" {
+		t.Fatalf("pushes = %+v, want two, the second for w1:p1", msgs)
+	}
+}
+
+func TestPresence_OfflineThenAnsweredIsNotCaughtUp(t *testing.T) {
+	d, _, _, sender, states := presenceDispatcher(t)
+	d.OnHostPresence(time.Second, false)
+	block(d, states, "w1:p1", 10)
+	d.OnHostOffline()
+	states["w1:p1"] = agentAt("w1:p1", "w1:p1", model.StatusWorking, 11)
+
+	d.OnHostPresence(20*time.Minute, false)
+	if n := pushed(d, sender); n != 0 {
+		t.Fatalf("catch-up pushes = %d, want 0", n)
+	}
+}
+
+func TestPresence_LeavingBlockedDropsHeldBack(t *testing.T) {
+	d, _, _, _, states := presenceDispatcher(t)
+	d.OnHostPresence(time.Second, false)
+	block(d, states, "w1:p1", 10)
+
+	prev := states["w1:p1"]
+	cur := agentAt("w1:p1", "w1:p1", model.StatusWorking, 11)
+	states["w1:p1"] = cur
+	d.OnAgentUpdate(&prev, cur)
+
+	d.mu.Lock()
+	_, held := d.presence.quiet["w1:p1"]
+	d.mu.Unlock()
+	if held {
+		t.Fatal("w1:p1 is still held back after leaving blocked")
+	}
+}
+
+func TestPresence_StaleReportIsAwayForNewPrompts(t *testing.T) {
+	d, clock, _, sender, states := presenceDispatcher(t)
+	d.OnHostPresence(time.Second, false)
+	clock.Advance(PresenceStale)
+	block(d, states, "w1:p1", 10)
+	if n := pushed(d, sender); n != 1 {
+		t.Fatalf("pushes with a stale report = %d, want 1", n)
 	}
 }
 
@@ -211,7 +261,8 @@ func TestPresence_CatchUpGoesThroughDigest(t *testing.T) {
 	flushWindow(d, timers)
 	d.Wait()
 	msgs := sender.getMessages()
-	if len(msgs) != 2 || msgs[0].Event != EventBlocked || msgs[1].Event != EventDigest {
-		t.Fatalf("catch-up = %v, want the first blocked push then one digest", eventsOf(msgs))
+	// The senders run concurrently, so the order of the two is not fixed.
+	if got := eventsOf(msgs); len(got) != 2 || got[0] != "blocked:w1:p1" || got[1] != "digest:" {
+		t.Fatalf("catch-up = %v, want the first blocked push then one digest", got)
 	}
 }
