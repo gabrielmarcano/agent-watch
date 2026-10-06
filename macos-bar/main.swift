@@ -213,7 +213,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
 
         header?.subtitle.stringValue = p.headline
-        header?.toggle.state = p.switchOn ? .on : .off
+        header?.toggle.isOn = p.switchOn
         header?.toggle.isEnabled = p.switchEnabled
         for (i, item) in detailItems.enumerated() {
             let text = i < p.details.count ? p.details[i] : ""
@@ -239,8 +239,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     /// The header switch: on starts the bridge service, off stops it. A flip
     /// that cannot run snaps back to the real state.
-    @objc private func toggleBridge(_ sender: NSSwitch) {
-        let started = sender.state == .on
+    @objc private func toggleBridge(_ sender: AccentSwitch) {
+        let started = sender.isOn
         let ran = started
             ? runCLI(["start"], busy: "Starting", failure: "Could not start the bridge")
             : runCLI(["stop"], busy: "Stopping", failure: "Could not stop the bridge")

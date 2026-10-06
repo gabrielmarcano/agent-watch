@@ -72,7 +72,7 @@ The version strings' format is in `docs/reference/contracts.md` §3.
 
 ## Menu actions
 
-- **The switch** in the first row (next to "Agent Watch" and the state): on runs `agent-watch-bridge start`, off runs `agent-watch-bridge stop`. Start keeps the installed LaunchAgent's paths, so it never moves the state dir or the binary. Off asks nothing: your watch shows this Mac as offline until you turn it on again. The switch is disabled while an action runs, and while the bridge is not configured.
+- **The switch** in the first row (next to "Agent Watch" and the state): on runs `agent-watch-bridge start`, off runs `agent-watch-bridge stop`. Start keeps the installed LaunchAgent's paths, so it never moves the state dir or the binary. Off asks nothing: your watch shows this Mac as offline until you turn it on again. The switch is disabled while an action runs, and while the bridge is not configured. It is drawn in the system accent colour (`AccentSwitch`, `HeaderView.swift`): a stock `NSSwitch` turns gray in a menu bar app's menu.
 - **Restart Bridge** (⌘R): `agent-watch-bridge restart`, which restarts the
   installed service without rewriting it (use it after `make bridge`).
 - **Pair a Watch…** (⌘P): `agent-watch-bridge pair --json`; shows the code and
