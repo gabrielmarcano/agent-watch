@@ -218,6 +218,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             let text = i < p.details.count ? p.details[i] : ""
             item.title = "   " + text
             item.isHidden = text.isEmpty
+            item.toolTip = i == 0 ? p.detailHelp : nil
         }
         for (i, item) in versionItems.enumerated() {
             let text = i < p.versions.count ? p.versions[i] : ""
@@ -343,7 +344,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if FileManager.default.fileExists(atPath: dir.path) {
             NSWorkspace.shared.activateFileViewerSelecting([dir])
         }
-        showAlert("No configuration yet", "\(path) does not exist.\n\n\(configureHint)")
+        showAlert("No configuration yet", "\(path) does not exist.\n\n\(configureHelp)")
     }
 
     /// Registers or removes this app as a login item (SMAppService, macOS 13+).

@@ -54,14 +54,14 @@ The bar reports the health of the bridge and the relay, and pairs watches. It ne
 | watch with waves | green | Connected to *relay* | Nothing |
 | watch | yellow | Connecting to *relay*… | Wait |
 | watch | yellow | herdr is not running | Start herdr |
-| watch with `!` | red | Relay error (for example the host token was rejected), with the error | Fix the cause; it keeps retrying |
+| watch with `!` | red | Relay error, with a short reason (for example `Relay unreachable (timed out)` or `The relay rejected the host token`); hover over it for the full error, also in the bridge log | Fix the cause; it keeps retrying |
 | watch with `!` | red | Bridge not responding (its status file is stale: `contracts.md` §6) | Restart |
 | crossed watch | gray, or red if it failed to start | Bridge stopped (and why, if it failed) | Start |
 | crossed watch | gray | Bridge service not installed | Start |
 | crossed watch | gray | Bridge not configured; Start is disabled | Run `make configure-bridge` (or `agent-watch-bridge configure --env-file agent-watch.env`) in a terminal |
 | watch with `!` | red | agent-watch-bridge not found, or status unavailable | See the menu |
 
-The tooltip repeats the state. The **Versions** section of the menu shows:
+The tooltip repeats the state. No menu line is longer than `maxMenuLine` (`BarLogic.swift`): errors are shortened there. The **Versions** section of the menu shows:
 
 - **Menu bar:** this app's bundle version.
 - **Bridge:** the running daemon's version, or the CLI's when it is stopped.
