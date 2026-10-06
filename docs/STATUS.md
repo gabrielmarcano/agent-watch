@@ -16,7 +16,7 @@ The one place for the project's state: what is done, what is open, what comes ne
 | [6 watchOS](phases/6-watchos.md) (best-effort) | not started; after 5 | — |
 | [7 Android phone client](phases/7-android-mobile.md) | not started; after 5 | — |
 
-**Deployed** (2026-10-06): the relay at `0.4.2` (commit `904df4a`); the bridge at `0.4.4` (commit `904df4a`) on the owner's Mac; the Wear OS app `1.2.4` (release build, version code 9) on the owner's Pixel Watch 2; the menu bar `0.4.0`, built from `main` into `bin/` (2026-10-05). The component versions are in `VERSIONS`.
+**Deployed** (2026-10-06): the relay at `0.5.0` (commit `bd16d60`); the bridge at `0.5.0` (commit `bd16d60`) on the owner's Mac; the Wear OS app `1.2.4` (release build, version code 9) on the owner's Pixel Watch 2; the menu bar `0.4.0`, built from `main` into `bin/` (2026-10-05). The component versions are in `VERSIONS`.
 
 **What can run in parallel:**
 - **5 runs alone:** it tests the whole system.
@@ -31,7 +31,7 @@ The one place for the project's state: what is done, what is open, what comes ne
 - Run the whole of [`phases/5-e2e.md`](phases/5-e2e.md) (every row and the security checks). No row has a valid result yet. Row 23 (`AW_PUSH_RESOLVED=1`) is unblocked: the watch runs the app that handles `resolved`.
 
 ### Quiet pushes while the owner is at the Mac
-- Implemented in bridge `0.5.0` and relay `0.5.0` (design: [`phases/quiet-at-mac.md`](phases/quiet-at-mac.md), plan: [`phases/quiet-at-mac-plan.md`](phases/quiet-at-mac-plan.md)), not deployed yet; claimed by Claude (2026-10-05).
+- Implemented in bridge `0.5.0` and relay `0.5.0` (design: [`phases/quiet-at-mac.md`](phases/quiet-at-mac.md), plan: [`phases/quiet-at-mac-plan.md`](phases/quiet-at-mac-plan.md)), deployed 2026-10-06 (the relay logs `push presence idle=10m0s`; the bridge sends `host_presence` under launchd), not verified on the watch yet; claimed by Claude (2026-10-05).
 - Left to check on the owner's Mac and watch: the screen-lock key `ioreg` shows while locked (`CGSSessionScreenIsLocked`, or the top-level `IOConsoleLocked`), no buzz while at the Mac, a push about 10 minutes after the last input for a prompt still waiting, a push within 15 s of locking the screen, and an immediate push when away.
 
 ### Code debt (for later)
