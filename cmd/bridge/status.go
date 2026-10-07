@@ -41,6 +41,7 @@ func (a *app) localStatus() bridge.LocalStatus {
 		ls.ConfigError = err.Error()
 	} else {
 		ls.Configured = true
+		ls.PushPresence = cfg.PushPresence
 		if u, err := url.Parse(cfg.RelayURL); err == nil {
 			ls.RelayHost = u.Host
 		}

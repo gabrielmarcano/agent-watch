@@ -3,6 +3,7 @@ package bridge
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -194,5 +195,24 @@ func TestConfig_NormalizeRelayURL(t *testing.T) {
 		if got != tc.want {
 			t.Errorf("NormalizeRelayURL(%q) = %q, want %q", tc.input, got, tc.want)
 		}
+	}
+}
+
+func TestConfig_PushPresence(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.toml")
+	cfg := &Config{RelayURL: "wss://relay.example.com/v1/host", HostToken: strings.Repeat("a", 64)}
+	if err := SaveConfig(path, cfg); err != nil {
+		t.Fatal(err)
+	}
+	if data, _ := os.ReadFile(path); strings.Contains(string(data), "push_presence") {
+		t.Errorf("off is the default and is not written: %s", data)
+	}
+	cfg.PushPresence = true
+	if err := SaveConfig(path, cfg); err != nil {
+		t.Fatal(err)
+	}
+	got, err := LoadConfig(path)
+	if err != nil || !got.PushPresence {
+		t.Fatalf("LoadConfig = %+v, %v; want push_presence true", got, err)
 	}
 }

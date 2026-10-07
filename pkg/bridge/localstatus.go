@@ -24,7 +24,8 @@ type LocalStatus struct {
 	LastError       string `json:"last_error"`
 	RelayError      string `json:"relay_error"`
 	HerdrError      string `json:"herdr_error"`
-	RelayHost       string `json:"relay_host"` // host[:port] of relay_url; never a token
+	RelayHost       string `json:"relay_host"`    // host[:port] of relay_url; never a token
+	PushPresence    bool   `json:"push_presence"` // "Only Notify When Away" is on in the config
 	PID             int    `json:"pid"`
 	UpdatedAt       string `json:"updated_at"`
 	AgeSeconds      int    `json:"age_seconds"`    // age of status.json; -1 when unknown

@@ -22,6 +22,10 @@ type Config struct {
 	HostToken        string   `toml:"host_token"`
 	HostName         string   `toml:"host_name"`
 	ClaudeConfigDirs []string `toml:"claude_config_dirs"`
+	// PushPresence turns on "Only Notify When Away": the bridge reports the
+	// host's presence so the relay holds back pushes while the owner is
+	// there (contracts.md §4.3). Off unless the owner turns it on.
+	PushPresence bool `toml:"push_presence,omitempty"`
 }
 
 // StatusFile is written by the bridge daemon every 5 s to report health.

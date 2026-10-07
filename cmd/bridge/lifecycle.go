@@ -63,7 +63,10 @@ func (a *app) cmdConfigure(args []string) error {
 
 	r := a.resolveForStart(ServiceSpec{ConfigPath: *configPath})
 	target := r.spec.ConfigPath
-	old, _ := bridge.LoadConfig(target) // only to say what the rewrite drops
+	old, _ := bridge.LoadConfig(target) // to say what the rewrite drops, and keep push_presence
+	if old != nil {
+		cfg.PushPresence = old.PushPresence // a preference, not a configure flag
+	}
 	if err := bridge.SaveConfig(target, cfg); err != nil {
 		return err
 	}

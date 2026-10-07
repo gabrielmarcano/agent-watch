@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/gabrielmarcano/agent-monitor/pkg/agents"
@@ -50,6 +51,10 @@ type Engine struct {
 	// StartPresence reports (set by NewEngine).
 	Presence         PresenceReader
 	PresenceInterval time.Duration
+	// PresenceEnabled says whether the owner turned presence reports on
+	// (config push_presence), read before each report; nil means off.
+	PresenceEnabled func() bool
+	presenceOn      atomic.Bool // the last presence read found it on
 	// CommandTimeout bounds a command from its arrival, including the wait
 	// for the pane lock (defaults to commandTimeout, below the relay's wait).
 	CommandTimeout time.Duration

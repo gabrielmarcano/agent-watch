@@ -50,8 +50,22 @@ func parsePresence(hid, root []byte) (Presence, bool) {
 	return Presence{Idle: idle, Locked: screenLockedRe.Match(root)}, true
 }
 
+// PresenceOffIdleSeconds is the idle time of the one report a bridge sends
+// when the owner turns presence off: it reads as away, so the relay stops
+// holding pushes back at once instead of when the last report goes stale.
+const PresenceOffIdleSeconds = 365 * 24 * 60 * 60
+
 // presenceMsg reads the presence once; false when there is nothing to send.
+// While the owner has it off it sends nothing, except one away report right
+// after it was turned off.
 func (e *Engine) presenceMsg(ctx context.Context) (model.HostPresenceMsg, bool) {
+	if e.PresenceEnabled == nil || !e.PresenceEnabled() {
+		if e.presenceOn.Swap(false) {
+			return model.HostPresenceMsg{Type: model.WireHostPresence, IdleSeconds: PresenceOffIdleSeconds}, true
+		}
+		return model.HostPresenceMsg{}, false
+	}
+	e.presenceOn.Store(true)
 	if e.Presence == nil {
 		return model.HostPresenceMsg{}, false
 	}
