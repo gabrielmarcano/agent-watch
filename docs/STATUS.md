@@ -31,8 +31,8 @@ The one place for the project's state: what is done, what is open, what comes ne
 - Run the whole of [`phases/5-e2e.md`](phases/5-e2e.md) (every row and the security checks). No row has a valid result yet. Row 23 (`AW_PUSH_RESOLVED=1`) is unblocked: the watch runs the app that handles `resolved`.
 
 ### Quiet pushes while the owner is at the Mac
-- Implemented in bridge `0.5.0` and relay `0.5.0` (design: [`phases/quiet-at-mac.md`](phases/quiet-at-mac.md), plan: [`phases/quiet-at-mac-plan.md`](phases/quiet-at-mac-plan.md)), deployed 2026-10-06 (the relay logs `push presence idle=10m0s`; the bridge sends `host_presence` under launchd), not verified on the watch yet; claimed by Claude (2026-10-05).
-- Left to check on the owner's Mac and watch: the screen-lock key `ioreg` shows while locked (`CGSSessionScreenIsLocked`, or the top-level `IOConsoleLocked`), no buzz while at the Mac, a push about 10 minutes after the last input for a prompt still waiting, a push within 15 s of locking the screen, and an immediate push when away.
+- Implemented in bridge `0.5.0` and relay `0.5.0` (design: [`phases/quiet-at-mac.md`](phases/quiet-at-mac.md), plan: [`phases/quiet-at-mac-plan.md`](phases/quiet-at-mac-plan.md)), deployed 2026-10-06 (the relay logs `push presence idle=10m0s`; the bridge sends `host_presence` under launchd), not verified on the watch yet; claimed by Claude (2026-10-05). Since bridge `0.6.0` it is opt-in, **Only Notify When Away** (off by default): the menu bar item or `agent-watch-bridge presence on`.
+- Left to check on the owner's Mac and watch, with Only Notify When Away turned on: the item's check follows `presence on`/`off`; turning it off sends a held-back prompt at once; the screen-lock key `ioreg` shows while locked (`CGSSessionScreenIsLocked`, or the top-level `IOConsoleLocked`), no buzz while at the Mac, a push about 10 minutes after the last input for a prompt still waiting, a push within 15 s of locking the screen, and an immediate push when away.
 
 ### Code debt (for later)
 
