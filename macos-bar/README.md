@@ -80,6 +80,7 @@ The version strings' format is in `docs/reference/contracts.md` §3.
   "Copy Code" marks the clipboard entry as concealed.
 - **Open Bridge Log** (⌘L) and **Show Configuration in Finder** (⌘,): the
   config holds the host token, so it is revealed, not opened in an editor.
+- **Only Notify When Away**: `agent-watch-bridge presence on` or `off`; checked while the config has it on. What it does: [`docs/GUIDE.md` § 4. Pair Your Smartwatch](../docs/GUIDE.md#4-pair-your-smartwatch). Available whenever the bridge is configured.
 - **Open at Login**: § Launch at login.
 
 Any failed action shows an alert with the CLI's output.

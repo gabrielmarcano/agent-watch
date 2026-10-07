@@ -67,6 +67,8 @@ func realMain(argv []string) int {
 		cmd = a.cmdStatus
 	case "pair":
 		cmd = a.cmdPair
+	case "presence":
+		cmd = a.cmdPresence
 	default:
 		fmt.Fprintf(os.Stderr, "unknown command: %s\n", subcmd)
 		printUsage()
@@ -99,6 +101,7 @@ Usage:
   agent-watch-bridge stop
   agent-watch-bridge status [--json] [--local]
   agent-watch-bridge pair [--json] [--config PATH]
+  agent-watch-bridge presence [--config PATH] [on|off]
   agent-watch-bridge version
 
 configure --env-file takes AW_RELAY_DOMAIN and AW_HOST_TOKEN from the shared
@@ -109,6 +112,9 @@ Linux) and (re)loads it. A value not given as a flag or by herdr's plugin
 environment is kept from the installed service definition.
 restart restarts the installed service without rewriting it.
 status --json --local reads local files only (no network).
+presence on turns on "Only Notify When Away" (off by default): while you use
+this computer, the watch gets no pushes. The running bridge picks it up
+within 15 s; presence alone prints on or off.
 
 `, fullVersion)
 }
@@ -160,6 +166,11 @@ func runDaemon(args []string) error {
 	rClient.OnConnect = engine.ConnectMessages
 	rClient.OnMessage = engine.HandleRelayMessage
 	engine.Presence = bridge.ReadPresence
+	// Read on every report, so `presence on|off` applies without a restart.
+	engine.PresenceEnabled = func() bool {
+		c, err := bridge.LoadConfig(targetConfig)
+		return err == nil && c.PushPresence
+	}
 
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()

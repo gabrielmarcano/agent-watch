@@ -63,6 +63,7 @@ func TestConnectMessages_IncludesPresence(t *testing.T) {
 	e.Presence = func(context.Context) (Presence, bool) {
 		return Presence{Idle: 75 * time.Second, Locked: true}, true
 	}
+	e.PresenceEnabled = func() bool { return true }
 	msgs := e.ConnectMessages(context.Background())
 	if len(msgs) != 3 {
 		t.Fatalf("ConnectMessages = %d messages, want hello, snapshot, host_presence", len(msgs))
@@ -90,5 +91,35 @@ func TestParsePresence_HugeIdleIsClamped(t *testing.T) {
 	p, ok := parsePresence(hid, root)
 	if !ok || p.Idle != time.Duration(math.MaxInt64) {
 		t.Fatalf("parsePresence = %+v, %v; want the idle clamped to MaxInt64", p, ok)
+	}
+}
+
+func TestPresenceMsg_OffSendsOneAwayReport(t *testing.T) {
+	e := NewEngine(nil, nil, nil, nil, "test", "host", "", nil)
+	e.Presence = func(context.Context) (Presence, bool) { return Presence{Idle: 5 * time.Second}, true }
+	on := true
+	e.PresenceEnabled = func() bool { return on }
+	ctx := context.Background()
+
+	if m, ok := e.presenceMsg(ctx); !ok || m.IdleSeconds != 5 {
+		t.Fatalf("on: %+v %v, want idle 5", m, ok)
+	}
+	on = false
+	if m, ok := e.presenceMsg(ctx); !ok || m.IdleSeconds != PresenceOffIdleSeconds || m.Locked {
+		t.Fatalf("turned off: %+v %v, want one away report", m, ok)
+	}
+	if m, ok := e.presenceMsg(ctx); ok {
+		t.Fatalf("still off: %+v, want nothing", m)
+	}
+	if n := len(e.ConnectMessages(ctx)); n != 2 {
+		t.Fatalf("off: ConnectMessages = %d messages, want hello and snapshot", n)
+	}
+}
+
+func TestPresenceMsg_NoSwitchMeansOff(t *testing.T) {
+	e := NewEngine(nil, nil, nil, nil, "test", "host", "", nil)
+	e.Presence = func(context.Context) (Presence, bool) { return Presence{Idle: time.Second}, true }
+	if m, ok := e.presenceMsg(context.Background()); ok {
+		t.Fatalf("no PresenceEnabled: %+v, want nothing (off by default)", m)
 	}
 }

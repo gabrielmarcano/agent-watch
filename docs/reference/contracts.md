@@ -422,7 +422,7 @@ type ResyncMsg struct {
 1. The bridge sends `hello`.
 2. The bridge sends `snapshot`.
 3. From then on, it sends `agent_update`, `agent_removed`, `history_item` and `herdr_status` as things change.
-4. On macOS the bridge sends `host_presence` right after `snapshot`, then every 15 s while connected (the relay's use: §4.3). Each read is bounded to 2 s (`presenceTimeout`, `pkg/bridge/presence.go`); a failed read sends nothing.
+4. On macOS, while the owner has "Only Notify When Away" on (`push_presence`, §6; off by default), the bridge sends `host_presence` right after `snapshot`, then every 15 s while connected (the relay's use: §4.3). Each read is bounded to 2 s (`presenceTimeout`, `pkg/bridge/presence.go`); a failed read sends nothing. Turning it off sends one last report that reads as away (`idle_seconds` 31536000, `PresenceOffIdleSeconds`), then none.
 
 On a `resync` the bridge sends `hello` and `snapshot` again (the current relay never sends one).
 
@@ -521,7 +521,7 @@ ntfy never gets `resolved`: it cannot withdraw a notification it already deliver
   - A pane that leaves `blocked` through a `snapshot` gets its `resolved` with its next `agent_update`.
   - A pane removed while blocked (`agent_removed`, or missing from a `snapshot`) gets none; its notification stays until dismissed.
 
-- **Held back while the owner is at the host** (`AW_PUSH_PRESENCE_IDLE`, §5): while the host's last `host_presence` (§3) is under 45 s old, its screen is unlocked and its last input is under that threshold, `blocked` and `done` pushes are not sent. When presence ends (the threshold passes, the screen locks, or no report for 45 s), each pane whose `blocked` push was held back and that the relay still shows `blocked` gets one, built from its current state, through the debounce, window and digest below. A held-back `done` is not sent later. A host that disconnects ends presence without a catch-up; what was held back waits for its next report (a reconnected bridge reports right after its snapshot). A relay restart forgets it. A push already held in a window, or a `done` waiting for its reply, still goes out when its wait ends, whatever the presence is then. A host that never reports (Linux, an older bridge) is never held back.
+- **Held back while the owner is at the host** (`AW_PUSH_PRESENCE_IDLE`, §5): while the host's last `host_presence` (§3) is under 45 s old, its screen is unlocked and its last input is under that threshold, `blocked` and `done` pushes are not sent. When presence ends (the threshold passes, the screen locks, or no report for 45 s), each pane whose `blocked` push was held back and that the relay still shows `blocked` gets one, built from its current state, through the debounce, window and digest below. A held-back `done` is not sent later. A host that disconnects ends presence without a catch-up; what was held back waits for its next report (a reconnected bridge reports right after its snapshot). A relay restart forgets it. A push already held in a window, or a `done` waiting for its reply, still goes out when its wait ends, whatever the presence is then. A host that never reports ("Only Notify When Away" off, Linux, an older bridge) is never held back.
 - **Turns that end while the pane stays `working`** (background agents still running, §1.2) push nothing: their reply reaches the watch as a `history_item`, and the agent shows as done with its count. The `done` push comes once herdr reports `working` → `done`, after the last background agent's report turn, with that turn's reply. Why: a coordinator gets one report turn per finished agent, and a push for each would be noise.
 - **`done` waits for the reply:** the bridge sends the turn's `history_item` right after the transition. The relay holds the `done` push up to 3 s for that pane's next new history item and uses its response as the body; when none arrives, it pushes with `Task finished`. The debounce and the window below apply when it goes out.
 - **Debounce** (the same pane pushed the same event less than 5 s ago):
@@ -593,7 +593,8 @@ The relay reads them from `/etc/agent-watch-relay/env` (systemd `EnvironmentFile
 - **Mode:** `0600`, in a `0700` directory. Both are enforced on every write, also for a file that already exists.
 - **Written by:** `agent-watch-bridge configure` (atomically). Without `--config` it writes the config herdr's environment names, else the one the installed service uses, else the default above.
   - `--env-file <agent-watch.env>` (what `make configure-bridge` runs) takes `relay_url = wss://<AW_RELAY_DOMAIN>/v1/host` and `host_token = AW_HOST_TOKEN` from the file (§7), so the token never appears in argv. `--relay-url` / `--host-token` override it value by value.
-  - It rewrites the whole file. When that drops a previous `host_name` or `claude_config_dirs`, it prints a `note:` on stderr; pass `--host-name` / `--claude-config-dir` again to keep them.
+  - It rewrites the whole file. When that drops a previous `host_name` or `claude_config_dirs`, it prints a `note:` on stderr; pass `--host-name` / `--claude-config-dir` again to keep them. It keeps `push_presence`.
+- **`push_presence`** ("Only Notify When Away", off by default) is set by `agent-watch-bridge presence [--config PATH] on|off` (the menu bar's item of that name runs it), which keeps the rest of the file; `presence` alone prints `on` or `off`. The running bridge reads it before each presence report (§3), so it applies within 15 s, without a restart.
 - **`relay_url`:** `wss://` (`ws://` only for `localhost` / `127.0.0.1`). A URL without a path gets `/v1/host` appended.
 
 ```toml
@@ -601,6 +602,7 @@ relay_url  = "wss://relay.example.com/v1/host"   # https:// is derived for /v1/h
 host_token = "…64 hex chars…"
 host_name  = ""                          # empty → os.Hostname()
 claude_config_dirs = []                  # extra Claude profiles; which ones are found without it: agents.md §3.2
+push_presence = true                     # written only when on: "Only Notify When Away"
 ```
 
 ### 6.1 `status.json` (written by `agent-watch-bridge run`)
@@ -640,7 +642,7 @@ A reader must not trust `pid` alone: a file left by a crash names a dead pid. `s
   "relay_connected": true, "herdr_online": true,
   "agents": 11, "blocked": 1,
   "last_error": "", "relay_error": "", "herdr_error": "",
-  "relay_host": "relay.example.com",
+  "relay_host": "relay.example.com", "push_presence": false,
   "pid": 4242, "updated_at": "2026-09-23T17:04:05Z", "age_seconds": 3,
   "version": "x.y.z (<commit>)", "daemon_version": "x.y.z (<commit>)",
   "relay_version": "x.y.z (<commit>)",
@@ -657,6 +659,7 @@ A reader must not trust `pid` alone: a file left by a crash names a dead pid. `s
 - **`running`:** `status.json` names a live pid. While not running, `relay_connected`, `relay_version`, `herdr_online`, `agents` and `blocked` are reported as `false` / `""` / `0`, whatever the file says.
 - **`stale`:** running, but `status.json` is older than 15 s.
 - **`age_seconds`:** `-1` when unknown. **`version`** is the CLI; **`daemon_version`** is the bridge that wrote `status.json`. Both carry the commit (§3 version strings), so a CLI and a daemon built from different commits differ even with the same `BRIDGE_VERSION`.
+- **`push_presence`:** the config's `push_presence` (`false` while not configured).
 - **`relay_host`:** `host[:port]` of `relay_url`, never a token. **`service`:** `launchd` or `systemd`; on Linux `log_path` is a `journalctl` command.
 - **Without `--local`** the output adds `relay_status` (the relay's `HostStatusResponse`, §2.2) or `relay_status_error`.
 - The human form (no `--json`) exits with status 1 when the bridge is not running.

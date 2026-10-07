@@ -1,6 +1,6 @@
 id = "herdr-agent-watch"
 name = "Agent Watch"
-version = "0.5.1"   # = BRIDGE_VERSION in VERSIONS; `make check-versions` fails when they differ
+version = "0.6.0"   # = BRIDGE_VERSION in VERSIONS; `make check-versions` fails when they differ
 min_herdr_version = "0.9.1"
 description = "Monitor and answer your agent herd from your smartwatch via a remote relay"
 platforms = ["macos", "linux"]

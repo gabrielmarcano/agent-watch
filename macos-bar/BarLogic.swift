@@ -23,6 +23,7 @@ struct LocalStatus: Decodable, Equatable, Sendable {
     var relayError = ""
     var herdrError = ""
     var relayHost = ""
+    var pushPresence = false
     var pid = 0
     var updatedAt = ""
     var ageSeconds = -1
@@ -40,7 +41,7 @@ struct LocalStatus: Decodable, Equatable, Sendable {
     enum CodingKeys: String, CodingKey {
         case installed, definitionError, configured, configError, running, stale
         case relayConnected, herdrOnline, agents, blocked, lastError, relayError, herdrError
-        case relayHost, pid, updatedAt, ageSeconds, version, daemonVersion, relayVersion, service
+        case relayHost, pushPresence, pid, updatedAt, ageSeconds, version, daemonVersion, relayVersion, service
         case definitionPath, binary, configPath, stateDir, statusPath, logPath
     }
 
@@ -65,6 +66,7 @@ struct LocalStatus: Decodable, Equatable, Sendable {
         relayError = str(.relayError)
         herdrError = str(.herdrError)
         relayHost = str(.relayHost)
+        pushPresence = bool(.pushPresence)
         pid = int(.pid)
         updatedAt = str(.updatedAt)
         ageSeconds = int(.ageSeconds, -1)
@@ -171,6 +173,9 @@ struct Presentation: Equatable, Sendable {
     // flipping it starts or stops the service.
     var switchOn: Bool
     var switchEnabled: Bool
+    // "Only Notify When Away" (the bridge config's push_presence).
+    var awayOnlyOn: Bool
+    var canToggleAwayOnly: Bool
 }
 
 enum Symbols {
@@ -245,7 +250,8 @@ func present(state: BarState, status: LocalStatus?, busy: String? = nil, barVers
         hint: nil,
         canStart: false, canStop: s.installed, canRestart: s.installed && s.configured,
         canPair: s.configured, canOpenLogs: !s.logPath.isEmpty, canRevealConfig: !s.configPath.isEmpty,
-        switchOn: false, switchEnabled: false
+        switchOn: false, switchEnabled: false,
+        awayOnlyOn: s.pushPresence, canToggleAwayOnly: s.configured
     )
 
     switch state {
@@ -334,6 +340,7 @@ func present(state: BarState, status: LocalStatus?, busy: String? = nil, barVers
         p.headline = "\(busy)…"
         p.canStart = false; p.canStop = false; p.canRestart = false; p.canPair = false
         p.switchEnabled = false
+        p.canToggleAwayOnly = false
     }
     return p
 }

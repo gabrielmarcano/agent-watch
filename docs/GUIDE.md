@@ -149,7 +149,7 @@ The release build (`assembleRelease`, R8 on) is signed with the debug key: fine 
 2. On the watch, open Agent Watch, check the relay URL (`https://relay.<domain>`, prefilled from `agent-watch.env` at build time; `https://` is added if you leave it out) and enter the code.
 3. The watch exchanges the code for a device token (the relay stores only its SHA-256 hash) and registers for push. Your agents appear.
 
-When the bridge runs on macOS, quiet pushes apply: while you use the Mac (input in the last 10 minutes by default, screen unlocked), the watch does not buzz; a prompt still waiting when you leave is pushed then. For this the bridge sends your relay the Mac's input idle time and screen-lock state every 15 s; `AW_PUSH_PRESENCE_IDLE=0` on the relay turns it off. Rules and the setting: [`contracts.md` §4.3](reference/contracts.md).
+**Only Notify When Away** (off by default; macOS only for now): turn it on in the menu bar app, or with `agent-watch-bridge presence on`. While you use the computer (input in the last 10 minutes by default, screen unlocked), the watch does not buzz; a prompt still waiting when you leave is pushed then. While it is on, the bridge sends your relay the input idle time and screen-lock state every 15 s. Rules and the relay setting: [`contracts.md` §4.3](reference/contracts.md).
 
 ### 5. Optional: macOS Menu Bar App
 

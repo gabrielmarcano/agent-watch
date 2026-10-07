@@ -63,6 +63,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var logsItem = NSMenuItem()
     private var configItem = NSMenuItem()
     private var loginItem = NSMenuItem()
+    private var awayItem = NSMenuItem()
 
     private var timer: Timer?
     private var appBeforeMenu: NSRunningApplication?
@@ -134,6 +135,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             menu.addItem(v)
         }
         menu.addItem(.separator())
+        awayItem = addAction("Only Notify When Away", #selector(toggleAwayOnly), "")
+        awayItem.toolTip = "Your watch gets no pushes while you are using this computer; its list stays live."
         loginItem = addAction("Open at Login", #selector(toggleOpenAtLogin), "")
         renderLoginItem()
         _ = addAction("Quit Agent Watch Menu", #selector(quit), "q")
@@ -258,6 +261,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         pairItem.isEnabled = p.canPair
         logsItem.isEnabled = p.canOpenLogs
         configItem.isEnabled = p.canRevealConfig
+        awayItem.state = p.awayOnlyOn ? .on : .off
+        awayItem.isEnabled = p.canToggleAwayOnly && binary != nil
     }
 
     // MARK: Actions
@@ -273,6 +278,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             lastPresentation = nil
             render()
         }
+    }
+
+    /// "Only Notify When Away": agent-watch-bridge presence on|off, which the
+    /// running bridge picks up on its next report.
+    @objc private func toggleAwayOnly() {
+        let turnOn = !(status?.pushPresence ?? false)
+        runCLI(["presence", turnOn ? "on" : "off"], busy: "Saving", failure: "Could not change Only Notify When Away")
     }
 
     @objc private func restartBridge() { runCLI(["restart"], busy: "Restarting", failure: "Could not restart the bridge") }

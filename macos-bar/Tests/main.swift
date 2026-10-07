@@ -46,7 +46,7 @@ let full = """
   "installed": true, "definition_error": "", "configured": true, "config_error": "",
   "running": true, "stale": false, "relay_connected": true, "herdr_online": true,
   "agents": 9, "blocked": 2, "last_error": "", "relay_error": "", "herdr_error": "",
-  "relay_host": "relay.example.com", "pid": 1159, "updated_at": "2026-09-25T14:51:06Z",
+  "relay_host": "relay.example.com", "push_presence": true, "pid": 1159, "updated_at": "2026-09-25T14:51:06Z",
   "age_seconds": 2, "version": "0.3.0 (c8aa72e)", "daemon_version": "0.3.0 (c8aa72e)",
   "relay_version": "0.3.0 (5a32851)", "service": "launchd",
   "definition_path": "/Users/u/Library/LaunchAgents/com.gabrielmarcano.agent-watch-bridge.plist",
@@ -62,6 +62,7 @@ let decoded = decodeLocalStatus(full)
 check(decoded != nil, "full status decodes")
 check(decoded?.blocked == 2 && decoded?.agents == 9 && decoded?.relayHost == "relay.example.com", "fields decode: \(String(describing: decoded))")
 check(decoded?.logPath == "/Users/u/Library/Logs/agent-watch-bridge.log", "log path decodes")
+check(decoded?.pushPresence == true, "push_presence decodes")
 check(decoded?.relayVersion == "0.3.0 (5a32851)" && decoded?.daemonVersion == "0.3.0 (c8aa72e)",
       "versions decode: \(String(describing: decoded?.relayVersion))")
 let sparse = decodeLocalStatus(#"{"running": true, "relay_connected": false}"#)
@@ -198,6 +199,24 @@ let switchCases: [(String, BarState, LocalStatus?, String?, Bool, Bool)] = [
 for (name, state, status, busy, on, enabled) in switchCases {
     let p = present(state: state, status: status, busy: busy)
     check(p.switchOn == on && p.switchEnabled == enabled, "switch \(name): on \(p.switchOn) enabled \(p.switchEnabled), want \(on) \(enabled)")
+}
+
+// MARK: Only Notify When Away
+
+// Checked while the config has push_presence on; it can be flipped whenever
+// the bridge is configured, running or not, except while an action runs.
+let awayCases: [(String, LocalStatus?, String?, Bool, Bool)] = [
+    ("on", st { $0.pushPresence = true }, nil, true, true),
+    ("off", st { _ in }, nil, false, true),
+    ("stopped", st { $0.running = false; $0.pushPresence = true }, nil, true, true),
+    ("not configured", st { $0.running = false; $0.configured = false }, nil, false, false),
+    ("no status", nil, nil, false, false),
+    ("busy", st { $0.pushPresence = true }, "Saving", true, false),
+]
+for (name, status, busy, on, enabled) in awayCases {
+    let state = status == nil ? BarState.binaryMissing : deriveState(binaryFound: true, status: status, pollError: nil)
+    let p = present(state: state, status: status, busy: busy)
+    check(p.awayOnlyOn == on && p.canToggleAwayOnly == enabled, "away-only \(name): on \(p.awayOnlyOn) enabled \(p.canToggleAwayOnly), want \(on) \(enabled)")
 }
 
 // MARK: short error lines
