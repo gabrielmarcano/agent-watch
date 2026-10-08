@@ -16,7 +16,7 @@ The one place for the project's state: what is done, what is open, what comes ne
 | [6 watchOS](phases/6-watchos.md) (best-effort) | not started; after 5 | — |
 | [7 Android phone client](phases/7-android-mobile.md) | not started; after 5 | — |
 
-**Deployed** (2026-10-07): the relay at `0.6.0` (commit `931fe19`, branch `history-task-notifications`); on the owner's Mac, the bridge `0.7.0` (commit `931fe19`, same branch) and the menu bar `0.6.0`, built from the branch `presence-toggle` (2026-10-06; Only Notify When Away off); the Wear OS app `1.3.1` (release build, version code 12, branch `history-task-notifications`, 2026-10-07) on the owner's Pixel Watch 2. The component versions are in `VERSIONS`.
+**Deployed** (2026-10-07): the relay at `0.6.0` (commit `050328a` on `main`); on the owner's Mac, the bridge `0.7.0` (commit `050328a`) and the menu bar `0.6.0`, built from the branch `presence-toggle` (2026-10-06; Only Notify When Away off); the Wear OS app `1.3.1` (release build, version code 12, 2026-10-07; built before the squash merge, from the same code as `050328a`) on the owner's Pixel Watch 2. The component versions are in `VERSIONS`.
 
 **What can run in parallel:**
 - **5 runs alone:** it tests the whole system.
@@ -34,7 +34,7 @@ The one place for the project's state: what is done, what is open, what comes ne
 - Implemented in bridge `0.5.0` and relay `0.5.0` (design: [`phases/quiet-at-mac.md`](phases/quiet-at-mac.md), plan: [`phases/quiet-at-mac-plan.md`](phases/quiet-at-mac-plan.md)), deployed 2026-10-06 (the relay logs `push presence idle=10m0s`; the bridge sends `host_presence` under launchd), not verified on the watch yet; claimed by Claude (2026-10-05). Since bridge `0.6.0` it is opt-in, **Only Notify When Away** (off by default): the menu bar item or `agent-watch-bridge presence on`.
 - Left to check on the owner's Mac and watch, with Only Notify When Away turned on: the item's check follows `presence on`/`off`; turning it off sends a held-back prompt at once; the screen-lock key `ioreg` shows while locked (`CGSSessionScreenIsLocked`, or the top-level `IOConsoleLocked`), no buzz while at the Mac, a push about 10 minutes after the last input for a prompt still waiting, a push within 15 s of locking the screen, and an immediate push when away.
 
-### History cleanup (branch `history-task-notifications`, 2026-10-07)
+### History cleanup (2026-10-07, merged in #21)
 - Deployed 2026-10-07, not verified on the watch yet: bridge `0.6.1` shows a background task's report (`<task-notification>`) as its summary, not raw markup (`docs/reference/agents.md` §3.2 step 3); Wear OS `1.2.5` names one pane's history cards by their query and gives the session's title its own lines in the header (`wearos-app/ARCHITECTURE.md` §4a). Items the relay already stores keep their raw query.
 - **Background shells and monitors** (the owner's request, 2026-10-07, informational only; claimed by Claude, 2026-10-07): `background_shells` and `background_monitors` (`contracts.md` §1.2), derived from a bounded 16 MiB transcript read (`docs/reference/agents.md` §3.4, the owner's choice). Relay `0.6.0` and bridge `0.7.0` deployed 2026-10-07; Wear OS `1.3.1` (the background line, `1 shell · 1 monitor`) installed the same day. Not verified on the watch. Known gaps: a task stopped from Claude's UI keeps counting; a task started before the 16 MiB, or before a `continued-in`, is not counted.
 
