@@ -77,29 +77,29 @@ Known and accepted for now; none blocks a phase.
 
   The watch side (history re-fetched after a reconnect and on screen start) is in PR #6.
 - **Claude turns that end while the pane stays `working`** (background agents running; herdr never reports `done`): bridge `0.4.3` checks working Claude panes every 15 s for a new turn end in the transcript and publishes its reply (`docs/reference/agents.md` §3.4). Deployed (the bridge logs `a turn ended while the pane stays working`, 2026-10-07); not verified on the watch. This periodic check widens `AGENTS.md` §1.1 (it was "on a status transition" only); the owner approved it. Turns that end within the same 15 s window as the next one publish only the last.
-  - **Background agents on the watch** (bridge `0.4.4`, relay `0.4.2`, Wear OS `1.2.3`): the same check publishes `background_agents` (`contracts.md` §1.2, `agents.md` §3.4), and the watch shows such an agent as `Done`, with `N agents` on the background line (Wear OS `1.3.1`, `wearos-app/ARCHITECTURE.md` §4b); no push until herdr reports `done` (`contracts.md` §4.3). Deployed; not verified on the watch (the owner checked the same line with a background shell, 2026-10-07). Known gaps: the count lags up to 15 s (a report turn can show as done for that long), and after a turn interrupted with `esc` the agent shows `Working`. watchOS only got the model field (Phase 6).
+  - **Background agents on the watch** (bridge `0.4.4`, relay `0.4.2`, Wear OS `1.2.3`): the same check publishes `background_agents` (`contracts.md` §1.2, `agents.md` §3.4), and the watch shows such an agent as `Done`, with `N agents` on the background line (Wear OS `1.3.1`, `wearos-app/ARCHITECTURE.md` §4b); no push until herdr reports `done` (`contracts.md` §4.3). Verified on the watch (2026-10-07). Known gaps: the count lags up to 15 s (a report turn can show as done for that long), and after a turn interrupted with `esc` the agent shows `Working`. watchOS only got the model field (Phase 6).
 - **A pane labelled with the generic terminal title `Claude Code`** (an untitled conversation, no herdr name or tab label) is hard to recognise on the watch.
 - **Long single-line texts left** (the short-lines rule, `wearos-app/ARCHITECTURE.md` §4b; the list card and the agent screen's header follow it since Wear OS `1.2.4`):
-  - the history screen's title `History · <name>` (`HistoryListScreen.kt`) cuts a long name;
   - the agents tile's second line chains the status and the agent id as text (`AgentsTileService.kt`), and has no logo;
   - the complication's text chains `<status> · <agent>` and `· +N more` (`complication_status_agent`, `complication_status_more`).
 - **agy 1.2.17 menus:** `Create file` and `Question` parse without a `detail`; picking `Write-in...` leaves a text field the watch cannot answer (`docs/reference/agents.md` §4.1).
 
 ### Checks nobody has done yet
-- Wear OS 1.2.2 on the watch, still unchecked: Quick Dictate and Change with the system input; backing out is silent; an empty notification reply shows `Empty reply — nothing sent`; after the stream drops (Wi-Fi off and on) or the app returns from the background, the agent screen shows the latest reply. (Verified by the owner on 2026-10-05: Reply with voice and with the keyboard reaches the confirm screen and the agent.)
-- Menu bar 0.5.0 on the owner's Mac (the switch is blue when on: checked by the owner on 2026-10-06): the switch in the first row starts and stops the bridge, and the focus goes back to the previous app when the menu closes; **Open at Login** registers the app (it opens after logging out and in), turning it off removes it, and the check follows a change made in System Settings; a relay error shows a short line, with the full error as its tooltip.
-- Wear OS 1.2.4 on the watch: an agent waiting on background agents shows `Done` with `N in background` on its own line. (The agent brand marks were checked by the owner on 2026-10-06: legible and like herdr's GUI app.)
+
+Only changes that affect what the system does (the owner's rule, 2026-10-07): a text, wording or layout tweak needs no check of its own here.
+
+- Wear OS 1.2.2 on the watch, still unchecked: Quick Dictate and Change with the system input; an empty notification reply sends nothing; after the stream drops (Wi-Fi off and on) or the app returns from the background, the agent screen shows the latest reply. (Verified by the owner on 2026-10-05: Reply with voice and with the keyboard reaches the confirm screen and the agent.)
+- Menu bar on the owner's Mac: the switch in the first row starts and stops the bridge. (Checked by the owner: the switch's colour on 2026-10-06; Open at Login and the relay error lines on 2026-10-07.)
 - ntfy delivery (watchOS push) has never been tested.
-- The watch over LTE or its phone's Bluetooth connection: only Wi-Fi has been checked.
+- The watch over LTE: only Wi-Fi and its phone's Bluetooth connection have been checked (Bluetooth by the owner on 2026-10-07).
 - `herdr plugin install gabrielmarcano/agent-watch` end to end.
-- **herdr 0.9.3 against a live 0.9.3 server:** on 2026-10-05 the owner's server was still 0.9.1 (it changes version only when restarted, the owner's call). Once it runs 0.9.3, re-probe (`herdr-probe` skill) `ping`, the new `completion_seq`/`title` fields and, from 0.9.2's changelog, the `events_lost` error on a slow subscription (the bridge skips error lines on the stream today; its polling covers missed events) and error responses keeping the request id.
-- The first `make deploy-relay ARGS=--sync-env` on the VPS: the merge is covered by `tools/config/test_awenv.sh` (BSD awk locally, Linux awk in CI) but has never run against the real server file. The owner's `agent-watch.env` was filled from the running deployment, so it must list `AW_HOST_TOKEN` as **unchanged**; `changed` means the file's token is not the server's.
+- **`make deploy-relay ARGS=--sync-env` has never run.** Plain deploys run on the VPS all the time; `--sync-env` also rewrites the server's env file (its live secrets) from the owner's `agent-watch.env`, and that merge is covered only by `tools/config/test_awenv.sh` (BSD awk locally, Linux awk in CI). The owner's `agent-watch.env` was filled from the running deployment, so the first run must list `AW_HOST_TOKEN` as **unchanged**; `changed` means the file's token is not the server's.
 
 ---
 
 ## Blocked / waiting on upstream
 
-- **herdr misses Claude's dialogs after a relaunch in the same pane:** mitigated by the temporary override in [`tools/herdr-overrides/`](../tools/herdr-overrides/README.md), which explains the cause. Last check (`capture-fixture` skill, §0), 2026-10-05: still needed for claude; agy's override was uninstalled that day (upstream fixed it). The upstream issue is drafted (`tools/herdr-overrides/UPSTREAM-ISSUES.md`) and, by the owner's decision, not being filed for now.
+- **herdr misses Claude's dialogs after a relaunch in the same pane:** mitigated by the temporary override in [`tools/herdr-overrides/`](../tools/herdr-overrides/README.md), which explains the cause. Last check (`herdr-overrides.sh check`), 2026-10-07 with the herdr 0.9.3 server: still needed for claude (upstream manifest `2026.09.11.1`); agy's override was uninstalled on 2026-10-05 (upstream fixed it). The upstream issue is drafted (`tools/herdr-overrides/UPSTREAM-ISSUES.md`) and, by the owner's decision, not being filed for now.
 
 ---
 

@@ -1,6 +1,6 @@
 # Herdr Socket API Reference (verified)
 
-Everything here was **probed live against herdr 0.9.1, socket protocol 22**, on 2026-09-23, and re-probed on 2026-10-05 after the upgrade to herdr 0.9.3: the running server was still 0.9.1 (a server only changes version when it restarts), and the 0.9.3 schema (`herdr api schema`) keeps protocol 22 and every method, param and field used here. When in doubt, re-derive it with the `herdr-probe` skill (`.agents/skills/herdr-probe/SKILL.md`). Do not trust memory or blog posts.
+Everything here was **probed live against herdr 0.9.1, socket protocol 22**, on 2026-09-23, re-probed on 2026-10-05 against the 0.9.3 schema (`herdr api schema`: protocol 22, every method, param and field used here kept), and on 2026-10-07 against a live **herdr 0.9.3 server** (protocol 22): `ping`, `agent.list`, `agent.get` and the error responses behave as below. When in doubt, re-derive it with the `herdr-probe` skill (`.agents/skills/herdr-probe/SKILL.md`). Do not trust memory or blog posts.
 
 > ⚠️ **Safety first.** The herdr on the development Mac runs the owner's **real** agent sessions: sending `"1"` to a real Claude pane approves whatever it was asking. Which methods are safe and which are never called on the owner's panes: `.agents/rules/herdr-integration.md` § Safety.
 
@@ -27,7 +27,7 @@ Everything here was **probed live against herdr 0.9.1, socket protocol 22**, on 
   The server closes the connection after replying; a second request on the same connection never gets an answer.
 - **Exception:** `events.subscribe` keeps the connection open and streams events (§5).
 - **Success:** `{"id":"<same id>","result":{"type":"<result type>", ...}}`
-- **Error:** `{"id":"<same id or empty>","error":{"code":"<code>","message":"<text>"}}`. For malformed requests, `id` is `""` and `code` is `invalid_request`. The message names the offending field; use it to debug.
+- **Error:** `{"id":"<same id or empty>","error":{"code":"<code>","message":"<text>"}}`. For malformed requests, `id` is `""` and `code` is `invalid_request` (herdr 0.9.3 keeps the request's `id` there too: an unknown method or a missing param came back with it, 2026-10-07). The message names the offending field; use it to debug.
 
 The implementation, with its default timeout and cancellation: `Client.Call` in `pkg/herdr/client.go`.
 
@@ -37,7 +37,7 @@ The implementation, with its default timeout and cancellation: `Client.Call` in 
 
 | Method | Params | Result `type` | Notes |
 |---|---|---|---|
-| `ping` | `{}` | `pong` | `{"version":"0.9.1","protocol":22,"capabilities":{...}}` — use for `hello` and health checks |
+| `ping` | `{}` | `pong` | `{"version":"0.9.3","protocol":22,"capabilities":{...}}` — use for `hello` and health checks |
 | `agent.list` | `{}` | `agent_list` | `{"agents":[AgentInfo...]}` — the authoritative list |
 | `agent.get` | `{"target":"<pane_id or name>"}` | — | Single agent. Not called by the bridge; the guards use its CLI form |
 | `agent.read` | `{"target", "source", "lines"?, "format"?, "strip_ansi"?}` | `pane_read` | `{"read":{"text", "truncated", "revision", "pane_id", ...}}` |
@@ -107,7 +107,7 @@ Real example (trimmed, values replaced with placeholders):
 | `agent_session` | object\|null | no | See §3.1 |
 | `interactive_ready`, `launch_pending`, `screen_detection_skipped` | bool | no | Ignore |
 | `state_labels`, `tokens` | map | no | Ignore |
-| `completion_seq`, `title` | uint64, string | no | In the 0.9.3 schema only; a 0.9.1 server does not send them. `completion_seq`: "the current idle transition completed work", so it does not mark a turn that ends while the pane stays `working` (`agents.md` §3.4). Not used |
+| `completion_seq`, `title` | uint64, string | no | herdr 0.9.3 and later. `completion_seq`: "the current idle transition completed work"; on a 0.9.3 server it is present only on `idle` panes (equal to their `state_change_seq`) and absent on `working` ones, so it does not mark a turn that ends while the pane stays `working` (`agents.md` §3.4). `title` was absent on every pane (2026-10-07). Not used |
 
 ### 3.1 `agent_session`
 
