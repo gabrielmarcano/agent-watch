@@ -2,6 +2,7 @@ package agents
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"strconv"
 	"strings"
@@ -137,6 +138,49 @@ func TestClaudeLastTurn_MetaLines(t *testing.T) {
 	item, err = c.LastTurn(context.Background(), SessionRef{Kind: "path", Value: writeFile(t, "n.jsonl", notified)})
 	if err != nil || item.Query != "" || item.Response != "the agent finished" {
 		t.Errorf("notification turn: %+v, %v", item, err)
+	}
+}
+
+// userString is a user line whose content is the string text; isMeta as
+// given.
+func userString(t *testing.T, text string, isMeta bool) string {
+	t.Helper()
+	b, err := json.Marshal(map[string]any{"type": "user", "isMeta": isMeta, "message": map[string]any{"role": "user", "content": text}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(b) + "\n"
+}
+
+// A background task's report (a shell, a monitor or an agent that finished
+// or sent an event) starts a turn whose query is the report's summary, never
+// its markup. Shapes as Claude Code writes them (the owner's transcripts,
+// 2026-10-07; ids and texts made up).
+func TestClaudeLastTurn_TaskNotification(t *testing.T) {
+	shell := "<task-notification>\n<task-id>b1</task-id>\n<tool-use-id>toolu_1</tool-use-id>\n<output-file>/tmp/tasks/b1.output</output-file>\n<status>completed</status>\n<summary>Background command \"Run the tests\" completed (exit code 0)</summary>\n</task-notification>"
+	monitor := "<task-notification>\n<task-id>b2</task-id>\n<summary>Monitor event: \"build served\"</summary>\n<event>SERVED abc123</event>\nIf this event is something the user would act on now, send a PushNotification.\n</task-notification>"
+	stopped := "<task-notification>\n<task-id>b3</task-id>\n<status>stopped</status>\n</task-notification>"
+	meta := "[SYSTEM NOTIFICATION - NOT USER INPUT]\nThis is an automated background-task event, NOT a message from the user.\n\n<task-notification>\n<task-id>a1</task-id>\n<status>completed</status>\n<summary>Agent \"Review the diff\" finished</summary>\n</task-notification>"
+	answer := `{"type":"assistant","message":{"content":[{"type":"text","text":"noted"}]}}` + "\n"
+	cases := []struct {
+		name, lines, want string
+	}{
+		{"a shell", userString(t, shell, false), `Background command "Run the tests" completed (exit code 0)`},
+		{"a monitor event", userString(t, monitor, false), `Monitor event: "build served"`},
+		{"no summary", userString(t, stopped, false), ""},
+		{"two reports in one message", userString(t, shell+"\n"+monitor, false), "Background command \"Run the tests\" completed (exit code 0)\nMonitor event: \"build served\""},
+		{"marked as Claude Code's own", userString(t, meta, true), `Agent "Review the diff" finished`},
+		{"the user quoting one", userString(t, "why did this fail? "+shell, false), "why did this fail? " + shell},
+	}
+	c := newClaudeAdapter(Config{})
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			content := claudeTurnLines("q", "a") + turnDuration("u1", false) + tc.lines + answer
+			item, err := c.LastTurn(context.Background(), SessionRef{Kind: "path", Value: writeFile(t, "n.jsonl", content)})
+			if err != nil || item.Query != tc.want || item.Response != "noted" {
+				t.Errorf("got %+v, %v; want query %q", item, err, tc.want)
+			}
+		})
 	}
 }
 
