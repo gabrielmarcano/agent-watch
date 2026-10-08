@@ -90,7 +90,7 @@ Only changes that affect what the system does (the owner's rule, 2026-10-07): a 
 
 - Wear OS 1.2.2 on the watch, still unchecked: Quick Dictate and Change with the system input; an empty notification reply sends nothing; after the stream drops (Wi-Fi off and on) or the app returns from the background, the agent screen shows the latest reply. (Verified by the owner on 2026-10-05: Reply with voice and with the keyboard reaches the confirm screen and the agent.)
 - ntfy delivery (watchOS push) has never been tested.
-- `herdr plugin install gabrielmarcano/agent-watch` end to end.
+- **`herdr plugin install gabrielmarcano/agent-watch` end to end:** on 2026-10-07, against an isolated herdr 0.9.3 server (its own `HOME` and socket) on macOS, the install from GitHub, the build (`0.7.0`), the action list and the `status` and `pair` actions worked. Left: `start`, `restart` and `stop`, which can't run beside the owner's bridge (the LaunchAgent label is fixed, so `start` would boot out his service): a Linux container with `systemd --user`, or a second macOS user.
 - **`make deploy-relay ARGS=--sync-env` has never run.** Plain deploys run on the VPS all the time; `--sync-env` also rewrites the server's env file (its live secrets) from the owner's `agent-watch.env`, and that merge is covered only by `tools/config/test_awenv.sh` (BSD awk locally, Linux awk in CI). The owner's `agent-watch.env` was filled from the running deployment, so the first run must list `AW_HOST_TOKEN` as **unchanged**; `changed` means the file's token is not the server's.
 
 ---
