@@ -117,6 +117,11 @@ Agent Watch is a herdr plugin, listed on [herdr.dev/plugins](https://herdr.dev/p
    herdr plugin action invoke start --plugin herdr-agent-watch
    ```
    A plugin action runs in the background: its output and exit code are in `herdr plugin log list --plugin herdr-agent-watch`.
+4. To remove it, stop the service first: `herdr plugin uninstall` deletes the bridge binary but leaves the service, which keeps running until it next starts, then fails every few seconds.
+   ```bash
+   herdr plugin action invoke stop --plugin herdr-agent-watch
+   herdr plugin uninstall herdr-agent-watch
+   ```
 
 The relay (step 1), the watch app (step 3) and pairing (step 4) are unchanged. The relay deploy (`make deploy-relay`) still needs a checkout of this repository, or a relay binary from a [release](#versions-and-releases).
 
