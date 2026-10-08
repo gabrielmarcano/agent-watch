@@ -35,6 +35,8 @@ data class AgentState(
     val state_change_seq: Long = 0,
     val prompt: PendingPrompt? = null,
     val background_agents: Int = 0,        // agents the last turn left running while it waits on them; only with "working" (omitempty)
+    val background_shells: Int = 0,        // shell commands still running in the background; any status (omitempty)
+    val background_monitors: Int = 0,      // monitors still running in the background; any status (omitempty)
     val updated_at: String = ""
 )
 

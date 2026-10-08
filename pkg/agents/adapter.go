@@ -54,6 +54,22 @@ type TurnEnd struct {
 	Background int
 }
 
+// BackgroundTaskReader is implemented by adapters that can count, from the
+// agent's own transcript, the shell commands and monitors the agent still
+// runs in the background (Claude). The bridge asks it on each working →
+// done|idle transition and in the periodic check while the pane is working.
+type BackgroundTaskReader interface {
+	// BackgroundTasks counts the tasks still running. Reads are bounded and
+	// cheap when nothing changed.
+	BackgroundTasks(ctx context.Context, ref SessionRef) (BackgroundTasks, error)
+}
+
+// BackgroundTasks is what a BackgroundTaskReader counted.
+type BackgroundTasks struct {
+	Shells   int
+	Monitors int
+}
+
 // ViewDetector is implemented by adapters whose TUI can fill the pane with
 // something other than a conversation (Claude Code's agents view). While a
 // pane shows such a view, the bridge publishes no history for it, and it

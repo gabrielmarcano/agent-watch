@@ -103,8 +103,13 @@ type AgentState struct {
 	// agent's last turn left running, while the agent only waits on them:
 	// set only with StatusWorking, after a completed turn and before the
 	// next one starts. 0 (omitted) otherwise.
-	BackgroundAgents int    `json:"background_agents,omitempty"`
-	UpdatedAt        string `json:"updated_at"`
+	BackgroundAgents int `json:"background_agents,omitempty"`
+	// BackgroundShells and BackgroundMonitors count the shell commands and
+	// the monitors the agent still runs in the background, by its
+	// transcript. Informational, with any status; 0 (omitted) when none.
+	BackgroundShells   int    `json:"background_shells,omitempty"`
+	BackgroundMonitors int    `json:"background_monitors,omitempty"`
+	UpdatedAt          string `json:"updated_at"`
 }
 
 // HistoryItem represents a single completed query-response turn for a pane.

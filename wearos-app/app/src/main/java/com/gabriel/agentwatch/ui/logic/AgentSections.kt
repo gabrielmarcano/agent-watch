@@ -22,6 +22,18 @@ fun AgentState.attentionSection(): AttentionSection = when (status) {
 fun AgentState.waitingOnBackground(): Int =
     if (status == "working" && background_agents > 0) background_agents else 0
 
+/** What [AgentState] still runs in the background, by kind; all 0 when nothing does. */
+data class BackgroundCounts(val agents: Int, val shells: Int, val monitors: Int) {
+    val any: Boolean get() = agents > 0 || shells > 0 || monitors > 0
+}
+
+/**
+ * The agents it waits on ([waitingOnBackground]) and the shells and monitors it still runs, which
+ * hold with any status (contracts.md §1.2): they only say a report will come back to the agent.
+ */
+fun AgentState.backgroundCounts(): BackgroundCounts =
+    BackgroundCounts(waitingOnBackground(), background_shells.coerceAtLeast(0), background_monitors.coerceAtLeast(0))
+
 /** The status the UI draws: `done` while the agent only waits on background agents, else herdr's. Sections, sorting and surfaces keep herdr's. */
 fun AgentState.shownStatus(): String = if (waitingOnBackground() > 0) "done" else status
 

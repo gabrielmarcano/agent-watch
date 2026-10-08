@@ -54,6 +54,8 @@ struct AgentState: Codable {
     var name: String?
     var title: String? // /v1 AgentState.title (contracts.md §1.2); unused by the legacy client until Phase 6
     var background_agents: Int? // /v1 AgentState.background_agents (contracts.md §1.2), nil when omitted; unused until Phase 6
+    var background_shells: Int? // /v1 AgentState.background_shells (contracts.md §1.2), nil when omitted; unused until Phase 6
+    var background_monitors: Int? // /v1 AgentState.background_monitors (contracts.md §1.2), nil when omitted; unused until Phase 6
     var workspace: String?
     var cwd: String?
     var last_query: String?

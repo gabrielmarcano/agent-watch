@@ -185,3 +185,74 @@ func TestEngine_BackgroundAgents(t *testing.T) {
 	h.engine.checkWorkingTurns(ctx)
 	noUpdate("not working")
 }
+
+// background_shells and background_monitors follow the transcript with any
+// status: the turn watch reads them while the pane is working, each working
+// → done transition reads them again, and herdr updates in between keep
+// them.
+func TestEngine_BackgroundTasks(t *testing.T) {
+	h := newTestHarness(t)
+	home := t.TempDir()
+	dir := filepath.Join(home, ".claude", "projects", "-tmp-aw-sandbox")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "s1.jsonl")
+	write := func(s string) {
+		t.Helper()
+		f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := f.WriteString(s); err != nil {
+			t.Fatal(err)
+		}
+		f.Close()
+	}
+	h.engine.Agents = agents.NewRegistry(agents.Config{Home: home})
+	session := &herdr.AgentSession{Agent: "claude", Kind: "id", Value: "s1"}
+	cwd := "/tmp/aw-sandbox"
+	pane := func(status string, seq uint64) herdr.AgentInfo {
+		p := claudePane(status, "", seq, session)
+		p.CWD = &cwd
+		return p
+	}
+	ctx := context.Background()
+	update := func(step string, status model.AgentStatus, shells, monitors int) {
+		t.Helper()
+		msg, _ := waitMsg(h, 3*time.Second, func(msg any) bool {
+			u, ok := msg.(model.AgentUpdateMsg)
+			return ok && u.Agent.Status == status && u.Agent.BackgroundShells == shells && u.Agent.BackgroundMonitors == monitors
+		})
+		if msg == nil {
+			t.Fatalf("%s: no %s update with %d shells and %d monitors", step, status, shells, monitors)
+		}
+	}
+
+	working := pane("working", 7)
+	h.track(working)
+	write(`{"type":"user","message":{"content":"run the tests in the background"}}` + "\n" +
+		`{"type":"user","timestamp":"2026-10-07T20:00:00.000Z","message":{"content":[{"type":"tool_result","tool_use_id":"t1","content":"ok"}]},"toolUseResult":{"backgroundTaskId":"b1"}}` + "\n" +
+		`{"type":"user","timestamp":"2026-10-07T20:00:01.000Z","message":{"content":[{"type":"tool_result","tool_use_id":"t2","content":"ok"}]},"toolUseResult":{"taskId":"m1","timeoutMs":0,"persistent":true}}` + "\n" +
+		`{"type":"assistant","message":{"content":[{"type":"text","text":"started"}]}}` + "\n" +
+		`{"type":"system","subtype":"turn_duration","uuid":"u1"}` + "\n")
+	h.engine.checkWorkingTurns(ctx)
+	update("turn watch", model.StatusWorking, 1, 1)
+
+	// herdr reports done once the turn ends: the counts stay.
+	done := pane("done", 8)
+	h.engine.OnChanges([]herdr.Change{{Kind: herdr.Updated, Agent: done, Prev: &working}})
+	update("done", model.StatusDone, 1, 1)
+
+	// The shell's report starts a turn; when it ends, the transition reads
+	// the counts again.
+	write(`{"type":"user","message":{"content":"<task-notification>\n<task-id>b1</task-id>\n<status>completed</status>\n<summary>Background command \"tests\" completed (exit code 0)</summary>\n</task-notification>"}}` + "\n" +
+		`{"type":"assistant","message":{"content":[{"type":"text","text":"tests pass"}]}}` + "\n" +
+		`{"type":"system","subtype":"turn_duration","uuid":"u2"}` + "\n")
+	working2 := pane("working", 9)
+	h.engine.OnChanges([]herdr.Change{{Kind: herdr.Updated, Agent: working2, Prev: &done}})
+	update("report turn", model.StatusWorking, 1, 1)
+	done2 := pane("done", 10)
+	h.engine.OnChanges([]herdr.Change{{Kind: herdr.Updated, Agent: done2, Prev: &working2}})
+	update("report turn ended", model.StatusDone, 0, 1)
+}

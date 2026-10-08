@@ -70,6 +70,17 @@ class ContractsTest {
     }
 
     @Test
+    fun backgroundTasksParse() {
+        // contracts §1.2: a done agent with a shell and a monitor still running.
+        val state = Gson().fromJson(
+            """{"pane_id":"w5:pAE","agent":"claude","label":"x","workspace_id":"w5","status":"done","focused":false,"state_change_seq":7,"background_shells":1,"background_monitors":2,"updated_at":"2026-10-07T20:00:00Z"}""",
+            AgentState::class.java
+        )
+        assertEquals(1, state.background_shells)
+        assertEquals(2, state.background_monitors)
+    }
+
+    @Test
     fun optionDescriptionIsOptional() {
         // contracts §1.3: description is omitempty; the golden has none.
         val options = Gson().fromJson(

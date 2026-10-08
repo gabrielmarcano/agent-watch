@@ -20,6 +20,11 @@ type claudeAdapter struct {
 	// megabytes before the end of the file.
 	tailWindows []int64
 	turnEnds    turnEndCache
+	// taskWindow is the transcript tail BackgroundTasks reads (§3.4).
+	taskWindow int64
+	tasks      taskCache
+	// now is the clock monitor deadlines are checked against; nil: time.Now.
+	now func() time.Time
 }
 
 func newClaudeAdapter(cfg Config) *claudeAdapter {
@@ -27,6 +32,7 @@ func newClaudeAdapter(cfg Config) *claudeAdapter {
 		genericAdapter: newGenericAdapter(),
 		cfg:            cfg,
 		tailWindows:    []int64{256 << 10, 1 << 20, 4 << 20},
+		taskWindow:     backgroundTaskWindow,
 	}
 }
 
