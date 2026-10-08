@@ -89,9 +89,7 @@ Known and accepted for now; none blocks a phase.
 Only changes that affect what the system does (the owner's rule, 2026-10-07): a text, wording or layout tweak needs no check of its own here.
 
 - Wear OS 1.2.2 on the watch, still unchecked: Quick Dictate and Change with the system input; an empty notification reply sends nothing; after the stream drops (Wi-Fi off and on) or the app returns from the background, the agent screen shows the latest reply. (Verified by the owner on 2026-10-05: Reply with voice and with the keyboard reaches the confirm screen and the agent.)
-- Menu bar on the owner's Mac: the switch in the first row starts and stops the bridge. (Checked by the owner: the switch's colour on 2026-10-06; Open at Login and the relay error lines on 2026-10-07.)
 - ntfy delivery (watchOS push) has never been tested.
-- The watch over LTE: only Wi-Fi and its phone's Bluetooth connection have been checked (Bluetooth by the owner on 2026-10-07).
 - `herdr plugin install gabrielmarcano/agent-watch` end to end.
 - **`make deploy-relay ARGS=--sync-env` has never run.** Plain deploys run on the VPS all the time; `--sync-env` also rewrites the server's env file (its live secrets) from the owner's `agent-watch.env`, and that merge is covered only by `tools/config/test_awenv.sh` (BSD awk locally, Linux awk in CI). The owner's `agent-watch.env` was filled from the running deployment, so the first run must list `AW_HOST_TOKEN` as **unchanged**; `changed` means the file's token is not the server's.
 
