@@ -8,8 +8,7 @@
     <string name="status_working">Working</string>
     <string name="status_idle">Idle</string>
     <string name="status_unknown">Unknown</string>
-    <!-- Under the status word: what the agent still runs in the background (agents it waits on, shells, monitors). Short: its own line, at most 2. -->
-    <string name="status_background">%s in background</string>
+    <!-- Under the status word: what the agent still runs in the background (agents it waits on, shells, monitors), joined by the separator. Short: its own line, at most 2. -->
     <string name="background_separator">" · "</string>
     <plurals name="background_agents">
         <item quantity="one">%d agent</item>

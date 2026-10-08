@@ -55,7 +55,7 @@ fun agentStatus(agent: AgentState): ShownStatus {
             if (counts.shells > 0) add(pluralStringResource(R.plurals.background_shells, counts.shells, counts.shells))
             if (counts.monitors > 0) add(pluralStringResource(R.plurals.background_monitors, counts.monitors, counts.monitors))
         }
-        stringResource(R.string.status_background, parts.joinToString(stringResource(R.string.background_separator)))
+        parts.joinToString(stringResource(R.string.background_separator))
     } else null
     return ShownStatus(style, stringResource(style.label), background)
 }
