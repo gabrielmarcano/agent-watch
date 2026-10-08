@@ -79,7 +79,6 @@
 
     <!-- History and reader -->
     <string name="history_title">History</string>
-    <string name="history_title_agent">History · %s</string>
     <string name="no_history">No answers yet</string>
     <string name="you_asked">You asked</string>
     <string name="reader_screen_source">Screen capture</string>

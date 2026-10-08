@@ -1,5 +1,6 @@
 package com.gabriel.agentwatch.ui.screens
 
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -48,16 +49,29 @@ fun HistoryListScreen(
 
     ScreenList { spec ->
         item(key = "title") {
-            ListHeader(
-                modifier = Modifier.fillMaxWidth().transformedHeight(this, spec),
-                transformation = SurfaceTransformation(spec)
-            ) {
-                Text(
-                    if (agentLabel.isNullOrBlank()) stringResource(R.string.history_title)
-                    else stringResource(R.string.history_title_agent, agentLabel),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
+            if (agentLabel.isNullOrBlank()) {
+                ListHeader(
+                    modifier = Modifier.fillMaxWidth().transformedHeight(this, spec),
+                    transformation = SurfaceTransformation(spec)
+                ) {
+                    Text(stringResource(R.string.history_title), maxLines = 1)
+                }
+            } else {
+                // The session's title gets its own lines: one line after "History" cut it at two words.
+                Column(
+                    transformedItem(spec).padding(start = 18.dp, end = 18.dp, top = 6.dp, bottom = 4.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text(stringResource(R.string.history_title), style = MaterialTheme.typography.titleMedium, maxLines = 1)
+                    Text(
+                        agentLabel,
+                        color = OnSurfaceVariant,
+                        style = MaterialTheme.typography.bodySmall,
+                        textAlign = TextAlign.Center,
+                        maxLines = 3,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
             }
         }
         if (items.isEmpty()) {
@@ -76,15 +90,22 @@ fun HistoryListScreen(
             val preview = remember(entry.response) {
                 MarkdownFormatter.truncate(entry.response, 120).replace(Regex("\\s*\\n+\\s*"), " ")
             }
-            // Across all panes, the agent's logo leads the age; one pane's history leaves it out.
-            val showAgent = entry.agent.isNotBlank() && paneId.isNullOrBlank()
+            // Across all panes, the session's title names the card and the agent's logo leads the age.
+            // One pane's history already names its session in the header: what was asked names the card.
+            val allPanes = paneId.isNullOrBlank()
+            val showAgent = entry.agent.isNotBlank() && allPanes
+            val query = entry.query?.takeIf { it.isNotBlank() }
             val age = ageText(entry.completed_at)
             TitleCard(
                 onClick = { onSelectHistoryItem(entry) },
                 modifier = Modifier.fillMaxWidth().transformedHeight(this, spec),
                 transformation = SurfaceTransformation(spec),
                 title = {
-                    Text(entry.label.ifBlank { entry.agent }, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    Text(
+                        if (allPanes) entry.label.ifBlank { entry.agent } else query ?: age,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis
+                    )
                 },
                 subtitle = {
                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -92,11 +113,14 @@ fun HistoryListScreen(
                             AgentLogo(entry.agent, OnSurfaceVariant, 12.sp)
                             Spacer(Modifier.width(4.dp))
                         }
-                        Text(age, color = OnSurfaceVariant, style = MaterialTheme.typography.labelSmall, maxLines = 1)
+                        // With no query, one pane's card already shows the age as its title.
+                        if (allPanes || query != null) {
+                            Text(age, color = OnSurfaceVariant, style = MaterialTheme.typography.labelSmall, maxLines = 1)
+                        }
                     }
                 }
             ) {
-                entry.query?.takeIf { it.isNotBlank() }?.let { query ->
+                if (allPanes && query != null) {
                     Text(
                         query,
                         fontWeight = FontWeight.SemiBold,

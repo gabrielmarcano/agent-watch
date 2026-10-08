@@ -34,6 +34,10 @@ The one place for the project's state: what is done, what is open, what comes ne
 - Implemented in bridge `0.5.0` and relay `0.5.0` (design: [`phases/quiet-at-mac.md`](phases/quiet-at-mac.md), plan: [`phases/quiet-at-mac-plan.md`](phases/quiet-at-mac-plan.md)), deployed 2026-10-06 (the relay logs `push presence idle=10m0s`; the bridge sends `host_presence` under launchd), not verified on the watch yet; claimed by Claude (2026-10-05). Since bridge `0.6.0` it is opt-in, **Only Notify When Away** (off by default): the menu bar item or `agent-watch-bridge presence on`.
 - Left to check on the owner's Mac and watch, with Only Notify When Away turned on: the item's check follows `presence on`/`off`; turning it off sends a held-back prompt at once; the screen-lock key `ioreg` shows while locked (`CGSSessionScreenIsLocked`, or the top-level `IOConsoleLocked`), no buzz while at the Mac, a push about 10 minutes after the last input for a prompt still waiting, a push within 15 s of locking the screen, and an immediate push when away.
 
+### History cleanup (branch `history-task-notifications`, 2026-10-07)
+- Not deployed nor verified on the watch: bridge `0.6.1` shows a background task's report (`<task-notification>`) as its summary, not raw markup (`docs/reference/agents.md` §3.2 step 3); Wear OS `1.2.5` names one pane's history cards by their query and gives the session's title its own lines in the header (`wearos-app/ARCHITECTURE.md` §4). Items the relay already stores keep their raw query.
+- **Background shells and monitors** (the owner's request, 2026-10-07, informational only): show how many a Claude agent still runs, like `background_agents`. Claude writes no count for them (only `pendingBackgroundAgentCount`, for agents), so it must be derived from the transcript (launches minus `<task-notification>` statuses, `TaskStop` results and monitor expiry); a task stopped from Claude's UI leaves no marker. Measure how close a derived count gets on the owner's transcripts before designing the contract change.
+
 ### Code debt (for later)
 
 Known and accepted for now; none blocks a phase.
