@@ -8,10 +8,19 @@
     <string name="status_working">Working</string>
     <string name="status_idle">Idle</string>
     <string name="status_unknown">Unknown</string>
-    <!-- Under "Done": a working agent whose turn ended while its background agents still run. Short: its own line. -->
-    <plurals name="status_background">
-        <item quantity="one">%d in background</item>
-        <item quantity="other">%d in background</item>
+    <!-- Under the status word: what the agent still runs in the background (agents it waits on, shells, monitors), joined by the separator. Short: its own line, at most 2. -->
+    <string name="background_separator">" · "</string>
+    <plurals name="background_agents">
+        <item quantity="one">%d agent</item>
+        <item quantity="other">%d agents</item>
+    </plurals>
+    <plurals name="background_shells">
+        <item quantity="one">%d shell</item>
+        <item quantity="other">%d shells</item>
+    </plurals>
+    <plurals name="background_monitors">
+        <item quantity="one">%d monitor</item>
+        <item quantity="other">%d monitors</item>
     </plurals>
 
     <!-- List -->
@@ -79,7 +88,6 @@
 
     <!-- History and reader -->
     <string name="history_title">History</string>
-    <string name="history_title_agent">History · %s</string>
     <string name="no_history">No answers yet</string>
     <string name="you_asked">You asked</string>
     <string name="reader_screen_source">Screen capture</string>

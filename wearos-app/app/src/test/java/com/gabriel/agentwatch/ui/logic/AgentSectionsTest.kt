@@ -77,4 +77,21 @@ class AgentSectionsTest {
         assertEquals(0, blocked.waitingOnBackground())
         assertEquals("blocked", blocked.shownStatus())
     }
+
+    @Test
+    fun shellsAndMonitorsCountWithAnyStatusAndChangeNoStatus() {
+        val done = agent("d", "done").copy(background_shells = 1, background_monitors = 2)
+        assertEquals(BackgroundCounts(agents = 0, shells = 1, monitors = 2), done.backgroundCounts())
+        assertEquals("done", done.shownStatus())
+
+        // A working agent still generating keeps its status: shells say nothing about its turn.
+        val generating = agent("g", "working").copy(background_shells = 1)
+        assertEquals("working", generating.shownStatus())
+        assertEquals(BackgroundCounts(0, 1, 0), generating.backgroundCounts())
+
+        val waiting = agent("w", "working").copy(background_agents = 2, background_monitors = 1)
+        assertEquals(BackgroundCounts(2, 0, 1), waiting.backgroundCounts())
+
+        assertEquals(false, agent("i", "idle").backgroundCounts().any)
+    }
 }

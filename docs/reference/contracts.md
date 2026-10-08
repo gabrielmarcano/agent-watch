@@ -47,6 +47,8 @@ type AgentState struct {
     StateChangeSeq uint64         `json:"state_change_seq"`
     Prompt         *PendingPrompt `json:"prompt,omitempty"`
     BackgroundAgents int          `json:"background_agents,omitempty"`
+    BackgroundShells int          `json:"background_shells,omitempty"`
+    BackgroundMonitors int        `json:"background_monitors,omitempty"`
     UpdatedAt      string         `json:"updated_at"`
 }
 ```
@@ -66,7 +68,9 @@ type AgentState struct {
 | `state_change_seq` | herdr `state_change_seq` | Used as the optimistic-concurrency token for commands |
 | `prompt` | parsed by the adapter | Present **only** when `status == "blocked"`, otherwise omitted |
 | `background_agents` | the adapter's turn-end reader (Claude only: `agents.md` §3.4) | The background agents (sub-agents) the agent's last turn left running, **while the agent only waits on them**: its turn has ended, no newer turn has started, and herdr still reports `working`. Present **only** with `status == "working"` and a count > 0, otherwise omitted (0). Refreshed by the bridge's periodic turn check, so it can lag up to that interval (`agents.md` §1). Clients show such an agent as done with the count; `status` stays herdr's |
-| `updated_at` | bridge clock | Set each time the bridge rebuilds the state from a herdr change, publishes a newly parsed prompt or a new `background_agents`; a workspace rename alone does not change it |
+| `background_shells` | the adapter's background-task reader (Claude only: `agents.md` §3.4) | The shell commands the agent still runs in the background, by its transcript. Informational: present with any status when the count is > 0, otherwise omitted (0); `status` stays herdr's, and clients do not show the agent as done for it. Read again on each `working` → `done`/`idle` transition and by the periodic turn check while `working`. A task stopped from the agent's own UI leaves no record and keeps counting until the agent's next turn moves it out of the read |
+| `background_monitors` | the same reader | The monitors (background watches that report events) the agent still runs; same rules as `background_shells` |
+| `updated_at` | bridge clock | Set each time the bridge rebuilds the state from a herdr change, publishes a newly parsed prompt, a new `background_agents` or a new task count; a workspace rename alone does not change it |
 
 **Example:**
 
@@ -102,6 +106,12 @@ A Claude agent whose turn ended while two of its background agents still run (on
 
 ```json
 { "status": "working", "background_agents": 2 }
+```
+
+A Claude agent whose turn ended with a background shell and a monitor still running (herdr reports it `done`):
+
+```json
+{ "status": "done", "background_shells": 1, "background_monitors": 1 }
 ```
 
 The `fingerprint` above is the real `model.Fingerprint` of this prompt (§1.3); `TestFingerprintKnownAnswers` in `pkg/agents` checks it. The golden file `pkg/model/testdata/agent_state.json` carries the same value.
@@ -512,7 +522,7 @@ ntfy never gets `resolved`: it cannot withdraw a notification it already deliver
 | any → `blocked` | `blocked` |
 | `working` → `done` | `done` |
 | `blocked` → any other status, when that pane's own `blocked` push went out | `resolved` (FCM only, and only when enabled: §4.1) |
-| anything else (e.g. `working` → `working` with a new `background_agents`) | no push |
+| anything else (e.g. `working` → `working` with a new `background_agents`, or a new task count) | no push |
 
 - **`resolved`** goes out at once, once per `blocked` push:
   - no debounce, no window, never counted toward or included in a `digest`, never sent to ntfy;

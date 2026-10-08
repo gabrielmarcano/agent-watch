@@ -225,10 +225,13 @@ func (e *Engine) OnChanges(changes []herdr.Change) {
 			}
 
 			// The turn watch owns the background count; it holds only while
-			// herdr keeps the pane working.
+			// herdr keeps the pane working. The task counts hold with any
+			// status: they change only when the transcript is read again.
 			if pub.Status == model.StatusWorking {
 				pub.BackgroundAgents = st.public.BackgroundAgents
 			}
+			pub.BackgroundShells = st.public.BackgroundShells
+			pub.BackgroundMonitors = st.public.BackgroundMonitors
 
 			st.public = pub
 			if e.Relay != nil {
@@ -367,7 +370,7 @@ func titleOf(info herdr.AgentInfo) string {
 }
 
 func (e *Engine) captureHistory(paneID, cwd, agent string, info herdr.AgentInfo) {
-	budget := e.TranscriptTimeout + e.ScreenReadTimeout + e.ScreenRetryTimeout + time.Second
+	budget := 2*e.TranscriptTimeout + e.ScreenReadTimeout + e.ScreenRetryTimeout + time.Second
 	ctx, cancel := context.WithTimeout(context.Background(), budget)
 	defer cancel()
 
@@ -386,7 +389,18 @@ func (e *Engine) captureHistory(paneID, cwd, agent string, info herdr.AgentInfo)
 		if e.Logger != nil {
 			e.Logger.Info("no history: the pane shows no conversation", "pane_id", paneID, "agent", agent)
 		}
+		e.setTasks(paneID, agents.BackgroundTasks{})
 		return
+	}
+
+	if reader, ok := ad.(agents.BackgroundTaskReader); ok {
+		if ref == nil {
+			e.setTasks(paneID, agents.BackgroundTasks{})
+		} else {
+			e.refreshTasks(ctx, paneID, agent, reader, agents.SessionRef{
+				Agent: ref.Agent, Kind: ref.Kind, Value: ref.Value, CWD: cwd, Title: titleOf(info),
+			})
+		}
 	}
 
 	var item *model.HistoryItem
@@ -500,6 +514,7 @@ func (e *Engine) StartTurnWatch(ctx context.Context) {
 type workingPane struct {
 	paneID, agent string
 	reader        agents.TurnEndReader
+	tasks         agents.BackgroundTaskReader // nil when the adapter counts none
 	ref           agents.SessionRef
 }
 
@@ -529,7 +544,8 @@ func (e *Engine) checkWorkingTurns(ctx context.Context) {
 			hidden = append(hidden, paneID)
 			continue
 		}
-		panes = append(panes, workingPane{paneID: paneID, agent: st.public.Agent, reader: reader, ref: agents.SessionRef{
+		tasks, _ := ad.(agents.BackgroundTaskReader)
+		panes = append(panes, workingPane{paneID: paneID, agent: st.public.Agent, reader: reader, tasks: tasks, ref: agents.SessionRef{
 			Agent: ref.Agent, Kind: ref.Kind, Value: ref.Value, CWD: st.public.CWD, Title: titleOf(st.info),
 		}})
 	}
@@ -537,6 +553,7 @@ func (e *Engine) checkWorkingTurns(ctx context.Context) {
 
 	for _, paneID := range hidden {
 		e.setBackground(paneID, 0)
+		e.setTasks(paneID, agents.BackgroundTasks{})
 	}
 	for _, p := range panes {
 		if ctx.Err() != nil {
@@ -566,6 +583,49 @@ func (e *Engine) checkWorkingTurns(ctx context.Context) {
 			e.publishHistory(p.paneID, p.agent, p.ref.Value, *end.Item)
 		}
 		e.setBackground(p.paneID, end.Background)
+		if p.tasks != nil {
+			e.refreshTasks(ctx, p.paneID, p.agent, p.tasks, p.ref)
+		}
+	}
+}
+
+// refreshTasks reads the pane's background shells and monitors and
+// publishes them when they changed. A failed read keeps the counts: it says
+// nothing new.
+func (e *Engine) refreshTasks(ctx context.Context, paneID, agent string, reader agents.BackgroundTaskReader, ref agents.SessionRef) {
+	readCtx, cancel := context.WithTimeout(ctx, e.TranscriptTimeout)
+	n, err := reader.BackgroundTasks(readCtx, ref)
+	cancel()
+	if err != nil {
+		if e.Logger != nil {
+			e.Logger.Debug("background task read failed", "pane_id", paneID, "agent", agent, "err", err)
+		}
+		return
+	}
+	e.setTasks(paneID, n)
+}
+
+// setTasks stores n as the pane's background_shells and background_monitors
+// and publishes the agent when they changed, whatever its status.
+func (e *Engine) setTasks(paneID string, n agents.BackgroundTasks) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	st, ok := e.states[paneID]
+	if !ok || (st.public.BackgroundShells == n.Shells && st.public.BackgroundMonitors == n.Monitors) {
+		return
+	}
+	if e.Logger != nil {
+		e.Logger.Info("background tasks changed", "pane_id", paneID,
+			"shells", n.Shells, "monitors", n.Monitors)
+	}
+	st.public.BackgroundShells = n.Shells
+	st.public.BackgroundMonitors = n.Monitors
+	st.public.UpdatedAt = model.Now()
+	if e.Relay != nil {
+		e.Relay.Send(model.AgentUpdateMsg{
+			Type:  model.WireAgentUpdate,
+			Agent: st.public,
+		})
 	}
 }
 

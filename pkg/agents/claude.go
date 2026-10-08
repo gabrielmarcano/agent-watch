@@ -20,6 +20,11 @@ type claudeAdapter struct {
 	// megabytes before the end of the file.
 	tailWindows []int64
 	turnEnds    turnEndCache
+	// taskWindow is the transcript tail BackgroundTasks reads (§3.4).
+	taskWindow int64
+	tasks      taskCache
+	// now is the clock monitor deadlines are checked against; nil: time.Now.
+	now func() time.Time
 }
 
 func newClaudeAdapter(cfg Config) *claudeAdapter {
@@ -27,6 +32,7 @@ func newClaudeAdapter(cfg Config) *claudeAdapter {
 		genericAdapter: newGenericAdapter(),
 		cfg:            cfg,
 		tailWindows:    []int64{256 << 10, 1 << 20, 4 << 20},
+		taskWindow:     backgroundTaskWindow,
 	}
 }
 
@@ -214,6 +220,32 @@ func isCommandWrapper(t string) bool {
 		strings.HasPrefix(t, "<system-reminder>")
 }
 
+// taskNotificationTag opens Claude Code's report of a background task (a
+// shell, a monitor or an agent) that finished or sent an event.
+const taskNotificationTag = "<task-notification>"
+
+// taskNotificationSummary returns the <summary> texts of the task
+// notifications in t, one per line, and whether t holds any notification.
+// A notification without a summary adds nothing.
+func taskNotificationSummary(t string) (string, bool) {
+	if !strings.Contains(t, taskNotificationTag) {
+		return "", false
+	}
+	var summaries []string
+	for _, block := range strings.Split(t, taskNotificationTag)[1:] {
+		block, _, _ = strings.Cut(block, "</task-notification>")
+		_, rest, ok := strings.Cut(block, "<summary>")
+		if !ok {
+			continue
+		}
+		summary, _, _ := strings.Cut(rest, "</summary>")
+		if summary = strings.TrimSpace(summary); summary != "" {
+			summaries = append(summaries, summary)
+		}
+	}
+	return strings.Join(summaries, "\n"), true
+}
+
 // claudeTurn is the last turn found in a transcript tail.
 type claudeTurn struct {
 	query, response string
@@ -304,11 +336,16 @@ func claudeLastTurn(ctx context.Context, content string) (claudeTurn, error) {
 			if row.IsMeta {
 				// Written by Claude Code, not typed by the user. Right after a
 				// turn ended (a background agent's notification) it starts a
-				// turn with no query to show; inside a turn (a skill's text)
-				// it is not a message at all.
+				// turn whose query is the notification's summary, if any;
+				// inside a turn (a skill's text) it is not a message at all.
 				if t != "" && (len(entries) == 0 || entries[len(entries)-1].turnEnd) {
-					entries = append(entries, parsedEntry{isUser: true})
+					summary, _ := taskNotificationSummary(t)
+					entries = append(entries, parsedEntry{isUser: true, queryText: summary})
 				}
+			} else if summary, ok := taskNotificationSummary(t); ok && strings.HasPrefix(t, taskNotificationTag) {
+				// A background task's report, not the user's message: its
+				// summary stands for the raw markup.
+				entries = append(entries, parsedEntry{isUser: true, queryText: summary})
 			} else if t != "" && !isCommandWrapper(t) {
 				entries = append(entries, parsedEntry{
 					isUser:    true,

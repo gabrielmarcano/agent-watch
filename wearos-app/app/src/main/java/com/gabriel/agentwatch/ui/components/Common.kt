@@ -32,23 +32,31 @@ import com.gabriel.agentwatch.ui.logic.Age
 import com.gabriel.agentwatch.ui.logic.ageOf
 import com.gabriel.agentwatch.ui.logic.agentBrand
 import com.gabriel.agentwatch.ui.logic.shownStatus
-import com.gabriel.agentwatch.ui.logic.waitingOnBackground
+import com.gabriel.agentwatch.ui.logic.backgroundCounts
 import com.gabriel.agentwatch.ui.theme.StatusStyle
 import com.gabriel.agentwatch.ui.theme.statusStyle
 import java.time.Instant
 
-/** How an agent's status shows: its style, its word, and the short line for its background agents, if any. */
+/** How an agent's status shows: its style, its word, and the short line for what it runs in the background, if anything. */
 data class ShownStatus(val style: StatusStyle, val word: String, val background: String?)
 
 /**
  * How [agent]'s status shows in the list and on its screen. An agent that only waits on its
- * background agents shows as done, with their count on a line of its own (`ARCHITECTURE.md` §4b).
+ * background agents shows as done; what it runs in the background (agents, shells, monitors) gets a
+ * line of its own (`ARCHITECTURE.md` §4b).
  */
 @Composable
 fun agentStatus(agent: AgentState): ShownStatus {
     val style = statusStyle(agent.shownStatus())
-    val waiting = agent.waitingOnBackground()
-    val background = if (waiting > 0) pluralStringResource(R.plurals.status_background, waiting, waiting) else null
+    val counts = agent.backgroundCounts()
+    val background = if (counts.any) {
+        val parts = buildList {
+            if (counts.agents > 0) add(pluralStringResource(R.plurals.background_agents, counts.agents, counts.agents))
+            if (counts.shells > 0) add(pluralStringResource(R.plurals.background_shells, counts.shells, counts.shells))
+            if (counts.monitors > 0) add(pluralStringResource(R.plurals.background_monitors, counts.monitors, counts.monitors))
+        }
+        parts.joinToString(stringResource(R.string.background_separator))
+    } else null
     return ShownStatus(style, stringResource(style.label), background)
 }
 
