@@ -37,7 +37,7 @@ The one place for the project's state: what is done, what is open, what comes ne
 ### Plugin install, tested end to end (2026-10-07)
 Two isolated runs of herdr 0.9.3: on macOS (own `HOME` and socket) and in a Linux container with `systemd --user` and a local relay. Install from GitHub, build, `configure`, `start`, `status`, `pair` (the code paired a test device), `restart`, recovery after `kill -9`, `stop` and uninstall all worked; the GUIDE's `invoke` syntax was wrong and is fixed. Found:
 - **`herdr plugin uninstall` leaves the service:** it deletes the binary, so the service fails every 5 s once it restarts (`203/EXEC`, seen on Linux). The GUIDE now says to `stop` first.
-- **On macOS `stop` does not last:** it boots the LaunchAgent out but leaves its plist (`RunAtLoad`, `KeepAlive`), so by launchd's rules the bridge starts again at the next login (not tested; on Linux `stop` also disables the unit). The menu bar's switch says off lasts until it is turned on. A fix: `launchctl disable` in `stop` and `enable` before `start`.
+- **On macOS `stop` did not last a login** (it left the LaunchAgent enabled): fixed in bridge `0.7.1`, whose `stop` also disables it and `start` enables it again, as `systemd` does on Linux.
 - `start`, `restart` and `stop` were tested only on Linux: on the owner's Mac they would act on his own LaunchAgent (its label is fixed).
 
 ### Code debt (for later)

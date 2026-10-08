@@ -35,6 +35,7 @@ func TestStart_FromOutsideHerdrKeepsInstalledDefinition(t *testing.T) {
 	}
 	wantCalls := []string{
 		"launchctl bootout gui/501/com.gabrielmarcano.agent-watch-bridge",
+		"launchctl enable gui/501/com.gabrielmarcano.agent-watch-bridge",
 		"launchctl bootstrap gui/501 " + ta.svc.DefinitionPath(),
 	}
 	if got := ta.runner.Calls(); strings.Join(got, "\n") != strings.Join(wantCalls, "\n") {
@@ -185,7 +186,8 @@ func TestRestart_KickstartsWithoutRewriting(t *testing.T) {
 	}
 }
 
-// After `stop` the agent is unloaded: restart loads the existing plist as is.
+// After `stop` the agent is unloaded and disabled: restart enables it and
+// loads the existing plist as is.
 func TestRestart_LoadsStoppedServiceWithoutRewriting(t *testing.T) {
 	ta := newTestApp(t, "launchd")
 	before := installForRestart(t, ta)
@@ -199,8 +201,9 @@ func TestRestart_LoadsStoppedServiceWithoutRewriting(t *testing.T) {
 		t.Fatalf("restart: %v", err)
 	}
 	calls := ta.runner.Calls()
-	if len(calls) != 2 || calls[1] != "launchctl bootstrap gui/501 "+ta.svc.DefinitionPath() {
-		t.Errorf("calls = %v, want kickstart then bootstrap of the existing plist", calls)
+	if len(calls) != 3 || calls[1] != "launchctl enable gui/501/com.gabrielmarcano.agent-watch-bridge" ||
+		calls[2] != "launchctl bootstrap gui/501 "+ta.svc.DefinitionPath() {
+		t.Errorf("calls = %v, want kickstart, enable, then bootstrap of the existing plist", calls)
 	}
 	assertDefinitionUntouched(t, ta, before)
 }
@@ -258,15 +261,41 @@ func TestSystemd_StartAndRestart(t *testing.T) {
 	}
 }
 
+// stop unloads the agent and disables it, so launchd does not load its plist
+// again at the next login; an agent already unloaded is still disabled.
 func TestStop(t *testing.T) {
 	ta := newTestApp(t, "launchd")
-	ta.runner.respond = func(string) ([]byte, error) {
-		return []byte("Boot-out failed: 3: No such process\n"), errors.New("exit status 3")
+	ta.runner.respond = func(line string) ([]byte, error) {
+		if strings.Contains(line, "bootout") {
+			return []byte("Boot-out failed: 3: No such process\n"), errors.New("exit status 3")
+		}
+		return nil, nil
 	}
 	if err := ta.cmdStop(nil); err != nil {
 		t.Fatalf("stop of an unloaded agent: %v", err)
 	}
 	if ta.out.String() != "stopped\n" {
 		t.Errorf("output = %q", ta.out)
+	}
+	want := []string{
+		"launchctl bootout gui/501/com.gabrielmarcano.agent-watch-bridge",
+		"launchctl disable gui/501/com.gabrielmarcano.agent-watch-bridge",
+	}
+	if got := ta.runner.Calls(); strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Errorf("launchctl calls:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
+}
+
+// A stop whose disable fails says so: the agent would start again at login.
+func TestStop_DisableFails(t *testing.T) {
+	ta := newTestApp(t, "launchd")
+	ta.runner.respond = func(line string) ([]byte, error) {
+		if strings.Contains(line, "disable") {
+			return []byte("Not privileged to disable service.\n"), errors.New("exit status 1")
+		}
+		return nil, nil
+	}
+	if err := ta.cmdStop(nil); err == nil || !strings.Contains(err.Error(), "disable") {
+		t.Fatalf("stop = %v, want the disable error", err)
 	}
 }

@@ -172,7 +172,7 @@ The release build (`assembleRelease`, R8 on) is signed with the debug key: fine 
 | `make restart` | Rebuild `bin/agent-watch-bridge` and restart the installed service without rewriting its definition |
 | `./bin/agent-watch-bridge restart` | Restart only (also a plugin action) |
 | `./bin/agent-watch-bridge start` | Install or rewrite the service definition; keeps the installed values unless a flag or herdr's environment gives new ones |
-| `./bin/agent-watch-bridge stop` | Stop the service |
+| `./bin/agent-watch-bridge stop` | Stop the service; it stays stopped across logins and reboots until the next `start` |
 | `./bin/agent-watch-bridge status` | Human status, including the relay's view; exit 1 when the bridge is not running |
 | `./bin/agent-watch-bridge status --json --local` | Local files only, no network: what the menu bar reads ([`contracts.md` §6.2](reference/contracts.md)) |
 | `sudo agent-watch-relay devices list` / `devices revoke <id>` | On the VPS ([`deploy/relay/README.md`](../deploy/relay/README.md) § Devices) |
