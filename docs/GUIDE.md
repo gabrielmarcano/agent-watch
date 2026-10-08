@@ -83,7 +83,7 @@ On the machine that runs herdr:
    - Without the file: `./bin/agent-watch-bridge configure --relay-url wss://relay.<domain> --host-token <64-hex-token>` (the token then shows in `ps`).
 4. Start the bridge service (a LaunchAgent on macOS, a `systemd --user` unit on Linux):
    ```bash
-   herdr plugin action invoke --plugin herdr-agent-watch start
+   herdr plugin action invoke start --plugin herdr-agent-watch
    # or: ./bin/agent-watch-bridge start
    ```
    Already installed? After `make configure-bridge`, apply the new config with `make restart`.
@@ -105,6 +105,7 @@ Agent Watch is a herdr plugin, listed on [herdr.dev/plugins](https://herdr.dev/p
    ```bash
    herdr plugin install gabrielmarcano/agent-watch
    ```
+   Without a terminal to answer it (a script), add `--yes`.
 2. Find the plugin's folder: `plugin_root` in
    ```bash
    herdr plugin list --plugin herdr-agent-watch --json
@@ -113,7 +114,13 @@ Agent Watch is a herdr plugin, listed on [herdr.dev/plugins](https://herdr.dev/p
 3. Configure and start it, as in step 2:
    ```bash
    "<plugin_root>/bin/agent-watch-bridge" configure --env-file /path/to/agent-watch.env
-   herdr plugin action invoke --plugin herdr-agent-watch start
+   herdr plugin action invoke start --plugin herdr-agent-watch
+   ```
+   A plugin action runs in the background: its output and exit code are in `herdr plugin log list --plugin herdr-agent-watch`.
+4. To remove it, stop the service first: `herdr plugin uninstall` deletes the bridge binary but leaves the service, which keeps running until it next starts, then fails every few seconds.
+   ```bash
+   herdr plugin action invoke stop --plugin herdr-agent-watch
+   herdr plugin uninstall herdr-agent-watch
    ```
 
 The relay (step 1), the watch app (step 3) and pairing (step 4) are unchanged. The relay deploy (`make deploy-relay`) still needs a checkout of this repository, or a relay binary from a [release](#versions-and-releases).
@@ -143,7 +150,7 @@ The release build (`assembleRelease`, R8 on) is signed with the debug key: fine 
 1. Get a short-lived pairing code:
    ```bash
    ./bin/agent-watch-bridge pair
-   # or: herdr plugin action invoke --plugin herdr-agent-watch pair
+   # or: herdr plugin action invoke pair --plugin herdr-agent-watch
    ```
    It shows the code, its real expiry and the relay URL, and also posts a herdr notification.
 2. On the watch, open Agent Watch, check the relay URL (`https://relay.<domain>`, prefilled from `agent-watch.env` at build time; `https://` is added if you leave it out) and enter the code.
@@ -252,7 +259,7 @@ How each agent's menus, keys and history work: [`docs/reference/agents.md`](refe
 - **Check status anytime:**
   ```bash
   ./bin/agent-watch-bridge status
-  # or: herdr plugin action invoke --plugin herdr-agent-watch status
+  # or: herdr plugin action invoke status --plugin herdr-agent-watch
   ```
 - **Log files:**
   - Bridge logs: `~/Library/Logs/agent-watch-bridge.log` (macOS), `journalctl --user -u agent-watch-bridge` (Linux)

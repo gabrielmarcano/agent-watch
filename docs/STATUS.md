@@ -34,6 +34,12 @@ The one place for the project's state: what is done, what is open, what comes ne
 - Implemented in bridge `0.5.0` and relay `0.5.0` (design: [`phases/quiet-at-mac.md`](phases/quiet-at-mac.md), plan: [`phases/quiet-at-mac-plan.md`](phases/quiet-at-mac-plan.md)), deployed 2026-10-06 (the relay logs `push presence idle=10m0s`; the bridge sends `host_presence` under launchd), not verified on the watch yet; claimed by Claude (2026-10-05). Since bridge `0.6.0` it is opt-in, **Only Notify When Away** (off by default): the menu bar item or `agent-watch-bridge presence on`.
 - Left to check on the owner's Mac and watch, with Only Notify When Away turned on: the item's check follows `presence on`/`off`; turning it off sends a held-back prompt at once; the screen-lock key `ioreg` shows while locked (`CGSSessionScreenIsLocked`, or the top-level `IOConsoleLocked`), no buzz while at the Mac, a push about 10 minutes after the last input for a prompt still waiting, a push within 15 s of locking the screen, and an immediate push when away.
 
+### Plugin install, tested end to end (2026-10-07)
+Two isolated runs of herdr 0.9.3: on macOS (own `HOME` and socket) and in a Linux container with `systemd --user` and a local relay. Install from GitHub, build, `configure`, `start`, `status`, `pair` (the code paired a test device), `restart`, recovery after `kill -9`, `stop` and uninstall all worked; the GUIDE's `invoke` syntax was wrong and is fixed. Found:
+- **`herdr plugin uninstall` leaves the service:** it deletes the binary, so the service fails every 5 s once it restarts (`203/EXEC`, seen on Linux). The GUIDE now says to `stop` first.
+- **On macOS `stop` does not last:** it boots the LaunchAgent out but leaves its plist (`RunAtLoad`, `KeepAlive`), so by launchd's rules the bridge starts again at the next login (not tested; on Linux `stop` also disables the unit). The menu bar's switch says off lasts until it is turned on. A fix: `launchctl disable` in `stop` and `enable` before `start`.
+- `start`, `restart` and `stop` were tested only on Linux: on the owner's Mac they would act on his own LaunchAgent (its label is fixed).
+
 ### Code debt (for later)
 
 Known and accepted for now; none blocks a phase.
@@ -90,7 +96,6 @@ Only changes that affect what the system does (the owner's rule, 2026-10-07): a 
 
 - Wear OS 1.2.2 on the watch, still unchecked: Quick Dictate and Change with the system input; an empty notification reply sends nothing; after the stream drops (Wi-Fi off and on) or the app returns from the background, the agent screen shows the latest reply. (Verified by the owner on 2026-10-05: Reply with voice and with the keyboard reaches the confirm screen and the agent.)
 - ntfy delivery (watchOS push) has never been tested.
-- `herdr plugin install gabrielmarcano/agent-watch` end to end.
 - **`make deploy-relay ARGS=--sync-env` has never run.** Plain deploys run on the VPS all the time; `--sync-env` also rewrites the server's env file (its live secrets) from the owner's `agent-watch.env`, and that merge is covered only by `tools/config/test_awenv.sh` (BSD awk locally, Linux awk in CI). The owner's `agent-watch.env` was filled from the running deployment, so the first run must list `AW_HOST_TOKEN` as **unchanged**; `changed` means the file's token is not the server's.
 
 ---
