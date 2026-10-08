@@ -16,7 +16,7 @@ The one place for the project's state: what is done, what is open, what comes ne
 | [6 watchOS](phases/6-watchos.md) (best-effort) | not started; after 5 | — |
 | [7 Android phone client](phases/7-android-mobile.md) | not started; after 5 | — |
 
-**Deployed** (2026-10-07): the relay at `0.6.0` (commit `931fe19`, branch `history-task-notifications`); on the owner's Mac, the bridge `0.7.0` (commit `931fe19`, same branch) and the menu bar `0.6.0`, built from the branch `presence-toggle` (2026-10-06; Only Notify When Away off); the Wear OS app `1.2.5` (release build, version code 10, branch `history-task-notifications`, 2026-10-07) on the owner's Pixel Watch 2. The component versions are in `VERSIONS`.
+**Deployed** (2026-10-07): the relay at `0.6.0` (commit `931fe19`, branch `history-task-notifications`); on the owner's Mac, the bridge `0.7.0` (commit `931fe19`, same branch) and the menu bar `0.6.0`, built from the branch `presence-toggle` (2026-10-06; Only Notify When Away off); the Wear OS app `1.3.0` (release build, version code 11, branch `history-task-notifications`, 2026-10-07) on the owner's Pixel Watch 2. The component versions are in `VERSIONS`.
 
 **What can run in parallel:**
 - **5 runs alone:** it tests the whole system.
@@ -36,7 +36,7 @@ The one place for the project's state: what is done, what is open, what comes ne
 
 ### History cleanup (branch `history-task-notifications`, 2026-10-07)
 - Deployed 2026-10-07, not verified on the watch yet: bridge `0.6.1` shows a background task's report (`<task-notification>`) as its summary, not raw markup (`docs/reference/agents.md` §3.2 step 3); Wear OS `1.2.5` names one pane's history cards by their query and gives the session's title its own lines in the header (`wearos-app/ARCHITECTURE.md` §4a). Items the relay already stores keep their raw query.
-- **Background shells and monitors** (the owner's request, 2026-10-07, informational only; claimed by Claude, 2026-10-07): `background_shells` and `background_monitors` (`contracts.md` §1.2), derived from a bounded 16 MiB transcript read (`docs/reference/agents.md` §3.4, the owner's choice). Relay `0.6.0` and bridge `0.7.0` deployed 2026-10-07; Wear OS `1.3.0` (the background line) built, not installed yet. Not verified on the watch. Known gaps: a task stopped from Claude's UI keeps counting; a task started before the 16 MiB, or before a `continued-in`, is not counted.
+- **Background shells and monitors** (the owner's request, 2026-10-07, informational only; claimed by Claude, 2026-10-07): `background_shells` and `background_monitors` (`contracts.md` §1.2), derived from a bounded 16 MiB transcript read (`docs/reference/agents.md` §3.4, the owner's choice). Relay `0.6.0` and bridge `0.7.0` deployed 2026-10-07; Wear OS `1.3.0` (the background line) installed the same day. Not verified on the watch. Known gaps: a task stopped from Claude's UI keeps counting; a task started before the 16 MiB, or before a `continued-in`, is not counted.
 
 ### Code debt (for later)
 
