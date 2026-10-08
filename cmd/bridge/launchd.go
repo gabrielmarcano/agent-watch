@@ -121,13 +121,16 @@ func (m *launchdManager) Install(ctx context.Context, spec ServiceSpec) error {
 	return m.bootstrap(ctx)
 }
 
-// bootstrap loads the installed plist. bootout is asynchronous, so a
-// bootstrap right after it can fail briefly; retry for up to ~1.5 s.
+// bootstrap enables the agent (stop disabled it) and loads the installed
+// plist. bootout is asynchronous, so a bootstrap right after it can fail
+// briefly; retry for up to ~1.5 s.
 func (m *launchdManager) bootstrap(ctx context.Context) error {
 	sleep := m.sleep
 	if sleep == nil {
 		sleep = time.Sleep
 	}
+	// A disabled agent cannot be bootstrapped; bootstrap reports it if this fails.
+	_, _ = m.run(ctx, "launchctl", "enable", m.serviceTarget())
 	var lastErr error
 	var lastOut []byte
 	for attempt := 0; attempt < 15; attempt++ {
@@ -169,13 +172,16 @@ func launchdNotLoaded(out []byte) bool {
 	return strings.Contains(s, "Could not find service") || strings.Contains(s, "No such process")
 }
 
+// Stop unloads the agent and disables it: launchd loads every plist in
+// LaunchAgents at login, so without the disable a stopped bridge would start
+// again at the next login. start enables it again.
 func (m *launchdManager) Stop(ctx context.Context) error {
 	out, err := m.run(ctx, "launchctl", "bootout", m.serviceTarget())
-	if err != nil {
-		if launchdNotLoaded(out) {
-			return nil
-		}
+	if err != nil && !launchdNotLoaded(out) {
 		return fmt.Errorf("launchctl bootout: %w: %s", err, strings.TrimSpace(string(out)))
+	}
+	if out, err := m.run(ctx, "launchctl", "disable", m.serviceTarget()); err != nil {
+		return fmt.Errorf("launchctl disable (the bridge would start again at login): %w: %s", err, strings.TrimSpace(string(out)))
 	}
 	return nil
 }
