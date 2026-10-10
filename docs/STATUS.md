@@ -16,7 +16,7 @@ The one place for the project's state: what is done, what is open, what comes ne
 | [6 watchOS](phases/6-watchos.md) (best-effort) | not started; after 5 | — |
 | [7 Android phone client](phases/7-android-mobile.md) | not started; after 5 | — |
 
-**Deployed** (2026-10-08): the relay at `0.6.0` (commit `050328a` on `main`); on the owner's Mac, the bridge `0.7.1` (commit `b715403`) and the menu bar `0.6.0` (rebuilt from `main` on 2026-10-07; Only Notify When Away off); the Wear OS app `1.3.1` (release build, version code 12, 2026-10-07; built before the squash merge, from the same code as `050328a`) on the owner's Pixel Watch 2. The component versions are in `VERSIONS`.
+**Deployed** (2026-10-10): the relay at `0.6.0` (commit `050328a` on `main`); on the owner's Mac, the bridge `0.8.0` (commit `1e50bb2` on local `main`, not pushed yet) and the menu bar `0.6.0` (rebuilt from `main` on 2026-10-07; Only Notify When Away off); the Wear OS app `1.3.1` (release build, version code 12, 2026-10-07; built before the squash merge, from the same code as `050328a`) on the owner's Pixel Watch 2. The component versions are in `VERSIONS`.
 
 **What can run in parallel:**
 - **5 runs alone:** it tests the whole system.
