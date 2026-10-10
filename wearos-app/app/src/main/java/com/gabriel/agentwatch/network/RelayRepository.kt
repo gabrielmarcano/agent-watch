@@ -3,6 +3,7 @@ package com.gabriel.agentwatch.network
 import android.content.Context
 import android.util.Log
 import com.gabriel.agentwatch.data.Prefs
+import com.gabriel.agentwatch.model.AgentKey
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -58,7 +59,7 @@ object RelayRepository {
         RelayClient.unauthorizedListener = newEngine::onUnauthorized
         // Complication and tile: refresh when what they show changes (throttled), not every 15 min.
         CoroutineScope(SupervisorJob() + Dispatchers.Default).launch {
-            _state.collect { SurfaceUpdates.onState(appContext, it, prefs.pinnedPaneId) }
+            _state.collect { SurfaceUpdates.onState(appContext, it, prefs.pinnedTarget) }
         }
     }
 
@@ -95,13 +96,14 @@ object RelayRepository {
     private fun notPaired(): Result<Unit> =
         Result.failure(RelayError("not_paired", "Client not configured", 0))
 
-    suspend fun answer(paneId: String, optionId: String, expectedSeq: Long, fingerprint: String): Result<Unit> =
-        engine?.answer(paneId, optionId, expectedSeq, fingerprint) ?: notPaired()
+    /** Commands go to [agent]'s host (contracts §2.1): pass the key of the `AgentState` shown. */
+    suspend fun answer(agent: AgentKey, optionId: String, expectedSeq: Long, fingerprint: String): Result<Unit> =
+        engine?.answer(agent, optionId, expectedSeq, fingerprint) ?: notPaired()
 
     /** [fingerprint]: the fingerprint of the prompt being cancelled, when one is shown (see [RelayClient.cancel]). */
-    suspend fun cancel(paneId: String, expectedSeq: Long, fingerprint: String? = null): Result<Unit> =
-        engine?.cancel(paneId, expectedSeq, fingerprint) ?: notPaired()
+    suspend fun cancel(agent: AgentKey, expectedSeq: Long, fingerprint: String? = null): Result<Unit> =
+        engine?.cancel(agent, expectedSeq, fingerprint) ?: notPaired()
 
-    suspend fun prompt(paneId: String, text: String, expectedSeq: Long): Result<Unit> =
-        engine?.prompt(paneId, text, expectedSeq) ?: notPaired()
+    suspend fun prompt(agent: AgentKey, text: String, expectedSeq: Long): Result<Unit> =
+        engine?.prompt(agent, text, expectedSeq) ?: notPaired()
 }

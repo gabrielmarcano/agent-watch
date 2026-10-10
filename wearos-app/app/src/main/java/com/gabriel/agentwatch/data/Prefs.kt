@@ -2,6 +2,7 @@ package com.gabriel.agentwatch.data
 
 import android.content.Context
 import android.content.SharedPreferences
+import com.gabriel.agentwatch.model.AgentKey
 import com.gabriel.agentwatch.network.ResolvedSeqs
 
 class Prefs(context: Context) : FcmRegistrationStore {
@@ -54,11 +55,19 @@ class Prefs(context: Context) : FcmRegistrationStore {
         @Deprecated("Ignored. Use PushRegistration.ensure(context); it records the token only after the relay accepts it.")
         set(@Suppress("UNUSED_PARAMETER") value) {}
 
-    var pinnedPaneId: String?
-        get() = prefs.getString("pinned_pane_id", null)
-        set(value) = prefs.edit().putString("pinned_pane_id", value).apply()
+    /**
+     * The agent set with "Pin to tile", or null. A pin saved before hosts has no host: `findAgent`
+     * still finds its pane while only one host has it.
+     */
+    var pinnedTarget: AgentKey?
+        get() = prefs.getString("pinned_pane_id", null)?.takeIf { it.isNotBlank() }
+            ?.let { AgentKey(prefs.getString("pinned_host", null).orEmpty(), it) }
+        set(value) = prefs.edit()
+            .putString("pinned_pane_id", value?.paneId)
+            .putString("pinned_host", value?.host)
+            .apply()
 
-    /** Last `resolved` push seq per pane (contracts §4.1): late `blocked` pushes at or below it are stale. */
+    /** Last `resolved` push seq per agent (contracts §4.1): late `blocked` pushes at or below it are stale. */
     var resolvedSeqs: ResolvedSeqs
         get() = ResolvedSeqs.decode(prefs.getString("resolved_seqs", null))
         set(value) = prefs.edit().putString("resolved_seqs", value.encode()).apply()

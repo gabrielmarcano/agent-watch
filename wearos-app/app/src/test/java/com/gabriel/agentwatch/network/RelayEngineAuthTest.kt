@@ -1,5 +1,6 @@
 package com.gabriel.agentwatch.network
 
+import com.gabriel.agentwatch.model.AgentKey
 import com.gabriel.agentwatch.model.AgentState
 import com.gabriel.agentwatch.model.AgentsSnapshot
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -67,7 +68,7 @@ class RelayEngineAuthTest {
         startLive()
         relay.responses["/v1/agents/w1%3Ap1/answer"] = unauthorized
 
-        val err = engine.answer("w1:p1", "opt-1", 3, "fp").exceptionOrNull() as RelayError
+        val err = engine.answer(AgentKey("", "w1:p1"), "opt-1", 3, "fp").exceptionOrNull() as RelayError
 
         assertEquals(401, err.httpStatus)
         assertRevoked()

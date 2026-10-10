@@ -11,7 +11,13 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -22,10 +28,15 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.wear.compose.foundation.lazy.items
 import androidx.wear.compose.foundation.lazy.rememberTransformingLazyColumnState
+import androidx.wear.compose.foundation.pager.HorizontalPager
+import androidx.wear.compose.foundation.pager.rememberPagerState
+import androidx.wear.compose.material3.AnimatedPage
 import androidx.wear.compose.material3.Button
 import androidx.wear.compose.material3.ButtonDefaults
 import androidx.wear.compose.material3.CircularProgressIndicator
 import androidx.wear.compose.material3.FilledTonalButton
+import androidx.wear.compose.material3.HorizontalPagerScaffold
+import androidx.wear.compose.material3.ListHeader
 import androidx.wear.compose.material3.ListSubHeader
 import androidx.wear.compose.material3.MaterialTheme
 import androidx.wear.compose.material3.OutlinedButton
@@ -33,7 +44,9 @@ import androidx.wear.compose.material3.SurfaceTransformation
 import androidx.wear.compose.material3.Text
 import androidx.wear.compose.material3.lazy.transformedHeight
 import com.gabriel.agentwatch.R
+import com.gabriel.agentwatch.model.AgentKey
 import com.gabriel.agentwatch.model.AgentState
+import com.gabriel.agentwatch.model.key
 import com.gabriel.agentwatch.network.UiState
 import com.gabriel.agentwatch.ui.components.AgentLogo
 import com.gabriel.agentwatch.ui.components.ResIcon
@@ -41,30 +54,75 @@ import com.gabriel.agentwatch.ui.components.agentStatus
 import com.gabriel.agentwatch.ui.components.ScreenList
 import com.gabriel.agentwatch.ui.components.transformedItem
 import com.gabriel.agentwatch.ui.logic.AttentionSection
+import com.gabriel.agentwatch.ui.logic.HostPage
 import com.gabriel.agentwatch.ui.logic.ListNotice
 import com.gabriel.agentwatch.ui.logic.attentionSections
-import com.gabriel.agentwatch.ui.logic.listStatus
+import com.gabriel.agentwatch.ui.logic.hostPages
+import com.gabriel.agentwatch.ui.logic.pageStatus
 import com.gabriel.agentwatch.ui.theme.Amber
 import com.gabriel.agentwatch.ui.theme.OnSurfaceVariant
 import com.gabriel.agentwatch.ui.theme.Red
 
 private const val DIMMED_ALPHA = 0.6f
 
+/**
+ * The agent list: one page per host, swiped sideways, with a page indicator (ARCHITECTURE.md §4a).
+ * While the relay knows at most one host it is a single list, exactly as before hosts.
+ */
 @Composable
 fun AgentListScreen(
     state: UiState,
-    onAgentClick: (paneId: String) -> Unit,
+    onAgentClick: (AgentKey) -> Unit,
+    onHistoryClick: () -> Unit,
+    onSettingsClick: () -> Unit
+) {
+    val pages = remember(state.hosts, state.agents) { hostPages(state) }
+    if (pages.size == 1) {
+        HostPageList(state, pages[0], onAgentClick, onHistoryClick, onSettingsClick)
+        return
+    }
+
+    val currentPages by rememberUpdatedState(pages)
+    val pagerState = rememberPagerState(pageCount = { currentPages.size })
+    // Keep the page on its host when a host is added or the order changes.
+    var shownHost by rememberSaveable { mutableStateOf<String?>(null) }
+    LaunchedEffect(pagerState) {
+        snapshotFlow { pagerState.currentPage }.collect { shownHost = currentPages.getOrNull(it)?.key }
+    }
+    val keys = pages.map { it.key }
+    LaunchedEffect(keys) {
+        val index = keys.indexOf(shownHost)
+        if (index >= 0 && index != pagerState.currentPage) pagerState.scrollToPage(index)
+    }
+
+    HorizontalPagerScaffold(pagerState = pagerState) {
+        HorizontalPager(state = pagerState, key = { currentPages.getOrNull(it)?.key ?: it }) { index ->
+            AnimatedPage(pageIndex = index, pagerState = pagerState) {
+                currentPages.getOrNull(index)?.let { page ->
+                    HostPageList(state, page, onAgentClick, onHistoryClick, onSettingsClick)
+                }
+            }
+        }
+    }
+}
+
+/** One page: the host's name (several hosts only), its notice, its agents by attention, then History and Settings. */
+@Composable
+private fun HostPageList(
+    state: UiState,
+    page: HostPage,
+    onAgentClick: (AgentKey) -> Unit,
     onHistoryClick: () -> Unit,
     onSettingsClick: () -> Unit
 ) {
     // The last notice shown, so a retry after a failure keeps saying "Can't reach the relay".
     val lastNotice = remember { arrayOfNulls<ListNotice>(1) }
-    val status = listStatus(state, lastNotice[0])
+    val status = pageStatus(state, page, lastNotice[0])
     SideEffect { lastNotice[0] = status.notice }
-    val sections = remember(state.agents) { attentionSections(state.agents) }
+    val sections = remember(page.agents) { attentionSections(page.agents) }
 
-    // The notice is always item 0; when it changes or the first agents arrive, show the top again
-    // unless the user has scrolled down the list.
+    // The notice is always near the top; when it changes or the first agents arrive, show the top
+    // again unless the user has scrolled down the list.
     val listState = rememberTransformingLazyColumnState()
     LaunchedEffect(status.notice) {
         if (listState.anchorItemIndex <= 2) listState.scrollToItem(0)
@@ -75,11 +133,21 @@ fun AgentListScreen(
     }
 
     ScreenList(state = listState) { spec ->
+        page.host?.let { host ->
+            item(key = "host") {
+                ListHeader(
+                    modifier = Modifier.fillMaxWidth().transformedHeight(this, spec),
+                    transformation = SurfaceTransformation(spec)
+                ) {
+                    Text(host.name.ifBlank { host.id }, maxLines = 2, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center)
+                }
+            }
+        }
         item(key = "notice") {
             status.notice?.let { Notice(it, transformedItem(spec).padding(start = 20.dp, end = 20.dp, bottom = 4.dp)) }
         }
 
-        if (state.agents.isEmpty()) {
+        if (page.agents.isEmpty()) {
             when (status.notice) {
                 ListNotice.CONNECTING -> item(key = "progress") {
                     Row(transformedItem(spec), horizontalArrangement = Arrangement.Center) {
@@ -107,10 +175,11 @@ fun AgentListScreen(
                     Text("${stringResource(section.section.title)} · ${section.agents.size}")
                 }
             }
-            items(section.agents, key = { it.pane_id }) { agent ->
+            // Keyed by host and pane: every herdr numbers its own panes.
+            items(section.agents, key = { it.key.token }) { agent ->
                 AgentRow(
                     agent = agent,
-                    onClick = { onAgentClick(agent.pane_id) },
+                    onClick = { onAgentClick(agent.key) },
                     modifier = Modifier
                         .fillMaxWidth()
                         .transformedHeight(this, spec)

@@ -1,5 +1,6 @@
 package com.gabriel.agentwatch.network
 
+import com.gabriel.agentwatch.model.AgentKey
 import com.gabriel.agentwatch.model.AgentState
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -65,8 +66,8 @@ class AgentNotificationsTest {
     fun resolvedTargetsTheSameNotificationIdAsTheBlockedOne() {
         val blocked = PushMessage.parse(blockedData()) as PushMessage.Blocked
         val resolved = PushMessage.parse(mapOf("event" to "resolved", "pane_id" to "w5:pAE", "state_change_seq" to "335")) as PushMessage.Resolved
-        assertEquals(AgentNotifications.idForPane(blocked.paneId), AgentNotifications.idForPane(resolved.paneId))
-        assertTrue(AgentNotifications.idForPane("w5:pAE") >= 0)
+        assertEquals(AgentNotifications.idFor(blocked.key), AgentNotifications.idFor(resolved.key))
+        assertTrue(AgentNotifications.idFor(AgentKey("", "w5:pAE")) >= 0)
     }
 
     @Test
@@ -107,28 +108,28 @@ class AgentNotificationsTest {
         assertEquals("precondition: old codes collide", oldRequestCode(a), oldRequestCode(b))
 
         for (action in NotificationAction.values()) {
-            assertNotEquals(AgentNotifications.intentUri(a, action), AgentNotifications.intentUri(b, action))
+            assertNotEquals(AgentNotifications.intentUri(AgentKey("", a), action), AgentNotifications.intentUri(AgentKey("", b), action))
         }
     }
 
     @Test
     fun intentIdentityIsStablePerPaneAndDistinctPerAction() {
         assertEquals(
-            AgentNotifications.intentUri("w5:pAE", NotificationAction.ALLOW),
-            AgentNotifications.intentUri("w5:pAE", NotificationAction.ALLOW)
+            AgentNotifications.intentUri(AgentKey("", "w5:pAE"), NotificationAction.ALLOW),
+            AgentNotifications.intentUri(AgentKey("", "w5:pAE"), NotificationAction.ALLOW)
         )
-        val uris = NotificationAction.values().map { AgentNotifications.intentUri("w5:pAE", it) }
+        val uris = NotificationAction.values().map { AgentNotifications.intentUri(AgentKey("", "w5:pAE"), it) }
         assertEquals(uris.size, uris.toSet().size)
         // pane ids are opaque: "a/b" must not look like pane "a" + something
         assertNotEquals(
-            AgentNotifications.intentUri("a/allow", NotificationAction.OPEN),
-            AgentNotifications.intentUri("a", NotificationAction.ALLOW)
+            AgentNotifications.intentUri(AgentKey("", "a/allow"), NotificationAction.OPEN),
+            AgentNotifications.intentUri(AgentKey("", "a"), NotificationAction.ALLOW)
         )
     }
 
     @Test
     fun requestCodesDifferPerActionForOnePane() {
-        val codes = NotificationAction.values().map { AgentNotifications.requestCode("w5:pAE", it) }
+        val codes = NotificationAction.values().map { AgentNotifications.requestCode(AgentKey("", "w5:pAE"), it) }
         assertEquals(codes.size, codes.toSet().size)
     }
 
@@ -214,5 +215,51 @@ class AgentNotificationsTest {
     @Test
     fun malformedOptionsAreIgnored() {
         assertEquals(emptyList<PushChoice>(), blocked(mapOf("kind" to "question", "options" to "[{oops")).options)
+    }
+
+    // ---- phase 8: (host, pane) is the key
+
+    @Test
+    fun pushesCarryTheHost() {
+        val blocked = PushMessage.parse(blockedData() + mapOf("host" to "box", "host_name" to "Box", "title" to "Box · my-app needs approval")) as PushMessage.Blocked
+        assertEquals(AgentKey("box", "w5:pAE"), blocked.key)
+        assertEquals("Box", blocked.hostName)
+        assertEquals("the relay's title is shown as it is, never prefixed again", "Box · my-app needs approval", blocked.title)
+        val done = PushMessage.parse(mapOf("event" to "done", "pane_id" to "p", "host" to "box", "host_name" to "Box")) as PushMessage.Done
+        assertEquals(AgentKey("box", "p"), done.key)
+        assertEquals(
+            PushMessage.Resolved("w5:pAE", 335L, host = "box"),
+            PushMessage.parse(mapOf("event" to "resolved", "host" to "box", "pane_id" to "w5:pAE", "state_change_seq" to "335"))
+        )
+        assertEquals("an older relay sends no host", "", (PushMessage.parse(blockedData()) as PushMessage.Blocked).host)
+    }
+
+    @Test
+    fun twoHostsSharingAPaneGetTwoNotifications() {
+        val mac = AgentKey("main", "w1:p1")
+        val box = AgentKey("box", "w1:p1")
+        assertNotEquals(AgentNotifications.idFor(mac), AgentNotifications.idFor(box))
+        assertTrue(AgentNotifications.idFor(box) >= 0)
+        assertEquals("without a host the id is the pane's, as before hosts", "w1:p1".hashCode() and 0x7FFFFFFF, AgentNotifications.idFor(AgentKey("", "w1:p1")))
+        for (action in NotificationAction.values()) {
+            assertNotEquals(AgentNotifications.intentUri(mac, action), AgentNotifications.intentUri(box, action))
+            assertNotEquals(AgentNotifications.intentUri(box, action), AgentNotifications.intentUri(AgentKey("", "w1:p1"), action))
+        }
+        assertEquals("agentwatch://notification/open/w1%3Ap1?host=box", AgentNotifications.intentUri(box, NotificationAction.OPEN))
+        assertEquals("agentwatch://notification/open/w1%3Ap1", AgentNotifications.intentUri(AgentKey("", "w1:p1"), NotificationAction.OPEN))
+    }
+
+    @Test
+    fun repositoryNewsDismissesOnlyTheApprovalOfItsHost() {
+        val shown = listOf(
+            ShownApproval(1, "w1:p1", 10, host = "main"),
+            ShownApproval(2, "w1:p1", 10, host = "box")
+        )
+        val macMovedOn = AgentState(pane_id = "w1:p1", host = "main", status = "working", state_change_seq = 11)
+        val boxBlocked = AgentState(pane_id = "w1:p1", host = "box", status = "blocked", state_change_seq = 10)
+
+        assertEquals(listOf(1), approvalsToDismiss(shown, AgentsUpdate.All(listOf(macMovedOn, boxBlocked))))
+        assertEquals(listOf(1), approvalsToDismiss(shown, AgentsUpdate.Changed(macMovedOn)))
+        assertEquals(listOf(2), approvalsToDismiss(shown, AgentsUpdate.Removed("w1:p1", host = "box")))
     }
 }

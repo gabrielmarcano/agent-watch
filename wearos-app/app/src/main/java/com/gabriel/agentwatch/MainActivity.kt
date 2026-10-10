@@ -34,11 +34,17 @@ import androidx.wear.compose.navigation.SwipeDismissableNavHost
 import androidx.wear.compose.navigation.composable
 import androidx.wear.compose.navigation.rememberSwipeDismissableNavController
 import com.gabriel.agentwatch.data.Prefs
+import com.gabriel.agentwatch.model.AgentKey
 import com.gabriel.agentwatch.model.AgentState
 import com.gabriel.agentwatch.model.HistoryItem
+import com.gabriel.agentwatch.model.findAgent
+import com.gabriel.agentwatch.model.hostNameFor
+import com.gabriel.agentwatch.model.key
 import com.gabriel.agentwatch.network.AuthState
+import com.gabriel.agentwatch.network.NotificationIntents
 import com.gabriel.agentwatch.network.PushRegistration
 import com.gabriel.agentwatch.network.RelayRepository
+import com.gabriel.agentwatch.network.UiState
 import com.gabriel.agentwatch.ui.components.rememberPaneHistory
 import com.gabriel.agentwatch.ui.screens.AgentDetailScreen
 import com.gabriel.agentwatch.ui.screens.AgentListScreen
@@ -55,26 +61,39 @@ import kotlinx.coroutines.flow.map
 private object Routes {
     const val PAIRING = "pairing"
     const val AGENTS = "agents"
-    const val AGENT = "agent/{paneId}"
-    const val HISTORY = "history?paneId={paneId}"
+    const val AGENT = "agent/{host}/{paneId}"
+    const val HISTORY = "history?host={host}&paneId={paneId}"
     const val READER = "reader/{historyId}"
     const val SETTINGS = "settings"
     const val FULL_TEXT = "text"
-    const val DICTATION = "dictation/{paneId}"
+    const val DICTATION = "dictation/{host}/{paneId}"
 
-    fun agent(paneId: String) = "agent/${Uri.encode(paneId)}"
-    fun history(paneId: String?) = if (paneId == null) "history" else "history?paneId=${Uri.encode(paneId)}"
+    /** An agent's host in a path segment: a segment cannot be empty, so no host ("") is `_`, never a host id (contracts §1.6). */
+    private const val NO_HOST = "_"
+
+    private fun hostSegment(host: String) = if (host.isEmpty()) NO_HOST else Uri.encode(host)
+
+    fun agent(key: AgentKey) = "agent/${hostSegment(key.host)}/${Uri.encode(key.paneId)}"
+    fun history(key: AgentKey?) =
+        if (key == null) "history" else "history?host=${hostSegment(key.host)}&paneId=${Uri.encode(key.paneId)}"
     fun reader(id: String) = "reader/${Uri.encode(id)}"
-    fun dictation(paneId: String) = "dictation/${Uri.encode(paneId)}"
+    fun dictation(key: AgentKey) = "dictation/${hostSegment(key.host)}/${Uri.encode(key.paneId)}"
+
+    /** The agent a route's `host` and `paneId` arguments name, or null without a pane. */
+    fun agentKey(arguments: Bundle?): AgentKey? {
+        val paneId = arguments?.getString("paneId")?.let(Uri::decode)?.takeIf { it.isNotBlank() } ?: return null
+        val host = arguments.getString("host")?.let(Uri::decode).orEmpty()
+        return AgentKey(if (host == NO_HOST) "" else host, paneId)
+    }
 }
 
 class MainActivity : ComponentActivity() {
     private val prefs by lazy { Prefs(this) }
-    private var pendingDeepLinkPaneId by mutableStateOf<String?>(null)
+    private var pendingDeepLink by mutableStateOf<AgentKey?>(null)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        pendingDeepLinkPaneId = intent?.getStringExtra("pane_id")
+        pendingDeepLink = NotificationIntents.agentOf(intent)
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
             checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
@@ -91,8 +110,8 @@ class MainActivity : ComponentActivity() {
                     AgentWatchNavigation(
                         startPaired = remember { prefs.isPaired },
                         prefs = prefs,
-                        deepLinkPaneId = pendingDeepLinkPaneId,
-                        onDeepLinkHandled = { pendingDeepLinkPaneId = null }
+                        deepLink = pendingDeepLink,
+                        onDeepLinkHandled = { pendingDeepLink = null }
                     )
                 }
             }
@@ -102,7 +121,7 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
-        intent.getStringExtra("pane_id")?.takeIf { it.isNotBlank() }?.let { pendingDeepLinkPaneId = it }
+        NotificationIntents.agentOf(intent)?.let { pendingDeepLink = it }
     }
 
     override fun onStart() {
@@ -132,14 +151,16 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-/** One agent from the live state, recomposing only when that agent changes (not on every SSE event). */
+/**
+ * One agent from the live state with its host's name (only when the relay knows several hosts),
+ * recomposing only when that agent or the name changes (not on every SSE event).
+ */
 @Composable
-private fun rememberAgent(paneId: String): AgentState? {
-    val flow = remember(paneId) {
-        RelayRepository.state.map { s -> s.agents.find { it.pane_id == paneId } }.distinctUntilChanged()
-    }
+private fun rememberAgent(key: AgentKey): Pair<AgentState, String?>? {
+    fun pick(s: UiState) = s.agents.findAgent(key)?.let { it to hostNameFor(s.hosts, it.host) }
+    val flow = remember(key) { RelayRepository.state.map(::pick).distinctUntilChanged() }
     // The current value only seeds the first frame; the collection keeps it up to date.
-    val initial = remember(paneId) { RelayRepository.state.value.agents.find { it.pane_id == paneId } }
+    val initial = remember(key) { pick(RelayRepository.state.value) }
     val agent by flow.collectAsStateWithLifecycle(initial)
     return agent
 }
@@ -148,7 +169,7 @@ private fun rememberAgent(paneId: String): AgentState? {
 private fun AgentWatchNavigation(
     startPaired: Boolean,
     prefs: Prefs,
-    deepLinkPaneId: String?,
+    deepLink: AgentKey?,
     onDeepLinkHandled: () -> Unit
 ) {
     val nav = rememberSwipeDismissableNavController()
@@ -162,10 +183,10 @@ private fun AgentWatchNavigation(
             nav.navigate(Routes.PAIRING) { popUpTo(nav.graph.id) { inclusive = true } }
         }
     }
-    LaunchedEffect(deepLinkPaneId, auth) {
-        if (!deepLinkPaneId.isNullOrBlank() && auth == AuthState.PAIRED) {
+    LaunchedEffect(deepLink, auth) {
+        if (deepLink != null && auth == AuthState.PAIRED) {
             onDeepLinkHandled()
-            nav.navigate(Routes.agent(deepLinkPaneId)) { popUpTo(Routes.AGENTS) }
+            nav.navigate(Routes.agent(deepLink)) { popUpTo(Routes.AGENTS) }
         }
     }
 
@@ -177,6 +198,13 @@ private fun AgentWatchNavigation(
     val openReader: (HistoryItem) -> Unit = { item ->
         readerItem = item
         nav.navigate(Routes.reader(item.id))
+    }
+
+    val agentArguments = remember {
+        listOf(
+            navArgument("host") { type = NavType.StringType },
+            navArgument("paneId") { type = NavType.StringType }
+        )
     }
 
     SwipeDismissableNavHost(navController = nav, startDestination = if (startPaired) Routes.AGENTS else Routes.PAIRING) {
@@ -192,30 +220,34 @@ private fun AgentWatchNavigation(
                 onSettingsClick = { nav.navigate(Routes.SETTINGS) }
             )
         }
-        composable(Routes.AGENT, arguments = listOf(navArgument("paneId") { type = NavType.StringType })) { entry ->
-            val paneId = Uri.decode(entry.arguments?.getString("paneId").orEmpty())
-            val agent = rememberAgent(paneId)
-            var pinned by remember { mutableStateOf(prefs.pinnedPaneId) }
-            if (agent == null) {
+        composable(Routes.AGENT, arguments = agentArguments) { entry ->
+            val key = Routes.agentKey(entry.arguments) ?: AgentKey("", "")
+            val found = rememberAgent(key)
+            var pinned by remember { mutableStateOf(prefs.pinnedTarget) }
+            if (found == null) {
                 // No snapshot yet (cold start, reconnecting) is not the same as a closed agent.
                 val stale by remember { RelayRepository.state.map { it.stale }.distinctUntilChanged() }
                     .collectAsStateWithLifecycle(remember { RelayRepository.state.value.stale })
                 Message(stringResource(if (stale) R.string.notice_connecting else R.string.agent_closed))
             } else {
+                val (agent, hostName) = found
+                // The agent found, with its host, even when the route had none (an intent from before hosts).
+                val agentKey = agent.key
                 AgentDetailScreen(
                     agent = agent,
-                    lastReply = rememberPaneHistory(paneId).firstOrNull(),
+                    hostName = hostName,
+                    lastReply = rememberPaneHistory(agentKey).firstOrNull(),
                     onReadReply = openReader,
-                    isTileTarget = pinned == paneId,
+                    isTileTarget = pinned == agentKey,
                     onTileTargetChange = { on ->
-                        prefs.pinnedPaneId = if (on) paneId else null
-                        pinned = prefs.pinnedPaneId
+                        prefs.pinnedTarget = if (on) agentKey else null
+                        pinned = prefs.pinnedTarget
                     },
                     onDictated = { text ->
                         dictatedText = text
-                        nav.navigate(Routes.dictation(paneId))
+                        nav.navigate(Routes.dictation(agentKey))
                     },
-                    onHistoryClick = { nav.navigate(Routes.history(paneId)) },
+                    onHistoryClick = { nav.navigate(Routes.history(agentKey)) },
                     onViewAll = { text ->
                         fullText = text
                         nav.navigate(Routes.FULL_TEXT)
@@ -223,10 +255,11 @@ private fun AgentWatchNavigation(
                 )
             }
         }
-        composable(Routes.DICTATION, arguments = listOf(navArgument("paneId") { type = NavType.StringType })) { entry ->
-            val paneId = Uri.decode(entry.arguments?.getString("paneId").orEmpty())
+        composable(Routes.DICTATION, arguments = agentArguments) { entry ->
+            val found = rememberAgent(Routes.agentKey(entry.arguments) ?: AgentKey("", ""))
             DictationFlow(
-                target = rememberAgent(paneId),
+                target = found?.first,
+                hostName = found?.second,
                 text = dictatedText,
                 onTextChange = { dictatedText = it },
                 onFinished = { nav.popBackStack() }
@@ -235,14 +268,17 @@ private fun AgentWatchNavigation(
         composable(Routes.FULL_TEXT) { FullTextScreen(fullText) }
         composable(
             Routes.HISTORY,
-            arguments = listOf(navArgument("paneId") { type = NavType.StringType; nullable = true; defaultValue = null })
+            arguments = listOf(
+                navArgument("host") { type = NavType.StringType; nullable = true; defaultValue = null },
+                navArgument("paneId") { type = NavType.StringType; nullable = true; defaultValue = null }
+            )
         ) { entry ->
-            val paneId = entry.arguments?.getString("paneId")?.let(Uri::decode)
+            val key = Routes.agentKey(entry.arguments)
             val state by RelayRepository.state.collectAsStateWithLifecycle()
             HistoryListScreen(
-                paneId = paneId,
-                agentLabel = paneId?.let { id -> state.agents.find { it.pane_id == id }?.label },
-                historyItems = if (paneId == null) state.history else rememberPaneHistory(paneId),
+                agent = key,
+                agentLabel = key?.let { state.agents.findAgent(it)?.label },
+                historyItems = if (key == null) state.history else rememberPaneHistory(key),
                 onSelectHistoryItem = openReader
             )
         }

@@ -1,5 +1,6 @@
 package com.gabriel.agentwatch.network
 
+import com.gabriel.agentwatch.model.AgentKey
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -31,29 +32,29 @@ class ResolvedSeqsTest {
     @Test
     fun recordKeepsTheHighestSeqPerPane() {
         val seqs = ResolvedSeqs()
-            .record("w5:pAE", 335)
-            .record("w5:pAE", 330) // a late, older resolved must not lower it
-            .record("w9:p1", 12)
-        assertEquals(335L, seqs.lastFor("w5:pAE"))
-        assertEquals(12L, seqs.lastFor("w9:p1"))
-        assertNull(seqs.lastFor("w1:p1"))
+            .record(AgentKey("", "w5:pAE"), 335)
+            .record(AgentKey("", "w5:pAE"), 330) // a late, older resolved must not lower it
+            .record(AgentKey("", "w9:p1"), 12)
+        assertEquals(335L, seqs.lastFor(AgentKey("", "w5:pAE")))
+        assertEquals(12L, seqs.lastFor(AgentKey("", "w9:p1")))
+        assertNull(seqs.lastFor(AgentKey("", "w1:p1")))
     }
 
     @Test
     fun memoryIsBoundedDroppingTheLeastRecentlyRecordedPane() {
         var seqs = ResolvedSeqs(maxPanes = 3)
-        for (i in 1..4) seqs = seqs.record("w1:p$i", i.toLong())
-        assertNull(seqs.lastFor("w1:p1"))
-        assertEquals(4L, seqs.lastFor("w1:p4"))
+        for (i in 1..4) seqs = seqs.record(AgentKey("", "w1:p$i"), i.toLong())
+        assertNull(seqs.lastFor(AgentKey("", "w1:p1")))
+        assertEquals(4L, seqs.lastFor(AgentKey("", "w1:p4")))
         assertEquals(3, seqs.size)
     }
 
     @Test
     fun encodeDecodeRoundTrips() {
-        val seqs = ResolvedSeqs().record("w5:pAE", 335).record("w9:p1", 12)
+        val seqs = ResolvedSeqs().record(AgentKey("", "w5:pAE"), 335).record(AgentKey("", "w9:p1"), 12)
         val back = ResolvedSeqs.decode(seqs.encode())
-        assertEquals(335L, back.lastFor("w5:pAE"))
-        assertEquals(12L, back.lastFor("w9:p1"))
+        assertEquals(335L, back.lastFor(AgentKey("", "w5:pAE")))
+        assertEquals(12L, back.lastFor(AgentKey("", "w9:p1")))
     }
 
     @Test
@@ -61,5 +62,17 @@ class ResolvedSeqsTest {
         assertEquals(0, ResolvedSeqs.decode(null).size)
         assertEquals(0, ResolvedSeqs.decode("not json").size)
         assertEquals(0, ResolvedSeqs.decode("{\"w1:p1\":\"x\"}").size)
+    }
+
+    @Test
+    fun eachHostsPaneHasItsOwnSeq() {
+        val seqs = ResolvedSeqs().record(AgentKey("main", "w1:p1"), 40).record(AgentKey("box", "w1:p1"), 7)
+        assertEquals(40L, seqs.lastFor(AgentKey("main", "w1:p1")))
+        assertEquals(7L, seqs.lastFor(AgentKey("box", "w1:p1")))
+        assertNull("a host's resolved never hides another host's prompt", seqs.lastFor(AgentKey("", "w1:p1")))
+        val back = ResolvedSeqs.decode(seqs.encode())
+        assertEquals(7L, back.lastFor(AgentKey("box", "w1:p1")))
+        assertTrue(shouldShowBlocked(8, back.lastFor(AgentKey("box", "w1:p1"))))
+        assertFalse(shouldShowBlocked(8, back.lastFor(AgentKey("main", "w1:p1"))))
     }
 }

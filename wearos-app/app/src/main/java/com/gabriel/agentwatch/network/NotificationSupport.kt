@@ -9,6 +9,7 @@ import android.net.Uri
 import android.os.Bundle
 import android.util.Log
 import com.gabriel.agentwatch.MainActivity
+import com.gabriel.agentwatch.model.AgentKey
 
 /** The app's notification channels. Idempotent: creating an existing channel is a no-op. */
 object NotificationChannels {
@@ -39,21 +40,26 @@ object NotificationChannels {
     }
 }
 
-/** PendingIntents whose identity is unique per (pane, action); see [AgentNotifications.intentUri]. */
+/** PendingIntents whose identity is unique per (host, pane, action); see [AgentNotifications.intentUri]. */
 object NotificationIntents {
-    /** Opens the app on [paneId] (or on the list for a digest). */
-    fun openApp(context: Context, paneId: String?): PendingIntent {
+    /** The intent extras that name an agent: its pane and its host ("" before hosts). */
+    const val EXTRA_PANE_ID = "pane_id"
+    const val EXTRA_HOST = "host"
+
+    /** Opens the app on [agent] (or on the list for a digest). */
+    fun openApp(context: Context, agent: AgentKey?): PendingIntent {
         val intent = Intent(context, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
-            if (!paneId.isNullOrBlank()) {
-                putExtra("pane_id", paneId)
-                data = Uri.parse(AgentNotifications.intentUri(paneId, NotificationAction.OPEN))
+            if (agent != null && agent.paneId.isNotBlank()) {
+                putExtra(EXTRA_PANE_ID, agent.paneId)
+                putExtra(EXTRA_HOST, agent.host)
+                data = Uri.parse(AgentNotifications.intentUri(agent, NotificationAction.OPEN))
             }
         }
-        val requestCode = if (paneId.isNullOrBlank()) {
+        val requestCode = if (agent == null || agent.paneId.isBlank()) {
             AgentNotifications.DIGEST_ID
         } else {
-            AgentNotifications.requestCode(paneId, NotificationAction.OPEN)
+            AgentNotifications.requestCode(agent, NotificationAction.OPEN)
         }
         return PendingIntent.getActivity(
             context, requestCode, intent,
@@ -61,10 +67,10 @@ object NotificationIntents {
         )
     }
 
-    /** A broadcast to [NotificationActionReceiver] carrying `pane_id` plus whatever [extras] adds. */
+    /** A broadcast to [NotificationActionReceiver] carrying the agent's pane and host plus whatever [extras] adds. */
     fun receiverAction(
         context: Context,
-        paneId: String,
+        agent: AgentKey,
         action: NotificationAction,
         broadcastAction: String,
         mutable: Boolean = false,
@@ -73,22 +79,32 @@ object NotificationIntents {
     ): PendingIntent {
         val intent = Intent(context, NotificationActionReceiver::class.java).apply {
             this.action = broadcastAction
-            data = Uri.parse(AgentNotifications.intentUri(paneId, action, optionId))
-            putExtra("pane_id", paneId)
+            data = Uri.parse(AgentNotifications.intentUri(agent, action, optionId))
+            putExtra(EXTRA_PANE_ID, agent.paneId)
+            putExtra(EXTRA_HOST, agent.host)
             extras()
         }
         val mutability = if (mutable) PendingIntent.FLAG_MUTABLE else PendingIntent.FLAG_IMMUTABLE
         return PendingIntent.getBroadcast(
-            context, AgentNotifications.requestCode(paneId, action), intent,
+            context, AgentNotifications.requestCode(agent, action), intent,
             PendingIntent.FLAG_UPDATE_CURRENT or mutability
         )
     }
 
     /** Extras that let [ApprovalNotifications] find this notification again. */
-    fun tag(kind: String, paneId: String? = null, seq: Long = 0L): Bundle = Bundle().apply {
+    fun tag(kind: String, agent: AgentKey? = null, seq: Long = 0L): Bundle = Bundle().apply {
         putString(AgentNotifications.EXTRA_KIND, kind)
-        if (paneId != null) putString(AgentNotifications.EXTRA_PANE, paneId)
+        if (agent != null) {
+            putString(AgentNotifications.EXTRA_PANE, agent.paneId)
+            putString(AgentNotifications.EXTRA_HOST, agent.host)
+        }
         putLong(AgentNotifications.EXTRA_SEQ, seq)
+    }
+
+    /** The agent an intent names (its extras); null without a pane. A missing host is "" (an intent from before hosts). */
+    fun agentOf(intent: Intent?): AgentKey? {
+        val paneId = intent?.getStringExtra(EXTRA_PANE_ID)?.takeIf { it.isNotBlank() } ?: return null
+        return AgentKey(intent.getStringExtra(EXTRA_HOST).orEmpty(), paneId)
     }
 }
 
@@ -104,14 +120,15 @@ object ApprovalNotifications {
             val extras = sbn.notification.extras
             if (extras.getString(AgentNotifications.EXTRA_KIND) != AgentNotifications.KIND_APPROVAL) return@mapNotNull null
             val paneId = extras.getString(AgentNotifications.EXTRA_PANE) ?: return@mapNotNull null
-            ShownApproval(sbn.id, paneId, extras.getLong(AgentNotifications.EXTRA_SEQ, 0L))
+            val host = extras.getString(AgentNotifications.EXTRA_HOST).orEmpty()
+            ShownApproval(sbn.id, paneId, extras.getLong(AgentNotifications.EXTRA_SEQ, 0L), host)
         }
 
-    /** A data-only `resolved` push: dismiss the pane's approval, show nothing. */
+    /** A data-only `resolved` push: dismiss the agent's approval, show nothing. */
     fun onResolved(context: Context, message: PushMessage.Resolved) {
         try {
             val manager = manager(context)
-            val approval = shown(manager).firstOrNull { it.paneId == message.paneId }
+            val approval = shown(manager).firstOrNull { it.key == message.key }
             if (shouldDismissOnResolved(approval, message.seq)) manager.cancel(approval!!.notificationId)
         } catch (e: RuntimeException) {
             Log.w(TAG, "Could not dismiss a resolved approval: ${e.javaClass.simpleName}")
