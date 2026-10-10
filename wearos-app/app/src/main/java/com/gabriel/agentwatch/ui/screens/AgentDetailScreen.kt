@@ -51,6 +51,7 @@ import com.gabriel.agentwatch.approval.needsConfirmation
 import com.gabriel.agentwatch.model.AgentState
 import com.gabriel.agentwatch.model.HistoryItem
 import com.gabriel.agentwatch.model.PromptOption
+import com.gabriel.agentwatch.model.key
 import com.gabriel.agentwatch.network.RelayRepository
 import com.gabriel.agentwatch.ui.components.PromptInput
 import com.gabriel.agentwatch.ui.components.AgentLogo
@@ -69,6 +70,7 @@ import kotlinx.coroutines.launch
 @Composable
 fun AgentDetailScreen(
     agent: AgentState,
+    hostName: String?,
     lastReply: HistoryItem?,
     onReadReply: (HistoryItem) -> Unit,
     isTileTarget: Boolean,
@@ -81,13 +83,13 @@ fun AgentDetailScreen(
     val view = LocalView.current
 
     var inFlight by remember { mutableStateOf(false) }
-    var error by remember(agent.pane_id) { mutableStateOf<CommandFeedback?>(null) }
+    var error by remember(agent.key) { mutableStateOf<CommandFeedback?>(null) }
     var confirmation by remember { mutableStateOf<Int?>(null) }
     var askAlways by remember { mutableStateOf<PromptOption?>(null) }
 
     // After a successful answer or cancel the prompt stays locked until the relay reports a new seq or
     // fingerprint, or the agent leaves blocked. Prevents a double send.
-    var sentAnswer by remember(agent.pane_id) { mutableStateOf<SentAnswer?>(null) }
+    var sentAnswer by remember(agent.key) { mutableStateOf<SentAnswer?>(null) }
     val awaitingUpdate = isAwaitingUpdate(agent, sentAnswer)
     LaunchedEffect(sentAnswer, awaitingUpdate) {
         if (sentAnswer != null && !awaitingUpdate) sentAnswer = null
@@ -99,7 +101,7 @@ fun AgentDetailScreen(
         val prompt = agent.prompt ?: return
         if (inFlight || awaitingUpdate) return
         // The seq and fingerprint of the prompt on screen at tap time.
-        val target = SentAnswer(agent.pane_id, agent.state_change_seq, prompt.fingerprint)
+        val target = SentAnswer(agent.pane_id, agent.state_change_seq, prompt.fingerprint, agent.host)
         inFlight = true
         error = null
         scope.launch {
@@ -124,10 +126,10 @@ fun AgentDetailScreen(
             "deny" -> R.string.feedback_denied
             else -> R.string.feedback_answered
         }
-    ) { t -> RelayRepository.answer(t.paneId, option.id, t.seq, t.fingerprint) }
+    ) { t -> RelayRepository.answer(t.key, option.id, t.seq, t.fingerprint) }
 
     fun cancel() = send(R.string.feedback_canceled) { t ->
-        RelayRepository.cancel(t.paneId, t.seq, fingerprint = t.fingerprint)
+        RelayRepository.cancel(t.key, t.seq, fingerprint = t.fingerprint)
     }
 
     // Reply: voice, keyboard or handwriting. Text goes to the confirm screen; a result without text
@@ -176,7 +178,7 @@ fun AgentDetailScreen(
         }
     ) { spec ->
         // Narrower at the top of the round screen, where the chord is short.
-        item(key = "header") { AgentHeader(agent, transformedItem(spec).padding(start = 18.dp, end = 18.dp, top = 6.dp, bottom = 6.dp)) }
+        item(key = "header") { AgentHeader(agent, hostName, transformedItem(spec).padding(start = 18.dp, end = 18.dp, top = 6.dp, bottom = 6.dp)) }
 
         val prompt = agent.prompt
         if (blocked && prompt != null) {
@@ -272,10 +274,11 @@ fun AgentDetailScreen(
 /**
  * Name first, anchored under the clock; then one short fact per line (`ARCHITECTURE.md` §4b): the
  * status word, the background agents' count when it waits on them, the age of the status, the agent's
- * logo with the workspace, and the agent's own title. Kept short so the prompt or the last reply shows on open.
+ * logo with the workspace, the agent's own title, and its host's name when the relay knows several hosts.
+ * Kept short so the prompt or the last reply shows on open.
  */
 @Composable
-private fun AgentHeader(agent: AgentState, modifier: Modifier) {
+private fun AgentHeader(agent: AgentState, hostName: String?, modifier: Modifier) {
     val status = agentStatus(agent)
     Column(modifier, horizontalAlignment = Alignment.CenterHorizontally) {
         Text(
@@ -305,6 +308,10 @@ private fun AgentHeader(agent: AgentState, modifier: Modifier) {
         }
         agent.title?.takeIf { it.isNotBlank() && it != agent.label }?.let { title ->
             Text(title, color = OnSurfaceVariant, style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+        // Several hosts: which machine runs it.
+        hostName?.let {
+            Text(it, color = OnSurfaceVariant, style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
     }
 }

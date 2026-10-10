@@ -7,7 +7,9 @@ import android.util.Log
 import androidx.wear.tiles.TileService
 import androidx.wear.watchface.complications.datasource.ComplicationDataSourceUpdateRequester
 import com.gabriel.agentwatch.complication.AgentStatusComplicationService
-import com.gabriel.agentwatch.model.resolveTargetAgent
+import com.gabriel.agentwatch.model.AgentKey
+import com.gabriel.agentwatch.model.allHostsOffline
+import com.gabriel.agentwatch.model.resolveTarget
 import com.gabriel.agentwatch.tile.AgentQuickActionTileService
 import com.gabriel.agentwatch.tile.AgentsTileService
 import kotlinx.coroutines.CoroutineScope
@@ -18,8 +20,8 @@ import kotlinx.coroutines.launch
 
 /**
  * What the complication (host offline / blocked / working / done counts) and the tiles (dictation target
- * label, the most urgent agents) render, reduced to the fields that change their output. Equal
- * signatures need no refresh.
+ * label, the most urgent agents, the hosts' names) render, reduced to the fields that change their
+ * output. Equal signatures need no refresh.
  */
 data class SurfaceSignature(
     val paired: Boolean,
@@ -28,17 +30,20 @@ data class SurfaceSignature(
     val working: Int,
     val agents: Int,
     val targetLabel: String?,
-    val done: Int = 0
+    val done: Int = 0,
+    /** Each host's id, name and whether it is online (contracts §1.6); empty before hosts. */
+    val hosts: List<Triple<String, String, Boolean>> = emptyList()
 )
 
-fun surfaceSignature(state: UiState, pinnedPaneId: String?): SurfaceSignature = SurfaceSignature(
+fun surfaceSignature(state: UiState, pinned: AgentKey?): SurfaceSignature = SurfaceSignature(
     paired = state.auth == AuthState.PAIRED,
-    hostOnline = state.hostOnline,
+    hostOnline = !allHostsOffline(state.hosts, state.hostOnline),
     blocked = state.agents.count { it.status == "blocked" },
     working = state.agents.count { it.status == "working" },
     agents = state.agents.size,
-    targetLabel = resolveTargetAgent(state.agents, pinnedPaneId)?.label,
-    done = state.agents.count { it.status == "done" }
+    targetLabel = resolveTarget(state.agents, pinned)?.label,
+    done = state.agents.count { it.status == "done" },
+    hosts = state.hosts.map { Triple(it.id, it.name, it.online) }
 )
 
 /**
@@ -83,8 +88,8 @@ object SurfaceUpdates {
     private var lastSignature: SurfaceSignature? = null
 
     /** The repository state changed: request an update only if what the surfaces show changed. */
-    fun onState(context: Context, state: UiState, pinnedPaneId: String?) {
-        val signature = surfaceSignature(state, pinnedPaneId)
+    fun onState(context: Context, state: UiState, pinned: AgentKey?) {
+        val signature = surfaceSignature(state, pinned)
         synchronized(this) {
             if (signature == lastSignature) return
             lastSignature = signature

@@ -36,7 +36,10 @@ import com.gabriel.agentwatch.MainActivity
 import com.gabriel.agentwatch.R
 import com.gabriel.agentwatch.approval.commandErrorFeedback
 import com.gabriel.agentwatch.data.Prefs
+import com.gabriel.agentwatch.model.AgentKey
 import com.gabriel.agentwatch.model.AgentState
+import com.gabriel.agentwatch.model.hostNameFor
+import com.gabriel.agentwatch.network.NotificationIntents
 import com.gabriel.agentwatch.network.RelayClient
 import com.gabriel.agentwatch.network.RelayRepository
 import com.gabriel.agentwatch.ui.components.PromptInput
@@ -48,23 +51,24 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
 /**
- * Quick Dictate, opened by the tile with the `pane_id` it displayed: fetch that agent (fresh seq),
+ * Quick Dictate, opened by the tile with the agent it displayed (pane and host): fetch that agent (fresh seq),
  * take the prompt (voice, keyboard or handwriting), show it, send on confirmation. Errors stay on screen, mapped by
  * [commandErrorFeedback]; nothing is sent to an agent other than the one the tile named.
  */
 class QuickDictateActivity : ComponentActivity() {
 
     companion object {
-        const val EXTRA_PANE_ID = "pane_id"
+        const val EXTRA_PANE_ID = NotificationIntents.EXTRA_PANE_ID
+        const val EXTRA_HOST = NotificationIntents.EXTRA_HOST
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         RelayRepository.init(this) // commands and 401 handling go through the process-wide engine
-        val launchPaneId = intent?.getStringExtra(EXTRA_PANE_ID)
+        val launch = NotificationIntents.agentOf(intent)
         setContent {
             AgentWatchTheme {
-                AppScaffold { QuickDictate(Prefs(this@QuickDictateActivity), launchPaneId, onFinish = ::finish) }
+                AppScaffold { QuickDictate(Prefs(this@QuickDictateActivity), launch, onFinish = ::finish) }
             }
         }
     }
@@ -73,12 +77,12 @@ class QuickDictateActivity : ComponentActivity() {
 private sealed interface Phase {
     data object Loading : Phase
     data class Message(val text: String) : Phase
-    data class Listening(val target: AgentState) : Phase
-    data class Confirm(val target: AgentState, val text: String) : Phase
+    data class Listening(val target: AgentState, val hostName: String?) : Phase
+    data class Confirm(val target: AgentState, val hostName: String?, val text: String) : Phase
 }
 
 @Composable
-private fun QuickDictate(prefs: Prefs, launchPaneId: String?, onFinish: () -> Unit) {
+private fun QuickDictate(prefs: Prefs, launch: AgentKey?, onFinish: () -> Unit) {
     var phase by remember { mutableStateOf<Phase>(Phase.Loading) }
     val notPaired = stringResource(R.string.dictation_not_paired)
     val closed = stringResource(R.string.dictation_agent_closed)
@@ -94,8 +98,8 @@ private fun QuickDictate(prefs: Prefs, launchPaneId: String?, onFinish: () -> Un
         val result = withContext(Dispatchers.IO) { RelayClient(prefs.relayUrl, prefs.deviceToken).agents() }
         phase = result.fold(
             onSuccess = { snapshot ->
-                when (val target = dictationTarget(snapshot.agents, launchPaneId, prefs.pinnedPaneId)) {
-                    is DictationTarget.Found -> Phase.Listening(target.agent)
+                when (val target = dictationTarget(snapshot.agents, launch, prefs.pinnedTarget)) {
+                    is DictationTarget.Found -> Phase.Listening(target.agent, hostNameFor(snapshot.hosts.orEmpty(), target.agent.host))
                     DictationTarget.Closed -> Phase.Message(closed)
                     DictationTarget.None -> Phase.Message(noTarget)
                 }
@@ -115,7 +119,7 @@ private fun QuickDictate(prefs: Prefs, launchPaneId: String?, onFinish: () -> Un
             // Backing out closes Quick Dictate; any other result without text says why.
             val listen = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
                 when (val input = PromptInput.result(result.resultCode, result.data)) {
-                    is InputResult.Text -> phase = Phase.Confirm(p.target, input.text)
+                    is InputResult.Text -> phase = Phase.Confirm(p.target, p.hostName, input.text)
                     else -> inputFeedback(input)?.let { phase = Phase.Message(context.getString(it)) } ?: onFinish()
                 }
             }
@@ -130,6 +134,7 @@ private fun QuickDictate(prefs: Prefs, launchPaneId: String?, onFinish: () -> Un
         }
         is Phase.Confirm -> DictationFlow(
             target = p.target,
+            hostName = p.hostName,
             text = p.text,
             onTextChange = { phase = p.copy(text = it) },
             onFinished = onFinish

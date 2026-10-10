@@ -161,4 +161,11 @@ class CommandFeedbackTest {
         assertFalse(fb.refresh)
         assertEquals("Sent answer", fb.message)
     }
+
+    @Test
+    fun hostRequiredRefreshesForTheAgentsHost() {
+        // contracts §2.4: an old command path while several hosts have the pane.
+        assertFeedback(relay("host_required", 409), "Several devices — refreshed", refresh = true)
+        assertEquals("Several devices — open the app", commandErrorFeedback(relay("host_required", 409), FeedbackSurface.NOTIFICATION).message)
+    }
 }

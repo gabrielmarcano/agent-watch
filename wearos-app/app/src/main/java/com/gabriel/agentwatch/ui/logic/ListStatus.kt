@@ -17,8 +17,20 @@ data class ListStatus(val notice: ListNotice?, val dimmed: Boolean)
  * shown before this state: a retry after a failure (Offline → Connecting) keeps saying the relay is
  * unreachable instead of flickering back to "Connecting".
  */
-fun listStatus(state: UiState, previous: ListNotice? = null): ListStatus {
-    val hasAgents = state.agents.isNotEmpty()
+fun listStatus(state: UiState, previous: ListNotice? = null): ListStatus =
+    listStatus(state, state.hostOnline, state.herdrOnline, state.agents.isNotEmpty(), previous)
+
+/**
+ * [listStatus] for one page of the list: [hostOnline] and [herdrOnline] are that page's host's flags
+ * and [hasAgents] whether the page shows any agent. The relay link (stale) is the same for every page.
+ */
+fun listStatus(
+    state: UiState,
+    hostOnline: Boolean,
+    herdrOnline: Boolean,
+    hasAgents: Boolean,
+    previous: ListNotice? = null
+): ListStatus {
     if (state.stale) {
         val notice = when {
             state.connection is Connection.Offline -> ListNotice.RELAY_UNREACHABLE
@@ -28,8 +40,8 @@ fun listStatus(state: UiState, previous: ListNotice? = null): ListStatus {
         return ListStatus(notice, dimmed = hasAgents)
     }
     return when {
-        !state.hostOnline -> ListStatus(ListNotice.MAC_OFFLINE, dimmed = hasAgents)
-        !state.herdrOnline -> ListStatus(ListNotice.HERDR_STOPPED, dimmed = hasAgents)
+        !hostOnline -> ListStatus(ListNotice.MAC_OFFLINE, dimmed = hasAgents)
+        !herdrOnline -> ListStatus(ListNotice.HERDR_STOPPED, dimmed = hasAgents)
         else -> ListStatus(null, dimmed = false)
     }
 }
