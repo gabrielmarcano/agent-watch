@@ -3,11 +3,10 @@
 // (shared with the Antigravity CLI hooks and the git pre-commit hook); this file only
 // forwards each tool call to it and blocks the call when the guard says so.
 
-import { Plugin } from "@opencode/plugin";
 import { spawnSync } from "node:child_process";
 import path from "node:path";
 
-export default Plugin.define({
+export default {
   id: "agent-watch-guards",
   async setup(ctx) {
     const root =
@@ -48,4 +47,4 @@ export default Plugin.define({
       }
     });
   },
-});
+};
