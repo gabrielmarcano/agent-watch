@@ -13,7 +13,8 @@ import (
 // The captures in testdata/opencode/focus are real `herdr agent read
 // --source visible --format ansi` reads of OpenCode 1.18.32 dialogs (herdr
 // 0.9.1), named <theme>-<stage>-<focused button>.ansi. The theme "system"
-// follows the terminal palette; the other three are bundled themes.
+// follows the terminal palette; the other three are bundled themes. The
+// v2-default-* captures are OpenCode 2.0.25 (herdr 0.9.3), default theme.
 
 var sgrOnly = regexp.MustCompile(`\x1b\[[0-9;:]*m`)
 
@@ -129,8 +130,8 @@ func TestOpenCodeFocusGuardOverCaptures(t *testing.T) {
 			}
 		})
 	}
-	if seen < 17 {
-		t.Errorf("found %d captures, want the 17 committed ones", seen)
+	if seen < 20 {
+		t.Errorf("found %d captures, want the 20 committed ones", seen)
 	}
 }
 

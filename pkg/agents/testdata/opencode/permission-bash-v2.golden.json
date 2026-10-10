@@ -1,0 +1,17 @@
+{
+  "prompt": {
+    "kind": "permission",
+    "title": "Permission required",
+    "detail": "$ ls -la",
+    "options": [
+      {"id": "opt-1", "label": "Allow once", "role": "allow_once"},
+      {"id": "opt-2", "label": "Always allow", "role": "allow_always"},
+      {"id": "opt-3", "label": "Reject", "role": "deny"}
+    ]
+  },
+  "keys": {"opt-1": ["Enter"], "opt-2": ["Right", "Enter"], "opt-3": ["esc"]},
+  "cancel_keys": ["esc"],
+  "verified_keys": true,
+  "herdr_status": "blocked",
+  "notes": "OpenCode 2.0.25 (herdr 0.9.3), sandbox opencode.json with \"shell\": \"ask\" (V2 asks for nothing by default). The second button is now \"Always allow\", and V2 has no Confirm stage: Right, Enter applied it at once (the next ls -la ran without asking). Right wraps (three Rights come back to Allow once). esc rejects."
+}

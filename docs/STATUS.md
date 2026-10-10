@@ -15,12 +15,14 @@ The one place for the project's state: what is done, what is open, what comes ne
 | **[5 End-to-end](phases/5-e2e.md) (release gate)** | **open** | — |
 | [6 watchOS](phases/6-watchos.md) (best-effort) | not started; after 5 | — |
 | [7 Android phone client](phases/7-android-mobile.md) | not started; after 5 | — |
+| [8 Several hosts on one relay](phases/8-multi-host.md) | designed (2026-10-10); not started | — |
 
-**Deployed** (2026-10-08): the relay at `0.6.0` (commit `050328a` on `main`); on the owner's Mac, the bridge `0.7.1` (commit `b715403`) and the menu bar `0.6.0` (rebuilt from `main` on 2026-10-07; Only Notify When Away off); the Wear OS app `1.3.1` (release build, version code 12, 2026-10-07; built before the squash merge, from the same code as `050328a`) on the owner's Pixel Watch 2. The component versions are in `VERSIONS`.
+**Deployed** (2026-10-10): the relay at `0.6.0` (commit `050328a` on `main`); on the owner's Mac, the bridge `0.8.0` (commit `1e50bb2` on local `main`, not pushed yet) and the menu bar `0.6.0` (rebuilt from `main` on 2026-10-07; Only Notify When Away off); the Wear OS app `1.3.1` (release build, version code 12, 2026-10-07; built before the squash merge, from the same code as `050328a`) on the owner's Pixel Watch 2. The component versions are in `VERSIONS`.
 
 **What can run in parallel:**
 - **5 runs alone:** it tests the whole system.
 - **6 and 7** start after 5 and can run together (disjoint code directories), **except 7's step 1**, which moves `wearos-app/`: nothing else may touch the Android tree while it runs. Both edit `docs/GUIDE.md`, `contracts.md`, this file and the `schema-sync` skill: commit those by path, one at a time.
+- **8** starts with a contract change (its step 1, alone); then its relay and Wear OS steps can run together. It touches the same relay and Wear OS code as 5's fixes and 7: not at the same time as 7.
 - **A contract change** is cross-cutting: stop parallel work and follow the `schema-sync` skill.
 
 ---
@@ -88,6 +90,7 @@ Known and accepted for now; none blocks a phase.
 - **Long single-line texts left** (the short-lines rule, `wearos-app/ARCHITECTURE.md` §4b; the list card and the agent screen's header follow it since Wear OS `1.2.4`):
   - the agents tile's second line chains the status and the agent id as text (`AgentsTileService.kt`), and has no logo;
   - the complication's text chains `<status> · <agent>` and `· +N more` (`complication_status_agent`, `complication_status_more`).
+- **OpenCode 2 focus check** (bridge `0.8.0`): the V2 rule was captured on the default theme only (`docs/reference/agents.md` §5.1). A theme where it does not hold refuses Allow, never presses.
 - **agy 1.2.17 menus:** `Create file` and `Question` parse without a `detail`; picking `Write-in...` leaves a text field the watch cannot answer (`docs/reference/agents.md` §4.1).
 
 ### Checks nobody has done yet
@@ -95,6 +98,7 @@ Known and accepted for now; none blocks a phase.
 Only changes that affect what the system does (the owner's rule, 2026-10-07): a text, wording or layout tweak needs no check of its own here.
 
 - Wear OS 1.2.2 on the watch, still unchecked: Quick Dictate and Change with the system input; an empty notification reply sends nothing; after the stream drops (Wi-Fi off and on) or the app returns from the background, the agent screen shows the latest reply. (Verified by the owner on 2026-10-05: Reply with voice and with the keyboard reaches the confirm screen and the agent.)
+- **An Allow from the watch on an OpenCode 2 dialog** (bridge `0.8.0`; keys and focus checked in the sandbox only). The history card from the transcript was checked on the watch on 2026-10-10. OpenCode 2 asks for nothing by default: the check needs `"ask"` in its `permission` config.
 - ntfy delivery (watchOS push) has never been tested.
 - **`make deploy-relay ARGS=--sync-env` has never run.** Plain deploys run on the VPS all the time; `--sync-env` also rewrites the server's env file (its live secrets) from the owner's `agent-watch.env`, and that merge is covered only by `tools/config/test_awenv.sh` (BSD awk locally, Linux awk in CI). The owner's `agent-watch.env` was filled from the running deployment, so the first run must list `AW_HOST_TOKEN` as **unchanged**; `changed` means the file's token is not the server's.
 
