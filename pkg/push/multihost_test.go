@@ -128,10 +128,18 @@ func TestDispatcher_HostNameInTitles(t *testing.T) {
 			d.OnAgentUpdate(nil, onHost(host, blockedState(fmt.Sprintf("w1:p%d", i), fmt.Sprintf("a%d", i))))
 		}
 		flushWindow(d, timers)
-		got := sender.getMessages()
-		digest := got[len(got)-1]
-		if digest.Event != EventDigest || digest.Host != "" || digest.HostName != "" || digest.Title != "3 agents need you" {
-			t.Fatalf("last push = %+v, want a digest without host", digest)
+		// Sends run concurrently: find the digest rather than rely on order.
+		var digests []Message
+		for _, m := range sender.getMessages() {
+			if m.Event == EventDigest {
+				digests = append(digests, m)
+			}
+		}
+		if len(digests) != 1 {
+			t.Fatalf("digests = %+v, want one", digests)
+		}
+		if dg := digests[0]; dg.Host != "" || dg.HostName != "" || dg.Title != "3 agents need you" {
+			t.Fatalf("digest = %+v, want one without host", dg)
 		}
 	})
 }
