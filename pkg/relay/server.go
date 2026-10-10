@@ -71,7 +71,11 @@ func NewServer(cfg *Config) (_ *Server, err error) {
 	if err != nil {
 		return nil, fmt.Errorf("data dir %s: %w", cfg.DataDir, err)
 	}
-	store, err := NewStore(cfg.DataDir)
+	hostID := cfg.HostID
+	if hostID == "" {
+		hostID = DefaultHostID
+	}
+	store, err := OpenStore(cfg.DataDir, hostID)
 	if err != nil {
 		lock.release()
 		return nil, fmt.Errorf("init store: %w", err)
@@ -83,8 +87,12 @@ func NewServer(cfg *Config) (_ *Server, err error) {
 		}
 	}()
 
-	state := NewState()
 	auth := NewAuthManager(cfg.HostToken, store, cfg.ClientIPPolicy())
+	auth.SetLegacyHost(hostID, cfg.HostName)
+	state, err := initialState(auth, store)
+	if err != nil {
+		return nil, err
+	}
 
 	var senders []push.Sender
 	if cfg.FCMCredentials != "" {
@@ -118,6 +126,7 @@ func NewServer(cfg *Config) (_ *Server, err error) {
 		dispatcher.ReplyWait = push.DefaultReplyWait
 		dispatcher.PresenceIdle = cfg.PushPresenceIdle
 		dispatcher.Current = state.Get
+		dispatcher.HostName = state.HostName
 		slog.Info("push presence", "idle", cfg.PushPresenceIdle)
 		notifier = dispatcher
 	} else {
@@ -138,6 +147,29 @@ func NewServer(cfg *Config) (_ *Server, err error) {
 	}
 	s.handler = s.routes()
 	return s, nil
+}
+
+// initialState checks that some host can connect and returns a State that
+// lists every known host: AW_HOST_TOKEN's, if set, and the registered ones.
+func initialState(auth *AuthManager, store *Store) (*State, error) {
+	hosts := store.ListHosts()
+	legacy, hasLegacy := auth.LegacyHost()
+	if !hasLegacy && len(hosts) == 0 {
+		return nil, errors.New("AW_HOST_TOKEN is required until a host is registered (agent-watch-relay hosts add)")
+	}
+	state := NewState()
+	if hasLegacy {
+		for _, h := range hosts {
+			if h.ID == legacy.ID {
+				return nil, fmt.Errorf("host %q is both AW_HOST_ID (the host of AW_HOST_TOKEN) and registered in store.json: unset AW_HOST_TOKEN, or set AW_HOST_ID to another id", h.ID)
+			}
+		}
+		state.AddHost(legacy.ID, legacy.Name)
+	}
+	for _, h := range hosts {
+		state.AddHost(h.ID, h.Name)
+	}
+	return state, nil
 }
 
 // NewServerWithDeps initializes a Server with explicit components (useful for

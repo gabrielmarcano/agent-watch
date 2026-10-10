@@ -34,8 +34,13 @@ const (
 
 // Message is the push notification payload forwarded to Senders.
 type Message struct {
-	Event          Event
-	PaneID         string
+	Event  Event
+	PaneID string
+	// Host is the pane's host id; empty for a digest.
+	Host string
+	// HostName is the host's display name, set when the message goes out
+	// (Dispatcher.HostName); empty for a digest and for resolved.
+	HostName       string
 	Agent          string
 	Label          string
 	Title          string
@@ -121,13 +126,17 @@ type Dispatcher struct {
 	// away (AW_PUSH_PRESENCE_IDLE). While they are there, blocked and done
 	// pushes are held back (contracts.md §4.3). 0 turns presence off.
 	PresenceIdle time.Duration
-	// Current returns a pane's current state (the relay's State.Get), for the
-	// catch-up when presence ends. nil: no catch-up.
-	Current func(paneID string) (model.AgentState, bool)
+	// Current returns a pane's current state on a host (the relay's
+	// State.Get), for the catch-up when presence ends. nil: no catch-up.
+	Current func(host, paneID string) (model.AgentState, bool)
+	// HostName returns a host's display name and how many hosts the relay
+	// knows (the relay's State.HostName). With more than one, titles start
+	// with the host's name. nil: the host id, one host.
+	HostName func(host string) (name string, hosts int)
 
 	mu        sync.Mutex
 	afterFunc func(time.Duration, func()) stopper // time.AfterFunc; tests fake it
-	lastPush  map[string]time.Time                // key: pane_id + ":" + event; pruned past DebounceDuration
+	lastPush  map[pushKey]time.Time               // pruned past DebounceDuration
 	lastPrune time.Time
 
 	// The current window. Its first message went out right away; the later
@@ -136,15 +145,15 @@ type Dispatcher struct {
 	windowGen  uint64  // tells a stale timer from the current window's
 	windowSent int     // messages of this window already sent
 	held       []Message
-	latest     map[string]model.AgentState // newest state of every pane in held
+	latest     map[paneKey]model.AgentState // newest state of every pane in held
 
 	// blockedShown holds the panes whose own blocked push went out and was
 	// not withdrawn yet, with when it went out. Capped at maxShownBlocked:
 	// a pane removed while blocked is never seen leaving blocked.
-	blockedShown map[string]shownPrompt
+	blockedShown map[paneKey]shownPrompt
 
 	// pendingDone holds the done pushes waiting for their pane's reply.
-	pendingDone map[string]*pendingDone
+	pendingDone map[paneKey]*pendingDone
 
 	presence presenceState // guarded by mu; presence.go
 
@@ -153,6 +162,23 @@ type Dispatcher struct {
 
 // DefaultReplyWait is how long the relay lets a done push wait for its reply.
 const DefaultReplyWait = 3 * time.Second
+
+// paneKey identifies an agent: herdr numbers its own panes, so a pane id is
+// unique only within one host. Every per-pane map is keyed by it.
+type paneKey struct {
+	host string
+	pane string
+}
+
+func keyOf(m Message) paneKey { return paneKey{host: m.Host, pane: m.PaneID} }
+
+func agentKey(a model.AgentState) paneKey { return paneKey{host: a.Host, pane: a.PaneID} }
+
+// pushKey is what the debounce remembers: a pane pushed an event.
+type pushKey struct {
+	pane  paneKey
+	event Event
+}
 
 // pendingDone is a done push waiting for its pane's reply.
 type pendingDone struct {
@@ -185,9 +211,9 @@ func NewDispatcher(senders []Sender, now func() time.Time, logger *slog.Logger) 
 		DebounceDuration: defaultDebounce,
 		WindowDuration:   defaultWindow,
 		afterFunc:        realAfterFunc,
-		lastPush:         make(map[string]time.Time),
-		latest:           make(map[string]model.AgentState),
-		blockedShown:     make(map[string]shownPrompt),
+		lastPush:         make(map[pushKey]time.Time),
+		latest:           make(map[paneKey]model.AgentState),
+		blockedShown:     make(map[paneKey]shownPrompt),
 	}
 }
 
@@ -210,19 +236,19 @@ func (d *Dispatcher) initLocked() {
 		d.afterFunc = realAfterFunc
 	}
 	if d.lastPush == nil {
-		d.lastPush = make(map[string]time.Time)
+		d.lastPush = make(map[pushKey]time.Time)
 	}
 	if d.latest == nil {
-		d.latest = make(map[string]model.AgentState)
+		d.latest = make(map[paneKey]model.AgentState)
 	}
 	if d.blockedShown == nil {
-		d.blockedShown = make(map[string]shownPrompt)
+		d.blockedShown = make(map[paneKey]shownPrompt)
 	}
 	if d.pendingDone == nil {
-		d.pendingDone = make(map[string]*pendingDone)
+		d.pendingDone = make(map[paneKey]*pendingDone)
 	}
 	if d.presence.quiet == nil {
-		d.presence.quiet = make(map[string]struct{})
+		d.presence.quiet = make(map[paneKey]struct{})
 	}
 }
 
@@ -253,27 +279,28 @@ func (d *Dispatcher) OnAgentUpdate(prev *model.AgentState, cur model.AgentState)
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	d.initLocked()
+	key := agentKey(cur)
 
 	// A held message is checked against its pane's newest state at flush.
-	if _, held := d.latest[cur.PaneID]; held {
-		d.latest[cur.PaneID] = cur
+	if _, held := d.latest[key]; held {
+		d.latest[key] = cur
 	}
 
 	// The pane's blocked notification is stale once the pane leaves blocked
 	// (answered on the Mac, on another watch, or canceled): withdraw it right
 	// away. No debounce, no window, no digest.
-	if _, shown := d.blockedShown[cur.PaneID]; shown && cur.Status != model.StatusBlocked {
-		delete(d.blockedShown, cur.PaneID)
-		d.dispatchLocked(Message{Event: EventResolved, PaneID: cur.PaneID, StateChangeSeq: cur.StateChangeSeq})
+	if _, shown := d.blockedShown[key]; shown && cur.Status != model.StatusBlocked {
+		delete(d.blockedShown, key)
+		d.dispatchLocked(Message{Event: EventResolved, Host: cur.Host, PaneID: cur.PaneID, StateChangeSeq: cur.StateChangeSeq})
 	}
 
 	// A held-back prompt is stale once its pane leaves blocked.
-	if _, held := d.presence.quiet[cur.PaneID]; held && cur.Status != model.StatusBlocked {
-		delete(d.presence.quiet, cur.PaneID)
+	if _, held := d.presence.quiet[key]; held && cur.Status != model.StatusBlocked {
+		delete(d.presence.quiet, key)
 	}
 
 	// A done push waiting for its reply follows the pane's newest state.
-	if p, ok := d.pendingDone[cur.PaneID]; ok {
+	if p, ok := d.pendingDone[key]; ok {
 		p.cur = cur
 	}
 
@@ -296,12 +323,13 @@ func (d *Dispatcher) OnHistoryItem(item model.HistoryItem) {
 	defer d.mu.Unlock()
 	d.initLocked()
 
-	p, ok := d.pendingDone[item.PaneID]
+	key := paneKey{host: item.Host, pane: item.PaneID}
+	p, ok := d.pendingDone[key]
 	if !ok {
 		return
 	}
 	p.timer.Stop()
-	delete(d.pendingDone, item.PaneID)
+	delete(d.pendingDone, key)
 	if body := replyPreview(item.Response); body != "" {
 		p.msg.Body = body
 	}
@@ -311,18 +339,19 @@ func (d *Dispatcher) OnHistoryItem(item model.HistoryItem) {
 // waitForReplyLocked holds done push m until its pane's reply arrives or
 // ReplyWait ends. A newer done for the same pane replaces it.
 func (d *Dispatcher) waitForReplyLocked(m Message, cur model.AgentState) {
-	if old, ok := d.pendingDone[m.PaneID]; ok {
+	key := keyOf(m)
+	if old, ok := d.pendingDone[key]; ok {
 		old.timer.Stop()
 	}
 	p := &pendingDone{msg: m, cur: cur}
-	p.timer = d.afterFunc(d.ReplyWait, func() { d.releaseDone(m.PaneID, p) })
-	d.pendingDone[m.PaneID] = p
+	p.timer = d.afterFunc(d.ReplyWait, func() { d.releaseDone(key, p) })
+	d.pendingDone[key] = p
 }
 
 // releaseDone is the reply-wait timer's callback: no reply came, so the done
 // push goes out with its generic body. It does nothing if the reply came first
 // or a newer done replaced p.
-func (d *Dispatcher) releaseDone(pane string, p *pendingDone) {
+func (d *Dispatcher) releaseDone(pane paneKey, p *pendingDone) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	if d.pendingDone[pane] != p {
@@ -524,6 +553,7 @@ func blockedMessage(cur model.AgentState) Message {
 	return Message{
 		Event:          EventBlocked,
 		PaneID:         cur.PaneID,
+		Host:           cur.Host,
 		Agent:          cur.Agent,
 		Label:          cur.Label,
 		Title:          title,
@@ -559,6 +589,7 @@ func doneMessage(cur model.AgentState) Message {
 	return Message{
 		Event:          EventDone,
 		PaneID:         cur.PaneID,
+		Host:           cur.Host,
 		Agent:          cur.Agent,
 		Label:          cur.Label,
 		Title:          fmt.Sprintf("%s finished", cur.Label),
@@ -582,7 +613,7 @@ func (d *Dispatcher) enqueueLocked(m Message, cur model.AgentState) {
 	// already says it finished. A blocked push is a new prompt and must not
 	// be lost, so it is held until the window ends (trailing edge), then
 	// pushed if the agent is still blocked, for its prompt at that time.
-	if last, ok := d.lastPush[m.PaneID+":"+string(m.Event)]; ok && now.Sub(last) < d.DebounceDuration {
+	if last, ok := d.lastPush[pushKey{keyOf(m), m.Event}]; ok && now.Sub(last) < d.DebounceDuration {
 		if m.Event == EventBlocked {
 			d.holdLocked(m, cur)
 		}
@@ -607,7 +638,7 @@ func (d *Dispatcher) enqueueLocked(m Message, cur model.AgentState) {
 func (d *Dispatcher) holdLocked(m Message, cur model.AgentState) {
 	d.openWindowLocked()
 	d.held = append(d.held, m)
-	d.latest[m.PaneID] = cur
+	d.latest[keyOf(m)] = cur
 }
 
 func (d *Dispatcher) openWindowLocked() {
@@ -625,7 +656,7 @@ func (d *Dispatcher) alreadyShownLocked(m Message) bool {
 	if m.Event != EventBlocked {
 		return false
 	}
-	shown, ok := d.blockedShown[m.PaneID]
+	shown, ok := d.blockedShown[keyOf(m)]
 	return ok && shown.seq == m.StateChangeSeq && shown.fingerprint == m.Fingerprint
 }
 
@@ -698,20 +729,22 @@ func (d *Dispatcher) flushLocked() {
 // to push the same prompt twice.
 func (d *Dispatcher) sendLocked(m Message, now time.Time) {
 	d.dispatchLocked(m)
-	d.lastPush[m.PaneID+":"+string(m.Event)] = now
+	key := keyOf(m)
+	d.lastPush[pushKey{key, m.Event}] = now
 	if m.Event != EventBlocked {
 		return
 	}
-	if _, ok := d.blockedShown[m.PaneID]; !ok && len(d.blockedShown) >= maxShownBlocked {
-		oldest := ""
+	if _, ok := d.blockedShown[key]; !ok && len(d.blockedShown) >= maxShownBlocked {
+		var oldest paneKey
+		found := false
 		for pane, shown := range d.blockedShown {
-			if oldest == "" || shown.at.Before(d.blockedShown[oldest].at) {
-				oldest = pane
+			if !found || shown.at.Before(d.blockedShown[oldest].at) {
+				oldest, found = pane, true
 			}
 		}
 		delete(d.blockedShown, oldest)
 	}
-	d.blockedShown[m.PaneID] = shownPrompt{at: now, seq: m.StateChangeSeq, fingerprint: m.Fingerprint}
+	d.blockedShown[key] = shownPrompt{at: now, seq: m.StateChangeSeq, fingerprint: m.Fingerprint}
 }
 
 // shownPrompt is the prompt a pane's blocked notification shows.
@@ -721,12 +754,6 @@ type shownPrompt struct {
 	fingerprint string
 }
 
-// paneEvent identifies what a held message announces.
-type paneEvent struct {
-	pane  string
-	event Event
-}
-
 // dueMessages returns what a flush may still push: at most one message per
 // agent, built from the agent's newest state, and only while that state is one
 // a held message announced. When the agent has left it (the prompt was
@@ -734,17 +761,18 @@ type paneEvent struct {
 // the watch must never offer to approve a prompt that is gone. A held done
 // message keeps its body (the agent's reply) when it is for the turn the
 // agent is in now.
-func dueMessages(held []Message, latest map[string]model.AgentState) []Message {
-	announced := make(map[paneEvent]bool)
-	doneHeld := make(map[string]Message) // the newest held done message per pane
-	var panes []string
+func dueMessages(held []Message, latest map[paneKey]model.AgentState) []Message {
+	announced := make(map[pushKey]bool)
+	doneHeld := make(map[paneKey]Message) // the newest held done message per pane
+	var panes []paneKey
 	for _, m := range held {
-		if !announced[paneEvent{m.PaneID, EventBlocked}] && !announced[paneEvent{m.PaneID, EventDone}] {
-			panes = append(panes, m.PaneID)
+		key := keyOf(m)
+		if !announced[pushKey{key, EventBlocked}] && !announced[pushKey{key, EventDone}] {
+			panes = append(panes, key)
 		}
-		announced[paneEvent{m.PaneID, m.Event}] = true
+		announced[pushKey{key, m.Event}] = true
 		if m.Event == EventDone {
-			doneHeld[m.PaneID] = m
+			doneHeld[key] = m
 		}
 	}
 
@@ -753,9 +781,9 @@ func dueMessages(held []Message, latest map[string]model.AgentState) []Message {
 		cur, ok := latest[pane]
 		switch {
 		case !ok:
-		case cur.Status == model.StatusBlocked && announced[paneEvent{pane, EventBlocked}]:
+		case cur.Status == model.StatusBlocked && announced[pushKey{pane, EventBlocked}]:
 			due = append(due, blockedMessage(cur))
-		case cur.Status == model.StatusDone && announced[paneEvent{pane, EventDone}]:
+		case cur.Status == model.StatusDone && announced[pushKey{pane, EventDone}]:
 			msg := doneMessage(cur)
 			if h := doneHeld[pane]; h.StateChangeSeq == cur.StateChangeSeq && h.Body != "" {
 				msg.Body = h.Body
@@ -795,8 +823,30 @@ func digestMessage(due []Message) Message {
 	}
 }
 
+// hostTitleSeparator follows the host's name in a title: "Mac · my-app finished".
+const hostTitleSeparator = " · "
+
+// withHostLocked names m's host: HostName always, and the title's prefix when
+// the relay knows more than one host. A digest (several agents, maybe of
+// several hosts) and resolved (no title) are left alone.
+func (d *Dispatcher) withHostLocked(m Message) Message {
+	if m.Host == "" || (m.Event != EventBlocked && m.Event != EventDone) {
+		return m
+	}
+	name, hosts := m.Host, 1
+	if d.HostName != nil {
+		name, hosts = d.HostName(m.Host)
+	}
+	m.HostName = name
+	if hosts > 1 {
+		m.Title = name + hostTitleSeparator + m.Title
+	}
+	return m
+}
+
 // dispatchLocked delivers m to all registered senders in separate goroutines with retry.
 func (d *Dispatcher) dispatchLocked(m Message) {
+	m = d.withHostLocked(m)
 	for _, s := range d.Senders {
 		if m.Event == EventResolved && !sendsResolved(s) {
 			continue
@@ -814,6 +864,7 @@ func (d *Dispatcher) dispatchLocked(m Message) {
 					logger.Error("push send failed",
 						"sender", sender.Name(),
 						"event", m.Event,
+						"host", m.Host,
 						"pane", m.PaneID,
 						"err", err,
 					)
@@ -823,6 +874,7 @@ func (d *Dispatcher) dispatchLocked(m Message) {
 				logger.Warn("push send failed, retrying once",
 					"sender", sender.Name(),
 					"event", m.Event,
+					"host", m.Host,
 					"pane", m.PaneID,
 					"err", err,
 				)
@@ -834,6 +886,7 @@ func (d *Dispatcher) dispatchLocked(m Message) {
 					logger.Error("push retry failed",
 						"sender", sender.Name(),
 						"event", m.Event,
+						"host", m.Host,
 						"pane", m.PaneID,
 						"err", retryErr,
 					)
