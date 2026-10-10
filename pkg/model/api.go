@@ -22,10 +22,25 @@ type PairCodeResponse struct {
 
 // HostStatusResponse summarizes the host and relay status.
 type HostStatusResponse struct {
-	HostOnline  bool `json:"host_online"`
-	HerdrOnline bool `json:"herdr_online"`
-	Devices     int  `json:"devices"`
-	Agents      int  `json:"agents"`
+	Host        string `json:"host,omitempty"` // the calling host's id
+	HostOnline  bool   `json:"host_online"`    // the calling host
+	HerdrOnline bool   `json:"herdr_online"`   // the calling host
+	Devices     int    `json:"devices"`        // every paired device
+	Agents      int    `json:"agents"`         // the calling host's agents
+}
+
+// AgentRemovedEvent is the data of the SSE "agent_removed" event.
+type AgentRemovedEvent struct {
+	Host   string `json:"host,omitempty"`
+	PaneID string `json:"pane_id"`
+}
+
+// HostEvent is the data of the SSE "host" event: the snapshot's aggregate
+// flags and the full host list.
+type HostEvent struct {
+	HostOnline  bool       `json:"host_online"`
+	HerdrOnline bool       `json:"herdr_online"`
+	Hosts       []HostInfo `json:"hosts,omitempty"`
 }
 
 // HistoryResponse contains a list of history turns.
@@ -91,6 +106,7 @@ const (
 	ErrPairCodeInvalid   ErrorCode = "pair_code_invalid"
 	ErrRateLimited       ErrorCode = "rate_limited"
 	ErrHostOffline       ErrorCode = "host_offline"
+	ErrHostRequired      ErrorCode = "host_required"
 	ErrHerdrOffline      ErrorCode = "herdr_offline"
 	ErrTimeout           ErrorCode = "timeout"
 	ErrInternal          ErrorCode = "internal"
@@ -107,7 +123,7 @@ func (c ErrorCode) HTTPStatus() int {
 		return http.StatusForbidden // 403
 	case ErrUnknownPane:
 		return http.StatusNotFound // 404
-	case ErrStaleState, ErrPromptChanged, ErrAgentBusy, ErrAgentBlocked, ErrAgentStateUnknown, ErrUnknownOption:
+	case ErrStaleState, ErrPromptChanged, ErrAgentBusy, ErrAgentBlocked, ErrAgentStateUnknown, ErrUnknownOption, ErrHostRequired:
 		return http.StatusConflict // 409
 	case ErrRateLimited:
 		return http.StatusTooManyRequests // 429

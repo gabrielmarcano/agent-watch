@@ -1,5 +1,6 @@
 {
   "pane_id": "w5:pAE",
+  "host": "main",
   "agent": "claude",
   "label": "my-app",
   "name": "my-app",
