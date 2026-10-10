@@ -98,7 +98,7 @@ Known and accepted for now; none blocks a phase.
 Only changes that affect what the system does (the owner's rule, 2026-10-07): a text, wording or layout tweak needs no check of its own here.
 
 - Wear OS 1.2.2 on the watch, still unchecked: Quick Dictate and Change with the system input; an empty notification reply sends nothing; after the stream drops (Wi-Fi off and on) or the app returns from the background, the agent screen shows the latest reply. (Verified by the owner on 2026-10-05: Reply with voice and with the keyboard reaches the confirm screen and the agent.)
-- **OpenCode 2 on the owner's panes** (bridge `0.8.0`, captured in the sandbox only): once herdr's OpenCode integration is v13 and OpenCode restarted in the pane, the pane has an `agent_session`, the watch's history card comes from the transcript, and an Allow from the watch answers a V2 dialog.
+- **An Allow from the watch on an OpenCode 2 dialog** (bridge `0.8.0`; keys and focus checked in the sandbox only). The history card from the transcript was checked on the watch on 2026-10-10. OpenCode 2 asks for nothing by default: the check needs `"ask"` in its `permission` config.
 - ntfy delivery (watchOS push) has never been tested.
 - **`make deploy-relay ARGS=--sync-env` has never run.** Plain deploys run on the VPS all the time; `--sync-env` also rewrites the server's env file (its live secrets) from the owner's `agent-watch.env`, and that merge is covered only by `tools/config/test_awenv.sh` (BSD awk locally, Linux awk in CI). The owner's `agent-watch.env` was filled from the running deployment, so the first run must list `AW_HOST_TOKEN` as **unchanged**; `changed` means the file's token is not the server's.
 
