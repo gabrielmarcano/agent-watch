@@ -1,0 +1,17 @@
+{
+  "prompt": {
+    "kind": "permission",
+    "title": "Permission required",
+    "detail": "Edit note.txt",
+    "options": [
+      {"id": "opt-1", "label": "Allow once", "role": "allow_once"},
+      {"id": "opt-2", "label": "Always allow", "role": "allow_always"},
+      {"id": "opt-3", "label": "Reject", "role": "deny"}
+    ]
+  },
+  "keys": {"opt-1": ["Enter"], "opt-2": ["Right", "Enter"], "opt-3": ["esc"]},
+  "cancel_keys": ["esc"],
+  "verified_keys": true,
+  "herdr_status": "blocked",
+  "notes": "OpenCode 2.0.25, sandbox opencode.json with \"edit\": \"ask\". esc rejected the edit (note.txt unchanged; the screen shows 'The user declined this tool call' and the turn ends interrupted)."
+}

@@ -1,0 +1,75 @@
+
+  ┃                                                                                                      Running ls -la directory listing
+  ┃  Run the shell command ls -la and tell me what you see
+  ┃                                                                                                      Context
+                                                                                                         8,187 tokens
+     Running ls -la for you.                                                                             1% used
+
+  ┃
+  ┃  $ ls -la
+  ┃
+  ┃  total 16
+  ┃  drwxr-xr-x@   5 me       wheel   160 Oct 10 11:42 .
+  ┃  drwxrwxrwt  100 root     wheel  3200 Oct 10 11:43 ..
+  ┃  drwxr-xr-x@   9 me       wheel   288 Oct 10 11:42 .git
+  ┃  -rw-r--r--@   1 me       wheel     6 Oct 10 11:41 note.txt
+  ┃  -rw-r--r--@   1 me       wheel   163 Oct 10 11:42 opencode.json
+  ┃
+
+     I ran ls -la in /private/tmp/aw-sandbox:
+
+     - total 16
+     - . — current dir, drwxr-xr-x@, owned by me     :wheel, modified Oct 10 11:42
+     - .. — parent dir, drwxrwxrwt, owned by root:wheel
+     - .git/ — drwxr-xr-x@, owned by me     :wheel, Oct 10 11:42
+     - note.txt — -rw-r--r--@, 6 bytes, Oct 10 11:41
+     - opencode.json — -rw-r--r--@, 163 bytes, Oct 10 11:42                                              Running ls -la directory listing
+
+     Build · Muse Spark 1.3 Free · 30.0s · 110.2 tok/s                                                   Context
+                                                                                                         8,187 tokens
+  ┃                                                                                                      1% used
+  ┃  Run the shell command ls -la again
+  ┃
+
+     On it — running that again.
+                                                                                                         Running ls -la directory listing
+  ┃
+  ┃  $ ls -la                                                                                            Context
+  ┃                                                                                                      8,187 tokens
+  ┃  total 16                                                                                            1% used
+  ┃  drwxr-xr-x@   5 me       wheel   160 Oct 10 11:42 .
+  ┃  drwxrwxrwt  100 root     wheel  3200 Oct 10 11:43 ..
+  ┃  drwxr-xr-x@   9 me       wheel   288 Oct 10 11:42 .git
+  ┃  -rw-r--r--@   1 me       wheel     6 Oct 10 11:41 note.txt
+  ┃  -rw-r--r--@   1 me       wheel   163 Oct 10 11:42 opencode.json
+  ┃
+
+     Same output as before:
+
+     - total 16
+     - ., .., .git/, note.txt (6 bytes), opencode.json (163 bytes)
+
+     Build · Muse Spark 1.3 Free · 1.9s · 78.7 tok/s
+
+  ┃
+  ┃  Append the line world to note.txt
+  ┃
+
+     Appending that line for you.
+
+     → Explored: 1 read
+
+  ┃
+  ┃  ← Edit note.txt
+  ┃
+  ┃  The user declined this tool call
+  ┃
+
+     Build · Muse Spark 1.3 Free · 9.0s · 97.1 tok/s · interrupted
+
+  ┃
+  ┃
+  ┃
+  ┃  Build · Muse Spark 1.3 Free Default / OpenCode
+  ╹▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+  /private/tmp/aw-sandbox:main                                             8.2K (1%)  ctrl+p commands    /private/tmp/aw-sandbox:main

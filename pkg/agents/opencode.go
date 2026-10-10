@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"os"
 	"regexp"
 	"strings"
@@ -28,42 +29,62 @@ func newOpenCodeAdapter(cfg Config) *opencodeAdapter {
 
 // SplitScreenTurn implements ScreenTurnReader: OpenCode draws the user's
 // message inside a "┃" frame, then the reply between a "Thought · …" line and
-// a footer "▣  <mode> · <model> · <time>", neither of which is part of it. A
-// sidebar on the right (session title, tokens, cost, LSP) shares the lines.
+// a footer, neither of which is part of it: "▣  <mode> · <model> · <time>" in
+// V1, "<mode> · <model> · <time> · <speed>" in V2. A sidebar on the right
+// (session title, tokens, cost, LSP) shares the lines. V2 frames tool calls
+// too ("$ ls -la", "← Edit note.txt"): those blocks are not the user's
+// message, and they are left out of the reply.
 func (o *opencodeAdapter) SplitScreenTurn(lines []string) (string, []string, bool) {
+	var parts []string
 	end := -1
-	for i := len(lines) - 1; i >= 0; i-- {
-		if isFramedLine(strings.TrimSpace(lines[i])) {
-			end = i
-			break
+	for i := len(lines) - 1; i >= 0 && end < 0; i-- {
+		if !isFramedLine(strings.TrimSpace(lines[i])) {
+			continue
 		}
+		start := i
+		for start > 0 && isFramedLine(strings.TrimSpace(lines[start-1])) {
+			start--
+		}
+		parts = parts[:0]
+		for _, l := range lines[start : i+1] {
+			if text := ocFramedText(l); text != "" {
+				parts = append(parts, text)
+			}
+		}
+		if len(parts) > 0 && ocStripIcon(parts[0]) == parts[0] {
+			end = i
+		}
+		i = start
 	}
 	if end < 0 {
 		return "", nil, false
 	}
-	start := end
-	for start > 0 && isFramedLine(strings.TrimSpace(lines[start-1])) {
-		start--
-	}
-	var parts []string
-	for _, l := range lines[start : end+1] {
-		frame := strings.Index(l, "┃")
-		if text := strings.TrimSpace(ocMainText(l[frame+len("┃"):])); text != "" {
-			parts = append(parts, text)
-		}
-	}
-	if len(parts) == 0 {
-		return "", nil, false
-	}
 	var reply []string
 	for _, l := range lines[end+1:] {
-		text := ocMainText(l)
-		if t := strings.TrimSpace(text); strings.HasPrefix(t, "Thought · ") || strings.HasPrefix(t, "▣ ") {
+		if isFramedLine(strings.TrimSpace(l)) {
 			continue
+		}
+		text := ocMainText(l)
+		if t := strings.TrimSpace(text); strings.HasPrefix(t, "Thought · ") || strings.HasPrefix(t, "▣ ") || ocFooterV2.MatchString(t) {
+			continue
+		}
+		if text == "" && len(reply) > 0 && reply[len(reply)-1] == "" {
+			continue // a dropped tool block leaves its blank lines behind
 		}
 		reply = append(reply, text)
 	}
-	return strings.Join(parts, " "), reply, true
+	return strings.Join(parts, " "), trimBlankTail(reply), true
+}
+
+// ocFooterV2 is V2's footer under a reply: "Build · Muse Spark 1.3 Free ·
+// 3.7s · 94.8 tok/s", "… · 2m 58s · …", "… · interrupted".
+var ocFooterV2 = regexp.MustCompile(`^\p{L}[\p{L}\d -]* · .+ · (\d+h )?(\d+m )?\d+(\.\d+)?(ms|s|m)( · .*)?$`)
+
+// ocFramedText returns the text of a "┃"-framed line, without the frame and
+// the sidebar.
+func ocFramedText(l string) string {
+	frame := strings.Index(l, "┃")
+	return strings.TrimSpace(ocMainText(l[frame+len("┃"):]))
 }
 
 // ocSidebarIndent: text that starts this far right is the sidebar's.
@@ -160,7 +181,9 @@ func ocParseButtons(lines []string) (Prompt, bool) {
 			continue
 		}
 		bar := strings.TrimSpace(inner)
-		permission := strings.Contains(bar, "Allow once") && strings.Contains(bar, "Allow always") && strings.Contains(bar, "Reject")
+		// V1 labels the second button "Allow always", V2 "Always allow".
+		v2 := strings.Contains(bar, "Always allow")
+		permission := strings.Contains(bar, "Allow once") && (v2 || strings.Contains(bar, "Allow always")) && strings.Contains(bar, "Reject")
 		confirm := strings.HasPrefix(bar, "Confirm") && strings.Contains(bar, "Cancel")
 		if !permission && !confirm {
 			continue
@@ -187,7 +210,7 @@ func ocParseButtons(lines []string) (Prompt, bool) {
 			}
 		}
 		if permission && title == "Permission required" {
-			return ocPermissionPrompt(title, body), true
+			return ocPermissionPrompt(title, body, v2), true
 		}
 		if confirm && title == "Always allow" {
 			return ocAlwaysPrompt(title, body), true
@@ -199,12 +222,14 @@ func ocParseButtons(lines []string) (Prompt, bool) {
 
 // ocPermissionPrompt builds the first stage. Keys assume the focus OpenCode
 // gives the bar when it mounts ("Allow once"); see agents.md §5.1.
-func ocPermissionPrompt(title string, body []string) Prompt {
+func ocPermissionPrompt(title string, body []string, v2 bool) Prompt {
 	var action string
 	var extra, patterns []string
 	inPatterns := false
 	for _, c := range body {
 		switch {
+		case action == "" && strings.HasPrefix(c, "$ "):
+			action = c // V2 shows the shell command alone, without "# Shell command"
 		case action == "":
 			action = ocStripIcon(c)
 		case c == "Patterns":
@@ -217,6 +242,18 @@ func ocPermissionPrompt(title string, body []string) Prompt {
 	}
 	detail := ocJoinDetail(action, extra, patterns)
 
+	if v2 {
+		return ocPrompt(title, detail, []model.PromptOption{
+			{ID: "opt-1", Label: "Allow once", Role: model.RoleAllowOnce},
+			{ID: "opt-2", Label: "Always allow", Role: model.RoleAllowAlways},
+			{ID: "opt-3", Label: "Reject", Role: model.RoleDeny},
+		}, map[string][]string{
+			"opt-1": {"Enter"},
+			// V2 has no Confirm stage: Enter on "Always allow" applies it.
+			"opt-2": {"Right", "Enter"},
+			"opt-3": {"esc"},
+		})
+	}
 	return ocPrompt(title, detail, []model.PromptOption{
 		{ID: "opt-1", Label: "Allow once", Role: model.RoleAllowOnce},
 		{ID: "opt-2", Label: "Allow always", Role: model.RoleAllowAlways},
@@ -340,12 +377,113 @@ func (o *opencodeAdapter) LastTurn(ctx context.Context, ref SessionRef) (*model.
 		return nil, err
 	}
 
+	// OpenCode V2 keeps the conversation in session_message; V1 in message
+	// and part. A V2 database keeps the V1 tables, so V1 is read only when
+	// V2 has no row for the session.
+	item, err := o.lastTurnV2(ctx, db, ref.Value)
+	if !errors.Is(err, errNoV2Session) {
+		return item, err
+	}
+	return o.lastTurnV1(ctx, db, ref.Value)
+}
+
+// errNoV2Session: the database has no V2 session_message row for the session.
+var errNoV2Session = errors.New("no V2 session")
+
+// opencodeV2Message is the data of a V2 session_message row: a user message
+// has its text in text, an assistant message (one per step) has content.
+type opencodeV2Message struct {
+	Text    string             `json:"text"`
+	Content []opencodePartData `json:"content"`
+}
+
+func (o *opencodeAdapter) lastTurnV2(ctx context.Context, db *sql.DB, sessionID string) (*model.HistoryItem, error) {
+	var tables int
+	if err := db.QueryRowContext(ctx,
+		`SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = 'session_message'`).Scan(&tables); err != nil {
+		return nil, ErrNoTranscript
+	}
+	if tables == 0 {
+		return nil, errNoV2Session
+	}
+
+	// The query is the newest user message. A long turn has many assistant
+	// steps after it, so it is looked up on its own, not within their window.
+	var userSeq int64
+	var userJSON string
+	err := db.QueryRowContext(ctx, `
+		SELECT seq, data FROM session_message
+		WHERE session_id = ? AND type = 'user'
+		ORDER BY seq DESC
+		LIMIT 1;
+	`, sessionID).Scan(&userSeq, &userJSON)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, errNoV2Session
+	}
+	if err != nil {
+		return nil, ErrNoTranscript
+	}
+	var user opencodeV2Message
+	if err := json.Unmarshal([]byte(userJSON), &user); err != nil {
+		return nil, ErrNoTranscript
+	}
+	query := strings.TrimSpace(user.Text)
+	if query == "" {
+		return nil, ErrNoTranscript
+	}
+
+	// The answer is the newest step after it with text: earlier steps are
+	// tool calls, with or without a line of text before them.
+	rows, err := db.QueryContext(ctx, `
+		SELECT data FROM session_message
+		WHERE session_id = ? AND type = 'assistant' AND seq > ?
+		ORDER BY seq DESC
+		LIMIT 40;
+	`, sessionID, userSeq)
+	if err != nil {
+		return nil, ErrNoTranscript
+	}
+	defer rows.Close()
+	var response string
+	for response == "" && rows.Next() {
+		var dataJSON string
+		if err := rows.Scan(&dataJSON); err != nil {
+			return nil, ErrNoTranscript
+		}
+		var m opencodeV2Message
+		if err := json.Unmarshal([]byte(dataJSON), &m); err != nil {
+			continue
+		}
+		response = ocJoinText(m.Content)
+	}
+	if err := rows.Err(); err != nil || response == "" {
+		return nil, ErrNoTranscript
+	}
+	return &model.HistoryItem{
+		Query:    query,
+		Response: model.TruncateUTF8(response, model.MaxResponseBytes),
+		Source:   "transcript",
+	}, nil
+}
+
+// ocJoinText joins the text parts, leaving out reasoning and tool calls.
+func ocJoinText(parts []opencodePartData) string {
+	var texts []string
+	for _, p := range parts {
+		if p.Type == "text" && p.Text != "" {
+			texts = append(texts, p.Text)
+		}
+	}
+	return strings.TrimSpace(strings.Join(texts, "\n"))
+}
+
+func (o *opencodeAdapter) lastTurnV1(ctx context.Context, db *sql.DB, sessionID string) (*model.HistoryItem, error) {
 	rows, err := db.QueryContext(ctx, `
 		SELECT id, data FROM message
 		WHERE session_id = ?
 		ORDER BY time_created DESC, id DESC
 		LIMIT 40;
-	`, ref.Value)
+	`, sessionID)
 	if err != nil {
 		return nil, ErrNoTranscript
 	}

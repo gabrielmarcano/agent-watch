@@ -88,6 +88,7 @@ Known and accepted for now; none blocks a phase.
 - **Long single-line texts left** (the short-lines rule, `wearos-app/ARCHITECTURE.md` §4b; the list card and the agent screen's header follow it since Wear OS `1.2.4`):
   - the agents tile's second line chains the status and the agent id as text (`AgentsTileService.kt`), and has no logo;
   - the complication's text chains `<status> · <agent>` and `· +N more` (`complication_status_agent`, `complication_status_more`).
+- **OpenCode 2 focus check** (bridge `0.8.0`): the V2 rule was captured on the default theme only (`docs/reference/agents.md` §5.1). A theme where it does not hold refuses Allow, never presses.
 - **agy 1.2.17 menus:** `Create file` and `Question` parse without a `detail`; picking `Write-in...` leaves a text field the watch cannot answer (`docs/reference/agents.md` §4.1).
 
 ### Checks nobody has done yet
@@ -95,6 +96,7 @@ Known and accepted for now; none blocks a phase.
 Only changes that affect what the system does (the owner's rule, 2026-10-07): a text, wording or layout tweak needs no check of its own here.
 
 - Wear OS 1.2.2 on the watch, still unchecked: Quick Dictate and Change with the system input; an empty notification reply sends nothing; after the stream drops (Wi-Fi off and on) or the app returns from the background, the agent screen shows the latest reply. (Verified by the owner on 2026-10-05: Reply with voice and with the keyboard reaches the confirm screen and the agent.)
+- **OpenCode 2 on the owner's panes** (bridge `0.8.0`, captured in the sandbox only): once herdr's OpenCode integration is v13 and OpenCode restarted in the pane, the pane has an `agent_session`, the watch's history card comes from the transcript, and an Allow from the watch answers a V2 dialog.
 - ntfy delivery (watchOS push) has never been tested.
 - **`make deploy-relay ARGS=--sync-env` has never run.** Plain deploys run on the VPS all the time; `--sync-env` also rewrites the server's env file (its live secrets) from the owner's `agent-watch.env`, and that merge is covered only by `tools/config/test_awenv.sh` (BSD awk locally, Linux awk in CI). The owner's `agent-watch.env` was filled from the running deployment, so the first run must list `AW_HOST_TOKEN` as **unchanged**; `changed` means the file's token is not the server's.
 
