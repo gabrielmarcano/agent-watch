@@ -69,7 +69,7 @@ The only host identity on the wire, `hello.host`, is logged and dropped.
 
 | Step | Work | Parallel? |
 |---|---|---|
-| 1 | Contract: `contracts.md`, `pkg/model`, Kotlin and Swift copies, golden file (`schema-sync` skill). **Done 2026-10-10:** §1.2, §1.4–§1.6, §2.1–§2.4, §4.1. Left to 2a: §3 (one connection per host), §5 (host tokens, `store.json` hosts, the admin API) | **Alone:** every layer reads these files |
+| 1 | Contract: `contracts.md`, `pkg/model`, Kotlin and Swift copies, golden file (`schema-sync` skill). **Done 2026-10-10:** §1.2, §1.4–§1.6, §2.1–§2.4, §4.1. §3, §4.3, §5 and §7 followed in 2a | **Alone:** every layer reads these files |
 | 2a | Relay + push + relay CLI (`pkg/relay`, `pkg/push`, `cmd/relay`, `deploy/relay/README.md`) | **With 2b**: disjoint directories |
 | 2b | Wear OS (`wearos-app/`, `ARCHITECTURE.md`) | **With 2a** |
 | 3 | Deploy the relay; register the hosts; install the bridge on each Linux machine | After 2a. Installing on the owner's machines is his call |

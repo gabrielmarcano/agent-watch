@@ -125,6 +125,16 @@ Agent Watch is a herdr plugin, listed on [herdr.dev/plugins](https://herdr.dev/p
 
 The relay (step 1), the watch app (step 3) and pairing (step 4) are unchanged. The relay deploy (`make deploy-relay`) still needs a checkout of this repository, or a relay binary from a [release](#versions-and-releases).
 
+### Another Machine (several hosts)
+
+Each machine with herdr runs its own bridge, with **its own host token**; the watch shows one page per machine (relay `0.7.0`, Wear OS `1.4.0`).
+
+1. On the VPS, register the machine and copy the token it prints once: `sudo agent-watch-relay hosts add <id> --name "<name>"` ([`deploy/relay/README.md` § Hosts](../deploy/relay/README.md#hosts-one-per-machine)).
+2. On that machine, clone the repo, create its `agent-watch.env` with `make config`, and replace its `AW_HOST_TOKEN` with that token (the relay keys stay the same).
+3. Install and start its bridge as in [step 2](#2-install-and-configure-the-host-bridge). Linux runs it as a `systemd --user` unit.
+
+The first machine's token, `AW_HOST_TOKEN` in the relay's env file, keeps working as the host `AW_HOST_ID` (default `main`).
+
 ### 3. Build and Install the Wear OS App
 
 1. **Firebase:** create a Firebase project, add an Android app with the package name `com.gabriel.agentwatch` (the app's id; the `google-services.json` must match it), and download its `google-services.json` to `wearos-app/app/`. It is git-ignored; never commit it. The build fails without it.
@@ -272,5 +282,5 @@ How each agent's menus, keys and history work: [`docs/reference/agents.md`](refe
 - **"herdr stopped" indicator:**
   - Indicates that the bridge is running but the herdr daemon is not responding on its UNIX socket. Start herdr to restore live monitoring.
 - **"Relay offline" on the watch** (or "Can't reach the relay" after a tap): the watch has no internet path to the relay. On Bluetooth only, check the phone itself is online (the watch goes out through it). `curl https://relay.<domain>/v1/healthz` from any network tells whether the relay is up.
-- **`status` shows a relay error with "close 4000":** two bridges share the host token (a foreground `run` beside the service, or a second host) and replace each other in a loop. Stop one of them.
+- **`status` shows a relay error with "close 4000":** two bridges use the same host token (a foreground `run` beside the service, or a second machine given the first one's token) and replace each other in a loop. Stop one, or give the second machine its own token ([Another Machine](#another-machine-several-hosts)).
 - **Relay rejects the host token:** `status` shows the relay error. The relay and the bridge must hold the same `AW_HOST_TOKEN`: give both the one in `agent-watch.env` with `make deploy-relay ARGS=--sync-env` and `make configure-bridge && make restart`.

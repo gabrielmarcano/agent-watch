@@ -259,10 +259,10 @@ Never accept a token in the query string.
 | `POST /v1/agents/{pane_id}/prompt` | device | `PromptRequest` | `200 CommandResponse` |
 | `POST /v1/agents/{pane_id}/answer` | device | `AnswerRequest` | `200 CommandResponse` |
 | `POST /v1/agents/{pane_id}/cancel` | device | `CancelRequest` | `200 CommandResponse` |
-
-**Commands name the host.** A client that has `host` on the agent uses the `/v1/hosts/{host}/…` paths. The older `/v1/agents/{pane_id}/…` paths stay for clients that predate hosts: the relay sends the command to the one host whose agents include `pane_id`, and answers `409 host_required` when several do (`unknown_pane` when none does).
 | `POST /v1/push/register` | device | `PushRegisterRequest` | `200 CommandResponse` |
 | `GET /v1/healthz` | none | — | `200 {"ok":true}` |
+
+**Commands name the host.** A client that has `host` on the agent uses the `/v1/hosts/{host}/…` paths. The older `/v1/agents/{pane_id}/…` paths stay for clients that predate hosts: the relay sends the command to the one host whose agents include `pane_id`, and answers `409 host_required` when several do (`unknown_pane` when none does).
 
 `GET /v1/history` parameters:
 - `host` and `pane_id` are optional. Without `pane_id`, the response mixes all panes (of `host`, when given). `pane_id` without `host` matches that pane on every host.
@@ -353,7 +353,7 @@ Every 15 s the relay writes the comment line `:` followed by a blank line, as a 
 
 | `event:` | `data:` (one JSON line) | When |
 |---|---|---|
-| `snapshot` | `AgentsSnapshot` | Immediately on connect, and after the host reconnects |
+| `snapshot` | `AgentsSnapshot` | Immediately on connect; after any host sends its snapshot (on every bridge (re)connect); after a host is revoked |
 | `agent` | `AgentState` | An agent was added or changed |
 | `agent_removed` | `AgentRemovedEvent`: `{"host": "...", "pane_id": "..."}` | A pane closed or lost its agent. `host` is omitted by a relay that predates hosts |
 | `host` | `HostEvent`: `{"host_online": bool, "herdr_online": bool, "hosts": [HostInfo]}` | A host connected or disconnected, or its herdr flag changed. The two flags are the aggregates of §1.5; `hosts` is the full list, as in the snapshot |
