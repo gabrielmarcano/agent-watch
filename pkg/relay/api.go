@@ -94,6 +94,10 @@ func (s *Server) routes() http.Handler {
 	mux.Handle("GET /v1/agents", s.auth.DeviceAuthMiddleware(http.HandlerFunc(s.agents)))
 	mux.Handle("GET /v1/events", s.auth.DeviceAuthMiddleware(http.HandlerFunc(s.events)))
 	mux.Handle("GET /v1/history", s.auth.DeviceAuthMiddleware(http.HandlerFunc(s.history)))
+	mux.Handle("POST /v1/hosts/{host}/agents/{pane_id}/prompt", s.auth.DeviceAuthMiddleware(http.HandlerFunc(s.prompt)))
+	mux.Handle("POST /v1/hosts/{host}/agents/{pane_id}/answer", s.auth.DeviceAuthMiddleware(http.HandlerFunc(s.answer)))
+	mux.Handle("POST /v1/hosts/{host}/agents/{pane_id}/cancel", s.auth.DeviceAuthMiddleware(http.HandlerFunc(s.cancel)))
+	// The paths that predate hosts: the relay finds the pane's host.
 	mux.Handle("POST /v1/agents/{pane_id}/prompt", s.auth.DeviceAuthMiddleware(http.HandlerFunc(s.prompt)))
 	mux.Handle("POST /v1/agents/{pane_id}/answer", s.auth.DeviceAuthMiddleware(http.HandlerFunc(s.answer)))
 	mux.Handle("POST /v1/agents/{pane_id}/cancel", s.auth.DeviceAuthMiddleware(http.HandlerFunc(s.cancel)))
@@ -205,13 +209,19 @@ func (s *Server) pairCode(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// GET /v1/host/status
+// GET /v1/host/status: the calling host's view; devices are relay-wide.
 func (s *Server) hostStatus(w http.ResponseWriter, r *http.Request) {
+	host, ok := HostFromContext(r.Context())
+	if !ok {
+		writeError(w, model.ErrUnauthorized, "unauthorized")
+		return
+	}
 	writeJSON(w, http.StatusOK, model.HostStatusResponse{
-		HostOnline:  s.state.HostOnline(),
-		HerdrOnline: s.state.HerdrOnline(),
+		Host:        host.ID,
+		HostOnline:  s.state.HostOnline(host.ID),
+		HerdrOnline: s.state.HerdrOnline(host.ID),
 		Devices:     len(s.store.ListDevices()),
-		Agents:      s.state.AgentCount(),
+		Agents:      s.state.AgentCount(host.ID),
 	})
 }
 
@@ -220,8 +230,9 @@ func (s *Server) agents(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, s.state.Snapshot())
 }
 
-// GET /v1/history?pane_id=&limit=
+// GET /v1/history?host=&pane_id=&limit=
 func (s *Server) history(w http.ResponseWriter, r *http.Request) {
+	host := r.URL.Query().Get("host")
 	paneID := r.URL.Query().Get("pane_id")
 	limitStr := r.URL.Query().Get("limit")
 
@@ -235,7 +246,7 @@ func (s *Server) history(w http.ResponseWriter, r *http.Request) {
 		limit = 200
 	}
 
-	items := s.store.GetHistory(paneID, limit)
+	items := s.store.GetHistory(host, paneID, limit)
 	if items == nil {
 		items = []model.HistoryItem{}
 	}
@@ -245,10 +256,74 @@ func (s *Server) history(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// POST /v1/agents/{pane_id}/prompt
-func (s *Server) prompt(w http.ResponseWriter, r *http.Request) {
+// commandTarget is the agent a command names: its host and pane.
+type commandTarget struct {
+	host string
+	pane string
+}
+
+// targetFromPath reads {host} and {pane_id}. Without {host} (the paths that
+// predate hosts) the command goes to the one host whose agents include the
+// pane: host_required when several do, unknown_pane when none does.
+func (s *Server) targetFromPath(r *http.Request) (commandTarget, model.ErrorCode, string) {
 	paneID := r.PathValue("pane_id")
 	if paneID == "" {
+		return commandTarget{}, model.ErrInvalidRequest, "missing pane_id"
+	}
+	host := r.PathValue("host")
+	if host != "" {
+		if !s.state.HasPane(host, paneID) {
+			return commandTarget{}, model.ErrUnknownPane, "unknown pane"
+		}
+		return commandTarget{host: host, pane: paneID}, "", ""
+	}
+	switch hosts := s.state.HostsWithPane(paneID); len(hosts) {
+	case 0:
+		return commandTarget{}, model.ErrUnknownPane, "unknown pane"
+	case 1:
+		return commandTarget{host: hosts[0], pane: paneID}, "", ""
+	default:
+		return commandTarget{}, model.ErrHostRequired, "several hosts have this pane: use /v1/hosts/{host}/agents/{pane_id}/..."
+	}
+}
+
+// runCommand checks the target, sends cmd to its host and writes the outcome.
+func (s *Server) runCommand(w http.ResponseWriter, r *http.Request, cmd model.CommandMsg) {
+	target, code, msg := s.targetFromPath(r)
+	if code != "" {
+		writeError(w, code, msg)
+		return
+	}
+	if !s.state.HostOnline(target.host) {
+		writeError(w, model.ErrHostOffline, "host offline")
+		return
+	}
+	if !s.state.HerdrOnline(target.host) {
+		writeError(w, model.ErrHerdrOffline, "herdr offline")
+		return
+	}
+
+	cmd.PaneID = target.pane
+	res, err := s.hub.Command(r.Context(), target.host, cmd)
+	if err != nil {
+		writeError(w, model.ErrInternal, err.Error())
+		return
+	}
+	if !res.OK {
+		code := model.ErrorCode(res.ErrorCode)
+		if code == "" {
+			code = model.ErrInternal
+		}
+		writeError(w, code, res.Message)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, model.CommandResponse{OK: true})
+}
+
+// POST /v1/hosts/{host}/agents/{pane_id}/prompt and /v1/agents/{pane_id}/prompt
+func (s *Server) prompt(w http.ResponseWriter, r *http.Request) {
+	if r.PathValue("pane_id") == "" {
 		writeError(w, model.ErrInvalidRequest, "missing pane_id")
 		return
 	}
@@ -265,47 +340,16 @@ func (s *Server) prompt(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !s.state.HasPane(paneID) {
-		writeError(w, model.ErrUnknownPane, "unknown pane")
-		return
-	}
-	if !s.state.HostOnline() {
-		writeError(w, model.ErrHostOffline, "host offline")
-		return
-	}
-	if !s.state.HerdrOnline() {
-		writeError(w, model.ErrHerdrOffline, "herdr offline")
-		return
-	}
-
-	cmd := model.CommandMsg{
+	s.runCommand(w, r, model.CommandMsg{
 		Action:      "prompt",
-		PaneID:      paneID,
 		ExpectedSeq: req.ExpectedSeq,
 		Text:        req.Text,
-	}
-
-	res, err := s.hub.Command(r.Context(), cmd)
-	if err != nil {
-		writeError(w, model.ErrInternal, err.Error())
-		return
-	}
-	if !res.OK {
-		code := model.ErrorCode(res.ErrorCode)
-		if code == "" {
-			code = model.ErrInternal
-		}
-		writeError(w, code, res.Message)
-		return
-	}
-
-	writeJSON(w, http.StatusOK, model.CommandResponse{OK: true})
+	})
 }
 
-// POST /v1/agents/{pane_id}/answer
+// POST /v1/hosts/{host}/agents/{pane_id}/answer and /v1/agents/{pane_id}/answer
 func (s *Server) answer(w http.ResponseWriter, r *http.Request) {
-	paneID := r.PathValue("pane_id")
-	if paneID == "" {
+	if r.PathValue("pane_id") == "" {
 		writeError(w, model.ErrInvalidRequest, "missing pane_id")
 		return
 	}
@@ -322,48 +366,17 @@ func (s *Server) answer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !s.state.HasPane(paneID) {
-		writeError(w, model.ErrUnknownPane, "unknown pane")
-		return
-	}
-	if !s.state.HostOnline() {
-		writeError(w, model.ErrHostOffline, "host offline")
-		return
-	}
-	if !s.state.HerdrOnline() {
-		writeError(w, model.ErrHerdrOffline, "herdr offline")
-		return
-	}
-
-	cmd := model.CommandMsg{
+	s.runCommand(w, r, model.CommandMsg{
 		Action:      "answer",
-		PaneID:      paneID,
 		ExpectedSeq: req.ExpectedSeq,
 		OptionID:    req.OptionID,
 		Fingerprint: req.Fingerprint,
-	}
-
-	res, err := s.hub.Command(r.Context(), cmd)
-	if err != nil {
-		writeError(w, model.ErrInternal, err.Error())
-		return
-	}
-	if !res.OK {
-		code := model.ErrorCode(res.ErrorCode)
-		if code == "" {
-			code = model.ErrInternal
-		}
-		writeError(w, code, res.Message)
-		return
-	}
-
-	writeJSON(w, http.StatusOK, model.CommandResponse{OK: true})
+	})
 }
 
-// POST /v1/agents/{pane_id}/cancel
+// POST /v1/hosts/{host}/agents/{pane_id}/cancel and /v1/agents/{pane_id}/cancel
 func (s *Server) cancel(w http.ResponseWriter, r *http.Request) {
-	paneID := r.PathValue("pane_id")
-	if paneID == "" {
+	if r.PathValue("pane_id") == "" {
 		writeError(w, model.ErrInvalidRequest, "missing pane_id")
 		return
 	}
@@ -375,41 +388,11 @@ func (s *Server) cancel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !s.state.HasPane(paneID) {
-		writeError(w, model.ErrUnknownPane, "unknown pane")
-		return
-	}
-	if !s.state.HostOnline() {
-		writeError(w, model.ErrHostOffline, "host offline")
-		return
-	}
-	if !s.state.HerdrOnline() {
-		writeError(w, model.ErrHerdrOffline, "herdr offline")
-		return
-	}
-
-	cmd := model.CommandMsg{
+	s.runCommand(w, r, model.CommandMsg{
 		Action:      "cancel",
-		PaneID:      paneID,
 		ExpectedSeq: req.ExpectedSeq,
 		Fingerprint: req.Fingerprint,
-	}
-
-	res, err := s.hub.Command(r.Context(), cmd)
-	if err != nil {
-		writeError(w, model.ErrInternal, err.Error())
-		return
-	}
-	if !res.OK {
-		code := model.ErrorCode(res.ErrorCode)
-		if code == "" {
-			code = model.ErrInternal
-		}
-		writeError(w, code, res.Message)
-		return
-	}
-
-	writeJSON(w, http.StatusOK, model.CommandResponse{OK: true})
+	})
 }
 
 // POST /v1/push/register

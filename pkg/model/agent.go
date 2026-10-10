@@ -87,7 +87,10 @@ type PendingPrompt struct {
 
 // AgentState represents the state of a single agent pane.
 type AgentState struct {
-	PaneID         string         `json:"pane_id"`
+	PaneID string `json:"pane_id"`
+	// Host is the id of the host whose connection sent the agent, stamped by
+	// the relay; the bridge leaves it empty. The key is (Host, PaneID).
+	Host           string         `json:"host,omitempty"`
 	Agent          string         `json:"agent"`
 	Label          string         `json:"label"`
 	Name           string         `json:"name,omitempty"`
@@ -116,6 +119,7 @@ type AgentState struct {
 type HistoryItem struct {
 	ID          string `json:"id"`
 	PaneID      string `json:"pane_id"`
+	Host        string `json:"host,omitempty"` // stamped by the relay, like AgentState.Host
 	Agent       string `json:"agent"`
 	Label       string `json:"label"`
 	Query       string `json:"query,omitempty"`
@@ -126,10 +130,19 @@ type HistoryItem struct {
 
 // AgentsSnapshot is the full state snapshot sent to clients on connect.
 type AgentsSnapshot struct {
-	HostOnline  bool         `json:"host_online"`
-	HerdrOnline bool         `json:"herdr_online"`
+	HostOnline  bool         `json:"host_online"`  // at least one host is connected
+	HerdrOnline bool         `json:"herdr_online"` // every connected host reaches its herdr
+	Hosts       []HostInfo   `json:"hosts,omitempty"`
 	Agents      []AgentState `json:"agents"`
 	GeneratedAt string       `json:"generated_at"`
+}
+
+// HostInfo is one host (one bridge and its herdr) known to the relay.
+type HostInfo struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Online      bool   `json:"online"`
+	HerdrOnline bool   `json:"herdr_online"`
 }
 
 // SortAgents orders agents by Severity desc, then Label asc. Sorts in place.

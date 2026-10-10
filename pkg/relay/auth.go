@@ -20,6 +20,7 @@ type contextKey string
 
 const (
 	deviceCtxKey    contextKey = "device"
+	hostCtxKey      contextKey = "host"
 	accessLogCtxKey contextKey = "access_log"
 
 	pairCodeTTL       = 5 * time.Minute
@@ -36,6 +37,7 @@ func Sha256Hex(s string) string {
 }
 
 // GenerateDeviceToken generates 32 random bytes formatted as 64 hex characters.
+// Host tokens (`hosts add`) are made the same way.
 func GenerateDeviceToken() (string, error) {
 	var tokenBytes [32]byte
 	if _, err := rand.Read(tokenBytes[:]); err != nil {
@@ -49,9 +51,18 @@ type pairCodeEntry struct {
 	expiresAt time.Time
 }
 
+// HostIdentity is the host a host token belongs to.
+type HostIdentity struct {
+	ID   string
+	Name string
+	// Legacy is set for the host of AW_HOST_TOKEN, which is not in store.json.
+	Legacy bool
+}
+
 // AuthManager manages tokens, pairing codes, and rate limiting.
 type AuthManager struct {
-	hostToken string
+	hostToken string       // AW_HOST_TOKEN; "" when unset
+	legacy    HostIdentity // the host hostToken authenticates
 	store     *Store
 	ipPolicy  ClientIPPolicy
 	now       func() time.Time // rate-limiter clock (tests override)
@@ -70,11 +81,14 @@ type deviceSession struct {
 	cancel context.CancelFunc
 }
 
-// NewAuthManager initializes an AuthManager. ipPolicy decides which address
-// the pairing rate limiter counts attempts against.
+// NewAuthManager initializes an AuthManager. hostToken (AW_HOST_TOKEN, may be
+// empty) authenticates the host DefaultHostID (SetLegacyHost names another);
+// the hosts in store authenticate with their own tokens. ipPolicy decides
+// which address the pairing rate limiter counts attempts against.
 func NewAuthManager(hostToken string, store *Store, ipPolicy ClientIPPolicy) *AuthManager {
 	return &AuthManager{
 		hostToken:  hostToken,
+		legacy:     HostIdentity{ID: DefaultHostID, Name: DefaultHostID, Legacy: true},
 		store:      store,
 		ipPolicy:   ipPolicy,
 		now:        time.Now,
@@ -137,24 +151,57 @@ func ExtractBearerToken(r *http.Request) string {
 	return strings.TrimSpace(parts[1])
 }
 
-// VerifyHostToken checks if the request has a valid host token in constant time.
-func (a *AuthManager) VerifyHostToken(token string) bool {
-	if token == "" || len(token) != len(a.hostToken) {
-		return false
+// SetLegacyHost sets the id and name of the host AW_HOST_TOKEN authenticates.
+// Call it before serving.
+func (a *AuthManager) SetLegacyHost(id, name string) {
+	if name == "" {
+		name = id
 	}
-	return subtle.ConstantTimeCompare([]byte(token), []byte(a.hostToken)) == 1
+	a.legacy = HostIdentity{ID: id, Name: name, Legacy: true}
 }
 
-// HostAuthMiddleware validates that the caller provided the correct host bearer token.
+// LegacyHost returns the host of AW_HOST_TOKEN; ok is false when it is unset.
+func (a *AuthManager) LegacyHost() (HostIdentity, bool) {
+	return a.legacy, a.hostToken != ""
+}
+
+// VerifyHostToken returns the host a token belongs to: AW_HOST_TOKEN's host,
+// or a host registered in the store. Both compare in constant time (the store
+// compares token hashes).
+func (a *AuthManager) VerifyHostToken(token string) (HostIdentity, bool) {
+	if token == "" {
+		return HostIdentity{}, false
+	}
+	if a.hostToken != "" && len(token) == len(a.hostToken) &&
+		subtle.ConstantTimeCompare([]byte(token), []byte(a.hostToken)) == 1 {
+		return a.legacy, true
+	}
+	if a.store == nil {
+		return HostIdentity{}, false
+	}
+	if h, ok := a.store.FindHostByTokenHash(Sha256Hex(token)); ok {
+		return HostIdentity{ID: h.ID, Name: h.Name}, true
+	}
+	return HostIdentity{}, false
+}
+
+// HostAuthMiddleware validates the host bearer token and attaches the
+// HostIdentity to the request context.
 func (a *AuthManager) HostAuthMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		token := ExtractBearerToken(r)
-		if !a.VerifyHostToken(token) {
+		host, ok := a.VerifyHostToken(ExtractBearerToken(r))
+		if !ok {
 			writeError(w, model.ErrUnauthorized, "invalid or missing host token")
 			return
 		}
-		next.ServeHTTP(w, r)
+		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), hostCtxKey, host)))
 	})
+}
+
+// HostFromContext extracts the authenticated host from context.
+func HostFromContext(ctx context.Context) (HostIdentity, bool) {
+	h, ok := ctx.Value(hostCtxKey).(HostIdentity)
+	return h, ok
 }
 
 // DeviceAuthMiddleware validates the device bearer token and attaches the Device to context.

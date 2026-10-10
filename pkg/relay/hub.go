@@ -19,6 +19,9 @@ import (
 const (
 	wsCloseCodeReplaced     websocket.StatusCode = 4000
 	wsCloseCodeHelloTimeout websocket.StatusCode = 4001
+	// A revoked host's connection closes with a policy violation; its next
+	// handshake gets 401.
+	wsCloseCodeRevoked = websocket.StatusPolicyViolation
 
 	helloTimeout = 5 * time.Second
 	// commandTimeout sits between the bridge's 6 s command budget and the
@@ -34,18 +37,19 @@ const (
 // (pkg/relayclient) reads the same name; contracts.md §3.
 const RelayVersionHeader = "X-Agent-Watch-Relay-Version"
 
-// Notifier receives agent update notifications for push dispatching.
+// Notifier receives agent update notifications for push dispatching. Agents
+// and history items carry their host (stamped by the hub).
 type Notifier interface {
 	OnAgentUpdate(prev *model.AgentState, cur model.AgentState)
 	// OnHistoryItem reports a pane's new reply (never a resent duplicate), so
 	// a "finished" push can show it.
 	OnHistoryItem(item model.HistoryItem)
-	// OnHostPresence reports the host's input idle time and screen lock
+	// OnHostPresence reports a host's input idle time and screen lock
 	// (host_presence, contracts.md §3): pushes wait while the owner is there.
-	OnHostPresence(idle time.Duration, locked bool)
-	// OnHostOffline reports that the current host disconnected or was dropped
-	// (not replaced by a new connection).
-	OnHostOffline()
+	OnHostPresence(host string, idle time.Duration, locked bool)
+	// OnHostOffline reports that a host disconnected, was dropped or was
+	// revoked (not replaced by a new connection of the same host).
+	OnHostOffline(host string)
 }
 
 // NoopNotifier is a placeholder notifier that does nothing.
@@ -58,26 +62,53 @@ func (NoopNotifier) OnAgentUpdate(prev *model.AgentState, cur model.AgentState) 
 func (NoopNotifier) OnHistoryItem(item model.HistoryItem) {}
 
 // OnHostPresence is a no-op implementation.
-func (NoopNotifier) OnHostPresence(idle time.Duration, locked bool) {}
+func (NoopNotifier) OnHostPresence(host string, idle time.Duration, locked bool) {}
 
 // OnHostOffline is a no-op implementation.
-func (NoopNotifier) OnHostOffline() {}
+func (NoopNotifier) OnHostOffline(host string) {}
 
 // maxPresenceIdle caps a reported idle time: anything longer is just "away",
 // and the cap keeps the conversion to time.Duration from overflowing.
 const maxPresenceIdle = 365 * 24 * time.Hour
 
-// hostConnection is one bridge WebSocket. gone is closed exactly once, as soon
-// as the connection stops being the current host (replaced, disconnected or
-// dropped for missing pings); commands waiting on it fail at that moment.
+// hostConnection is one bridge WebSocket of the host id. gone is closed
+// exactly once, as soon as the connection stops being its host's current one
+// (replaced, disconnected, dropped for missing pings, or revoked); commands
+// waiting on it fail at that moment.
 type hostConnection struct {
+	id       string
 	conn     *websocket.Conn
 	gone     chan struct{}
 	goneOnce sync.Once
+	// applyMu is held while a message from this connection changes the
+	// relay's state; see apply.
+	applyMu sync.Mutex
 }
 
-func newHostConnection(conn *websocket.Conn) *hostConnection {
-	return &hostConnection{conn: conn, gone: make(chan struct{})}
+func newHostConnection(id string, conn *websocket.Conn) *hostConnection {
+	return &hostConnection{id: id, conn: conn, gone: make(chan struct{})}
+}
+
+// apply runs fn unless the connection is gone, and reports whether it ran.
+// Whoever marks a connection gone and then takes applyMu once knows that no
+// message of it changes the state afterwards (a revoked host must not come
+// back through a message it sent just before).
+func (c *hostConnection) apply(fn func()) bool {
+	c.applyMu.Lock()
+	defer c.applyMu.Unlock()
+	if c.isGone() {
+		return false
+	}
+	fn()
+	return true
+}
+
+// retire marks the connection gone and waits for a message being applied.
+func (c *hostConnection) retire() {
+	c.markGone()
+	c.applyMu.Lock()
+	// An empty critical section on purpose: it only waits for apply.
+	c.applyMu.Unlock()
 }
 
 func (c *hostConnection) markGone() {
@@ -93,7 +124,14 @@ func (c *hostConnection) isGone() bool {
 	}
 }
 
-// Hub coordinates the WebSocket connection from the bridge host and command routing.
+// pendingCommand is a command waiting for its result from host.
+type pendingCommand struct {
+	ch   chan model.CommandResultMsg
+	host *hostConnection
+}
+
+// Hub coordinates the hosts' WebSocket connections, one per host id, and
+// routes each command to its agent's host.
 type Hub struct {
 	auth     *AuthManager
 	state    *State
@@ -101,8 +139,8 @@ type Hub struct {
 	notifier Notifier
 
 	mu             sync.Mutex
-	currentHost    *hostConnection
-	pending        map[string]chan model.CommandResultMsg
+	conns          map[string]*hostConnection // host id -> its current connection
+	pending        map[string]pendingCommand
 	helloTimeout   time.Duration
 	commandTimeout time.Duration
 	pingInterval   time.Duration
@@ -124,7 +162,8 @@ func NewHub(auth *AuthManager, state *State, store *Store, notifier Notifier) *H
 		state:          state,
 		store:          store,
 		notifier:       notifier,
-		pending:        make(map[string]chan model.CommandResultMsg),
+		conns:          make(map[string]*hostConnection),
+		pending:        make(map[string]pendingCommand),
 		helloTimeout:   helloTimeout,
 		commandTimeout: commandTimeout,
 		pingInterval:   pingInterval,
@@ -174,7 +213,8 @@ func (h *Hub) setAfterPing(fn func(err error)) {
 // ServeHost handles GET /v1/host WebSocket connections.
 func (h *Hub) ServeHost(w http.ResponseWriter, r *http.Request) {
 	token := ExtractBearerToken(r)
-	if !h.auth.VerifyHostToken(token) {
+	ident, ok := h.auth.VerifyHostToken(token)
+	if !ok {
 		writeError(w, model.ErrUnauthorized, "invalid or missing host token")
 		return
 	}
@@ -202,12 +242,21 @@ func (h *Hub) ServeHost(w http.ResponseWriter, r *http.Request) {
 	}
 	conn.SetReadLimit(1 << 20)
 
-	host := newHostConnection(conn)
+	host := newHostConnection(ident.ID, conn)
 
-	// Enforce 1 active host connection.
+	// One connection per host: a new one with the same host's token replaces
+	// the old one. Other hosts are not affected.
 	h.mu.Lock()
-	oldHost := h.currentHost
-	h.currentHost = host
+	// Checked again under mu: a revocation removes the token from the store
+	// and then drops the host's connection under mu, so a handshake that
+	// raced with it is refused here or dropped there.
+	if again, ok := h.auth.VerifyHostToken(token); !ok || again.ID != ident.ID {
+		h.mu.Unlock()
+		_ = conn.Close(wsCloseCodeRevoked, "host revoked")
+		return
+	}
+	oldHost := h.conns[ident.ID]
+	h.conns[ident.ID] = host
 	helloWait, pingEvery, pingWait, afterPing := h.helloTimeout, h.pingInterval, h.pingTimeout, h.afterPing
 	h.mu.Unlock()
 
@@ -222,14 +271,19 @@ func (h *Hub) ServeHost(w http.ResponseWriter, r *http.Request) {
 	defer func() {
 		host.markGone()
 		h.mu.Lock()
-		wasCurrent := h.currentHost == host
+		wasCurrent := h.conns[ident.ID] == host
 		if wasCurrent {
-			h.currentHost = nil
-			h.state.SetHost(false, false)
+			delete(h.conns, ident.ID)
+			// Under mu: a new connection of this host registers only after
+			// this, so its online flag is never overwritten by this one.
+			h.state.SetHost(ident.ID, false, false)
 		}
 		h.mu.Unlock()
 		if wasCurrent {
-			h.notifier.OnHostOffline()
+			h.notifier.OnHostOffline(ident.ID)
+			if h.store != nil {
+				h.store.TouchHost(ident.ID)
+			}
 		}
 		// Only now: closing a dead peer can take seconds, and watches must
 		// see the host go offline at once.
@@ -262,11 +316,16 @@ func (h *Hub) ServeHost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if host.isGone() {
-		return // replaced while saying hello
+	if !host.apply(func() {
+		h.state.AddHost(ident.ID, ident.Name)
+		h.state.SetHost(ident.ID, true, hello.HerdrOnline)
+	}) {
+		return // replaced or revoked while saying hello
 	}
-	slog.Info("host connected", "host", hello.Host, "version", hello.Version, "herdr_online", hello.HerdrOnline)
-	h.state.SetHost(true, hello.HerdrOnline)
+	slog.Info("host connected", "host", ident.ID, "hello_host", hello.Host, "version", hello.Version, "herdr_online", hello.HerdrOnline)
+	if h.store != nil {
+		h.store.TouchHost(ident.ID)
+	}
 
 	pingCtx, stopPing := context.WithCancel(r.Context())
 	defer stopPing()
@@ -290,20 +349,43 @@ func (h *Hub) ServeHost(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 
-		h.handleWireMessage(wireMsg)
+		if !host.apply(func() { h.handleWireMessage(host, wireMsg) }) {
+			break
+		}
 	}
 }
 
-// Shutdown stops accepting hosts, drops the current one (watches see it go
-// offline and its in-flight commands fail with host_offline) and waits until
+// RevokeHost drops a revoked host's connection, if any: its in-flight
+// commands fail with host_offline and nothing it sent after this point
+// changes the state. It reports whether the host was connected.
+func (h *Hub) RevokeHost(id string) bool {
+	h.mu.Lock()
+	host := h.conns[id]
+	delete(h.conns, id)
+	h.mu.Unlock()
+
+	if host == nil {
+		return false
+	}
+	host.retire()
+	go func() { _ = host.conn.Close(wsCloseCodeRevoked, "host revoked") }()
+	h.notifier.OnHostOffline(id)
+	return true
+}
+
+// Shutdown stops accepting hosts, drops the connected ones (watches see them go
+// offline and their in-flight commands fail with host_offline) and waits until
 // every host handler has returned, or ctx ends.
 func (h *Hub) Shutdown(ctx context.Context) error {
 	h.mu.Lock()
 	h.closed = true
-	host := h.currentHost
+	hosts := make([]*hostConnection, 0, len(h.conns))
+	for _, host := range h.conns {
+		hosts = append(hosts, host)
+	}
 	h.mu.Unlock()
 
-	if host != nil {
+	for _, host := range hosts {
 		_ = host.conn.CloseNow()
 	}
 	done := make(chan struct{})
@@ -357,39 +439,47 @@ func pingHost(ctx context.Context, host *hostConnection, interval, timeout time.
 	}
 }
 
-func (h *Hub) handleWireMessage(msg any) {
+// handleWireMessage applies one message from host. The relay stamps the
+// host's id on everything it sends; the bridge's own host fields are ignored.
+func (h *Hub) handleWireMessage(host *hostConnection, msg any) {
+	id := host.id
 	switch m := msg.(type) {
 	case model.SnapshotMsg:
-		h.state.ReplaceAll(m.Agents)
+		h.state.ReplaceAll(id, m.Agents)
 	case model.AgentUpdateMsg:
+		m.Agent.Host = id
 		prev := h.state.Upsert(m.Agent)
 		h.notifier.OnAgentUpdate(prev, m.Agent)
 	case model.AgentRemovedMsg:
-		h.state.Remove(m.PaneID)
+		h.state.Remove(id, m.PaneID)
 	case model.HistoryItemMsg:
+		m.Item.Host = id
 		// Duplicates (the bridge resends after a reconnect) are not news.
 		if h.store.AddHistory(m.Item) {
 			h.state.BroadcastHistory(m.Item)
 			h.notifier.OnHistoryItem(m.Item)
 		}
 	case model.HerdrStatusMsg:
-		h.state.SetHost(true, m.HerdrOnline)
+		h.state.SetHost(id, true, m.HerdrOnline)
 	case model.HostPresenceMsg:
 		idle := maxPresenceIdle
 		if m.IdleSeconds < uint64(maxPresenceIdle/time.Second) {
 			idle = time.Duration(m.IdleSeconds) * time.Second
 		}
-		h.notifier.OnHostPresence(idle, m.Locked)
+		h.notifier.OnHostPresence(id, idle, m.Locked)
 	case model.CommandResultMsg:
+		// Only the connection the command went to may answer it.
 		h.mu.Lock()
-		ch, ok := h.pending[m.RequestID]
-		if ok {
+		p, ok := h.pending[m.RequestID]
+		if ok && p.host == host {
 			delete(h.pending, m.RequestID)
+		} else {
+			ok = false
 		}
 		h.mu.Unlock()
 
 		if ok {
-			ch <- m
+			p.ch <- m
 		} else {
 			slog.Debug("dropped late or unknown command result", "request_id", m.RequestID)
 		}
@@ -408,15 +498,16 @@ func commandFailure(reqID string, code model.ErrorCode, msg string) model.Comman
 	}
 }
 
-// Command sends a command to the host and waits for its result. Writing the
-// command and waiting for the answer share one budget (7 s by default).
+// Command sends a command to the host hostID and waits for its result.
+// Writing the command and waiting for the answer share one budget (7 s by
+// default).
 //
-// It returns host_offline when no host is connected or the host goes away
-// before answering (at once, not after the budget), and timeout when the
-// budget runs out. A non-nil error means ctx ended first (the caller left).
-func (h *Hub) Command(ctx context.Context, cmd model.CommandMsg) (model.CommandResultMsg, error) {
+// It returns host_offline when that host is not connected or goes away before
+// answering (at once, not after the budget), and timeout when the budget runs
+// out. A non-nil error means ctx ended first (the caller left).
+func (h *Hub) Command(ctx context.Context, hostID string, cmd model.CommandMsg) (model.CommandResultMsg, error) {
 	h.mu.Lock()
-	host := h.currentHost
+	host := h.conns[hostID]
 	budget := h.commandTimeout
 	if host == nil {
 		h.mu.Unlock()
@@ -433,7 +524,7 @@ func (h *Hub) Command(ctx context.Context, cmd model.CommandMsg) (model.CommandR
 	cmd.RequestID = reqID
 
 	ch := make(chan model.CommandResultMsg, 1)
-	h.pending[reqID] = ch
+	h.pending[reqID] = pendingCommand{ch: ch, host: host}
 	h.mu.Unlock()
 
 	defer func() {

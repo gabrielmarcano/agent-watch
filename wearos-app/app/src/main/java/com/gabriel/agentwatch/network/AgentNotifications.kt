@@ -1,7 +1,9 @@
 package com.gabriel.agentwatch.network
 
 import androidx.annotation.Keep
+import com.gabriel.agentwatch.model.AgentKey
 import com.gabriel.agentwatch.model.AgentState
+import com.gabriel.agentwatch.model.key
 import com.google.gson.Gson
 import com.google.gson.JsonObject
 import com.google.gson.JsonParseException
@@ -26,30 +28,42 @@ sealed class PushMessage {
         /** The prompt's kind; blank from a relay older than `kind` (contracts §4.1). */
         val kind: String = "",
         /** A question's one-tap answers. */
-        val options: List<PushChoice> = emptyList()
-    ) : PushMessage()
+        val options: List<PushChoice> = emptyList(),
+        /** The agent's host id; "" from a relay that predates hosts (contracts §4.1). */
+        val host: String = "",
+        /** The host's name; the relay's [title] already carries it when it registers several hosts. */
+        val hostName: String = ""
+    ) : PushMessage() {
+        val key: AgentKey get() = AgentKey(host, paneId)
+    }
 
     data class Done(
         val paneId: String,
         val label: String,
         val title: String,
         val body: String,
-        val seq: Long
-    ) : PushMessage()
+        val seq: Long,
+        val host: String = "",
+        val hostName: String = ""
+    ) : PushMessage() {
+        val key: AgentKey get() = AgentKey(host, paneId)
+    }
 
     data class Digest(val title: String, val body: String) : PushMessage()
 
     /** The pane's prompt was answered or went away: dismiss its approval notification and show nothing. */
-    data class Resolved(val paneId: String, val seq: Long?) : PushMessage()
+    data class Resolved(val paneId: String, val seq: Long?, val host: String = "") : PushMessage() {
+        val key: AgentKey get() = AgentKey(host, paneId)
+    }
 
     data class Ignored(val reason: String) : PushMessage()
 
     /** For logcat: event, pane id and sizes only. Never titles, bodies or prompt text. */
     fun logSummary(): String = when (this) {
-        is Blocked -> "blocked pane=$paneId seq=$seq body=${body.length} chars"
-        is Done -> "done pane=$paneId seq=$seq body=${body.length} chars"
+        is Blocked -> "blocked host=$host pane=$paneId seq=$seq body=${body.length} chars"
+        is Done -> "done host=$host pane=$paneId seq=$seq body=${body.length} chars"
         is Digest -> "digest body=${body.length} chars"
-        is Resolved -> "resolved pane=$paneId seq=$seq"
+        is Resolved -> "resolved host=$host pane=$paneId seq=$seq"
         is Ignored -> "ignored ($reason)"
     }
 
@@ -57,6 +71,8 @@ sealed class PushMessage {
         fun parse(data: Map<String, String>): PushMessage {
             val event = data["event"].orEmpty()
             val paneId = data["pane_id"].orEmpty()
+            val host = data["host"].orEmpty()
+            val hostName = data["host_name"].orEmpty()
             val label = data["label"]?.takeIf { it.isNotBlank() } ?: data["agent"].orEmpty()
             val body = data["body"].orEmpty()
             val seq = data["state_change_seq"]?.toLongOrNull()
@@ -74,7 +90,9 @@ sealed class PushMessage {
                         allowOptionId = data["allow_option_id"].orEmpty(),
                         denyOptionId = data["deny_option_id"].orEmpty(),
                         kind = data["kind"].orEmpty(),
-                        options = parseChoices(data["options"])
+                        options = parseChoices(data["options"]),
+                        host = host,
+                        hostName = hostName
                     )
                 "done", "agent_done" ->
                     if (paneId.isBlank()) Ignored("done without pane_id")
@@ -83,11 +101,13 @@ sealed class PushMessage {
                         label = label,
                         title = data["title"]?.takeIf { it.isNotBlank() } ?: "$label finished",
                         body = body,
-                        seq = seq ?: 0L
+                        seq = seq ?: 0L,
+                        host = host,
+                        hostName = hostName
                     )
                 "digest" -> Digest(title = data["title"]?.takeIf { it.isNotBlank() } ?: "Agent Watch", body = body)
                 "resolved" ->
-                    if (paneId.isBlank()) Ignored("resolved without pane_id") else Resolved(paneId, seq)
+                    if (paneId.isBlank()) Ignored("resolved without pane_id") else Resolved(paneId, seq, host)
                 else -> Ignored("unknown event '$event'")
             }
         }
@@ -156,30 +176,38 @@ object AgentNotifications {
     /** Notification extras that tag what a shown notification is (read back via `activeNotifications`). */
     const val EXTRA_KIND = "aw_kind"
     const val EXTRA_PANE = "aw_pane"
+    const val EXTRA_HOST = "aw_host"
     const val EXTRA_SEQ = "aw_seq"
     const val KIND_APPROVAL = "approval"
     const val KIND_DONE = "done"
     const val KIND_FEEDBACK = "feedback"
 
-    /** One notification per pane: a new push for the pane replaces the old one (phase 4 guide §5). */
-    fun idForPane(paneId: String): Int = paneId.hashCode() and 0x7FFFFFFF
+    /**
+     * One notification per agent, (host, pane): a new push for it replaces the old one. Without a host
+     * (an older relay) the id is the pane's, as before hosts.
+     */
+    fun idFor(agent: AgentKey): Int = agent.token.hashCode() and 0x7FFFFFFF
 
     /**
      * The data URI put on every notification intent. PendingIntents are equal when action, data, class
-     * and request code match (extras never count), so a URI unique per (pane, action) means a tap can
-     * never pick up another pane's extras, whatever the request codes are. Pane ids are percent-encoded.
+     * and request code match (extras never count), so a URI unique per (host, pane, action) means a tap
+     * can never pick up another agent's extras, whatever the request codes are. Ids are percent-encoded;
+     * the host goes in a query (absent without one, so those URIs stay as before hosts).
      */
-    fun intentUri(paneId: String, action: NotificationAction, optionId: String? = null): String {
+    fun intentUri(agent: AgentKey, action: NotificationAction, optionId: String? = null): String {
         val path = if (optionId.isNullOrBlank()) action.path else "${action.path}/${URLEncoder.encode(optionId, "UTF-8")}"
-        return "agentwatch://notification/$path/${URLEncoder.encode(paneId, "UTF-8")}"
+        val base = "agentwatch://notification/$path/${URLEncoder.encode(agent.paneId, "UTF-8")}"
+        return if (agent.host.isEmpty()) base else "$base?host=${URLEncoder.encode(agent.host, "UTF-8")}"
     }
 
-    /** Distinct per action for one pane. Collisions across panes are harmless: [intentUri] tells them apart. */
-    fun requestCode(paneId: String, action: NotificationAction): Int = idForPane(paneId) * 4 + action.ordinal
+    /** Distinct per action for one agent. Collisions across agents are harmless: [intentUri] tells them apart. */
+    fun requestCode(agent: AgentKey, action: NotificationAction): Int = idFor(agent) * 4 + action.ordinal
 }
 
-/** An approval notification currently shown, as tagged in its extras. */
-data class ShownApproval(val notificationId: Int, val paneId: String, val seq: Long)
+/** An approval notification currently shown, as tagged in its extras. [host]: "" before hosts. */
+data class ShownApproval(val notificationId: Int, val paneId: String, val seq: Long, val host: String = "") {
+    val key: AgentKey get() = AgentKey(host, paneId)
+}
 
 /**
  * A `resolved` push arrived for the shown approval's pane. Dismiss it unless the shown prompt is newer
@@ -198,11 +226,11 @@ fun approvalsToDismiss(shown: List<ShownApproval>, update: AgentsUpdate): List<I
 
     return when (update) {
         is AgentsUpdate.All -> {
-            val byPane = update.agents.associateBy { it.pane_id }
-            shown.filter { obsolete(it, byPane[it.paneId]) }
+            val byKey = update.agents.associateBy { it.key }
+            shown.filter { obsolete(it, byKey[it.key]) }
         }
-        is AgentsUpdate.Changed -> shown.filter { it.paneId == update.agent.pane_id && obsolete(it, update.agent) }
-        is AgentsUpdate.Removed -> shown.filter { it.paneId == update.paneId }
+        is AgentsUpdate.Changed -> shown.filter { it.key == update.agent.key && obsolete(it, update.agent) }
+        is AgentsUpdate.Removed -> shown.filter { it.key == update.key }
     }.map { it.notificationId }
 }
 
@@ -220,14 +248,14 @@ fun actionSuccessTitle(action: String, isDeny: Boolean, isChoice: Boolean = fals
 
 /**
  * contracts §4.1: FCM does not guarantee order. A `blocked` push whose seq is not newer than the last
- * `resolved` seen for its pane announces a prompt that was already answered: don't show it.
+ * `resolved` seen for its (host, pane) announces a prompt that was already answered: don't show it.
  */
 fun shouldShowBlocked(seq: Long, lastResolved: Long?): Boolean = lastResolved == null || seq > lastResolved
 
 /**
- * The last `resolved` seq per pane, kept across process restarts (the FCM service can be killed between
- * a `resolved` and a late `blocked`). Immutable; bounded to [maxPanes], dropping the least recently
- * recorded pane.
+ * The last `resolved` seq per agent, (host, pane), kept across process restarts (the FCM service can be
+ * killed between a `resolved` and a late `blocked`). Immutable; bounded to [maxPanes], dropping the
+ * least recently recorded one. Stored under [AgentKey.token]: the pane id alone without a host.
  */
 class ResolvedSeqs(
     private val maxPanes: Int = 32,
@@ -235,13 +263,14 @@ class ResolvedSeqs(
 ) {
     val size: Int get() = seqs.size
 
-    fun lastFor(paneId: String): Long? = seqs[paneId]
+    fun lastFor(agent: AgentKey): Long? = seqs[agent.token]
 
-    /** Records [seq] for [paneId], keeping the highest seq seen for that pane. */
-    fun record(paneId: String, seq: Long): ResolvedSeqs {
+    /** Records [seq] for [agent], keeping the highest seq seen for it. */
+    fun record(agent: AgentKey, seq: Long): ResolvedSeqs {
+        val id = agent.token
         val next = LinkedHashMap(seqs)
-        val kept = maxOf(seq, next.remove(paneId) ?: seq)
-        next[paneId] = kept
+        val kept = maxOf(seq, next.remove(id) ?: seq)
+        next[id] = kept
         while (next.size > maxPanes) next.remove(next.keys.first())
         return ResolvedSeqs(maxPanes, next)
     }

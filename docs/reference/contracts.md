@@ -35,6 +35,7 @@ Herdr's enum, copied verbatim. Never rename, never remap, never add values.
 ```go
 type AgentState struct {
     PaneID         string         `json:"pane_id"`
+    Host           string         `json:"host,omitempty"`
     Agent          string         `json:"agent"`
     Label          string         `json:"label"`
     Name           string         `json:"name,omitempty"`
@@ -55,7 +56,8 @@ type AgentState struct {
 
 | Field | Source (bridge side) | Rule |
 |---|---|---|
-| `pane_id` | herdr `pane_id` | Primary key everywhere. Contains `:` (e.g. `w5:pAW`) |
+| `pane_id` | herdr `pane_id` | Contains `:` (e.g. `w5:pAW`). Unique only within one host: every herdr numbers its own panes, so the key is `(host, pane_id)` |
+| `host` | **relay** | The id of the host whose connection sent the agent (§1.6), stamped by the relay from the connection's host token. The bridge leaves it empty. Clients key an agent by `(host, pane_id)`; an older relay omits it (one host) |
 | `agent` | herdr `agent` | Lowercase herdr id: `claude`, `agy`, `opencode`, `codex`, … Never empty: a pane whose herdr `agent` is null is not tracked (the relay gets `agent_removed`) |
 | `label` | computed | The name the owner gave, first non-empty of: herdr `name`; the tab's `label` from `tab.list` (ignored when it is only the tab's `number`, herdr's default); `title`; `basename(cwd)`; `pane_id`. Agents that share a tab share its label |
 | `name` | herdr `name` | Explicit pane name or slug if set, otherwise omitted |
@@ -77,6 +79,7 @@ type AgentState struct {
 ```json
 {
   "pane_id": "w5:pAE",
+  "host": "main",
   "agent": "claude",
   "label": "my-app",
   "name": "my-app",
@@ -172,6 +175,7 @@ type PendingPrompt struct {
 type HistoryItem struct {
     ID          string `json:"id"`
     PaneID      string `json:"pane_id"`
+    Host        string `json:"host,omitempty"`
     Agent       string `json:"agent"`
     Label       string `json:"label"`
     Query       string `json:"query,omitempty"`
@@ -181,7 +185,8 @@ type HistoryItem struct {
 }
 ```
 
-- **`id`** is the first 16 hex characters of `sha256(pane_id + "\n" + session_value + "\n" + query + "\n" + response)`. It is deterministic, so a resent item deduplicates on the relay.
+- **`id`** is the first 16 hex characters of `sha256(pane_id + "\n" + session_value + "\n" + query + "\n" + response)`. It is deterministic, so a resent item deduplicates on the relay, which keeps history per `(host, pane_id)`.
+- **`host`**: as in `AgentState` (§1.2), stamped by the relay.
 - **`response`** is truncated to 65 536 bytes (`model.MaxResponseBytes`; why that bound: its comment) on a UTF-8 boundary, with `\n\n…[truncated]` appended when cut.
 - **`source`:**
   - `"transcript"` means `response` is the agent's own markdown.
@@ -193,14 +198,33 @@ type HistoryItem struct {
 type AgentsSnapshot struct {
     HostOnline  bool         `json:"host_online"`
     HerdrOnline bool         `json:"herdr_online"`
+    Hosts       []HostInfo   `json:"hosts,omitempty"`
     Agents      []AgentState `json:"agents"`
     GeneratedAt string       `json:"generated_at"`
 }
 ```
 
-- **`agents` order:** by severity (see 1.1), then `label` ascending. It is never null.
-- **`host_online=false`:** the bridge is not connected to the relay. `agents` is then the last known list; clients grey it out.
-- **`herdr_online=false`:** the bridge is connected, but cannot reach herdr.
+- **`agents` order:** by severity (see 1.1), then `label` ascending, every host's agents in one list. It is never null.
+- **`hosts`:** every host the relay knows (§1.6), in that order; omitted only by a relay that predates hosts. A client shows one page per host, its agents being those with the same `host`.
+- **`host_online`:** at least one host is connected. `false`: no bridge is connected; `agents` is then the last known list, and clients grey it out.
+- **`herdr_online`:** every connected host reaches its herdr (`false` with no host connected). With one host, both flags mean what they always did; a client that reads `hosts` uses each host's own flags instead.
+
+### 1.6 `HostInfo`
+
+```go
+type HostInfo struct {
+    ID          string `json:"id"`
+    Name        string `json:"name"`
+    Online      bool   `json:"online"`
+    HerdrOnline bool   `json:"herdr_online"`
+}
+```
+
+- **`id`:** `[a-z0-9-]{1,32}`, chosen by the owner when the host is registered on the relay, stable. It is what `host` holds in §1.2 and §1.4, and the `{host}` of §2.1's paths.
+- **`name`:** what clients show (e.g. `Mac`); the `id` when none was given.
+- **`online`:** the host's bridge is connected. `false`: its agents are the last known ones; clients grey that host's page.
+- **`herdr_online`:** the bridge is connected and reaches its herdr. `false` whenever `online` is.
+- **Order:** by `name`, then `id`.
 
 ---
 
@@ -228,19 +252,24 @@ Never accept a token in the query string.
 | `GET /v1/host/status` | host | — | `200 HostStatusResponse` |
 | `GET /v1/agents` | device | — | `200 AgentsSnapshot` |
 | `GET /v1/events` | device | — | `200 text/event-stream` (see 2.3) |
-| `GET /v1/history?pane_id=&limit=` | device | — | `200 HistoryResponse` |
+| `GET /v1/history?host=&pane_id=&limit=` | device | — | `200 HistoryResponse` |
+| `POST /v1/hosts/{host}/agents/{pane_id}/prompt` | device | `PromptRequest` | `200 CommandResponse` |
+| `POST /v1/hosts/{host}/agents/{pane_id}/answer` | device | `AnswerRequest` | `200 CommandResponse` |
+| `POST /v1/hosts/{host}/agents/{pane_id}/cancel` | device | `CancelRequest` | `200 CommandResponse` |
 | `POST /v1/agents/{pane_id}/prompt` | device | `PromptRequest` | `200 CommandResponse` |
 | `POST /v1/agents/{pane_id}/answer` | device | `AnswerRequest` | `200 CommandResponse` |
 | `POST /v1/agents/{pane_id}/cancel` | device | `CancelRequest` | `200 CommandResponse` |
 | `POST /v1/push/register` | device | `PushRegisterRequest` | `200 CommandResponse` |
 | `GET /v1/healthz` | none | — | `200 {"ok":true}` |
 
+**Commands name the host.** A client that has `host` on the agent uses the `/v1/hosts/{host}/…` paths. The older `/v1/agents/{pane_id}/…` paths stay for clients that predate hosts: the relay sends the command to the one host whose agents include `pane_id`, and answers `409 host_required` when several do (`unknown_pane` when none does).
+
 `GET /v1/history` parameters:
-- `pane_id` is optional. Without it, the response mixes all panes.
+- `host` and `pane_id` are optional. Without `pane_id`, the response mixes all panes (of `host`, when given). `pane_id` without `host` matches that pane on every host.
 - `limit` defaults to 20, maximum 200. A missing, invalid or ≤ 0 value means 20.
 - Items are sorted newest first.
 
-**History retention** (`pkg/relay/store.go`): the relay keeps at most 20 items per pane and 200 in total (the oldest go first), and, each time a history item arrives, drops every pane whose newest item is older than 7 days. So a request with `pane_id` never returns more than 20.
+**History retention** (`pkg/relay/store.go`): the relay keeps at most 20 items per pane (per `(host, pane_id)`) and 200 in total (the oldest go first), and, each time a history item arrives, drops every pane whose newest item is older than 7 days. So a request with `pane_id` never returns more than 20.
 
 **Pairing limits** (`pkg/relay/auth.go`): a code lives 5 minutes and works once; at most 3 codes are active (a new one evicts the oldest). `POST /v1/pair` allows 5 attempts per client IP and 20 in total per 10 minutes, and counts every attempt it lets through, successful ones included; past that it answers `429 rate_limited`.
 
@@ -260,10 +289,11 @@ type PairCodeResponse struct {
     ExpiresAt string `json:"expires_at"` // now + 5 minutes
 }
 type HostStatusResponse struct {
-    HostOnline  bool `json:"host_online"`
-    HerdrOnline bool `json:"herdr_online"`
-    Devices     int  `json:"devices"`
-    Agents      int  `json:"agents"`
+    Host        string `json:"host,omitempty"` // the calling host's id (§1.6)
+    HostOnline  bool   `json:"host_online"`    // the calling host
+    HerdrOnline bool   `json:"herdr_online"`   // the calling host
+    Devices     int    `json:"devices"`        // every paired device (devices are not per host)
+    Agents      int    `json:"agents"`         // the calling host's agents
 }
 type HistoryResponse struct {
     Items []HistoryItem `json:"items"`
@@ -323,11 +353,23 @@ Every 15 s the relay writes the comment line `:` followed by a blank line, as a 
 
 | `event:` | `data:` (one JSON line) | When |
 |---|---|---|
-| `snapshot` | `AgentsSnapshot` | Immediately on connect, and after the host reconnects |
+| `snapshot` | `AgentsSnapshot` | Immediately on connect; after any host sends its snapshot (on every bridge (re)connect); after a host is revoked |
 | `agent` | `AgentState` | An agent was added or changed |
-| `agent_removed` | `{"pane_id": "..."}` | A pane closed or lost its agent |
-| `host` | `{"host_online": bool, "herdr_online": bool}` | Either flag changed |
+| `agent_removed` | `AgentRemovedEvent`: `{"host": "...", "pane_id": "..."}` | A pane closed or lost its agent. `host` is omitted by a relay that predates hosts |
+| `host` | `HostEvent`: `{"host_online": bool, "herdr_online": bool, "hosts": [HostInfo]}` | A host connected or disconnected, or its herdr flag changed. The two flags are the aggregates of §1.5; `hosts` is the full list, as in the snapshot |
 | `history` | `HistoryItem` | A new history item was stored (never for a resent duplicate, same `id`) |
+
+```go
+type AgentRemovedEvent struct {
+    Host   string `json:"host,omitempty"`
+    PaneID string `json:"pane_id"`
+}
+type HostEvent struct {
+    HostOnline  bool       `json:"host_online"`
+    HerdrOnline bool       `json:"herdr_online"`
+    Hosts       []HostInfo `json:"hosts,omitempty"`
+}
+```
 
 **Client rules:**
 - On any disconnect, reconnect with backoff (1 s, 2 s, 4 s … max 30 s) and **replace** local state with the next `snapshot`.
@@ -341,7 +383,8 @@ Every non-200 response of the endpoints in §2.1 carries an `ErrorResponse`. A p
 |---|---|---|
 | `invalid_request` | 400 | Malformed body or bad parameter |
 | `unauthorized` | 401 | Missing or unknown token |
-| `unknown_pane` | 404 | Pane is not in the relay's list; or herdr's list no longer has it, or it has no agent (bridge) |
+| `unknown_pane` | 404 | Pane is not in the relay's list (for that host, or an unknown host); or herdr's list no longer has it, or it has no agent (bridge) |
+| `host_required` | 409 | A command on `/v1/agents/{pane_id}/…` for a `pane_id` that several hosts have: use `/v1/hosts/{host}/agents/{pane_id}/…` |
 | `stale_state` | 409 | `expected_seq` no longer matches; also `answer`/`cancel` to an agent that is not `blocked`, or a repeated command |
 | `prompt_changed` | 409 | Fingerprint mismatch; the menu is no longer on the screen; a cancel without `fingerprint` for which the bridge published no prompt; or, for OpenCode, the focus on the host is not on the button the keys assume (the `message` says to answer on the Mac; nothing was pressed) |
 | `agent_busy` | 409 | Prompt sent while `working` to an agent that cannot queue |
@@ -350,7 +393,7 @@ Every non-200 response of the endpoints in §2.1 carries an `ErrorResponse`. A p
 | `unknown_option` | 409 | `option_id` is not in the current prompt |
 | `pair_code_invalid` | 403 | Wrong or expired code |
 | `rate_limited` | 429 | Too many attempts |
-| `host_offline` | 503 | Bridge not connected, or it disconnected (or was replaced) before answering a command |
+| `host_offline` | 503 | The agent's host is not connected, or its bridge disconnected (or was replaced) before answering a command |
 | `herdr_offline` | 503 | Bridge connected, herdr unreachable |
 | `timeout` | 504 | The relay's 7 s budget ran out (one budget for sending the command and waiting for `command_result`), or the bridge's own 6 s budget did (e.g. waiting behind another command on the same pane). Timeouts nest from the inside out, bridge 6 s < relay 7 s < watch 8 s, so a `timeout` means the bridge has already given up |
 | `internal` | 500 | Bug, or herdr failed `agent.prompt` / `agent.send_keys` for an unclassified reason (the text or keys may have reached the pane) |
@@ -369,7 +412,10 @@ URL: `wss://relay.<domain>/v1/host`, with the header `Authorization: Bearer <hos
 
 - Every frame is one JSON text message with a `type` field.
 - To decode, first unmarshal into `struct{ Type string \`json:"type"\` }`, then unmarshal again into the concrete type.
-- **Only one host may be connected.** A second connection replaces the first: the relay closes the old one with status 4000 `replaced`.
+- **One connection per host.** The relay knows which host (§1.6) a connection is from by its host token (§5), never by what the bridge sends (`hello.host` is only logged).
+  - A second connection with the same host's token replaces the first: the relay closes the old one with status 4000 `replaced`. Connections of different hosts coexist.
+  - A host revoked on the relay (`hosts revoke`, §5) is closed with status 1008; its token then gets `401`.
+- **The relay stamps the host's id** (`host`, §1.2, §1.4) on every agent and history item the connection sends. The bridge leaves it empty, and the wire messages below carry no host.
 
 ```go
 type HelloMsg struct {
@@ -442,9 +488,9 @@ On a `resync` the bridge sends `hello` and `snapshot` again (the current relay n
 
 **Keepalive:** both sides send a WebSocket ping every 30 s and expect the pong within 10 s.
 - **Bridge:** no pong → it reconnects.
-- **Relay:** no pong → it drops the host: closes the socket, broadcasts `host` with `host_online=false`, and fails the host's in-flight commands with `host_offline`.
+- **Relay:** no pong → it drops the host: closes the socket, broadcasts `host` with that host offline, and fails the host's in-flight commands with `host_offline`.
 
-**In-flight commands** fail with `host_offline` as soon as their host disconnects, is dropped, or is replaced by a new connection, without waiting for the command budget (§2.4).
+**In-flight commands** fail with `host_offline` as soon as their host disconnects, is dropped, is revoked, or is replaced by a new connection, without waiting for the command budget (§2.4).
 
 **Reconnect backoff** (bridge side): 1 s, 2 s, 4 s … up to 60 s, each ±20 % jitter. The backoff resets after 60 s of healthy connection. A host token the relay rejects (401/403) waits the maximum backoff (60 s, same jitter) before the next try.
 
@@ -460,9 +506,11 @@ All values are strings (FCM data maps allow only strings). No `notification` blo
 |---|---|---|
 | `event` | `blocked` | `blocked` \| `done` \| `digest` (and `resolved`, below) |
 | `pane_id` | `w5:pAE` | Empty for `digest` |
+| `host` | `main` | The agent's host id (§1.6). Empty for `digest`; absent from a relay that predates hosts. The app keys the notification by `(host, pane_id)` |
+| `host_name` | `Mac` | The host's name. Empty for `digest`. `title` already carries it when more than one host is registered |
 | `agent` | `claude` | |
 | `label` | `my-app` | |
-| `title` | `my-app needs approval` | Ready to display |
+| `title` | `my-app needs approval` | Ready to display. With more than one host registered it starts with the host's name: `Mac · my-app needs approval` |
 | `body` | `Bash command: go test ./...` | ≤ 240 chars. For `blocked`: `<title>: <detail>` (the title alone without a detail), or a fixed invitation to open the app for an `unknown` prompt. For `done`: the agent's reply as one line (markdown markers dropped; a markdown table becomes one line per row, `first cell: other cells · …`, without its header); a longer reply is its first line (≤ 110 chars), ` … ` and its end (`replyPreview`, `pkg/push/push.go`); or `Task finished` when no reply arrived in time (§4.3) |
 | `state_change_seq` | `334` | Decimal string, always a number (`0` for `digest`) |
 | `fingerprint` | `fd6ff7388739252d` | Empty except for `blocked` |
@@ -475,21 +523,22 @@ All values are strings (FCM data maps allow only strings). No `notification` blo
 
 > ⚠️ **Disabled by default.** The relay sends `resolved` only when the FCM sender's `EnableResolved` is set (`AW_PUSH_RESOLVED`, §5). Enable it **only once every installed watch app handles `resolved`**: older apps show an unknown event as an approval on the pane's notification id, which replaces a real approval with a bogus one. Whether it is on: `docs/STATUS.md`.
 
-It carries **only** these three keys, and never a notification block:
+It carries **only** these keys (`host` since hosts), and never a notification block:
 
 ```json
 {"message":{"token":"<device fcm token>",
-            "data":{"event":"resolved","pane_id":"w5:pAE","state_change_seq":"335"},
+            "data":{"event":"resolved","host":"main","pane_id":"w5:pAE","state_change_seq":"335"},
             "android":{"priority":"normal","ttl":"600s"}}}
 ```
 
 | Key | Example | Notes |
 |---|---|---|
 | `event` | `resolved` | |
+| `host` | `main` | The pane's host (absent from a relay that predates hosts) |
 | `pane_id` | `w5:pAE` | The pane whose `blocked` notification the app removes |
 | `state_change_seq` | `335` | Seq of the update that left `blocked`, so greater than the `blocked` push's seq |
 
-- FCM does not guarantee delivery order. The app ignores a `blocked` for a pane whose `state_change_seq` is ≤ the last `resolved` seq it got for that pane.
+- FCM does not guarantee delivery order. The app ignores a `blocked` for a pane whose `state_change_seq` is ≤ the last `resolved` seq it got for that `(host, pane_id)`.
 - Apps must ignore an `event` value they do not know, like unknown JSON fields.
 
 FCM message options:
@@ -531,7 +580,8 @@ ntfy never gets `resolved`: it cannot withdraw a notification it already deliver
   - A pane that leaves `blocked` through a `snapshot` gets its `resolved` with its next `agent_update`.
   - A pane removed while blocked (`agent_removed`, or missing from a `snapshot`) gets none; its notification stays until dismissed.
 
-- **Held back while the owner is at the host** (`AW_PUSH_PRESENCE_IDLE`, §5): while the host's last `host_presence` (§3) is under 45 s old, its screen is unlocked and its last input is under that threshold, `blocked` and `done` pushes are not sent. When presence ends (the threshold passes, the screen locks, or no report for 45 s), each pane whose `blocked` push was held back and that the relay still shows `blocked` gets one, built from its current state, through the debounce, window and digest below. A held-back `done` is not sent later. A host that disconnects ends presence without a catch-up; what was held back waits for its next report (a reconnected bridge reports right after its snapshot). A relay restart forgets it. A push already held in a window, or a `done` waiting for its reply, still goes out when its wait ends, whatever the presence is then. A host that never reports ("Only Notify When Away" off, Linux, an older bridge) is never held back.
+- **Held back while the owner is at a host** (`AW_PUSH_PRESENCE_IDLE`, §5): presence is one state for the whole relay (the owner's decision), taken from the last `host_presence` (§3) any host sent. While that report is under 45 s old, its screen is unlocked and its last input is under that threshold, no host's `blocked` and `done` pushes are sent. When presence ends (the threshold passes, the screen locks, or no report for 45 s), each pane whose `blocked` push was held back and that the relay still shows `blocked` gets one, built from its current state, through the debounce, window and digest below. A held-back `done` is not sent later. When the host that sent the last report disconnects, presence ends without a catch-up; what was held back waits for the next report (a reconnected bridge reports right after its snapshot). Another host disconnecting changes nothing. A relay restart forgets it. A push already held in a window, or a `done` waiting for its reply, still goes out when its wait ends, whatever the presence is then. While no host reports ("Only Notify When Away" off, Linux hosts, an older bridge), nothing is held back.
+- **Per agent:** every rule in this section (transitions, `resolved`, the reply wait, the debounce, no duplicates, the window's one push per agent) applies per `(host, pane_id)`. The digest and the window are relay-wide.
 - **Turns that end while the pane stays `working`** (background agents still running, §1.2) push nothing: their reply reaches the watch as a `history_item`, and the agent shows as done with its count. The `done` push comes once herdr reports `working` → `done`, after the last background agent's report turn, with that turn's reply. Why: a coordinator gets one report turn per finished agent, and a push for each would be noise.
 - **`done` waits for the reply:** the bridge sends the turn's `history_item` right after the transition. The relay holds the `done` push up to 3 s for that pane's next new history item and uses its response as the body; when none arrives, it pushes with `Task finished`. The debounce and the window below apply when it goes out.
 - **Debounce** (the same pane pushed the same event less than 5 s ago):
@@ -558,7 +608,9 @@ The relay reads them from `/etc/agent-watch-relay/env` (systemd `EnvironmentFile
 | Variable | Required | Default | Meaning |
 |---|---|---|---|
 | `AW_LISTEN` | no | `:8080` | Listen address. Bind it to the address the reverse proxy reaches, never to a public interface (the value per proxy topology: `deploy/relay/README.md`) |
-| `AW_HOST_TOKEN` | **yes** | — | 64 hex chars; the same value goes in the bridge config |
+| `AW_HOST_TOKEN` | **until a host is registered** | — | 64 hex chars; the same value goes in the config of the bridge of host `AW_HOST_ID`. Optional once `store.json` holds a host (`hosts add`, below); with neither, the relay refuses to start |
+| `AW_HOST_ID` | no | `main` | The id (§1.6) of `AW_HOST_TOKEN`'s host, which is not in `store.json`; also the host of the history a version 1 `store.json` held. A registered host with the same id stops startup |
+| `AW_HOST_NAME` | no | `AW_HOST_ID` | The name clients show for that host (§1.6): at most 64 characters, no control characters |
 | `AW_DATA_DIR` | no | `/var/lib/agent-watch-relay` | Holds `store.json`, `relay.lock` and `admin.sock` (see below) |
 | `AW_FCM_CREDENTIALS` | no | — | Path to the Firebase service-account JSON. FCM is disabled if unset |
 | `AW_NTFY_URL` | no | — | e.g. `https://ntfy.sh`. ntfy is disabled if unset |
@@ -584,16 +636,19 @@ The relay reads them from `/etc/agent-watch-relay/env` (systemd `EnvironmentFile
 
 | File | Meaning |
 |---|---|
-| `store.json` | Devices (device-token hashes only, plus each device's FCM push token) and history. `0600`, owned by the service user |
+| `store.json` | Hosts (id, name, token hash, created and last-seen times), devices (device-token hashes only, plus each device's FCM push token) and history (per host and pane, keyed `<host>/<pane_id>`). `0600`, owned by the service user. **Version 2.** A version 1 file (a relay before hosts) is migrated when the relay or the CLI opens it, its history going to `AW_HOST_ID`; a newer version, or a malformed host or history key, stops startup |
 | `relay.lock` | Exclusive `flock` held by the running relay for its whole life. A second relay on the same directory refuses to start |
 | `admin.sock` | Local admin API, a `0600` Unix socket that exists only while the relay runs. Never exposed over TCP |
 
-**Admin API on `admin.sock`** (`pkg/relay/admin.go`; used by `agent-watch-relay devices`, whose behaviour is in `deploy/relay/README.md` § Devices):
+**Admin API on `admin.sock`** (`pkg/relay/admin.go`; used by `agent-watch-relay devices` and `agent-watch-relay hosts`, whose behaviour is in `deploy/relay/README.md` § Devices and § Hosts):
 
 | Request | Response |
 |---|---|
 | `GET /devices` | `200`, a JSON array of `{"id", "name", "created_at", "last_seen"}`: never the token hash or the push token |
 | `DELETE /devices/{id}` | `204`; `404 {"error": "…"}` for an unknown id; `500 {"error": "…"}` when the store cannot be saved |
+| `GET /hosts` | `200`, a JSON array of `{"id", "name", "created_at", "last_seen", "online", "env"}`, never a token or its hash. `env: true` marks `AW_HOST_TOKEN`'s host (no times); `last_seen` is its last connect or disconnect |
+| `POST /hosts` with `{"id", "name", "token_hash"}` | `201` with the host as in `GET /hosts`; `400 {"error": "…"}` for a bad id (§1.6), name (as `AW_HOST_NAME`) or an empty hash; `409 {"error": "…"}` for an id already registered or equal to `AW_HOST_ID`. The CLI generates the token (32 random bytes, hex) and sends only its `sha256` |
+| `DELETE /hosts/{id}` | `204`: the token is rejected from then on, the host's connection is closed (1008, §3), its agents leave the snapshot; its history stays until it ages out. `404` for an unknown id, `409` for `AW_HOST_ID`, `500` when the store cannot be saved |
 
 ---
 
@@ -697,10 +752,10 @@ One file at the repo root holds everything a deployment needs. `agent-watch.env.
 | Key | Read by | Meaning |
 |---|---|---|
 | `AW_RELAY_DOMAIN` | bridge `configure --env-file`, Wear OS build, `make watchos-config` | Relay host (`host[:port]`, no scheme or path). Derived: `wss://<domain>/v1/host` (bridge), `https://<domain>` (watch pairing default) |
-| `AW_HOST_TOKEN` | bridge `configure --env-file`, `deploy.sh --sync-env` | 64 hex chars shared by the relay (§5) and the bridge (§6). `make config` fills it when empty and never prints it |
+| `AW_HOST_TOKEN` | bridge `configure --env-file`, `deploy.sh --sync-env` | 64 hex chars shared by the relay (§5) and the bridge (§6). `make config` fills it when empty and never prints it. On a machine whose host was registered with `hosts add`, it holds that host's token |
 | `AW_RELAY_SSH` | `make deploy-relay` / `deploy.sh` without a target | SSH target of the VPS (root) |
 | `AW_RELAY_SSH_OPTS` | same | Extra `ssh`/`scp` options, word-split (`-i <key> -o Port=<n>`). `SSH_OPTS` in the environment overrides it |
-| `AW_LISTEN`, `AW_TRUSTED_PROXIES`, `AW_CLIENT_IP_HEADER`, `AW_PUSH_RESOLVED`, `AW_PUSH_PRESENCE_IDLE`, `AW_FCM_CREDENTIALS`, `AW_NTFY_URL`, `AW_NTFY_TOPIC`, `AW_NTFY_TOKEN` | `deploy.sh --sync-env` only | Relay variables (§5). Commented out in the example; `AW_FCM_CREDENTIALS` is a path **on the server** |
+| `AW_HOST_ID`, `AW_HOST_NAME`, `AW_LISTEN`, `AW_TRUSTED_PROXIES`, `AW_CLIENT_IP_HEADER`, `AW_PUSH_RESOLVED`, `AW_PUSH_PRESENCE_IDLE`, `AW_FCM_CREDENTIALS`, `AW_NTFY_URL`, `AW_NTFY_TOPIC`, `AW_NTFY_TOKEN` | `deploy.sh --sync-env` only | Relay variables (§5). Commented out in the example; `AW_FCM_CREDENTIALS` is a path **on the server** |
 | `AW_WATCHOS_BUNDLE_ID` | `make watchos-config` | Bundle id for the Phase 6 watchOS project. Empty: the project's own |
 
 How `deploy.sh --sync-env` copies the relay keys to the server: `deploy/relay/README.md` § `--sync-env`.

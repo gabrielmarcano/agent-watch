@@ -10,6 +10,7 @@ import androidx.core.app.RemoteInput
 import com.gabriel.agentwatch.R
 import com.gabriel.agentwatch.approval.FeedbackSurface
 import com.gabriel.agentwatch.approval.commandErrorFeedback
+import com.gabriel.agentwatch.model.AgentKey
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -37,11 +38,12 @@ class NotificationActionReceiver : BroadcastReceiver() {
 
     override fun onReceive(context: Context, intent: Intent) {
         val action = intent.action ?: return
-        val paneId = intent.getStringExtra("pane_id") ?: return
+        // A notification posted before hosts has no host: the relay's old path then finds the pane (contracts §2.1).
+        val agent = NotificationIntents.agentOf(intent) ?: return
         val expectedSeq = intent.getLongExtra("state_change_seq", 0L)
-        val notifId = intent.getIntExtra("notif_id", AgentNotifications.idForPane(paneId))
+        val notifId = intent.getIntExtra("notif_id", AgentNotifications.idFor(agent))
 
-        Log.d(TAG, "Notification action $action for pane $paneId (seq $expectedSeq)")
+        Log.d(TAG, "Notification action $action for host ${agent.host} pane ${agent.paneId} (seq $expectedSeq)")
 
         val notifManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         NotificationChannels.ensure(context)
@@ -52,7 +54,7 @@ class NotificationActionReceiver : BroadcastReceiver() {
         if (client == null) {
             Log.w(TAG, "Not paired; cannot perform action")
             val message = commandErrorFeedback(RelayError("not_paired", "Client not configured", 0), FeedbackSurface.NOTIFICATION).message
-            showFeedback(context, notifManager, notifId, paneId, message, isSuccess = false)
+            showFeedback(context, notifManager, notifId, agent, message, isSuccess = false)
             return
         }
 
@@ -64,7 +66,7 @@ class NotificationActionReceiver : BroadcastReceiver() {
         if (isBlankReply(action, replyText)) {
             // Never a silent drop: the reply's notification says nothing was sent. Keys only, never text.
             Log.d(TAG, "Reply without text; extras keys=${intent.extras?.keySet()} clipData=${intent.clipData != null}")
-            showFeedback(context, notifManager, notifId, paneId, context.getString(R.string.reply_empty), isSuccess = false)
+            showFeedback(context, notifManager, notifId, agent, context.getString(R.string.reply_empty), isSuccess = false)
             return
         }
 
@@ -79,37 +81,37 @@ class NotificationActionReceiver : BroadcastReceiver() {
                         ACTION_ANSWER -> {
                             val optionId = intent.getStringExtra("option_id") ?: ""
                             val fingerprint = intent.getStringExtra("fingerprint") ?: ""
-                            client.answer(paneId, optionId, expectedSeq, fingerprint)
+                            client.answer(agent, optionId, expectedSeq, fingerprint)
                         }
                         ACTION_CANCEL -> {
                             // The push's fingerprint, when present: the bridge refuses the cancel if the menu changed.
                             val fingerprint = intent.getStringExtra("fingerprint")?.takeIf { it.isNotBlank() }
-                            client.cancel(paneId, expectedSeq, fingerprint)
+                            client.cancel(agent, expectedSeq, fingerprint)
                         }
-                        ACTION_PROMPT -> client.prompt(paneId, replyText!!, expectedSeq)
+                        ACTION_PROMPT -> client.prompt(agent, replyText!!, expectedSeq)
                         else -> null
                     }
                 } ?: return@launch
                 result.fold(
                     onSuccess = {
-                        showFeedback(context, notifManager, notifId, paneId, actionSuccessTitle(action, isDeny, isChoice), isSuccess = true)
+                        showFeedback(context, notifManager, notifId, agent, actionSuccessTitle(action, isDeny, isChoice), isSuccess = true)
                     },
                     onFailure = { error ->
                         // Same mapping as the app screen (contracts §2.4), worded for a notification.
                         val message = commandErrorFeedback(error, FeedbackSurface.NOTIFICATION).message
-                        showFeedback(context, notifManager, notifId, paneId, message, isSuccess = false)
+                        showFeedback(context, notifManager, notifId, agent, message, isSuccess = false)
                     }
                 )
             } catch (e: TimeoutCancellationException) {
                 // Our own safety net fired: "Relay timed out" (the command may still have run).
                 val message = commandErrorFeedback(e, FeedbackSurface.NOTIFICATION).message
-                showFeedback(context, notifManager, notifId, paneId, message, isSuccess = false)
+                showFeedback(context, notifManager, notifId, agent, message, isSuccess = false)
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
                 Log.e(TAG, "Notification action failed: ${e.javaClass.simpleName}")
                 val message = commandErrorFeedback(e, FeedbackSurface.NOTIFICATION).message
-                showFeedback(context, notifManager, notifId, paneId, message, isSuccess = false)
+                showFeedback(context, notifManager, notifId, agent, message, isSuccess = false)
             } finally {
                 pendingResult.finish()
             }
@@ -125,11 +127,11 @@ class NotificationActionReceiver : BroadcastReceiver() {
         context: Context,
         manager: NotificationManager,
         notifId: Int,
-        paneId: String,
+        agent: AgentKey,
         message: String,
         isSuccess: Boolean
     ) {
-        val openPending = NotificationIntents.openApp(context, paneId)
+        val openPending = NotificationIntents.openApp(context, agent)
 
         val builder = NotificationCompat.Builder(context, NotificationChannels.FEEDBACK)
             .setSmallIcon(R.drawable.ic_agent)
@@ -139,7 +141,7 @@ class NotificationActionReceiver : BroadcastReceiver() {
             .setContentIntent(openPending)
             .setSilent(true)
             .setOnlyAlertOnce(true)
-            .addExtras(NotificationIntents.tag(AgentNotifications.KIND_FEEDBACK, paneId))
+            .addExtras(NotificationIntents.tag(AgentNotifications.KIND_FEEDBACK, agent))
 
         if (isSuccess) {
             builder.setTimeoutAfter(SUCCESS_FEEDBACK_MS)

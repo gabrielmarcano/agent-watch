@@ -21,6 +21,7 @@ class ContractsTest {
 
         assertNotNull(state)
         assertEquals("w5:pAE", state.pane_id)
+        assertEquals("main", state.host)
         assertEquals("claude", state.agent)
         assertEquals("my-app", state.label)
         assertEquals("my-app", state.name)
@@ -57,6 +58,28 @@ class ContractsTest {
         assertEquals("opt-3", opt3.id)
         assertEquals("No, and tell Claude what to do differently", opt3.label)
         assertEquals("deny", opt3.role)
+    }
+
+    @Test
+    fun hostsParse() {
+        // contracts §1.5, §1.6, §2.3: hosts in the snapshot and the host event, host on agent_removed.
+        val snap = Gson().fromJson(
+            """{"host_online":true,"herdr_online":false,"hosts":[{"id":"main","name":"Mac","online":true,"herdr_online":true},{"id":"box","name":"box","online":true,"herdr_online":false}],"agents":[],"generated_at":"t"}""",
+            AgentsSnapshot::class.java
+        )
+        assertEquals(listOf("main", "box"), snap.hosts.map { it.id })
+        assertEquals("Mac", snap.hosts[0].name)
+        assertFalse(snap.hosts[1].herdr_online)
+        val event = Gson().fromJson("""{"host_online":false,"herdr_online":false,"hosts":[{"id":"main","name":"Mac","online":false,"herdr_online":false}]}""", HostEvent::class.java)
+        assertFalse(event.hosts[0].online)
+        assertEquals("box", Gson().fromJson("""{"host":"box","pane_id":"w1:p1"}""", PaneRef::class.java).host)
+    }
+
+    @Test
+    fun hostsAbsentFromAnOlderRelay() {
+        val snap = Gson().fromJson("""{"host_online":true,"herdr_online":true,"agents":[],"generated_at":"t"}""", AgentsSnapshot::class.java)
+        assertTrue(snap.hosts.isEmpty())
+        assertEquals("", Gson().fromJson("""{"pane_id":"w1:p1"}""", PaneRef::class.java).host)
     }
 
     @Test

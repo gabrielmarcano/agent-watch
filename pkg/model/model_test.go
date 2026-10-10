@@ -16,6 +16,7 @@ import (
 func TestGoldenAgentState(t *testing.T) {
 	state := model.AgentState{
 		PaneID:         "w5:pAE",
+		Host:           "main",
 		Agent:          "claude",
 		Label:          "my-app",
 		Name:           "my-app",
@@ -340,6 +341,7 @@ func TestErrorCodeHTTPStatus(t *testing.T) {
 		{model.ErrAgentBlocked, http.StatusConflict},
 		{model.ErrAgentStateUnknown, http.StatusConflict},
 		{model.ErrUnknownOption, http.StatusConflict},
+		{model.ErrHostRequired, http.StatusConflict},
 		{model.ErrRateLimited, http.StatusTooManyRequests},
 		{model.ErrHostOffline, http.StatusServiceUnavailable},
 		{model.ErrHerdrOffline, http.StatusServiceUnavailable},
@@ -360,5 +362,38 @@ func TestMaxResponseBytesKeepsRealReplies(t *testing.T) {
 	reply := strings.Repeat("a", 21*1024)
 	if got := model.TruncateUTF8(reply, model.MaxResponseBytes); got != reply {
 		t.Errorf("a 21 KB reply was cut to %d bytes", len(got))
+	}
+}
+
+// contracts.md §1.5, §1.6, §2.3: the host fields' JSON shapes. A relay that
+// predates hosts omits them; the bridge never sets host.
+func TestHostShapes(t *testing.T) {
+	cases := []struct {
+		name string
+		v    any
+		want string
+	}{
+		{"snapshot with hosts", model.AgentsSnapshot{
+			HostOnline: true, HerdrOnline: true,
+			Hosts:  []model.HostInfo{{ID: "main", Name: "Mac", Online: true, HerdrOnline: true}},
+			Agents: []model.AgentState{}, GeneratedAt: "2026-10-10T00:00:00Z",
+		}, `{"host_online":true,"herdr_online":true,"hosts":[{"id":"main","name":"Mac","online":true,"herdr_online":true}],"agents":[],"generated_at":"2026-10-10T00:00:00Z"}`},
+		{"snapshot without hosts", model.AgentsSnapshot{Agents: []model.AgentState{}},
+			`{"host_online":false,"herdr_online":false,"agents":[],"generated_at":""}`},
+		{"agent removed", model.AgentRemovedEvent{Host: "main", PaneID: "w1:p1"}, `{"host":"main","pane_id":"w1:p1"}`},
+		{"agent removed, no host", model.AgentRemovedEvent{PaneID: "w1:p1"}, `{"pane_id":"w1:p1"}`},
+		{"host event", model.HostEvent{HostOnline: true, Hosts: []model.HostInfo{{ID: "box", Name: "box"}}},
+			`{"host_online":true,"herdr_online":false,"hosts":[{"id":"box","name":"box","online":false,"herdr_online":false}]}`},
+		{"history item", model.HistoryItem{ID: "x", PaneID: "w1:p1", Host: "main", Agent: "claude", Label: "l", Response: "r", Source: "screen", CompletedAt: "t"},
+			`{"id":"x","pane_id":"w1:p1","host":"main","agent":"claude","label":"l","response":"r","source":"screen","completed_at":"t"}`},
+	}
+	for _, c := range cases {
+		got, err := json.Marshal(c.v)
+		if err != nil {
+			t.Fatalf("%s: %v", c.name, err)
+		}
+		if string(got) != c.want {
+			t.Errorf("%s:\n got %s\nwant %s", c.name, got, c.want)
+		}
 	}
 }
