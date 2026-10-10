@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -387,13 +388,152 @@ func TestCLI_DevicesListAndRevoke(t *testing.T) {
 }
 
 func TestCLI_ServeConfigValidation(t *testing.T) {
-	// Missing AW_HOST_TOKEN should fail runServe
+	// Without AW_HOST_TOKEN and without a registered host, serve fails.
+	t.Setenv("AW_DATA_DIR", shortTempDir(t))
 	t.Setenv("AW_HOST_TOKEN", "")
+	t.Setenv("AW_LISTEN", freeListenAddr(t))
 	var stdout, stderr bytes.Buffer
 	err := run(context.Background(), []string{"serve"}, &stdout, &stderr)
-	if err == nil {
-		t.Fatalf("expected error running serve without AW_HOST_TOKEN, got nil")
+	if err == nil || !strings.Contains(err.Error(), "AW_HOST_TOKEN is required") {
+		t.Fatalf("serve without AW_HOST_TOKEN or hosts = %v, want AW_HOST_TOKEN is required", err)
 	}
+
+	t.Setenv("AW_HOST_ID", "Not Valid")
+	t.Setenv("AW_HOST_TOKEN", testHostToken)
+	if err := run(context.Background(), []string{"serve"}, &stdout, &stderr); err == nil || !strings.Contains(err.Error(), "AW_HOST_ID") {
+		t.Fatalf("serve with an invalid AW_HOST_ID = %v", err)
+	}
+}
+
+// hostsCmd runs `agent-watch-relay hosts …` and returns stdout and stderr.
+func hostsCmd(t *testing.T, args ...string) (string, string, error) {
+	t.Helper()
+	var stdout, stderr bytes.Buffer
+	err := run(context.Background(), append([]string{"hosts"}, args...), &stdout, &stderr)
+	return stdout.String(), stderr.String(), err
+}
+
+// dialHost opens /v1/host with token and returns the connection, or the
+// handshake's HTTP status.
+func dialHost(t *testing.T, ctx context.Context, base, token string) (*websocket.Conn, int) {
+	t.Helper()
+	conn, resp, err := websocket.Dial(ctx, strings.Replace(base, "http://", "ws://", 1)+"/v1/host", &websocket.DialOptions{
+		HTTPHeader: http.Header{"Authorization": []string{"Bearer " + token}},
+	})
+	if err != nil {
+		if resp == nil {
+			t.Fatalf("dial host: %v", err)
+		}
+		return nil, resp.StatusCode
+	}
+	t.Cleanup(func() { _ = conn.CloseNow() })
+	return conn, http.StatusSwitchingProtocols
+}
+
+// Hosts are managed with the relay stopped (store.json under the lock) and
+// running (admin socket): a new token works at once, a revoked one is
+// rejected and its connection closed, and the AW_HOST_TOKEN host is listed
+// but managed in the environment.
+func TestCLI_Hosts(t *testing.T) {
+	dir := shortTempDir(t)
+	t.Setenv("AW_DATA_DIR", dir)
+	t.Setenv("AW_HOST_TOKEN", "")
+	t.Setenv("AW_FCM_CREDENTIALS", "")
+	t.Setenv("AW_NTFY_URL", "")
+	t.Setenv("AW_NTFY_TOPIC", "")
+
+	// Relay stopped: add a host, so the relay can start without AW_HOST_TOKEN.
+	out, msg, err := hostsCmd(t, "add", "linux-1", "--name", "Build box")
+	if err != nil {
+		t.Fatalf("hosts add: %v", err)
+	}
+	linuxToken := strings.TrimSpace(out)
+	if len(linuxToken) != 64 || !strings.Contains(msg, "relay not running") || strings.Contains(msg, linuxToken) {
+		t.Fatalf("hosts add: stdout %q, stderr %q; want the token alone on stdout", out, msg)
+	}
+	if _, _, err := hostsCmd(t, "add", "linux-1"); err == nil || !strings.Contains(err.Error(), "already exists") {
+		t.Fatalf("hosts add of an existing id = %v", err)
+	}
+	if _, _, err := hostsCmd(t, "add", "Bad_ID"); err == nil {
+		t.Fatal("hosts add accepted an invalid id")
+	}
+	if data, _ := os.ReadFile(filepath.Join(dir, "store.json")); bytes.Contains(data, []byte(linuxToken)) {
+		t.Fatal("store.json holds the raw host token")
+	}
+
+	t.Setenv("AW_HOST_TOKEN", testHostToken)
+	t.Setenv("AW_HOST_NAME", "Mac")
+	base, _ := startRelay(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	linux, status := dialHost(t, ctx, base, linuxToken)
+	if linux == nil {
+		t.Fatalf("handshake with the added host's token = %d, want 101", status)
+	}
+	hello := `{"type":"hello","version":"test","host":"build","herdr_online":true}`
+	if err := linux.Write(ctx, websocket.MessageText, []byte(hello)); err != nil {
+		t.Fatalf("hello: %v", err)
+	}
+
+	// Relay running: add through the admin socket; the token works at once.
+	out, msg, err = hostsCmd(t, "add", "pi")
+	if err != nil || !strings.Contains(msg, "by the running relay") {
+		t.Fatalf("hosts add while running = %v, %q", err, msg)
+	}
+	if conn, status := dialHost(t, ctx, base, strings.TrimSpace(out)); conn == nil {
+		t.Fatalf("handshake with a token added while running = %d, want 101", status)
+	}
+	if _, _, err := hostsCmd(t, "add", "main"); err == nil || !strings.Contains(err.Error(), "AW_HOST_TOKEN") {
+		t.Fatalf("hosts add main (the AW_HOST_TOKEN host) = %v", err)
+	}
+
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		out, _, err = hostsCmd(t, "list")
+		if err != nil {
+			t.Fatalf("hosts list: %v", err)
+		}
+		if strings.Contains(out, "linux-1") && regexpLine(out, `linux-1\s+Build box\s+yes`) {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("hosts list never showed linux-1 online:\n%s", out)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if !regexpLine(out, `main\s+Mac\s+no\s+\(AW_HOST_TOKEN\)`) || !strings.Contains(out, "pi") {
+		t.Fatalf("hosts list =\n%s", out)
+	}
+
+	// Revoke while running: the connection closes, the token is refused.
+	out, _, err = hostsCmd(t, "revoke", "linux-1")
+	if err != nil || !strings.Contains(out, "connection was closed") {
+		t.Fatalf("hosts revoke = %v, %q", err, out)
+	}
+	if _, _, err := linux.Read(ctx); websocket.CloseStatus(err) != websocket.StatusPolicyViolation {
+		t.Fatalf("revoked host's connection: %v, want closed with 1008", err)
+	}
+	if _, status := dialHost(t, ctx, base, linuxToken); status != http.StatusUnauthorized {
+		t.Fatalf("handshake with a revoked token = %d, want 401", status)
+	}
+	if _, _, err := hostsCmd(t, "revoke", "linux-1"); err == nil || !strings.Contains(err.Error(), "not found") {
+		t.Fatalf("revoking it again = %v, want not found", err)
+	}
+	if _, _, err := hostsCmd(t, "revoke", "main"); err == nil || !strings.Contains(err.Error(), "AW_HOST_TOKEN") {
+		t.Fatalf("hosts revoke main = %v", err)
+	}
+}
+
+// regexpLine reports whether some line of out matches pattern.
+func regexpLine(out, pattern string) bool {
+	re := regexp.MustCompile(pattern)
+	for _, line := range strings.Split(out, "\n") {
+		if re.MatchString(line) {
+			return true
+		}
+	}
+	return false
 }
 
 func TestCLI_UnknownCommand(t *testing.T) {

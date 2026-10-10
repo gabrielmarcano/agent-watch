@@ -13,7 +13,7 @@ import (
 func TestState_SnapshotAndOrdering(t *testing.T) {
 	state := NewState()
 
-	state.ReplaceAll([]model.AgentState{
+	state.ReplaceAll("main", []model.AgentState{
 		{PaneID: "p1", Label: "beta", Status: model.StatusIdle},
 		{PaneID: "p2", Label: "alpha", Status: model.StatusBlocked},
 		{PaneID: "p3", Label: "charlie", Status: model.StatusWorking},
@@ -72,8 +72,8 @@ func TestState_UpsertAndRemove(t *testing.T) {
 	}
 
 	// Remove agent
-	state.Remove("w1:p1")
-	if state.HasPane("w1:p1") {
+	state.Remove("", "w1:p1")
+	if state.HasPane("", "w1:p1") {
 		t.Fatalf("pane w1:p1 should have been removed")
 	}
 
@@ -94,7 +94,7 @@ func TestState_SetHost(t *testing.T) {
 	defer state.Unsubscribe(sub)
 
 	// Initial change
-	state.SetHost(true, true)
+	state.SetHost("main", true, true)
 	select {
 	case ev := <-subCh:
 		if ev.Name != "host" {
@@ -105,7 +105,7 @@ func TestState_SetHost(t *testing.T) {
 	}
 
 	// Same state: should NOT broadcast
-	state.SetHost(true, true)
+	state.SetHost("main", true, true)
 	select {
 	case ev := <-subCh:
 		t.Fatalf("did not expect event on identical SetHost, got %s", ev.Name)
@@ -113,7 +113,7 @@ func TestState_SetHost(t *testing.T) {
 	}
 
 	// Change herdr status
-	state.SetHost(true, false)
+	state.SetHost("main", true, false)
 	select {
 	case ev := <-subCh:
 		if ev.Name != "host" {
@@ -258,10 +258,10 @@ func TestState_BroadcastUnsubscribeChurn(t *testing.T) {
 func TestState_Get(t *testing.T) {
 	s := NewState()
 	s.Upsert(model.AgentState{PaneID: "w1:p1", Agent: "claude", Status: model.StatusBlocked})
-	if a, ok := s.Get("w1:p1"); !ok || a.Status != model.StatusBlocked {
+	if a, ok := s.Get("", "w1:p1"); !ok || a.Status != model.StatusBlocked {
 		t.Fatalf("Get(w1:p1) = %+v, %v", a, ok)
 	}
-	if _, ok := s.Get("w1:none"); ok {
+	if _, ok := s.Get("", "w1:none"); ok {
 		t.Fatal("Get(w1:none) found a pane")
 	}
 }

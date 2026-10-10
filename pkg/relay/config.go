@@ -2,7 +2,6 @@ package relay
 
 import (
 	"encoding/hex"
-	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -24,8 +23,16 @@ const DefaultPushPresenceIdle = 10 * time.Minute
 
 // Config holds runtime configuration loaded from environment variables.
 type Config struct {
-	ListenAddr     string
-	HostToken      string
+	ListenAddr string
+	// HostToken (AW_HOST_TOKEN) authenticates the host HostID. Optional once
+	// a host is registered in store.json (`hosts add`); NewServer checks that.
+	HostToken string
+	// HostID (AW_HOST_ID, default DefaultHostID) is the id of HostToken's
+	// host, and of the history a version 1 store.json held.
+	HostID string
+	// HostName (AW_HOST_NAME) is HostToken's host as the watch shows it.
+	// Empty: HostID.
+	HostName       string
 	DataDir        string
 	FCMCredentials string
 	NtfyURL        string
@@ -66,15 +73,28 @@ func LoadConfig() (*Config, error) {
 		listenAddr = DefaultListenAddr
 	}
 
+	// Optional here: whether a host can connect at all is known only once
+	// store.json is read (NewServer).
 	hostToken := strings.TrimSpace(os.Getenv("AW_HOST_TOKEN"))
-	if hostToken == "" {
-		return nil, errors.New("AW_HOST_TOKEN is required")
+	if hostToken != "" {
+		if len(hostToken) != 64 {
+			return nil, fmt.Errorf("AW_HOST_TOKEN must be exactly 64 hex characters (got length %d)", len(hostToken))
+		}
+		if _, err := hex.DecodeString(hostToken); err != nil {
+			return nil, fmt.Errorf("AW_HOST_TOKEN must be valid hex: %w", err)
+		}
 	}
-	if len(hostToken) != 64 {
-		return nil, fmt.Errorf("AW_HOST_TOKEN must be exactly 64 hex characters (got length %d)", len(hostToken))
+
+	hostID := strings.TrimSpace(os.Getenv("AW_HOST_ID"))
+	if hostID == "" {
+		hostID = DefaultHostID
 	}
-	if _, err := hex.DecodeString(hostToken); err != nil {
-		return nil, fmt.Errorf("AW_HOST_TOKEN must be valid hex: %w", err)
+	if !ValidHostID(hostID) {
+		return nil, fmt.Errorf("AW_HOST_ID %q: %w", hostID, ErrInvalidHostID)
+	}
+	hostName, err := NormalizeHostName(hostID, os.Getenv("AW_HOST_NAME"))
+	if err != nil {
+		return nil, fmt.Errorf("AW_HOST_NAME: %w", err)
 	}
 
 	dataDir := os.Getenv("AW_DATA_DIR")
@@ -121,6 +141,8 @@ func LoadConfig() (*Config, error) {
 	cfg := &Config{
 		ListenAddr:       listenAddr,
 		HostToken:        hostToken,
+		HostID:           hostID,
+		HostName:         hostName,
 		DataDir:          dataDir,
 		FCMCredentials:   os.Getenv("AW_FCM_CREDENTIALS"),
 		NtfyURL:          os.Getenv("AW_NTFY_URL"),

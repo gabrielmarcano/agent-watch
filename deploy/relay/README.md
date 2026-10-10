@@ -1,6 +1,6 @@
 # Relay operations
 
-Everything about running the relay on a VPS: first-time setup, deploys, rollback, the proxy, devices and backups. The relay's environment variables and data files are defined in [`docs/reference/contracts.md`](../../docs/reference/contracts.md) §5. Who may run these commands: [`AGENTS.md`](../../AGENTS.md) §3.
+Everything about running the relay on a VPS: first-time setup, deploys, rollback, the proxy, hosts, devices and backups. The relay's environment variables and data files are defined in [`docs/reference/contracts.md`](../../docs/reference/contracts.md) §5. Who may run these commands: [`AGENTS.md`](../../AGENTS.md) §3.
 
 ## First-time setup (once per VPS)
 
@@ -21,6 +21,7 @@ systemctl daemon-reload && systemctl enable agent-watch-relay
 - **The env file:** set `AW_LISTEN` and `AW_TRUSTED_PROXIES` for your proxy (below).
   - **With `agent-watch.env` on the Mac:** leave the `AW_HOST_TOKEN` placeholder; `--sync-env` writes the real token.
   - **Without it:** `AW_HOST_TOKEN=$(openssl rand -hex 32)`, and give the same value to the bridge's `configure`.
+  - **Its host:** `AW_HOST_ID` (default `main`) and `AW_HOST_NAME` (what the watch shows, e.g. `Mac`). Every other machine gets its own token: see Hosts, below.
 - **Push:** copy the Firebase service-account JSON to `/etc/agent-watch-relay/` yourself (`install -m 0640 -o root -g agentwatch …`) and put its server path in `AW_FCM_CREDENTIALS`. It never goes through `agent-watch.env`.
 - **Listen address:** the address your proxy reaches, never a public interface: `127.0.0.1:8080` for nginx or Caddy on the host, the docker bridge for Nginx Proxy Manager in docker (below).
 - **TLS in front:** any reverse proxy that terminates TLS and passes WebSockets and unbuffered SSE: `nginx.conf.example`, `Caddyfile.example`, or Nginx Proxy Manager (below).
@@ -67,6 +68,8 @@ ssh <vps> 'install -m 0755 /usr/local/bin/agent-watch-relay.prev /usr/local/bin/
 ```
 
 Only one previous binary is kept: each deploy overwrites `.prev`.
+
+**Across relay 0.7.0** (`store.json` version 2, with hosts): an older relay still starts on the new file, but needs `AW_HOST_TOKEN`, finds no pane's history (its keys now name a host), and drops the registered hosts on its next save. After rolling forward again, add them anew (new tokens).
 
 ### `--sync-env`: the server's env file from `agent-watch.env`
 
@@ -184,6 +187,23 @@ sudo agent-watch-relay devices revoke <device_id>
 - **Custom data dir:** if `/etc/agent-watch-relay/env` sets a different `AW_DATA_DIR`, pass the same value: `sudo AW_DATA_DIR=<dir> agent-watch-relay devices …`.
 - **Docker:** `docker exec <container> /agent-watch-relay devices revoke <device_id>`.
 
+## Hosts: one per machine
+
+Each machine that runs a bridge is one host with its own token; the watch shows one page per host. The host of `AW_HOST_TOKEN` (`AW_HOST_ID`, default `main`) is set in the env file; every other machine gets its token here. Like `devices`, these commands work **with the relay running or stopped**.
+
+```bash
+sudo agent-watch-relay hosts add <id> --name "<name>"   # prints the new token, once, alone on stdout
+sudo agent-watch-relay hosts list                       # ID, NAME, ONLINE, CREATED, LAST SEEN
+sudo agent-watch-relay hosts revoke <id>
+```
+
+- **`<id>`** is stable (the watch keys agents by it): `[a-z0-9-]{1,32}`. **`--name`** is what the watch shows; default: the id. Rules: contracts §1.6, §5.
+- **The token is shown once:** the CLI generates it and the relay keeps only its hash. On that machine, put it in `agent-watch.env` as `AW_HOST_TOKEN` and run `make configure-bridge` ([`docs/GUIDE.md`](../../docs/GUIDE.md)). A lost token cannot be recovered: revoke the host and add it again.
+- **Relay running:** a new token works at once, and the watch lists the host, offline until its bridge connects. A revoked host's connection is closed (1008), its token gets `401`, and its agents leave the watch's list; its history stays until it ages out.
+- **`AW_HOST_TOKEN`'s host** is listed as `(AW_HOST_TOKEN)` and managed in `/etc/agent-watch-relay/env`, not here. Once another host is registered, `AW_HOST_TOKEN` may be removed; the relay then starts only with a registered host.
+- **Custom data dir or `AW_HOST_ID`:** pass the same values as the env file, `sudo AW_DATA_DIR=<dir> AW_HOST_ID=<id> agent-watch-relay hosts …`: a `store.json` from a relay before 0.7.0 is migrated by whichever opens it first, and its history goes to `AW_HOST_ID`.
+- **Docker:** `docker exec <container> /agent-watch-relay hosts …`.
+
 ## Lost or stolen watch
 
 1. `sudo agent-watch-relay devices list`, then find the device by name and last-seen time.
@@ -192,7 +212,7 @@ sudo agent-watch-relay devices revoke <device_id>
 
 ## Backups
 
-What to keep: `store.json` in the data dir (devices and history; its contents: contracts §5) and `/etc/agent-watch-relay/env` (the relay's secrets). Both are secrets: keep the copies root-only.
+What to keep: `store.json` in the data dir (hosts, devices and history; its contents: contracts §5) and `/etc/agent-watch-relay/env` (the relay's secrets). Both are secrets: keep the copies root-only.
 
 ```bash
 sudo install -m 0600 /var/lib/agent-watch-relay/store.json /root/agent-watch-store.json.bak-$(date -u +%Y%m%d)
@@ -209,4 +229,4 @@ sudo install -m 0600 /etc/agent-watch-relay/env /root/agent-watch-env.bak-$(date
   ```
 
   The env file goes back with `install -m 0640 -o root -g agentwatch <backup> /etc/agent-watch-relay/env`, then a restart.
-- **Without a backup** the relay starts empty: every watch must pair again, and the history is gone.
+- **Without a backup** the relay starts empty: every watch must pair again, every host but `AW_HOST_TOKEN`'s needs a new token, and the history is gone.

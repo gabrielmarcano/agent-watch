@@ -5,23 +5,90 @@ import (
 	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
+	"strings"
 	"sync"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/gabrielmarcano/agent-monitor/pkg/model"
 )
 
 const (
-	storeVersion    = 1
+	// storeVersion 2 added hosts and keyed history by (host, pane_id).
+	storeVersion    = 2
 	maxHistoryPane  = 20
 	maxHistoryTotal = 200
 	historyMaxAge   = 7 * 24 * time.Hour
+
+	// DefaultHostID is AW_HOST_ID's default: the host AW_HOST_TOKEN
+	// authenticates, and the owner of the history a version 1 store held.
+	DefaultHostID = "main"
+	// maxHostNameRunes caps a host's display name.
+	maxHostNameRunes = 64
 )
+
+var (
+	// ErrHostExists means a host with that id is already registered.
+	ErrHostExists = errors.New("a host with that id already exists")
+	// ErrInvalidHostID means the id does not match [a-z0-9-]{1,32}.
+	ErrInvalidHostID = errors.New("host id must be 1 to 32 characters of a-z, 0-9 and -")
+	// ErrInvalidHostName means the display name is too long or has control characters.
+	ErrInvalidHostName = fmt.Errorf("host name must be at most %d characters, without control characters", maxHostNameRunes)
+
+	errEmptyTokenHash = errors.New("host token hash is empty")
+
+	hostIDPattern = regexp.MustCompile(`^[a-z0-9-]{1,32}$`)
+)
+
+// ValidHostID reports whether id is a valid host id ([a-z0-9-]{1,32},
+// contracts.md §1.6).
+func ValidHostID(id string) bool {
+	return hostIDPattern.MatchString(id)
+}
+
+// NormalizeHostName trims name and checks it; an empty name becomes id.
+func NormalizeHostName(id, name string) (string, error) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return id, nil
+	}
+	if utf8.RuneCountInString(name) > maxHostNameRunes || strings.ContainsFunc(name, unicode.IsControl) {
+		return "", ErrInvalidHostName
+	}
+	return name, nil
+}
+
+// Host is a bridge registered on the relay with its own token (`hosts add`).
+// The host of AW_HOST_TOKEN is not stored: it comes from the environment.
+type Host struct {
+	ID        string `json:"id"`         // [a-z0-9-]{1,32}, chosen by the owner
+	Name      string `json:"name"`       // what the watch shows
+	TokenHash string `json:"token_hash"` // hex(sha256(token))
+	CreatedAt string `json:"created_at"` // RFC 3339 UTC
+	LastSeen  string `json:"last_seen"`  // RFC 3339 UTC; its last connect or disconnect, "" before the first
+}
+
+// paneKey identifies an agent: herdr numbers its own panes, so a pane id is
+// unique only within one host.
+type paneKey struct {
+	host string
+	pane string
+}
+
+// historyFileKey is a history bucket's key in store.json: "<host>/<pane_id>".
+// A host id never contains "/". A flat map keeps the file readable by a relay
+// that predates hosts (after a rollback it simply finds no pane by these keys).
+func historyFileKey(k paneKey) string {
+	return k.host + "/" + k.pane
+}
 
 // Device represents a paired client device.
 type Device struct {
@@ -34,18 +101,25 @@ type Device struct {
 }
 
 type storeFile struct {
-	Version int                            `json:"version"`
-	Devices []Device                       `json:"devices"`
-	History map[string][]model.HistoryItem `json:"history"` // pane_id -> newest first
+	Version int      `json:"version"`
+	Hosts   []Host   `json:"hosts"`
+	Devices []Device `json:"devices"`
+	// History buckets, newest first: version 2 keys them "<host>/<pane_id>",
+	// version 1 by pane_id alone.
+	History map[string][]model.HistoryItem `json:"history"`
 }
 
-// Store provides thread-safe persistence for devices and history.
+// Store provides thread-safe persistence for hosts, devices and history.
 type Store struct {
 	mu       sync.RWMutex
 	filePath string
-	devices  []Device
-	history  map[string][]model.HistoryItem // pane_id -> items (newest first)
-	lastSeen map[string]time.Time           // device_id -> in-memory last seen timestamp
+	// legacyHost owns history that names no host: a version 1 file's, and
+	// an item added without one (the hub always stamps it).
+	legacyHost string
+	hosts      []Host
+	devices    []Device
+	history    map[paneKey][]model.HistoryItem // (host, pane_id) -> items (newest first)
+	lastSeen   map[string]time.Time            // device_id -> in-memory last seen timestamp
 
 	dirty       bool
 	saveTimer   *time.Timer
@@ -57,20 +131,32 @@ type Store struct {
 	syncDir   func(dir string) error // fsync of the data dir (tests override)
 }
 
-// NewStore loads an existing store file or initializes a new one.
+// NewStore loads an existing store file or initializes a new one. A version 1
+// file's history goes to DefaultHostID (OpenStore names another host).
 func NewStore(dataDir string) (*Store, error) {
+	return OpenStore(dataDir, DefaultHostID)
+}
+
+// OpenStore loads an existing store file or initializes a new one. A version 1
+// file (from a relay that predates hosts) is migrated at once: its history
+// belongs to legacyHostID, the host of AW_HOST_TOKEN (AW_HOST_ID).
+func OpenStore(dataDir, legacyHostID string) (*Store, error) {
+	if !ValidHostID(legacyHostID) {
+		return nil, fmt.Errorf("legacy host id %q: %w", legacyHostID, ErrInvalidHostID)
+	}
 	if err := os.MkdirAll(dataDir, 0700); err != nil {
 		return nil, fmt.Errorf("create data dir %s: %w", dataDir, err)
 	}
 
 	filePath := filepath.Join(dataDir, "store.json")
 	s := &Store{
-		filePath:  filePath,
-		history:   make(map[string][]model.HistoryItem),
-		lastSeen:  make(map[string]time.Time),
-		saveDelay: time.Second,
-		syncFile:  func(f *os.File) error { return f.Sync() },
-		syncDir:   syncDir,
+		filePath:   filePath,
+		legacyHost: legacyHostID,
+		history:    make(map[paneKey][]model.HistoryItem),
+		lastSeen:   make(map[string]time.Time),
+		saveDelay:  time.Second,
+		syncFile:   func(f *os.File) error { return f.Sync() },
+		syncDir:    syncDir,
 	}
 
 	data, err := os.ReadFile(filePath)
@@ -90,6 +176,32 @@ func NewStore(dataDir string) (*Store, error) {
 	if err := json.Unmarshal(data, &sf); err != nil {
 		return nil, fmt.Errorf("corrupt store file %s: %w", filePath, err)
 	}
+	if sf.Version > storeVersion {
+		return nil, fmt.Errorf("store file %s is version %d, newer than this relay reads (%d): run a newer relay", filePath, sf.Version, storeVersion)
+	}
+
+	for _, h := range sf.Hosts {
+		if !ValidHostID(h.ID) || h.TokenHash == "" {
+			return nil, fmt.Errorf("corrupt store file %s: invalid host %q", filePath, h.ID)
+		}
+	}
+	s.hosts = sf.Hosts
+
+	migrate := sf.Version < 2
+	for fileKey, items := range sf.History {
+		key := paneKey{host: legacyHostID, pane: fileKey}
+		if !migrate {
+			host, pane, ok := strings.Cut(fileKey, "/")
+			if !ok || !ValidHostID(host) || pane == "" {
+				return nil, fmt.Errorf("corrupt store file %s: invalid history key %q", filePath, fileKey)
+			}
+			key = paneKey{host: host, pane: pane}
+		}
+		for i := range items {
+			items[i].Host = key.host
+		}
+		s.history[key] = items
+	}
 
 	if sf.Devices != nil {
 		s.devices = sf.Devices
@@ -99,11 +211,104 @@ func NewStore(dataDir string) (*Store, error) {
 			}
 		}
 	}
-	if sf.History != nil {
-		s.history = sf.History
+
+	if migrate {
+		// Written at once, so the file on disk says which host the history
+		// belongs to even if this relay never changes anything else.
+		s.dirty = true
+		if err := s.save(false); err != nil {
+			return nil, fmt.Errorf("migrate store file %s to version %d: %w", filePath, storeVersion, err)
+		}
+		slog.Info("store migrated", "path", filePath, "from_version", sf.Version, "to_version", storeVersion, "history_host", legacyHostID)
 	}
 
 	return s, nil
+}
+
+// AddHost registers a host with the hash of its token. name defaults to id.
+func (s *Store) AddHost(id, name, tokenHash string) (Host, error) {
+	if !ValidHostID(id) {
+		return Host{}, ErrInvalidHostID
+	}
+	name, err := NormalizeHostName(id, name)
+	if err != nil {
+		return Host{}, err
+	}
+	if tokenHash == "" {
+		return Host{}, errEmptyTokenHash
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, h := range s.hosts {
+		if h.ID == id {
+			return Host{}, ErrHostExists
+		}
+	}
+	h := Host{ID: id, Name: name, TokenHash: tokenHash, CreatedAt: model.Now()}
+	s.hosts = append(s.hosts, h)
+	s.scheduleSaveLocked()
+	return h, nil
+}
+
+// FindHostByTokenHash performs constant-time comparison against stored host token hashes.
+func (s *Store) FindHostByTokenHash(tokenHash string) (Host, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	target := []byte(tokenHash)
+	found := -1
+	for i, h := range s.hosts {
+		stored := []byte(h.TokenHash)
+		if len(stored) == len(target) && subtle.ConstantTimeCompare(stored, target) == 1 {
+			found = i
+		}
+	}
+	if found < 0 {
+		return Host{}, false
+	}
+	return s.hosts[found], true
+}
+
+// ListHosts returns a copy of the registered hosts.
+func (s *Store) ListHosts() []Host {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	out := make([]Host, len(s.hosts))
+	copy(out, s.hosts)
+	return out
+}
+
+// RevokeHost removes a host by id and returns it; ok is false when no host has
+// that id. Its history stays until it ages out.
+func (s *Store) RevokeHost(id string) (removed Host, ok bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	for i, h := range s.hosts {
+		if h.ID == id {
+			s.hosts = append(s.hosts[:i], s.hosts[i+1:]...)
+			s.scheduleSaveLocked()
+			return h, true
+		}
+	}
+	return Host{}, false
+}
+
+// TouchHost sets a registered host's LastSeen to now (a connect or a
+// disconnect, so rare enough to save each time). Unknown ids are ignored.
+func (s *Store) TouchHost(id string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	for i := range s.hosts {
+		if s.hosts[i].ID == id {
+			s.hosts[i].LastSeen = model.Now()
+			s.scheduleSaveLocked()
+			return
+		}
+	}
 }
 
 // AddDevice registers a new device with its token hash.
@@ -255,16 +460,20 @@ func (s *Store) RevokeDevice(deviceID string) (removed Device, ok bool) {
 	return removed, true
 }
 
-// AddHistory appends a history item for a pane, enforcing dedup and size
-// limits. It reports whether the item is now stored: false for a duplicate,
-// and for an item so old that the size limits dropped it at once.
+// AddHistory appends a history item for its (Host, PaneID), enforcing dedup
+// and size limits. It reports whether the item is now stored: false for a
+// duplicate, and for an item so old that the size limits dropped it at once.
 func (s *Store) AddHistory(item model.HistoryItem) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	s.pruneOldPanesLocked()
 
-	items := s.history[item.PaneID]
+	if item.Host == "" {
+		item.Host = s.legacyHost
+	}
+	key := paneKey{host: item.Host, pane: item.PaneID}
+	items := s.history[key]
 	for _, existing := range items {
 		if existing.ID == item.ID {
 			// Duplicate item already stored for this pane
@@ -277,14 +486,14 @@ func (s *Store) AddHistory(item model.HistoryItem) bool {
 	if len(items) > maxHistoryPane {
 		items = items[:maxHistoryPane]
 	}
-	s.history[item.PaneID] = items
+	s.history[key] = items
 
 	// Enforce global maximum of 200 items across all panes
 	s.enforceTotalLimitLocked()
 
 	s.scheduleSaveLocked()
 
-	for _, kept := range s.history[item.PaneID] {
+	for _, kept := range s.history[key] {
 		if kept.ID == item.ID {
 			return true
 		}
@@ -292,8 +501,11 @@ func (s *Store) AddHistory(item model.HistoryItem) bool {
 	return false
 }
 
-// GetHistory retrieves history items matching the filter, newest first.
-func (s *Store) GetHistory(paneID string, limit int) []model.HistoryItem {
+// GetHistory retrieves history items matching the filter, newest first. host
+// and paneID are optional: an empty host matches every host, an empty paneID
+// every pane. A request for one pane never returns more than maxHistoryPane
+// items, also when several hosts have that pane.
+func (s *Store) GetHistory(host, paneID string, limit int) []model.HistoryItem {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -302,26 +514,28 @@ func (s *Store) GetHistory(paneID string, limit int) []model.HistoryItem {
 	} else if limit > maxHistoryTotal {
 		limit = maxHistoryTotal
 	}
+	if paneID != "" && limit > maxHistoryPane {
+		limit = maxHistoryPane
+	}
 
-	if paneID != "" {
-		items := s.history[paneID]
+	if host != "" && paneID != "" {
+		items := s.history[paneKey{host: host, pane: paneID}]
 		if len(items) > limit {
-			out := make([]model.HistoryItem, limit)
-			copy(out, items[:limit])
-			return out
+			items = items[:limit]
 		}
 		out := make([]model.HistoryItem, len(items))
 		copy(out, items)
 		return out
 	}
 
-	// Aggregate from all panes
 	var all []model.HistoryItem
-	for _, items := range s.history {
-		all = append(all, items...)
+	for key, items := range s.history {
+		if (host == "" || key.host == host) && (paneID == "" || key.pane == paneID) {
+			all = append(all, items...)
+		}
 	}
 
-	sort.Slice(all, func(i, j int) bool {
+	sort.SliceStable(all, func(i, j int) bool {
 		return all[i].CompletedAt > all[j].CompletedAt
 	})
 
@@ -334,15 +548,15 @@ func (s *Store) GetHistory(paneID string, limit int) []model.HistoryItem {
 // pruneOldPanesLocked removes panes where the newest item is older than 7 days.
 func (s *Store) pruneOldPanesLocked() {
 	now := time.Now()
-	for paneID, items := range s.history {
+	for key, items := range s.history {
 		if len(items) == 0 {
-			delete(s.history, paneID)
+			delete(s.history, key)
 			continue
 		}
 		// items are newest first, check items[0]
 		t, err := time.Parse(time.RFC3339, items[0].CompletedAt)
 		if err == nil && now.Sub(t) > historyMaxAge {
-			delete(s.history, paneID)
+			delete(s.history, key)
 		}
 	}
 }
@@ -357,16 +571,16 @@ func (s *Store) enforceTotalLimitLocked() {
 		return
 	}
 
-	// Flatten references to all items with paneID and index
+	// Flatten references to all items with their bucket and index
 	type itemRef struct {
-		paneID      string
+		key         paneKey
 		index       int
 		completedAt string
 	}
 	var refs []itemRef
-	for paneID, items := range s.history {
+	for key, items := range s.history {
 		for i, it := range items {
-			refs = append(refs, itemRef{paneID: paneID, index: i, completedAt: it.CompletedAt})
+			refs = append(refs, itemRef{key: key, index: i, completedAt: it.CompletedAt})
 		}
 	}
 
@@ -376,26 +590,26 @@ func (s *Store) enforceTotalLimitLocked() {
 	})
 
 	// Retain only top maxHistoryTotal items
-	keep := make(map[string]map[int]bool)
+	keep := make(map[paneKey]map[int]bool)
 	for i := 0; i < maxHistoryTotal && i < len(refs); i++ {
-		p := refs[i].paneID
-		if keep[p] == nil {
-			keep[p] = make(map[int]bool)
+		k := refs[i].key
+		if keep[k] == nil {
+			keep[k] = make(map[int]bool)
 		}
-		keep[p][refs[i].index] = true
+		keep[k][refs[i].index] = true
 	}
 
-	for paneID, items := range s.history {
+	for key, items := range s.history {
 		var filtered []model.HistoryItem
 		for i, it := range items {
-			if keep[paneID] != nil && keep[paneID][i] {
+			if keep[key] != nil && keep[key][i] {
 				filtered = append(filtered, it)
 			}
 		}
 		if len(filtered) == 0 {
-			delete(s.history, paneID)
+			delete(s.history, key)
 		} else {
-			s.history[paneID] = filtered
+			s.history[key] = filtered
 		}
 	}
 }
@@ -454,14 +668,18 @@ func (s *Store) save(background bool) error {
 func (s *Store) marshalLocked() ([]byte, error) {
 	sf := storeFile{
 		Version: storeVersion,
+		Hosts:   s.hosts,
 		Devices: s.devices,
-		History: s.history,
+		History: make(map[string][]model.HistoryItem, len(s.history)),
+	}
+	if sf.Hosts == nil {
+		sf.Hosts = []Host{}
 	}
 	if sf.Devices == nil {
 		sf.Devices = []Device{}
 	}
-	if sf.History == nil {
-		sf.History = make(map[string][]model.HistoryItem)
+	for key, items := range s.history {
+		sf.History[historyFileKey(key)] = items
 	}
 
 	data, err := json.MarshalIndent(sf, "", "  ")
