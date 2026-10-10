@@ -412,7 +412,10 @@ URL: `wss://relay.<domain>/v1/host`, with the header `Authorization: Bearer <hos
 
 - Every frame is one JSON text message with a `type` field.
 - To decode, first unmarshal into `struct{ Type string \`json:"type"\` }`, then unmarshal again into the concrete type.
-- **Only one host may be connected.** A second connection replaces the first: the relay closes the old one with status 4000 `replaced`.
+- **One connection per host.** The relay knows which host (§1.6) a connection is from by its host token (§5), never by what the bridge sends (`hello.host` is only logged).
+  - A second connection with the same host's token replaces the first: the relay closes the old one with status 4000 `replaced`. Connections of different hosts coexist.
+  - A host revoked on the relay (`hosts revoke`, §5) is closed with status 1008; its token then gets `401`.
+- **The relay stamps the host's id** (`host`, §1.2, §1.4) on every agent and history item the connection sends. The bridge leaves it empty, and the wire messages below carry no host.
 
 ```go
 type HelloMsg struct {
@@ -485,9 +488,9 @@ On a `resync` the bridge sends `hello` and `snapshot` again (the current relay n
 
 **Keepalive:** both sides send a WebSocket ping every 30 s and expect the pong within 10 s.
 - **Bridge:** no pong → it reconnects.
-- **Relay:** no pong → it drops the host: closes the socket, broadcasts `host` with `host_online=false`, and fails the host's in-flight commands with `host_offline`.
+- **Relay:** no pong → it drops the host: closes the socket, broadcasts `host` with that host offline, and fails the host's in-flight commands with `host_offline`.
 
-**In-flight commands** fail with `host_offline` as soon as their host disconnects, is dropped, or is replaced by a new connection, without waiting for the command budget (§2.4).
+**In-flight commands** fail with `host_offline` as soon as their host disconnects, is dropped, is revoked, or is replaced by a new connection, without waiting for the command budget (§2.4).
 
 **Reconnect backoff** (bridge side): 1 s, 2 s, 4 s … up to 60 s, each ±20 % jitter. The backoff resets after 60 s of healthy connection. A host token the relay rejects (401/403) waits the maximum backoff (60 s, same jitter) before the next try.
 
@@ -577,7 +580,8 @@ ntfy never gets `resolved`: it cannot withdraw a notification it already deliver
   - A pane that leaves `blocked` through a `snapshot` gets its `resolved` with its next `agent_update`.
   - A pane removed while blocked (`agent_removed`, or missing from a `snapshot`) gets none; its notification stays until dismissed.
 
-- **Held back while the owner is at the host** (`AW_PUSH_PRESENCE_IDLE`, §5): while the host's last `host_presence` (§3) is under 45 s old, its screen is unlocked and its last input is under that threshold, `blocked` and `done` pushes are not sent. When presence ends (the threshold passes, the screen locks, or no report for 45 s), each pane whose `blocked` push was held back and that the relay still shows `blocked` gets one, built from its current state, through the debounce, window and digest below. A held-back `done` is not sent later. A host that disconnects ends presence without a catch-up; what was held back waits for its next report (a reconnected bridge reports right after its snapshot). A relay restart forgets it. A push already held in a window, or a `done` waiting for its reply, still goes out when its wait ends, whatever the presence is then. A host that never reports ("Only Notify When Away" off, Linux, an older bridge) is never held back.
+- **Held back while the owner is at a host** (`AW_PUSH_PRESENCE_IDLE`, §5): presence is one state for the whole relay (the owner's decision), taken from the last `host_presence` (§3) any host sent. While that report is under 45 s old, its screen is unlocked and its last input is under that threshold, no host's `blocked` and `done` pushes are sent. When presence ends (the threshold passes, the screen locks, or no report for 45 s), each pane whose `blocked` push was held back and that the relay still shows `blocked` gets one, built from its current state, through the debounce, window and digest below. A held-back `done` is not sent later. When the host that sent the last report disconnects, presence ends without a catch-up; what was held back waits for the next report (a reconnected bridge reports right after its snapshot). Another host disconnecting changes nothing. A relay restart forgets it. A push already held in a window, or a `done` waiting for its reply, still goes out when its wait ends, whatever the presence is then. While no host reports ("Only Notify When Away" off, Linux hosts, an older bridge), nothing is held back.
+- **Per agent:** every rule in this section (transitions, `resolved`, the reply wait, the debounce, no duplicates, the window's one push per agent) applies per `(host, pane_id)`. The digest and the window are relay-wide.
 - **Turns that end while the pane stays `working`** (background agents still running, §1.2) push nothing: their reply reaches the watch as a `history_item`, and the agent shows as done with its count. The `done` push comes once herdr reports `working` → `done`, after the last background agent's report turn, with that turn's reply. Why: a coordinator gets one report turn per finished agent, and a push for each would be noise.
 - **`done` waits for the reply:** the bridge sends the turn's `history_item` right after the transition. The relay holds the `done` push up to 3 s for that pane's next new history item and uses its response as the body; when none arrives, it pushes with `Task finished`. The debounce and the window below apply when it goes out.
 - **Debounce** (the same pane pushed the same event less than 5 s ago):
@@ -604,7 +608,9 @@ The relay reads them from `/etc/agent-watch-relay/env` (systemd `EnvironmentFile
 | Variable | Required | Default | Meaning |
 |---|---|---|---|
 | `AW_LISTEN` | no | `:8080` | Listen address. Bind it to the address the reverse proxy reaches, never to a public interface (the value per proxy topology: `deploy/relay/README.md`) |
-| `AW_HOST_TOKEN` | **yes** | — | 64 hex chars; the same value goes in the bridge config |
+| `AW_HOST_TOKEN` | **until a host is registered** | — | 64 hex chars; the same value goes in the config of the bridge of host `AW_HOST_ID`. Optional once `store.json` holds a host (`hosts add`, below); with neither, the relay refuses to start |
+| `AW_HOST_ID` | no | `main` | The id (§1.6) of `AW_HOST_TOKEN`'s host, which is not in `store.json`; also the host of the history a version 1 `store.json` held. A registered host with the same id stops startup |
+| `AW_HOST_NAME` | no | `AW_HOST_ID` | The name clients show for that host (§1.6): at most 64 characters, no control characters |
 | `AW_DATA_DIR` | no | `/var/lib/agent-watch-relay` | Holds `store.json`, `relay.lock` and `admin.sock` (see below) |
 | `AW_FCM_CREDENTIALS` | no | — | Path to the Firebase service-account JSON. FCM is disabled if unset |
 | `AW_NTFY_URL` | no | — | e.g. `https://ntfy.sh`. ntfy is disabled if unset |
@@ -630,16 +636,19 @@ The relay reads them from `/etc/agent-watch-relay/env` (systemd `EnvironmentFile
 
 | File | Meaning |
 |---|---|
-| `store.json` | Devices (device-token hashes only, plus each device's FCM push token) and history. `0600`, owned by the service user |
+| `store.json` | Hosts (id, name, token hash, created and last-seen times), devices (device-token hashes only, plus each device's FCM push token) and history (per host and pane, keyed `<host>/<pane_id>`). `0600`, owned by the service user. **Version 2.** A version 1 file (a relay before hosts) is migrated when the relay or the CLI opens it, its history going to `AW_HOST_ID`; a newer version, or a malformed host or history key, stops startup |
 | `relay.lock` | Exclusive `flock` held by the running relay for its whole life. A second relay on the same directory refuses to start |
 | `admin.sock` | Local admin API, a `0600` Unix socket that exists only while the relay runs. Never exposed over TCP |
 
-**Admin API on `admin.sock`** (`pkg/relay/admin.go`; used by `agent-watch-relay devices`, whose behaviour is in `deploy/relay/README.md` § Devices):
+**Admin API on `admin.sock`** (`pkg/relay/admin.go`; used by `agent-watch-relay devices` and `agent-watch-relay hosts`, whose behaviour is in `deploy/relay/README.md` § Devices and § Hosts):
 
 | Request | Response |
 |---|---|
 | `GET /devices` | `200`, a JSON array of `{"id", "name", "created_at", "last_seen"}`: never the token hash or the push token |
 | `DELETE /devices/{id}` | `204`; `404 {"error": "…"}` for an unknown id; `500 {"error": "…"}` when the store cannot be saved |
+| `GET /hosts` | `200`, a JSON array of `{"id", "name", "created_at", "last_seen", "online", "env"}`, never a token or its hash. `env: true` marks `AW_HOST_TOKEN`'s host (no times); `last_seen` is its last connect or disconnect |
+| `POST /hosts` with `{"id", "name", "token_hash"}` | `201` with the host as in `GET /hosts`; `400 {"error": "…"}` for a bad id (§1.6), name (as `AW_HOST_NAME`) or an empty hash; `409 {"error": "…"}` for an id already registered or equal to `AW_HOST_ID`. The CLI generates the token (32 random bytes, hex) and sends only its `sha256` |
+| `DELETE /hosts/{id}` | `204`: the token is rejected from then on, the host's connection is closed (1008, §3), its agents leave the snapshot; its history stays until it ages out. `404` for an unknown id, `409` for `AW_HOST_ID`, `500` when the store cannot be saved |
 
 ---
 
@@ -743,10 +752,10 @@ One file at the repo root holds everything a deployment needs. `agent-watch.env.
 | Key | Read by | Meaning |
 |---|---|---|
 | `AW_RELAY_DOMAIN` | bridge `configure --env-file`, Wear OS build, `make watchos-config` | Relay host (`host[:port]`, no scheme or path). Derived: `wss://<domain>/v1/host` (bridge), `https://<domain>` (watch pairing default) |
-| `AW_HOST_TOKEN` | bridge `configure --env-file`, `deploy.sh --sync-env` | 64 hex chars shared by the relay (§5) and the bridge (§6). `make config` fills it when empty and never prints it |
+| `AW_HOST_TOKEN` | bridge `configure --env-file`, `deploy.sh --sync-env` | 64 hex chars shared by the relay (§5) and the bridge (§6). `make config` fills it when empty and never prints it. On a machine whose host was registered with `hosts add`, it holds that host's token |
 | `AW_RELAY_SSH` | `make deploy-relay` / `deploy.sh` without a target | SSH target of the VPS (root) |
 | `AW_RELAY_SSH_OPTS` | same | Extra `ssh`/`scp` options, word-split (`-i <key> -o Port=<n>`). `SSH_OPTS` in the environment overrides it |
-| `AW_LISTEN`, `AW_TRUSTED_PROXIES`, `AW_CLIENT_IP_HEADER`, `AW_PUSH_RESOLVED`, `AW_PUSH_PRESENCE_IDLE`, `AW_FCM_CREDENTIALS`, `AW_NTFY_URL`, `AW_NTFY_TOPIC`, `AW_NTFY_TOKEN` | `deploy.sh --sync-env` only | Relay variables (§5). Commented out in the example; `AW_FCM_CREDENTIALS` is a path **on the server** |
+| `AW_HOST_ID`, `AW_HOST_NAME`, `AW_LISTEN`, `AW_TRUSTED_PROXIES`, `AW_CLIENT_IP_HEADER`, `AW_PUSH_RESOLVED`, `AW_PUSH_PRESENCE_IDLE`, `AW_FCM_CREDENTIALS`, `AW_NTFY_URL`, `AW_NTFY_TOPIC`, `AW_NTFY_TOKEN` | `deploy.sh --sync-env` only | Relay variables (§5). Commented out in the example; `AW_FCM_CREDENTIALS` is a path **on the server** |
 | `AW_WATCHOS_BUNDLE_ID` | `make watchos-config` | Bundle id for the Phase 6 watchOS project. Empty: the project's own |
 
 How `deploy.sh --sync-env` copies the relay keys to the server: `deploy/relay/README.md` § `--sync-env`.
