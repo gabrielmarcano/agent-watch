@@ -262,4 +262,16 @@ class AgentNotificationsTest {
         assertEquals(listOf(1), approvalsToDismiss(shown, AgentsUpdate.Changed(macMovedOn)))
         assertEquals(listOf(2), approvalsToDismiss(shown, AgentsUpdate.Removed("w1:p1", host = "box")))
     }
+
+    @Test
+    fun anApprovalShownBeforeHostsFindsItsPaneWhileOneHostHasIt() {
+        // Posted under a relay before hosts (tagged host ""); the relay now says host "main".
+        val shown = listOf(ShownApproval(1, "w1:p1", 10))
+        val stillBlocked = AgentState(pane_id = "w1:p1", host = "main", status = "blocked", state_change_seq = 10)
+        assertEquals(emptyList<Int>(), approvalsToDismiss(shown, AgentsUpdate.All(listOf(stillBlocked))))
+        assertEquals(listOf(1), approvalsToDismiss(shown, AgentsUpdate.All(listOf(stillBlocked.copy(status = "working", state_change_seq = 11)))))
+        // Two hosts with that pane: it cannot tell which one it was, so the approval goes.
+        val onBox = stillBlocked.copy(host = "box")
+        assertEquals(listOf(1), approvalsToDismiss(shown, AgentsUpdate.All(listOf(stillBlocked, onBox))))
+    }
 }

@@ -39,6 +39,7 @@ import com.gabriel.agentwatch.model.AgentState
 import com.gabriel.agentwatch.model.HistoryItem
 import com.gabriel.agentwatch.model.findAgent
 import com.gabriel.agentwatch.model.hostNameFor
+import com.gabriel.agentwatch.model.isPinnedTarget
 import com.gabriel.agentwatch.model.key
 import com.gabriel.agentwatch.network.AuthState
 import com.gabriel.agentwatch.network.NotificationIntents
@@ -233,12 +234,18 @@ private fun AgentWatchNavigation(
                 val (agent, hostName) = found
                 // The agent found, with its host, even when the route had none (an intent from before hosts).
                 val agentKey = agent.key
+                // Resolved like the tile resolves the pin, so a pin saved before hosts shows as set.
+                val isTileTarget by remember(pinned, agentKey) {
+                    RelayRepository.state.map { isPinnedTarget(pinned, agentKey, it.agents) }.distinctUntilChanged()
+                }.collectAsStateWithLifecycle(
+                    remember(pinned, agentKey) { isPinnedTarget(pinned, agentKey, RelayRepository.state.value.agents) }
+                )
                 AgentDetailScreen(
                     agent = agent,
                     hostName = hostName,
                     lastReply = rememberPaneHistory(agentKey).firstOrNull(),
                     onReadReply = openReader,
-                    isTileTarget = pinned == agentKey,
+                    isTileTarget = isTileTarget,
                     onTileTargetChange = { on ->
                         prefs.pinnedTarget = if (on) agentKey else null
                         pinned = prefs.pinnedTarget

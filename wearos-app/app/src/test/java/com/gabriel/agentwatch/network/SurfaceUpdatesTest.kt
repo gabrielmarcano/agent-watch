@@ -62,6 +62,18 @@ class SurfaceUpdatesTest {
     }
 
     @Test
+    fun theTargetLabelSkipsOfflineHostsLikeTheTile() {
+        val hosts = listOf(
+            HostInfo(id = "box", name = "Box", online = false, herdr_online = false),
+            HostInfo(id = "main", name = "Mac", online = true, herdr_online = true)
+        )
+        val staleDone = AgentState(pane_id = "w1:p1", host = "box", label = "api", status = "done", updated_at = "2026-10-10T10:00:00Z")
+        val onMac = AgentState(pane_id = "w1:p1", host = "main", label = "web", status = "idle", focused = true)
+        val state = base.copy(hosts = hosts, agents = listOf(staleDone, onMac))
+        assertEquals("web", surfaceSignature(state, null).targetLabel)
+    }
+
+    @Test
     fun theFirstChangeIsSentAtOnce() {
         val throttle = UpdateThrottle(minIntervalMs = 10_000)
 

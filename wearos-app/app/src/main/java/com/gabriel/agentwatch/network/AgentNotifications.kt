@@ -3,6 +3,7 @@ package com.gabriel.agentwatch.network
 import androidx.annotation.Keep
 import com.gabriel.agentwatch.model.AgentKey
 import com.gabriel.agentwatch.model.AgentState
+import com.gabriel.agentwatch.model.findAgent
 import com.gabriel.agentwatch.model.key
 import com.google.gson.Gson
 import com.google.gson.JsonObject
@@ -225,10 +226,9 @@ fun approvalsToDismiss(shown: List<ShownApproval>, update: AgentsUpdate): List<I
         agent == null || (agent.status != "blocked" && agent.state_change_seq >= approval.seq)
 
     return when (update) {
-        is AgentsUpdate.All -> {
-            val byKey = update.agents.associateBy { it.key }
-            shown.filter { obsolete(it, byKey[it.key]) }
-        }
+        // findAgent: an approval shown under a relay before hosts (host "") still finds its pane while
+        // only one host has it, so it stays while that agent is blocked at the same seq.
+        is AgentsUpdate.All -> shown.filter { obsolete(it, update.agents.findAgent(it.key)) }
         is AgentsUpdate.Changed -> shown.filter { it.key == update.agent.key && obsolete(it, update.agent) }
         is AgentsUpdate.Removed -> shown.filter { it.key == update.key }
     }.map { it.notificationId }

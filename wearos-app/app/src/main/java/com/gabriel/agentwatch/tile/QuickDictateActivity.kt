@@ -98,7 +98,7 @@ private fun QuickDictate(prefs: Prefs, launch: AgentKey?, onFinish: () -> Unit) 
         val result = withContext(Dispatchers.IO) { RelayClient(prefs.relayUrl, prefs.deviceToken).agents() }
         phase = result.fold(
             onSuccess = { snapshot ->
-                when (val target = dictationTarget(snapshot.agents, launch, prefs.pinnedTarget)) {
+                when (val target = dictationTarget(snapshot, launch, prefs.pinnedTarget)) {
                     is DictationTarget.Found -> Phase.Listening(target.agent, hostNameFor(snapshot.hosts.orEmpty(), target.agent.host))
                     DictationTarget.Closed -> Phase.Message(closed)
                     DictationTarget.None -> Phase.Message(noTarget)

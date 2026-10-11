@@ -135,6 +135,8 @@ class ContractsTest {
         // 4. No done agents -> falls back to focused
         val listNoDone = listOf(a1, a4)
         assertEquals("p4", resolveTargetAgent(listNoDone, null)?.pane_id)
+        // ... unless several hosts are online (each herdr has its own focused pane)
+        assertEquals(null, resolveTargetAgent(listNoDone, null, useFocused = false))
 
         // 5. No pinned, no done, no focused -> no target (ARCHITECTURE.md §4b): never an arbitrary first agent
         val listNoFocused = listOf(a1)
