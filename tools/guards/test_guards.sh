@@ -119,6 +119,7 @@ agy 'not json' allow "garbage input is a no-op"
 
 # ── opencode adapter ({tool,args} → exit code) ──
 oc '{"tool":"bash","args":{"command":"git commit --amend"}}' 2 "bash amend blocked"
+oc '{"tool":"shell","args":{"command":"git commit --amend"}}' 2 "shell (V2 name) amend blocked"
 oc '{"tool":"bash","args":{"command":"make check"}}' 0 "bash make allowed"
 oc "{\"tool\":\"write\",\"args\":{\"filePath\":$(j "$ROOT/.env")}}" 2 "write .env blocked"
 oc "{\"tool\":\"edit\",\"args\":{\"filePath\":$(j "$ROOT/agent-watch.env")}}" 2 "edit agent-watch.env blocked"

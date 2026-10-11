@@ -1,0 +1,42 @@
+
+  ┃                                                                                                      New session - 2026-10-10T15:43:05.
+  ┃  Run the shell command ls -la and tell me what you see                                               707Z
+  ┃
+
+     Running ls -la for you.
+
+  ┃
+  ┃  ⠦ ls -la
+  ┃
+
+     Press ctrl+b to move running work to the background
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  ┃
+  ┃  △ Permission required
+  ┃
+  ┃  $ ls -la
+  ┃
+  ┃
+  ┃   Allow once   Always allow   Reject                ctrl+f fullscreen  ⇆ select  enter confirm
+  ┃                                                                                                      /private/tmp/aw-sandbox:main

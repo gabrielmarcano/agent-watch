@@ -5,7 +5,7 @@ One Python script (`guards.py`, standard library only) holds every safety rule. 
 | Adapter | File | Covers |
 |---|---|---|
 | Antigravity CLI | `.agents/hooks.json` | `PreToolUse` (every tool): shell commands and file writes. `Stop`: contract drift |
-| OpenCode | `.opencode/plugins/agent-watch-guards.js` | `tool.execute.before` (bash + edit/write/patch). `tool.execute.after`: gofmt on edited Go files |
+| OpenCode | `.opencode/plugins/agent-watch-guards.js` (OpenCode 2 plugin: a plain `{id, setup}` object, no dependency, so it cannot fail to load for a missing module; `ctx.tool.hook("execute.before"/"execute.after")`; a thrown error blocks the call, checked live 2026-10-10) | `shell`/`bash` + edit/write/patch (`opencode-before`). `execute.after`: gofmt on edited Go files |
 | Claude Code | `.claude/settings.json` | `PreToolUse` on `Bash`, `Write`, `Edit`, `MultiEdit`, `NotebookEdit` (`guards.py claude-pretool`; exit 2 blocks, the reason on stderr reaches the agent) |
 | GitHub Copilot CLI | `.claude/settings.json` (Copilot loads Claude Code's project hooks) | Same hook. Copilot maps its tools to Claude names (`apply_patch` arrives as `Edit`, with the patch text as `tool_input`) and reads the deny reason from stdout `{"permissionDecision":"deny","permissionDecisionReason":…}`, not from stderr, so `claude-pretool` prints both |
 | git | `.githooks/pre-commit` | Secrets, gofmt, contract sync — for **any** tool and for humans |

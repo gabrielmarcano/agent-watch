@@ -18,6 +18,8 @@ import (
 // dialog's accent glyphs, the "┃" of its left border and the "△" before its
 // title, are drawn with foreground theme.warning. The focused button is the
 // one whose background equals that foreground. No fixed colour is assumed.
+// V2 (2.0.25, default theme captured): the focused button's background is
+// the "┃"'s foreground still, but the "△" has a colour of its own.
 
 // ocButtonStage is a button-bar dialog: its title, its buttons in screen
 // order, and the button focused when it mounts, which its keys assume.
@@ -25,11 +27,14 @@ type ocButtonStage struct {
 	title  string
 	labels []string
 	home   string
+	// titleInAccent: the "△" before the title has the frame's colour (V1).
+	titleInAccent bool
 }
 
 var ocButtonStages = []ocButtonStage{
-	{title: "Permission required", labels: []string{"Allow once", "Allow always", "Reject"}, home: "Allow once"},
-	{title: "Always allow", labels: []string{"Confirm", "Cancel"}, home: "Confirm"},
+	{title: "Permission required", labels: []string{"Allow once", "Allow always", "Reject"}, home: "Allow once", titleInAccent: true},
+	{title: "Always allow", labels: []string{"Confirm", "Cancel"}, home: "Confirm", titleInAccent: true},
+	{title: "Permission required", labels: []string{"Allow once", "Always allow", "Reject"}, home: "Allow once"},
 }
 
 // FocusDependent implements FocusGuard. esc (Reject, Cancel, dismiss) and
@@ -79,7 +84,7 @@ func (o *opencodeAdapter) CheckFocus(ansiScreen string, p Prompt, optionID strin
 		return errors.New("the dialog changed between the text and the ansi read")
 	}
 
-	focused, err := ocFocusedButton(rows, plain, stage.labels)
+	focused, err := ocFocusedButton(rows, plain, stage)
 	if err != nil {
 		return err
 	}
@@ -111,7 +116,8 @@ func ocStageOf(p Prompt) (ocButtonStage, bool) {
 // button row: the last framed row holding every label, as ocParseButtons
 // finds it. Each label must appear on it exactly once in one style, and
 // exactly one button may carry the accent colour as its background.
-func ocFocusedButton(rows []styledRow, plain []string, labels []string) (string, error) {
+func ocFocusedButton(rows []styledRow, plain []string, stage ocButtonStage) (string, error) {
+	labels := stage.labels
 	bar := -1
 	for i := len(rows) - 1; i >= 0 && bar < 0; i-- {
 		if _, framed := ocFrame(plain[i]); !framed {
@@ -129,7 +135,7 @@ func ocFocusedButton(rows []styledRow, plain []string, labels []string) (string,
 		return "", errors.New("no button row with every button on it")
 	}
 
-	accent, err := ocAccent(rows, plain, bar)
+	accent, err := ocAccent(rows, plain, bar, stage.titleInAccent)
 	if err != nil {
 		return "", err
 	}
@@ -151,9 +157,9 @@ func ocFocusedButton(rows []styledRow, plain []string, labels []string) (string,
 }
 
 // ocAccent returns the foreground of the "┃" that frames the button row, and
-// checks the "△" before the dialog's title (in the same framed block, above
-// the row) has the same one.
-func ocAccent(rows []styledRow, plain []string, bar int) (termColor, error) {
+// checks the "△" before the dialog's title is in the same framed block, above
+// the row, with the same foreground when titleInAccent.
+func ocAccent(rows []styledRow, plain []string, bar int, titleInAccent bool) (termColor, error) {
 	marker, ok := ocGlyphStyle(rows[bar], '┃', true)
 	if !ok {
 		return termColor{}, errors.New("the button row has no frame glyph")
@@ -170,7 +176,7 @@ func ocAccent(rows []styledRow, plain []string, bar int) (termColor, error) {
 			continue
 		}
 		tri, ok := ocGlyphStyle(rows[i], '△', false)
-		if !ok || tri.inverse || tri.fg != marker.fg {
+		if !ok || tri.inverse || (titleInAccent && tri.fg != marker.fg) {
 			return termColor{}, errors.New("the title glyph and the frame differ in colour")
 		}
 		return marker.fg, nil

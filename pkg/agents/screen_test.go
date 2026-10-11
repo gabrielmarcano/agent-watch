@@ -110,3 +110,37 @@ func TestScreenTurn_OpenCodeInputBoxIsCut(t *testing.T) {
 		}
 	}
 }
+
+// OpenCode V2 frames tool calls in "┃" like the user's message: the query is
+// the user's block, and the tool blocks and V2's footer are not in the reply.
+func TestScreenTurnFor_OpenCodeV2ToolBlocks(t *testing.T) {
+	cases := []struct {
+		fixture, query, response string
+	}{
+		{"no-menu-idle-shell-v2.txt", "Run the shell command ls -la and tell me what you see",
+			"I'll run ls -la to see what's here.\n\n" +
+				"ls -la in /private/tmp/aw-sandbox shows:\n\n" +
+				"- total 8\n" +
+				"- . (current dir, drwxr-xr-x, owner me, modified Oct 10 11:41)\n" +
+				"- .. (parent dir, drwxrwxrwt, owner root)\n" +
+				"- .git/ (drwxr-xr-x, 9 entries)\n" +
+				"- note.txt (-rw-r--r--, 6 bytes)\n\n" +
+				"So it's a git repo with a single visible file: note.txt."},
+		{"no-menu-idle-declined-v2.txt", "Append the line world to note.txt",
+			"Appending that line for you.\n\n→ Explored: 1 read"},
+	}
+	ad := NewRegistry(Config{}).For("opencode")
+	for _, c := range cases {
+		data, err := os.ReadFile(filepath.Join("testdata", "opencode", c.fixture))
+		if err != nil {
+			t.Fatal(err)
+		}
+		item := ScreenTurnFor(ad, string(data))
+		if item.Query != c.query {
+			t.Errorf("%s: query = %q, want %q", c.fixture, item.Query, c.query)
+		}
+		if item.Response != c.response {
+			t.Errorf("%s: response = %q, want %q", c.fixture, item.Response, c.response)
+		}
+	}
+}

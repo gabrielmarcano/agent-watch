@@ -646,7 +646,7 @@ def cmd_opencode_before(_argv):
     tool = str(data.get("tool") or "")
     args = data.get("args") or {}
     try:
-        if tool == "bash" and isinstance(args, dict):
+        if tool in ("bash", "shell") and isinstance(args, dict):
             check_command(str(args.get("command") or ""))
         elif tool in WRITE_TOOLS:
             for p in paths_in_args(args):

@@ -1,0 +1,42 @@
+
+     Build · Muse Spark 1.3 Free · 1.9s · 78.7 tok/s                                                     Running ls -la directory listing
+
+  ┃                                                                                                      Context
+  ┃  Append the line world to note.txt                                                                   8,187 tokens
+  ┃                                                                                                      1% used
+
+     Appending that line for you.
+
+     → Explored: 1 read
+
+  ┃
+  ┃  ← Edit note.txt
+  ┃
+  ┃  The user declined this tool call
+  ┃
+
+     Build · Muse Spark 1.3 Free · 9.0s · 97.1 tok/s · interrupted
+
+  ┃
+  ┃  Ask me with a multiple-choice question which color I prefer: red, green or blue
+  ┃
+
+     Quick color check for you.
+
+     → Asked 1 question
+
+  ┃
+  ┃  Questions
+  ┃
+  ┃  Which color do you prefer?
+  ┃
+  ┃  1. Red
+  ┃     Bright and bold primary color
+  ┃  2. Green
+  ┃     Fresh natural calming color
+  ┃  3. Blue
+  ┃     Cool calm classic color
+  ┃  4. Type your own answer
+  ┃
+  ┃  ↑↓ select  enter submit  esc dismiss
+  ┃                                                                                                      /private/tmp/aw-sandbox:main

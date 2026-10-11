@@ -1,0 +1,17 @@
+{
+  "prompt": {
+    "kind": "question",
+    "title": "Which color do you prefer?",
+    "detail": "",
+    "options": [
+      {"id": "opt-1", "label": "Red", "description": "Bright and bold primary color", "role": "choice"},
+      {"id": "opt-2", "label": "Green", "description": "Fresh natural calming color", "role": "choice"},
+      {"id": "opt-3", "label": "Blue", "description": "Cool calm classic color", "role": "choice"}
+    ]
+  },
+  "keys": {"opt-1": ["1"], "opt-2": ["2"], "opt-3": ["3"]},
+  "cancel_keys": ["esc"],
+  "verified_keys": true,
+  "herdr_status": "blocked",
+  "notes": "OpenCode 2.0.25. Same dialog as V1 plus a 'Questions' heading above the question. Digit 2 submitted 'Green' at once."
+}
