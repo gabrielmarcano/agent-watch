@@ -48,24 +48,28 @@ func (d *Dispatcher) OnHostPresence(host string, idle time.Duration, locked bool
 		d.armPresenceTimerLocked(now)
 		return
 	}
-	d.endPresenceLocked()
+	d.endPresenceLocked(nil)
 }
 
 // OnHostOffline implements relay.Notifier: a host disconnected. When it sent
-// the last report, presence ends without a catch-up; another host's going
-// offline changes nothing. The held-back panes wait for the next report (a
-// reconnected bridge reports right after its snapshot), and the catch-up then
-// reads their current state.
+// the last report, presence ends: the panes held back for the hosts still
+// online are caught up now (a Linux host never reports, so nothing else would
+// end it for them), and the offline host's own panes stay held back for its
+// next report (a reconnected bridge reports right after its snapshot). Another
+// host's going offline changes nothing.
 func (d *Dispatcher) OnHostOffline(host string) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	d.initLocked()
+	d.hostOfflineLocked(host)
+}
 
+func (d *Dispatcher) hostOfflineLocked(host string) {
 	if !d.presence.reported || d.presence.host != host {
 		return
 	}
-	d.stopPresenceTimerLocked()
 	d.presence.reported = false
+	d.endPresenceLocked(&host)
 }
 
 // presentLocked reports whether the owner is at the host at time now.
@@ -123,12 +127,15 @@ func (d *Dispatcher) presenceTimerFired(gen uint64) {
 		d.armPresenceTimerLocked(now)
 		return
 	}
-	d.endPresenceLocked()
+	d.endPresenceLocked(nil)
 }
 
 // endPresenceLocked pushes every held-back pane that is still blocked now,
 // built from its current state, through the normal debounce, window and digest.
-func (d *Dispatcher) endPresenceLocked() {
+// The panes of *offline (the host going offline, when not nil) and of any host
+// that is not online stay held back: a push for them could not be answered,
+// and a later end of presence catches them up.
+func (d *Dispatcher) endPresenceLocked(offline *string) {
 	d.stopPresenceTimerLocked()
 	quiet := d.presence.quiet
 	if len(quiet) == 0 {
@@ -136,7 +143,11 @@ func (d *Dispatcher) endPresenceLocked() {
 	}
 	panes := make([]paneKey, 0, len(quiet))
 	for pane := range quiet {
+		if (offline != nil && pane.host == *offline) || (d.HostOnline != nil && !d.HostOnline(pane.host)) {
+			continue
+		}
 		panes = append(panes, pane)
+		delete(quiet, pane)
 	}
 	sort.Slice(panes, func(i, j int) bool {
 		if panes[i].host != panes[j].host {
@@ -144,7 +155,6 @@ func (d *Dispatcher) endPresenceLocked() {
 		}
 		return panes[i].pane < panes[j].pane
 	})
-	clear(quiet)
 	if d.Current == nil {
 		return
 	}

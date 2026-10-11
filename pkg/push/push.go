@@ -129,6 +129,10 @@ type Dispatcher struct {
 	// Current returns a pane's current state on a host (the relay's
 	// State.Get), for the catch-up when presence ends. nil: no catch-up.
 	Current func(host, paneID string) (model.AgentState, bool)
+	// HostOnline reports whether a host's bridge is connected (the relay's
+	// State.HostOnline): the catch-up leaves an offline host's panes held
+	// back. nil: every host is online.
+	HostOnline func(host string) bool
 	// HostName returns a host's display name and how many hosts the relay
 	// knows (the relay's State.HostName). With more than one, titles start
 	// with the host's name. nil: the host id, one host.

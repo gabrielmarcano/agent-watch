@@ -126,6 +126,7 @@ func NewServer(cfg *Config) (_ *Server, err error) {
 		dispatcher.ReplyWait = push.DefaultReplyWait
 		dispatcher.PresenceIdle = cfg.PushPresenceIdle
 		dispatcher.Current = state.Get
+		dispatcher.HostOnline = state.HostOnline
 		dispatcher.HostName = state.HostName
 		slog.Info("push presence", "idle", cfg.PushPresenceIdle)
 		notifier = dispatcher

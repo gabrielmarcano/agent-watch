@@ -146,7 +146,9 @@ func TestDispatcher_HostNameInTitles(t *testing.T) {
 
 // Presence is one state for every host: any host's report holds back every
 // host's pushes, and only the host that sent the last report ends it by going
-// offline.
+// offline. Its own held-back panes then wait for its next report; the other
+// hosts' are caught up at once (a Linux host never reports, so nothing else
+// would end presence for them).
 func TestPresence_OneStateAcrossHosts(t *testing.T) {
 	d, _, timers, sender, states := presenceDispatcher(t)
 	var asked []string
@@ -168,7 +170,7 @@ func TestPresence_OneStateAcrossHosts(t *testing.T) {
 		t.Fatalf("pushes while the owner is at mac = %d, want 0", n)
 	}
 
-	d.OnHostOffline("linux") // did not send the report: presence stays
+	d.OnHostOffline("pi") // did not send the report: presence stays
 	blockOn("mac", "w1:p1", 11)
 	if n := pushed(d, sender); n != 0 {
 		t.Fatalf("pushes after another host went offline = %d, want 0", n)
@@ -180,22 +182,53 @@ func TestPresence_OneStateAcrossHosts(t *testing.T) {
 		t.Fatalf("held-back panes = %d, want 2 (same pane id on two hosts)", quiet)
 	}
 
-	// The reporting host goes offline: presence ends without a catch-up.
+	// The reporting host goes offline: presence ends, linux's held-back pane
+	// is caught up now, mac's waits for mac's next report.
 	d.OnHostOffline("mac")
-	if n := pushed(d, sender); n != 0 {
-		t.Fatalf("catch-up on offline = %d pushes, want 0", n)
+	d.Wait()
+	if got, want := hostEvents(sender.getMessages()), []string{"blocked:linux/w1:p1"}; fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Fatalf("catch-up on offline = %v, want %v", got, want)
+	}
+	if fmt.Sprint(asked) != "[linux/w1:p1]" {
+		t.Fatalf("Current asked for %v, want only linux/w1:p1", asked)
 	}
 
-	// The next report, from any host, says the owner is away: both held-back
-	// panes are caught up, read from their own host.
+	// mac reconnects and reports the owner away: its held-back pane is caught
+	// up, read from its own host.
 	d.OnHostPresence("mac", 20*time.Minute, false)
 	flushWindow(d, timers)
-	sort.Strings(asked)
-	if want := []string{"linux/w1:p1", "mac/w1:p1"}; fmt.Sprint(asked) != fmt.Sprint(want) {
-		t.Fatalf("Current asked for %v, want %v", asked, want)
-	}
 	if got, want := hostEvents(sender.getMessages()), []string{"blocked:linux/w1:p1", "blocked:mac/w1:p1"}; fmt.Sprint(got) != fmt.Sprint(want) {
-		t.Fatalf("catch-up pushes = %v, want %v", got, want)
+		t.Fatalf("pushes = %v, want %v", got, want)
+	}
+}
+
+// The catch-up never pushes a prompt of a host that is offline: it stays held
+// back until presence ends again with its host online.
+func TestPresence_CatchUpSkipsOfflineHosts(t *testing.T) {
+	d, _, timers, sender, states := presenceDispatcher(t)
+	online := map[string]bool{"mac": true, "linux": true}
+	d.HostOnline = func(host string) bool { return online[host] }
+	d.Current = func(host, pane string) (model.AgentState, bool) {
+		s, ok := states[host+"/"+pane]
+		return s, ok
+	}
+	cur := onHost("linux", promptState(10, "fp10"))
+	states["linux/"+cur.PaneID] = cur
+
+	d.OnHostPresence("mac", time.Second, false)
+	d.OnAgentUpdate(nil, cur)
+	online["linux"] = false
+	d.OnHostOffline("linux")
+	d.OnHostPresence("mac", time.Second, true) // locked: presence ends
+	if n := pushed(d, sender); n != 0 {
+		t.Fatalf("catch-up pushes for an offline host = %d, want 0", n)
+	}
+
+	online["linux"] = true
+	d.OnHostPresence("mac", time.Second, true)
+	flushWindow(d, timers)
+	if got, want := hostEvents(sender.getMessages()), []string{"blocked:linux/" + cur.PaneID}; fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Fatalf("pushes once linux is back = %v, want %v", got, want)
 	}
 }
 
