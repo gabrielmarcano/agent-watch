@@ -637,7 +637,7 @@ The relay reads them from `/etc/agent-watch-relay/env` (systemd `EnvironmentFile
 
 | File | Meaning |
 |---|---|
-| `store.json` | Hosts (id, name, token hash, created and last-seen times), devices (device-token hashes only, plus each device's FCM push token) and history (per host and pane, keyed `<host>/<pane_id>`). `0600`, owned by the service user. **Version 2.** A version 1 file (a relay before hosts) is migrated when the relay or the CLI opens it, its history going to `AW_HOST_ID`; a newer version, or a malformed host or history key, stops startup |
+| `store.json` | Hosts (id, name, token hash, created and last-seen times), devices (device-token hashes only, plus each device's FCM push token) and history (per host and pane, keyed `<host>/<pane_id>`). `0600`, owned by the service user. **Version 2.** A version 1 file (a relay before hosts) is migrated when the relay or the CLI opens it, its history going to `AW_HOST_ID`, except a key that already starts with a valid `<host>/` (herdr pane ids contain no `/`), which keeps its host (a file saved by a rolled-back relay; a pane that ends up with both keys gets their items merged); a newer version, or a malformed host or history key, stops startup |
 | `relay.lock` | Exclusive `flock` held by the running relay for its whole life. A second relay on the same directory refuses to start |
 | `admin.sock` | Local admin API, a `0600` Unix socket that exists only while the relay runs. Never exposed over TCP |
 

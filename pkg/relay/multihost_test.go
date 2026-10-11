@@ -507,6 +507,41 @@ func TestStore_MigratesVersion1(t *testing.T) {
 	}
 }
 
+// A relay rolled back to before hosts saves store.json as version 1 but keeps
+// the host-prefixed history keys, and adds bare ones for new items. Opening it
+// again keeps each key's host, never "main/main/…", and merges a bare key into
+// the same pane of AW_HOST_ID.
+func TestStore_MigratesAfterRollback(t *testing.T) {
+	dir := t.TempDir()
+	item := func(id, pane, at string) string {
+		return `{"id":"` + id + `","pane_id":"` + pane + `","agent":"claude","label":"x","response":"r","source":"transcript","completed_at":"` + at + `"}`
+	}
+	rolledBack := `{"version":1,"devices":[],"history":{
+		"main/w1:p1":[` + item("a", "w1:p1", "2026-10-01T10:00:00Z") + `],
+		"linux/w1:p1":[` + item("b", "w1:p1", "2026-10-01T10:00:01Z") + `],
+		"w1:p1":[` + item("c", "w1:p1", "2026-10-02T10:00:00Z") + `,` + item("a", "w1:p1", "2026-10-01T10:00:00Z") + `]}}`
+	if err := os.WriteFile(filepath.Join(dir, "store.json"), []byte(rolledBack), 0600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	st, err := OpenStore(dir, "main")
+	if err != nil {
+		t.Fatalf("OpenStore: %v", err)
+	}
+	defer st.Close()
+	var got []string
+	for _, it := range st.GetHistory("", "", 50) {
+		got = append(got, it.Host+"/"+it.PaneID+"/"+it.ID)
+	}
+	sort.Strings(got)
+	if want := []string{"linux/w1:p1/b", "main/w1:p1/a", "main/w1:p1/c"}; strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("history = %v, want %v", got, want)
+	}
+	if items := st.GetHistory("main", "w1:p1", 10); len(items) != 2 || items[0].ID != "c" {
+		t.Fatalf("main/w1:p1 = %+v, want c then a", items)
+	}
+}
+
 func TestStore_RefusesNewerOrBrokenFiles(t *testing.T) {
 	for name, content := range map[string]string{
 		"newer version":       `{"version":3,"devices":[],"history":{}}`,

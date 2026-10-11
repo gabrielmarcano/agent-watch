@@ -189,18 +189,26 @@ func OpenStore(dataDir, legacyHostID string) (*Store, error) {
 
 	migrate := sf.Version < 2
 	for fileKey, items := range sf.History {
-		key := paneKey{host: legacyHostID, pane: fileKey}
-		if !migrate {
-			host, pane, ok := strings.Cut(fileKey, "/")
-			if !ok || !ValidHostID(host) || pane == "" {
-				return nil, fmt.Errorf("corrupt store file %s: invalid history key %q", filePath, fileKey)
-			}
+		host, pane, ok := strings.Cut(fileKey, "/")
+		valid := ok && ValidHostID(host) && pane != ""
+		var key paneKey
+		switch {
+		case valid:
 			key = paneKey{host: host, pane: pane}
+		case migrate:
+			// A version 1 key is a bare pane id. herdr pane ids contain no
+			// "/", so a key that already names a host is one a rolled-back
+			// relay kept from version 2: it is not migrated twice.
+			key = paneKey{host: legacyHostID, pane: fileKey}
+		default:
+			return nil, fmt.Errorf("corrupt store file %s: invalid history key %q", filePath, fileKey)
 		}
 		for i := range items {
 			items[i].Host = key.host
 		}
-		s.history[key] = items
+		// After a rollback, the same pane can have both keys: a host-prefixed
+		// one and a bare one for what the older relay added.
+		s.history[key] = mergeHistory(s.history[key], items)
 	}
 
 	if sf.Devices != nil {
@@ -223,6 +231,29 @@ func OpenStore(dataDir, legacyHostID string) (*Store, error) {
 	}
 
 	return s, nil
+}
+
+// mergeHistory returns a's and b's items without duplicate ids, newest first,
+// at most maxHistoryPane. With a empty it returns b as it is.
+func mergeHistory(a, b []model.HistoryItem) []model.HistoryItem {
+	if len(a) == 0 {
+		return b
+	}
+	seen := make(map[string]bool, len(a)+len(b))
+	out := make([]model.HistoryItem, 0, len(a)+len(b))
+	for _, items := range [][]model.HistoryItem{a, b} {
+		for _, it := range items {
+			if !seen[it.ID] {
+				seen[it.ID] = true
+				out = append(out, it)
+			}
+		}
+	}
+	sort.SliceStable(out, func(i, j int) bool { return out[i].CompletedAt > out[j].CompletedAt })
+	if len(out) > maxHistoryPane {
+		out = out[:maxHistoryPane]
+	}
+	return out
 }
 
 // AddHost registers a host with the hash of its token. name defaults to id.

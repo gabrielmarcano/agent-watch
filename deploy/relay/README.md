@@ -69,7 +69,7 @@ ssh <vps> 'install -m 0755 /usr/local/bin/agent-watch-relay.prev /usr/local/bin/
 
 Only one previous binary is kept: each deploy overwrites `.prev`.
 
-**Across relay 0.7.0** (`store.json` version 2, with hosts): an older relay still starts on the new file, but needs `AW_HOST_TOKEN`, finds no pane's history (its keys now name a host), and drops the registered hosts on its next save. After rolling forward again, add them anew (new tokens).
+**Across relay 0.7.0** (`store.json` version 2, with hosts): an older relay still starts on the new file, but needs `AW_HOST_TOKEN`, finds no pane's history (its keys now name a host), and drops the registered hosts on its next save. It saves the file as version 1 with those keys as they are, plus bare ones for what it adds. Rolling forward again migrates it once more: a key that already names a host keeps it, and a bare key's items join the same pane of `AW_HOST_ID`, so no history is lost or doubled. Add the registered hosts anew (new tokens).
 
 ### `--sync-env`: the server's env file from `agent-watch.env`
 
