@@ -40,6 +40,13 @@ fun resolveTarget(agents: List<AgentState>, pinned: AgentKey?, hosts: List<HostI
 }
 
 /**
+ * Whether the [pinned] target is [agent], resolved like the tile resolves it ([findAgent]): a pin saved
+ * before hosts (no host) shows as pinned while only one host has its pane.
+ */
+fun isPinnedTarget(pinned: AgentKey?, agent: AgentKey, agents: List<AgentState>): Boolean =
+    pinned != null && (pinned == agent || agents.findAgent(pinned)?.key == agent)
+
+/**
  * The name to show for [host] next to an agent, or null while the relay knows fewer than two hosts:
  * with one machine nothing names it (ARCHITECTURE.md §4b).
  */

@@ -62,6 +62,16 @@ class AgentKeyTest {
     }
 
     @Test
+    fun aPinSavedBeforeHostsShowsAsPinnedWhereTheTileFindsIt() {
+        val legacyPin = AgentKey("", "w1:p1")
+        assertTrue(isPinnedTarget(legacyPin, onMac.key, listOf(onMac)))
+        assertFalse("two hosts with that pane: the tile resolves none", isPinnedTarget(legacyPin, onMac.key, listOf(onMac, onBox)))
+        assertTrue(isPinnedTarget(onBox.key, onBox.key, listOf(onMac, onBox)))
+        assertFalse(isPinnedTarget(onBox.key, onMac.key, listOf(onMac, onBox)))
+        assertFalse(isPinnedTarget(null, onMac.key, listOf(onMac)))
+    }
+
+    @Test
     fun aHostIsNamedOnlyWhenThereAreSeveral() {
         assertNull(hostNameFor(emptyList(), "main"))
         assertNull(hostNameFor(listOf(mac), "main"))
