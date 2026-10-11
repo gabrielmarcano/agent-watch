@@ -61,7 +61,7 @@ Every herdr numbers its own panes, so `w1:p1` can exist on every host (contracts
 - **No host** (`""`): a relay that predates hosts. `AgentKey.token` is then the pane id alone, so ids, URIs and stored values stay as they were. A key without a host from an intent, a tile or a pin saved before hosts finds its pane only while one host has it (`findAgent`), never by guessing between two.
 - **Naming a host:** only while the relay knows two or more (`hostNameFor`): the list page's header, a line on the agent screen and the dictation confirm, the tiles and the complication. With one host nothing names it. Pushes: the relay's `title` already names it (contracts §4.1); the app shows it as it is.
 - **Online:** each host has its own flags (`UiState.hosts`); `hostOnline` and `herdrOnline` are the relay's aggregates (contracts §1.5), used as before when the relay lists no hosts.
-- **Tiles and complication:** the most urgent agent across every online host (an offline host's last known agents cannot be answered, so they leave the count); "device offline" only when every host is (`allHostsOffline`).
+- **Tiles, complication and Quick Dictate:** agents of online hosts only (an offline host's last known agents cannot be answered, so they leave the count and are never the target: `onlineAgents`, `targetCandidates`); "device offline" only when every host is (`allHostsOffline`), and then the Quick Dictate tile still names its target.
 
 ## 4. What the UI must use
 

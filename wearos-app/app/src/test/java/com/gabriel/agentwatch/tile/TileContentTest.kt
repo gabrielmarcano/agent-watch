@@ -64,13 +64,13 @@ class TileContentTest {
         val onBox = idle.copy(host = "box", focused = false)
         val blockedOnMac = blocked1.copy(host = "main")
         val snapshot = Result.success(AgentsSnapshot(
-            host_online = true, herdr_online = true, hosts = listOf(box, mac.copy(online = false)),
+            host_online = true, herdr_online = true, hosts = listOf(box, mac),
             agents = listOf(onMac, onBox, blockedOnMac)
         ))
 
         val content = tileContent(true, snapshot, pinned = AgentKey("main", "w1:pA"))
 
-        assertEquals(TileContent.Target(onMac, othersNeedingYou = 1, macOnline = false, hostName = "Mac"), content)
+        assertEquals(TileContent.Target(onMac, othersNeedingYou = 1, macOnline = true, hostName = "Mac"), content)
         assertEquals(
             TileContent.Target(onBox, othersNeedingYou = 1, macOnline = true, hostName = "Box"),
             tileContent(true, snapshot, pinned = AgentKey("box", "w1:pA"))
@@ -82,5 +82,34 @@ class TileContentTest {
         val onMac = idle.copy(host = "main")
         val content = tileContent(true, Result.success(AgentsSnapshot(host_online = true, hosts = listOf(mac), agents = listOf(onMac))), null)
         assertEquals(TileContent.Target(onMac, othersNeedingYou = 0, macOnline = true, hostName = null), content)
+    }
+
+    @Test
+    fun anOfflineHostsAgentsAreNeitherTheTargetNorCounted() {
+        // Box went offline with a stale finished agent and a stale prompt: neither can be answered.
+        val staleDone = AgentState(pane_id = "w1:p1", host = "box", label = "api", status = "done", updated_at = "2026-10-10T10:00:00Z")
+        val staleBlocked = AgentState(pane_id = "w1:p2", host = "box", label = "db", status = "blocked")
+        val onMac = idle.copy(host = "main")
+        val snapshot = Result.success(AgentsSnapshot(
+            host_online = true, herdr_online = true, hosts = listOf(box.copy(online = false), mac),
+            agents = listOf(staleDone, staleBlocked, onMac)
+        ))
+
+        assertEquals(TileContent.Target(onMac, othersNeedingYou = 0, macOnline = true, hostName = "Mac"), tileContent(true, snapshot, null))
+        assertEquals(
+            "a pin on an offline host falls back to the rule",
+            TileContent.Target(onMac, othersNeedingYou = 0, macOnline = true, hostName = "Mac"),
+            tileContent(true, snapshot, pinned = AgentKey("box", "w1:p1"))
+        )
+    }
+
+    @Test
+    fun everyHostOfflineStillNamesTheTargetAsOffline() {
+        val onMac = idle.copy(host = "main")
+        val snapshot = Result.success(AgentsSnapshot(
+            host_online = false, herdr_online = false, hosts = listOf(box.copy(online = false), mac.copy(online = false)),
+            agents = listOf(onMac)
+        ))
+        assertEquals(TileContent.Target(onMac, othersNeedingYou = 0, macOnline = false, hostName = "Mac"), tileContent(true, snapshot, null))
     }
 }

@@ -65,3 +65,16 @@ fun AgentsSnapshot.onlineAgents(): List<AgentState> {
     val online = known.filter { it.online }.mapTo(HashSet()) { it.id }
     return agents.filter { it.host in online }
 }
+
+/**
+ * The agents a target (tile, Quick Dictate) may come from: those of online hosts, since an offline
+ * host's last known agents cannot be answered (ARCHITECTURE.md §3a). While every host is offline, all
+ * of them, so the tile still names its target and says the device is offline.
+ */
+fun targetCandidates(agents: List<AgentState>, hosts: List<HostInfo>, hostOnline: Boolean): List<AgentState> {
+    if (hosts.isEmpty() || allHostsOffline(hosts, hostOnline)) return agents
+    val online = hosts.filter { it.online }.mapTo(HashSet()) { it.id }
+    return agents.filter { it.host in online }
+}
+
+fun AgentsSnapshot.targetCandidates(): List<AgentState> = targetCandidates(agents, hosts.orEmpty(), host_online)

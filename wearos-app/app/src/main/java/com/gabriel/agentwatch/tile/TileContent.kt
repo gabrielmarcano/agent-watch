@@ -6,7 +6,9 @@ import com.gabriel.agentwatch.model.AgentsSnapshot
 import com.gabriel.agentwatch.model.hostIsOnline
 import com.gabriel.agentwatch.model.hostNameFor
 import com.gabriel.agentwatch.model.key
+import com.gabriel.agentwatch.model.onlineAgents
 import com.gabriel.agentwatch.model.resolveTarget
+import com.gabriel.agentwatch.model.targetCandidates
 
 /** What the Quick Dictate tile shows after its one `GET /v1/agents`. */
 sealed interface TileContent {
@@ -26,12 +28,15 @@ sealed interface TileContent {
     ) : TileContent
 }
 
-/** The target rule (pinned → latest `done` → focused) on the fetched [snapshot], across every host; null means no fetch. */
+/**
+ * The target rule (pinned → latest `done` → focused) on the fetched [snapshot] (null means no fetch),
+ * across every online host; only online hosts' blocked agents count (ARCHITECTURE.md §3a).
+ */
 fun tileContent(paired: Boolean, snapshot: Result<AgentsSnapshot>?, pinned: AgentKey?): TileContent {
     if (!paired) return TileContent.NotPaired
     val agents = snapshot?.getOrNull() ?: return TileContent.Unreachable
-    val blocked = agents.agents.filter { it.status == "blocked" }
-    val target = resolveTarget(agents.agents, pinned) ?: return TileContent.NoTarget(blocked.size)
+    val blocked = agents.onlineAgents().filter { it.status == "blocked" }
+    val target = resolveTarget(agents.targetCandidates(), pinned) ?: return TileContent.NoTarget(blocked.size)
     return TileContent.Target(
         agent = target,
         othersNeedingYou = blocked.count { it.key != target.key },
