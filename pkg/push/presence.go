@@ -72,6 +72,64 @@ func (d *Dispatcher) hostOfflineLocked(host string) {
 	d.endPresenceLocked(&host)
 }
 
+// OnHostRevoked implements relay.Notifier: a host was revoked. Nothing of it
+// is pushed any more: its held pushes (window, reply wait, presence) are
+// dropped, the debounce forgets it, and each blocked notification it shows is
+// withdrawn with resolved (to the senders that can, like any resolved). Then
+// it goes offline.
+func (d *Dispatcher) OnHostRevoked(host string) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.initLocked()
+
+	held := d.held[:0]
+	for _, m := range d.held {
+		if m.Host != host {
+			held = append(held, m)
+		}
+	}
+	clear(d.held[len(held):])
+	d.held = held
+	for pane := range d.latest {
+		if pane.host == host {
+			delete(d.latest, pane)
+		}
+	}
+	for pane, p := range d.pendingDone {
+		if pane.host == host {
+			p.timer.Stop()
+			delete(d.pendingDone, pane)
+		}
+	}
+	for pane := range d.presence.quiet {
+		if pane.host == host {
+			delete(d.presence.quiet, pane)
+		}
+	}
+	for key := range d.lastPush {
+		if key.pane.host == host {
+			delete(d.lastPush, key)
+		}
+	}
+	var shown []paneKey
+	for pane := range d.blockedShown {
+		if pane.host == host {
+			shown = append(shown, pane)
+		}
+	}
+	sort.Slice(shown, func(i, j int) bool { return shown[i].pane < shown[j].pane })
+	for _, pane := range shown {
+		// The shown prompt's own seq: the app withdraws a notification whose
+		// seq is at most the resolved one (contracts.md §4.1).
+		seq := d.blockedShown[pane].seq
+		delete(d.blockedShown, pane)
+		d.dispatchLocked(Message{Event: EventResolved, Host: host, PaneID: pane.pane, StateChangeSeq: seq})
+	}
+	d.Logger.Info("push state dropped for a revoked host", "host", host, "withdrawn", len(shown))
+
+	d.hostOfflineLocked(host)
+}
+
 // presentLocked reports whether the owner is at the host at time now.
 func (d *Dispatcher) presentLocked(now time.Time) bool {
 	p := d.presence

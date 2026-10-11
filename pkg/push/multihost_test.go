@@ -250,3 +250,56 @@ func TestPresence_LastReporterOwnsIt(t *testing.T) {
 		t.Fatalf("pushes after the reporting host left = %d, want 1", n)
 	}
 }
+
+// A revoked host's pushes never go out: what is held for it (window, reply
+// wait, presence) is dropped, and its shown approvals are withdrawn. Other
+// hosts are untouched.
+func TestDispatcher_RevokedHostIsForgotten(t *testing.T) {
+	fcm := newResolvedMock()
+	d, _, timers := newTestDispatcher(fcm)
+	d.ReplyWait = 3 * time.Second
+
+	shown := onHost("linux", blockedState("w1:p1", "a"))
+	shown.StateChangeSeq = 5
+	d.OnAgentUpdate(nil, shown)                                       // sent at once, shown
+	d.OnAgentUpdate(nil, onHost("linux", blockedState("w1:p2", "b"))) // held in the window
+	d.OnAgentUpdate(nil, onHost("mac", blockedState("w1:p3", "c")))   // held in the window
+	working := onHost("linux", agentAt("w1:p4", "d", model.StatusWorking, 1))
+	d.OnAgentUpdate(&working, onHost("linux", agentAt("w1:p4", "d", model.StatusDone, 2))) // waits for its reply
+	d.Wait()
+
+	d.OnHostRevoked("linux")
+	d.Wait()
+	msgs := fcm.getMessages()
+	if last := msgs[len(msgs)-1]; last.Event != EventResolved || last.Host != "linux" || last.PaneID != "w1:p1" || last.StateChangeSeq != 5 {
+		t.Fatalf("last push = %+v, want resolved for linux/w1:p1 at seq 5", last)
+	}
+
+	flushWindow(d, timers) // the window and the reply wait end
+	if got, want := hostEvents(fcm.getMessages()), []string{"blocked:linux/w1:p1", "blocked:mac/w1:p3", "resolved:linux/w1:p1"}; fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Fatalf("pushes = %v, want %v", got, want)
+	}
+	d.mu.Lock()
+	for key := range d.lastPush {
+		if key.pane.host == "linux" {
+			t.Errorf("the debounce still remembers %+v", key)
+		}
+	}
+	if len(d.blockedShown) != 1 {
+		t.Errorf("shown approvals = %v, want only mac's", d.blockedShown)
+	}
+	d.mu.Unlock()
+
+	t.Run("held back by presence", func(t *testing.T) {
+		d, _, _, sender, states := presenceDispatcher(t)
+		cur := onHost("linux", blockedState("w1:p1", "a"))
+		states["w1:p1"] = cur
+		d.OnHostPresence("mac", time.Second, false)
+		d.OnAgentUpdate(nil, cur)
+		d.OnHostRevoked("linux")
+		d.OnHostPresence("mac", time.Second, true) // presence ends
+		if n := pushed(d, sender); n != 0 {
+			t.Fatalf("catch-up pushes for a revoked host = %d, want 0", n)
+		}
+	})
+}

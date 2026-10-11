@@ -621,6 +621,13 @@ type presenceNotifier struct {
 	idles    []time.Duration
 	locked   []bool
 	offlines int
+	revoked  []string
+}
+
+func (n *presenceNotifier) OnHostRevoked(host string) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	n.revoked = append(n.revoked, host)
 }
 
 func (n *presenceNotifier) OnHostPresence(host string, idle time.Duration, locked bool) {
@@ -706,5 +713,20 @@ func TestHub_ReplaceIsNotOffline(t *testing.T) {
 	time.Sleep(50 * time.Millisecond)
 	if got := n.offlineCount(); got != 1 {
 		t.Fatalf("OnHostOffline calls after closing the current host = %d, want exactly 1", got)
+	}
+}
+
+// Revoking a host tells the notifier even when the host is not connected: a
+// push held for it (a reply wait, presence) must not go out afterwards.
+func TestHub_RevokeReportsHostRevoked(t *testing.T) {
+	n := &presenceNotifier{}
+	h := NewHub(nil, NewState(), nil, n)
+	if h.RevokeHost("linux") {
+		t.Fatal("RevokeHost reported an unconnected host as connected")
+	}
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	if fmt.Sprint(n.revoked) != "[linux]" || n.offlines != 0 {
+		t.Fatalf("revoked = %v, offline calls = %d; want [linux] and 0", n.revoked, n.offlines)
 	}
 }

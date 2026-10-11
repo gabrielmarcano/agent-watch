@@ -47,9 +47,12 @@ type Notifier interface {
 	// OnHostPresence reports a host's input idle time and screen lock
 	// (host_presence, contracts.md §3): pushes wait while the owner is there.
 	OnHostPresence(host string, idle time.Duration, locked bool)
-	// OnHostOffline reports that a host disconnected, was dropped or was
-	// revoked (not replaced by a new connection of the same host).
+	// OnHostOffline reports that a host disconnected or was dropped (not
+	// replaced by a new connection of the same host, nor revoked).
 	OnHostOffline(host string)
+	// OnHostRevoked reports that a host was revoked, connected or not: nothing
+	// of it may be pushed any more.
+	OnHostRevoked(host string)
 }
 
 // NoopNotifier is a placeholder notifier that does nothing.
@@ -66,6 +69,9 @@ func (NoopNotifier) OnHostPresence(host string, idle time.Duration, locked bool)
 
 // OnHostOffline is a no-op implementation.
 func (NoopNotifier) OnHostOffline(host string) {}
+
+// OnHostRevoked is a no-op implementation.
+func (NoopNotifier) OnHostRevoked(host string) {}
 
 // maxPresenceIdle caps a reported idle time: anything longer is just "away",
 // and the cap keeps the conversion to time.Duration from overflowing.
@@ -357,20 +363,20 @@ func (h *Hub) ServeHost(w http.ResponseWriter, r *http.Request) {
 
 // RevokeHost drops a revoked host's connection, if any: its in-flight
 // commands fail with host_offline and nothing it sent after this point
-// changes the state. It reports whether the host was connected.
+// changes the state. The notifier forgets the host, connected or not. It
+// reports whether the host was connected.
 func (h *Hub) RevokeHost(id string) bool {
 	h.mu.Lock()
 	host := h.conns[id]
 	delete(h.conns, id)
 	h.mu.Unlock()
 
-	if host == nil {
-		return false
+	if host != nil {
+		host.retire()
+		go func() { _ = host.conn.Close(wsCloseCodeRevoked, "host revoked") }()
 	}
-	host.retire()
-	go func() { _ = host.conn.Close(wsCloseCodeRevoked, "host revoked") }()
-	h.notifier.OnHostOffline(id)
-	return true
+	h.notifier.OnHostRevoked(id)
+	return host != nil
 }
 
 // Shutdown stops accepting hosts, drops the connected ones (watches see them go
