@@ -13,7 +13,7 @@ import (
 func TestState_SnapshotAndOrdering(t *testing.T) {
 	state := NewState()
 
-	state.ReplaceAll([]model.AgentState{
+	state.ReplaceAll("main", []model.AgentState{
 		{PaneID: "p1", Label: "beta", Status: model.StatusIdle},
 		{PaneID: "p2", Label: "alpha", Status: model.StatusBlocked},
 		{PaneID: "p3", Label: "charlie", Status: model.StatusWorking},
@@ -72,8 +72,8 @@ func TestState_UpsertAndRemove(t *testing.T) {
 	}
 
 	// Remove agent
-	state.Remove("w1:p1")
-	if state.HasPane("w1:p1") {
+	state.Remove("", "w1:p1")
+	if state.HasPane("", "w1:p1") {
 		t.Fatalf("pane w1:p1 should have been removed")
 	}
 
@@ -94,7 +94,7 @@ func TestState_SetHost(t *testing.T) {
 	defer state.Unsubscribe(sub)
 
 	// Initial change
-	state.SetHost(true, true)
+	state.SetHost("main", true, true)
 	select {
 	case ev := <-subCh:
 		if ev.Name != "host" {
@@ -105,7 +105,7 @@ func TestState_SetHost(t *testing.T) {
 	}
 
 	// Same state: should NOT broadcast
-	state.SetHost(true, true)
+	state.SetHost("main", true, true)
 	select {
 	case ev := <-subCh:
 		t.Fatalf("did not expect event on identical SetHost, got %s", ev.Name)
@@ -113,7 +113,7 @@ func TestState_SetHost(t *testing.T) {
 	}
 
 	// Change herdr status
-	state.SetHost(true, false)
+	state.SetHost("main", true, false)
 	select {
 	case ev := <-subCh:
 		if ev.Name != "host" {
@@ -121,6 +121,48 @@ func TestState_SetHost(t *testing.T) {
 		}
 	default:
 		t.Fatalf("expected host event on state change")
+	}
+}
+
+// Registering or renaming a host broadcasts a "host" event with the full host
+// list (contracts.md §2.3); an unchanged name broadcasts nothing.
+func TestState_AddHostBroadcastsFullList(t *testing.T) {
+	state := NewState()
+	state.AddHost("main", "Mac")
+	sub, subCh := state.Subscribe()
+	defer state.Unsubscribe(sub)
+
+	next := func(what string) model.HostEvent {
+		t.Helper()
+		select {
+		case ev := <-subCh:
+			if ev.Name != "host" {
+				t.Fatalf("%s: event %s, want host", what, ev.Name)
+			}
+			var he model.HostEvent
+			if err := json.Unmarshal(ev.Data, &he); err != nil {
+				t.Fatalf("%s: %v", what, err)
+			}
+			return he
+		default:
+			t.Fatalf("%s: no host event", what)
+		}
+		return model.HostEvent{}
+	}
+
+	state.AddHost("linux", "Linux box")
+	if he := next("register"); len(he.Hosts) != 2 || he.Hosts[0].ID != "linux" || he.Hosts[1].ID != "main" {
+		t.Fatalf("register: hosts = %+v, want linux and main", he.Hosts)
+	}
+	state.AddHost("linux", "Build box")
+	if he := next("rename"); len(he.Hosts) != 2 || he.Hosts[0].Name != "Build box" {
+		t.Fatalf("rename: hosts = %+v, want both, linux renamed", he.Hosts)
+	}
+	state.AddHost("linux", "Build box")
+	select {
+	case ev := <-subCh:
+		t.Fatalf("same name: unexpected %s event", ev.Name)
+	default:
 	}
 }
 
@@ -258,10 +300,10 @@ func TestState_BroadcastUnsubscribeChurn(t *testing.T) {
 func TestState_Get(t *testing.T) {
 	s := NewState()
 	s.Upsert(model.AgentState{PaneID: "w1:p1", Agent: "claude", Status: model.StatusBlocked})
-	if a, ok := s.Get("w1:p1"); !ok || a.Status != model.StatusBlocked {
+	if a, ok := s.Get("", "w1:p1"); !ok || a.Status != model.StatusBlocked {
 		t.Fatalf("Get(w1:p1) = %+v, %v", a, ok)
 	}
-	if _, ok := s.Get("w1:none"); ok {
+	if _, ok := s.Get("", "w1:none"); ok {
 		t.Fatal("Get(w1:none) found a pane")
 	}
 }

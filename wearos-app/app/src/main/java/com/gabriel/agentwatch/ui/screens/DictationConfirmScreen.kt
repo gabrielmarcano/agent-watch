@@ -37,6 +37,7 @@ import com.gabriel.agentwatch.R
 import com.gabriel.agentwatch.approval.CommandFeedback
 import com.gabriel.agentwatch.approval.commandErrorFeedback
 import com.gabriel.agentwatch.model.AgentState
+import com.gabriel.agentwatch.model.key
 import com.gabriel.agentwatch.network.RelayRepository
 import com.gabriel.agentwatch.ui.components.PromptInput
 import com.gabriel.agentwatch.ui.components.ResIcon
@@ -51,11 +52,13 @@ import kotlinx.coroutines.launch
 
 /**
  * The text entered (spoken, typed or handwritten) and where it goes, before anything is sent. Used
- * from the agent screen and from Quick Dictate (the tile).
+ * from the agent screen and from Quick Dictate (the tile). [targetHost]: the target's host name, on a
+ * line of its own, only when the relay knows several hosts.
  */
 @Composable
 fun DictationConfirmScreen(
     targetLabel: String,
+    targetHost: String?,
     text: String,
     sending: Boolean,
     error: CommandFeedback?,
@@ -85,6 +88,19 @@ fun DictationConfirmScreen(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
+        }
+        targetHost?.let { host ->
+            item(key = "host") {
+                Text(
+                    host,
+                    modifier = transformedItem(spec).padding(horizontal = 24.dp),
+                    color = OnSurfaceVariant,
+                    style = MaterialTheme.typography.labelSmall,
+                    textAlign = TextAlign.Center,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
         }
         item(key = "text") {
             Text(
@@ -122,12 +138,19 @@ fun DictationConfirmScreen(
 }
 
 /**
- * Confirm-then-send for one dictated [text] to [target] (null: the agent is gone). Sends with the
- * target's `state_change_seq`, shows "Sent" and calls [onFinished]; errors stay on screen, mapped by
- * [commandErrorFeedback]. Shared by the agent screen and Quick Dictate.
+ * Confirm-then-send for one dictated [text] to [target] (null: the agent is gone), on its host. Sends
+ * with the target's `state_change_seq`, shows "Sent" and calls [onFinished]; errors stay on screen,
+ * mapped by [commandErrorFeedback]. Shared by the agent screen and Quick Dictate. [hostName]: the
+ * target's host, shown only when the relay knows several hosts.
  */
 @Composable
-fun DictationFlow(target: AgentState?, text: String, onTextChange: (String) -> Unit, onFinished: () -> Unit) {
+fun DictationFlow(
+    target: AgentState?,
+    hostName: String?,
+    text: String,
+    onTextChange: (String) -> Unit,
+    onFinished: () -> Unit
+) {
     val scope = rememberCoroutineScope()
     val view = LocalView.current
     var sending by remember { mutableStateOf(false) }
@@ -153,6 +176,7 @@ fun DictationFlow(target: AgentState?, text: String, onTextChange: (String) -> U
 
     DictationConfirmScreen(
         targetLabel = label,
+        targetHost = hostName,
         text = text,
         sending = sending,
         error = error ?: if (target == null) CommandFeedback(closed, isError = true) else null,
@@ -161,7 +185,7 @@ fun DictationFlow(target: AgentState?, text: String, onTextChange: (String) -> U
             sending = true
             error = null
             scope.launch {
-                RelayRepository.prompt(agent.pane_id, text, agent.state_change_seq).fold(
+                RelayRepository.prompt(agent.key, text, agent.state_change_seq).fold(
                     onSuccess = {
                         view.performHapticFeedback(HapticFeedbackConstants.CONFIRM)
                         sent = true

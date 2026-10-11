@@ -34,21 +34,21 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
             is PushMessage.Resolved -> {
                 message.seq?.let { seq ->
                     val prefs = Prefs(this)
-                    prefs.resolvedSeqs = prefs.resolvedSeqs.record(message.paneId, seq)
+                    prefs.resolvedSeqs = prefs.resolvedSeqs.record(message.key, seq)
                 }
                 ApprovalNotifications.onResolved(this, message)
             }
             is PushMessage.Blocked -> {
-                if (!shouldShowBlocked(message.seq, Prefs(this).resolvedSeqs.lastFor(message.paneId))) {
-                    Log.d(TAG, "Dropping a stale blocked push: pane=${message.paneId} seq=${message.seq} already resolved")
+                if (!shouldShowBlocked(message.seq, Prefs(this).resolvedSeqs.lastFor(message.key))) {
+                    Log.d(TAG, "Dropping a stale blocked push: host=${message.host} pane=${message.paneId} seq=${message.seq} already resolved")
                     return
                 }
                 NotificationChannels.ensure(this)
-                notifManager.notify(AgentNotifications.idForPane(message.paneId), blockedNotification(message))
+                notifManager.notify(AgentNotifications.idFor(message.key), blockedNotification(message))
             }
             is PushMessage.Done -> {
                 NotificationChannels.ensure(this)
-                notifManager.notify(AgentNotifications.idForPane(message.paneId), doneNotification(message))
+                notifManager.notify(AgentNotifications.idFor(message.key), doneNotification(message))
             }
             is PushMessage.Digest -> {
                 NotificationChannels.ensure(this)
@@ -61,9 +61,9 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
     }
 
     private fun blockedNotification(message: PushMessage.Blocked): Notification {
-        val paneId = message.paneId
-        val notifId = AgentNotifications.idForPane(paneId)
-        val openPendingIntent = NotificationIntents.openApp(this, paneId)
+        val agent = message.key
+        val notifId = AgentNotifications.idFor(agent)
+        val openPendingIntent = NotificationIntents.openApp(this, agent)
         val body = MarkdownFormatter.clean(message.body)
 
         val builder = NotificationCompat.Builder(this, NotificationChannels.BLOCKED)
@@ -74,7 +74,7 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
             .setAutoCancel(true)
             .setContentIntent(openPendingIntent)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
-            .addExtras(NotificationIntents.tag(AgentNotifications.KIND_APPROVAL, paneId, message.seq))
+            .addExtras(NotificationIntents.tag(AgentNotifications.KIND_APPROVAL, agent, message.seq))
 
         // Every answer is sent with the pushed prompt's seq and fingerprint; the bridge refuses it if
         // the prompt changed in the meantime.
@@ -84,7 +84,7 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
                     val isDeny = button.kind == NotificationButton.Kind.DENY
                     val isChoice = message.kind == "question"
                     val pending = NotificationIntents.receiverAction(
-                        this, paneId,
+                        this, agent,
                         when {
                             isDeny -> NotificationAction.DENY
                             isChoice -> NotificationAction.ANSWER
@@ -104,7 +104,7 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
                 }
                 NotificationButton.Kind.CANCEL -> {
                     val pending = NotificationIntents.receiverAction(
-                        this, paneId, NotificationAction.DENY, NotificationActionReceiver.ACTION_CANCEL
+                        this, agent, NotificationAction.DENY, NotificationActionReceiver.ACTION_CANCEL
                     ) {
                         putExtra("fingerprint", message.fingerprint)
                         putExtra("state_change_seq", message.seq)
@@ -119,15 +119,15 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
     }
 
     private fun doneNotification(message: PushMessage.Done): Notification {
-        val paneId = message.paneId
-        val notifId = AgentNotifications.idForPane(paneId)
+        val agent = message.key
+        val notifId = AgentNotifications.idFor(agent)
 
         // Done Action: Reply via RemoteInput
         val remoteInput = RemoteInput.Builder("KEY_TEXT_REPLY")
             .setLabel("Reply to ${message.label}...")
             .build()
         val replyPending = NotificationIntents.receiverAction(
-            this, paneId, NotificationAction.REPLY, NotificationActionReceiver.ACTION_PROMPT, mutable = true
+            this, agent, NotificationAction.REPLY, NotificationActionReceiver.ACTION_PROMPT, mutable = true
         ) {
             putExtra("state_change_seq", message.seq)
             putExtra("notif_id", notifId)
@@ -146,9 +146,9 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
             .setContentText(body)
             .setStyle(NotificationCompat.BigTextStyle().bigText(body))
             .setAutoCancel(true)
-            .setContentIntent(NotificationIntents.openApp(this, paneId))
+            .setContentIntent(NotificationIntents.openApp(this, agent))
             .setPriority(NotificationCompat.PRIORITY_DEFAULT)
-            .addExtras(NotificationIntents.tag(AgentNotifications.KIND_DONE, paneId, message.seq))
+            .addExtras(NotificationIntents.tag(AgentNotifications.KIND_DONE, agent, message.seq))
             .addAction(replyAction)
             .build()
     }

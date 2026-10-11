@@ -187,7 +187,7 @@ func TestDispatcher_PruneKeepsDebounce(t *testing.T) {
 	d.mu.Lock()
 	var keys []string
 	for k := range d.lastPush {
-		keys = append(keys, k)
+		keys = append(keys, k.pane.pane+":"+string(k.event))
 	}
 	d.mu.Unlock()
 	sort.Strings(keys)

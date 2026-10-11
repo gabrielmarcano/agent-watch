@@ -25,7 +25,9 @@ import androidx.wear.compose.material3.Text
 import androidx.wear.compose.material3.TitleCard
 import androidx.wear.compose.material3.lazy.transformedHeight
 import com.gabriel.agentwatch.R
+import com.gabriel.agentwatch.model.AgentKey
 import com.gabriel.agentwatch.model.HistoryItem
+import com.gabriel.agentwatch.model.key
 import com.gabriel.agentwatch.network.RelayRepository
 import com.gabriel.agentwatch.ui.components.AgentLogo
 import com.gabriel.agentwatch.ui.components.ScreenList
@@ -34,18 +36,18 @@ import com.gabriel.agentwatch.ui.components.transformedItem
 import com.gabriel.agentwatch.ui.theme.OnSurfaceVariant
 import com.gabriel.agentwatch.util.MarkdownFormatter
 
-/** Finished turns, newest first: all agents, or one pane's when [paneId] is set. */
+/** Finished turns, newest first: all agents, or one agent's (host and pane) when [agent] is set. */
 @Composable
 fun HistoryListScreen(
-    paneId: String?,
+    agent: AgentKey?,
     agentLabel: String?,
     historyItems: List<HistoryItem>,
     onSelectHistoryItem: (HistoryItem) -> Unit
 ) {
-    val items = remember(historyItems, paneId) {
-        if (paneId.isNullOrBlank()) historyItems else historyItems.filter { it.pane_id == paneId }
+    val items = remember(historyItems, agent) {
+        if (agent == null) historyItems else historyItems.filter { it.key == agent }
     }
-    LaunchedEffect(paneId) { RelayRepository.refresh() }
+    LaunchedEffect(agent) { RelayRepository.refresh() }
 
     ScreenList { spec ->
         item(key = "title") {
@@ -92,7 +94,7 @@ fun HistoryListScreen(
             }
             // Across all panes, the session's title names the card and the agent's logo leads the age.
             // One pane's history already names its session in the header: what was asked names the card.
-            val allPanes = paneId.isNullOrBlank()
+            val allPanes = agent == null
             val showAgent = entry.agent.isNotBlank() && allPanes
             val query = entry.query?.takeIf { it.isNotBlank() }
             val age = ageText(entry.completed_at)

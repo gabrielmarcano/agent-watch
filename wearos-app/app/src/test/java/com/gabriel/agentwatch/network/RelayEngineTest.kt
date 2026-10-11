@@ -1,5 +1,11 @@
 package com.gabriel.agentwatch.network
 
+import org.junit.Assert.assertTrue
+import kotlinx.coroutines.runBlocking
+import com.google.gson.Gson
+import com.gabriel.agentwatch.model.AgentKey
+import com.gabriel.agentwatch.model.HostEvent
+import com.gabriel.agentwatch.model.HostInfo
 import com.gabriel.agentwatch.model.AgentState
 import com.gabriel.agentwatch.model.AgentsSnapshot
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -82,5 +88,42 @@ class RelayEngineTest {
 
         awaitTrue(what = "second /v1/events") { relay.eventsRequests().size >= 2 }
         awaitValue(state, what = "live again") { it.connection == Connection.Live }
+    }
+
+    // ---- phase 8
+
+    @Test
+    fun theStreamKeepsTwoHostsApartAndCarriesTheirFlags() {
+        val hosts = listOf(
+            HostInfo(id = "box", name = "Box", online = true, herdr_online = true),
+            HostInfo(id = "main", name = "Mac", online = true, herdr_online = true)
+        )
+        relay.agents = AgentsSnapshot(
+            host_online = true, herdr_online = true, hosts = hosts,
+            agents = listOf(agent("w1:p1", 1).copy(host = "main"), agent("w1:p1", 1).copy(host = "box"))
+        )
+        engine.start()
+        awaitValue(state, what = "two hosts") { it.agents.size == 2 && it.hosts == hosts }
+
+        relay.send("event: agent_removed\ndata: {\"host\":\"box\",\"pane_id\":\"w1:p1\"}\n\n")
+        val s = awaitValue(state, what = "box's pane removed") { it.agents.size == 1 }
+        assertEquals(listOf("main"), s.agents.map { it.host })
+
+        val offline = hosts.map { if (it.id == "main") it.copy(online = false, herdr_online = false) else it }
+        relay.send("event: host\ndata: ${Gson().toJson(HostEvent(host_online = true, herdr_online = true, hosts = offline))}\n\n")
+        awaitValue(state, what = "main offline") { it.hosts == offline }
+    }
+
+    @Test
+    fun commandsGoToTheAgentsHostThroughTheEngine() = runBlocking {
+        engine.start()
+        awaitValue(state, what = "live snapshot") { it.agents.isNotEmpty() }
+
+        assertTrue(engine.answer(AgentKey("box", "w1:p1"), "opt-1", 3, "fp").isSuccess)
+        assertTrue(engine.prompt(AgentKey("", "w1:p1"), "hi", 3).isSuccess)
+
+        val paths = relay.requests.map { it.path }
+        assertTrue(paths.toString(), "/v1/hosts/box/agents/w1%3Ap1/answer" in paths)
+        assertTrue(paths.toString(), "/v1/agents/w1%3Ap1/prompt" in paths)
     }
 }

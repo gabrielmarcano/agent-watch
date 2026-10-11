@@ -173,38 +173,52 @@ class RelayClient(
         return executeRequest(http.rest, request, AgentsSnapshot::class.java)
     }
 
-    suspend fun history(paneId: String? = null, limit: Int = 20): Result<List<HistoryItem>> {
+    /** `GET /v1/history`: every pane's, or one agent's ([agent]; its host is sent when it has one, contracts §2.1). */
+    suspend fun history(agent: AgentKey? = null, limit: Int = 20): Result<List<HistoryItem>> {
         var path = "/v1/history?limit=$limit"
-        if (!paneId.isNullOrBlank()) {
-            path += "&pane_id=${URLEncoder.encode(paneId, "UTF-8")}"
+        if (agent != null && agent.host.isNotBlank()) {
+            path += "&host=${URLEncoder.encode(agent.host, "UTF-8")}"
+        }
+        if (agent != null && agent.paneId.isNotBlank()) {
+            path += "&pane_id=${URLEncoder.encode(agent.paneId, "UTF-8")}"
         }
         val request = newRequestBuilder(path).get().build()
         val res = executeRequest(http.rest, request, HistoryResponse::class.java)
         return res.map { it.items }
     }
 
-    suspend fun prompt(paneId: String, text: String, expectedSeq: Long): Result<Unit> {
-        val encodedPane = URLEncoder.encode(paneId, "UTF-8")
+    /**
+     * The path of a command to [agent] (contracts §2.1): `/v1/hosts/{host}/agents/{pane_id}/…` when the
+     * agent has a host, else the older `/v1/agents/{pane_id}/…` of a relay that predates hosts.
+     */
+    internal fun commandPath(agent: AgentKey, command: String): String {
+        val pane = URLEncoder.encode(agent.paneId, "UTF-8")
+        return if (agent.host.isBlank()) {
+            "/v1/agents/$pane/$command"
+        } else {
+            "/v1/hosts/${URLEncoder.encode(agent.host, "UTF-8")}/agents/$pane/$command"
+        }
+    }
+
+    suspend fun prompt(agent: AgentKey, text: String, expectedSeq: Long): Result<Unit> {
         val reqBody = gson.toJson(PromptRequest(text = text, expected_seq = expectedSeq)).toRequestBody(jsonMediaType)
-        val request = newRequestBuilder("/v1/agents/$encodedPane/prompt").post(reqBody).build()
+        val request = newRequestBuilder(commandPath(agent, "prompt")).post(reqBody).build()
         return executeRequest(http.command, request, Unit::class.java)
     }
 
-    suspend fun answer(paneId: String, optionId: String, expectedSeq: Long, fingerprint: String): Result<Unit> {
-        val encodedPane = URLEncoder.encode(paneId, "UTF-8")
+    suspend fun answer(agent: AgentKey, optionId: String, expectedSeq: Long, fingerprint: String): Result<Unit> {
         val reqBody = gson.toJson(AnswerRequest(option_id = optionId, expected_seq = expectedSeq, fingerprint = fingerprint)).toRequestBody(jsonMediaType)
-        val request = newRequestBuilder("/v1/agents/$encodedPane/answer").post(reqBody).build()
+        val request = newRequestBuilder(commandPath(agent, "answer")).post(reqBody).build()
         return executeRequest(http.command, request, Unit::class.java)
     }
 
     /**
-     * `POST /v1/agents/{pane}/cancel`. [fingerprint] is the prompt's fingerprint when the cancel targets a
+     * `POST …/cancel` ([commandPath]). [fingerprint] is the prompt's fingerprint when the cancel targets a
      * visible prompt, so the bridge refuses it if the menu changed; null (omitted from the JSON) otherwise.
      */
-    suspend fun cancel(paneId: String, expectedSeq: Long, fingerprint: String? = null): Result<Unit> {
-        val encodedPane = URLEncoder.encode(paneId, "UTF-8")
+    suspend fun cancel(agent: AgentKey, expectedSeq: Long, fingerprint: String? = null): Result<Unit> {
         val reqBody = gson.toJson(CancelRequest(expected_seq = expectedSeq, fingerprint = fingerprint)).toRequestBody(jsonMediaType)
-        val request = newRequestBuilder("/v1/agents/$encodedPane/cancel").post(reqBody).build()
+        val request = newRequestBuilder(commandPath(agent, "cancel")).post(reqBody).build()
         return executeRequest(http.command, request, Unit::class.java)
     }
 

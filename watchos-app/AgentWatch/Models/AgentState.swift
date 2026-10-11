@@ -56,6 +56,7 @@ struct AgentState: Codable {
     var background_agents: Int? // /v1 AgentState.background_agents (contracts.md §1.2), nil when omitted; unused until Phase 6
     var background_shells: Int? // /v1 AgentState.background_shells (contracts.md §1.2), nil when omitted; unused until Phase 6
     var background_monitors: Int? // /v1 AgentState.background_monitors (contracts.md §1.2), nil when omitted; unused until Phase 6
+    var host: String? // /v1 AgentState.host (contracts.md §1.2), nil from a relay that predates hosts; unused until Phase 6
     var workspace: String?
     var cwd: String?
     var last_query: String?
@@ -93,4 +94,12 @@ struct PromptOption: Codable, Sendable {
     let label: String
     let description: String?
     let role: String
+}
+
+// /v1 HostInfo (contracts.md §1.6) and the snapshot's hosts list; unused by the legacy client until Phase 6.
+struct HostInfo: Codable {
+    var id: String
+    var name: String
+    var online: Bool
+    var herdr_online: Bool
 }

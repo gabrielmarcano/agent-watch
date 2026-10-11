@@ -1,6 +1,8 @@
 package com.gabriel.agentwatch.approval
 
+import com.gabriel.agentwatch.model.AgentKey
 import com.gabriel.agentwatch.model.AgentState
+import com.gabriel.agentwatch.model.key
 import com.gabriel.agentwatch.model.PendingPrompt
 import com.gabriel.agentwatch.model.PromptOption
 
@@ -40,15 +42,18 @@ fun morePermissionOptions(prompt: PendingPrompt): List<PromptOption> {
 /** "Don't ask again" options change the agent's rules for good, so the wrist asks before sending them. */
 fun PromptOption.needsConfirmation(): Boolean = role == "allow_always"
 
-/** A command the relay accepted (HTTP 200) for one prompt: the pane plus the seq and fingerprint it was sent with. */
+/** A command the relay accepted (HTTP 200) for one prompt: the agent (host and pane) plus the seq and fingerprint it was sent with. */
 data class SentAnswer(
     val paneId: String,
     val seq: Long,
-    val fingerprint: String
-)
+    val fingerprint: String,
+    val host: String = ""
+) {
+    val key: AgentKey get() = AgentKey(host, paneId)
+}
 
 /**
- * True while [agent] still shows the exact prompt [sent] was accepted for: same pane, still `blocked`,
+ * True while [agent] still shows the exact prompt [sent] was accepted for: same agent, still `blocked`,
  * same `state_change_seq` and same prompt fingerprint. The relay has not reported the transition yet,
  * so the prompt's buttons stay disabled; a second tap would re-send with the same seq + fingerprint.
  * Any change (new seq, new fingerprint, prompt gone, agent no longer blocked) unlocks.
@@ -56,7 +61,7 @@ data class SentAnswer(
 fun isAwaitingUpdate(agent: AgentState, sent: SentAnswer?): Boolean {
     if (sent == null) return false
     val prompt = agent.prompt ?: return false
-    return agent.pane_id == sent.paneId &&
+    return agent.key == sent.key &&
         agent.status == "blocked" &&
         agent.state_change_seq == sent.seq &&
         prompt.fingerprint == sent.fingerprint

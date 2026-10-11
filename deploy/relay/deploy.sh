@@ -18,6 +18,8 @@
 #                 docs/reference/contracts.md §7) replaces the server's line; other
 #                 lines and comments stay. The old file is kept as env.bak-<UTC time>.
 #                 Values travel in a 0600 file over scp and are never printed.
+#                 Refused, before anything changes, when the file's AW_HOST_ID
+#                 (default main) is not the server's: it is another host's file.
 #   AW_ENV_FILE   the config file (default: agent-watch.env at the repo root).
 #
 # The SSH user must be able to write /usr/local/bin and /etc/agent-watch-relay
@@ -173,6 +175,9 @@ if [ "$sync_env" = 1 ]; then
 		echo "$env_file does not exist: create it first (deploy/relay/README.md, First-time setup), then re-run with --sync-env" >&2
 		exit 1
 	fi
+	# A second machine's agent-watch.env holds that machine's own token: never
+	# make it the relay's AW_HOST_TOKEN. Checked before anything changes.
+	bash "$remote_dir/awenv.sh" same-host "$env_file" "$remote_dir/relay.env"
 	env_tmp="$(mktemp "$env_file.sync.XXXXXX")"
 	cp -p "$env_file" "$env_tmp"
 	bash "$remote_dir/awenv.sh" merge "$env_file" "$remote_dir/relay.env" "$env_tmp"

@@ -2,6 +2,7 @@ package com.gabriel.agentwatch.network
 
 import com.gabriel.agentwatch.model.AgentState
 import com.gabriel.agentwatch.model.HistoryItem
+import com.gabriel.agentwatch.model.HostInfo
 
 sealed class Connection {
     object Connecting : Connection()
@@ -32,5 +33,10 @@ data class UiState(
      * should dim it or show "Reconnecting…" rather than present it as current.
      */
     val stale: Boolean = true,
-    val auth: AuthState = AuthState.PAIRED
+    val auth: AuthState = AuthState.PAIRED,
+    /**
+     * Every host the relay knows (contracts §1.6), in its order, each with its own flags; empty from a
+     * relay that predates hosts. [hostOnline] and [herdrOnline] are then the aggregates (§1.5).
+     */
+    val hosts: List<HostInfo> = emptyList()
 )

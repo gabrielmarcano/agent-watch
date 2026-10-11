@@ -1,5 +1,7 @@
 package com.gabriel.agentwatch.network
 
+import com.gabriel.agentwatch.model.HostInfo
+import com.gabriel.agentwatch.model.AgentKey
 import com.gabriel.agentwatch.model.AgentState
 import com.gabriel.agentwatch.model.HistoryItem
 import org.junit.Assert.assertEquals
@@ -23,7 +25,7 @@ class SurfaceUpdatesTest {
 
     @Test
     fun theSignatureTracksWhatTheComplicationAndTileShow() {
-        val sig = surfaceSignature(base, pinnedPaneId = null)
+        val sig = surfaceSignature(base, pinned = null)
 
         assertEquals(SurfaceSignature(paired = true, hostOnline = true, blocked = 1, working = 1, agents = 2, targetLabel = "B", done = 0), sig)
     }
@@ -55,8 +57,20 @@ class SurfaceUpdatesTest {
 
         assertNotEquals(sig, surfaceSignature(base.copy(hostOnline = false), null))
         assertNotEquals(sig, surfaceSignature(base.copy(agents = listOf(agent("A", "idle"), base.agents[1])), null))
-        assertNotEquals("the tile label follows the pinned agent", sig, surfaceSignature(base, pinnedPaneId = "A"))
+        assertNotEquals("the tile label follows the pinned agent", sig, surfaceSignature(base, pinned = AgentKey("", "A")))
         assertNotEquals(sig, surfaceSignature(base.copy(auth = AuthState.REVOKED), null))
+    }
+
+    @Test
+    fun theTargetLabelSkipsOfflineHostsLikeTheTile() {
+        val hosts = listOf(
+            HostInfo(id = "box", name = "Box", online = false, herdr_online = false),
+            HostInfo(id = "main", name = "Mac", online = true, herdr_online = true)
+        )
+        val staleDone = AgentState(pane_id = "w1:p1", host = "box", label = "api", status = "done", updated_at = "2026-10-10T10:00:00Z")
+        val onMac = AgentState(pane_id = "w1:p1", host = "main", label = "web", status = "idle", focused = true)
+        val state = base.copy(hosts = hosts, agents = listOf(staleDone, onMac))
+        assertEquals("web", surfaceSignature(state, null).targetLabel)
     }
 
     @Test
@@ -85,5 +99,17 @@ class SurfaceUpdatesTest {
         throttle.onChange(now = 100_000)
 
         assertEquals(0L, throttle.onChange(now = 110_001))
+    }
+
+    @Test
+    fun hostsChangeTheSignature() {
+        val hosts = listOf(HostInfo("box", "Box", online = true, herdr_online = true), HostInfo("main", "Mac", online = true, herdr_online = true))
+        val withHosts = base.copy(hosts = hosts)
+        assertNotEquals(surfaceSignature(base, null), surfaceSignature(withHosts, null))
+        val macDown = withHosts.copy(hosts = hosts.map { if (it.id == "main") it.copy(online = false) else it })
+        assertNotEquals(surfaceSignature(withHosts, null), surfaceSignature(macDown, null))
+        val allDown = withHosts.copy(hosts = hosts.map { it.copy(online = false) })
+        assertEquals("offline only when every host is", false, surfaceSignature(allDown, null).hostOnline)
+        assertEquals(true, surfaceSignature(macDown, null).hostOnline)
     }
 }

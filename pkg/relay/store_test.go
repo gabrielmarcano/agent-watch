@@ -252,7 +252,7 @@ func TestStore_DurabilityAndPermissions(t *testing.T) {
 		t.Fatalf("unexpected device data: %+v", foundDev)
 	}
 
-	items := store2.GetHistory("w1:p1", 10)
+	items := store2.GetHistory("", "w1:p1", 10)
 	if len(items) != 1 || items[0].ID != "hist-1" {
 		t.Fatalf("unexpected history items: %+v", items)
 	}
@@ -298,7 +298,7 @@ func TestStore_HistoryBoundsAndDedup(t *testing.T) {
 	if store.AddHistory(it1) { // Duplicate should be ignored
 		t.Fatalf("duplicate AddHistory reported the item as stored")
 	}
-	items := store.GetHistory("w1:p1", 50)
+	items := store.GetHistory("", "w1:p1", 50)
 	if len(items) != 1 {
 		t.Fatalf("expected 1 item after duplicate insertion, got %d", len(items))
 	}
@@ -311,7 +311,7 @@ func TestStore_HistoryBoundsAndDedup(t *testing.T) {
 			CompletedAt: at(time.Duration(10+i) * time.Second),
 		})
 	}
-	paneItems := store.GetHistory("w1:p1", 50)
+	paneItems := store.GetHistory("", "w1:p1", 50)
 	if len(paneItems) != 20 {
 		t.Fatalf("expected max 20 items per pane, got %d", len(paneItems))
 	}
@@ -332,7 +332,7 @@ func TestStore_HistoryBoundsAndDedup(t *testing.T) {
 			})
 		}
 	}
-	all := store.GetHistory("", 300)
+	all := store.GetHistory("", "", 300)
 	if len(all) != 200 {
 		t.Fatalf("expected total history to be capped at exactly 200, got %d", len(all))
 	}
@@ -360,12 +360,12 @@ func TestStore_PruneOldPanes(t *testing.T) {
 		CompletedAt: model.Now(),
 	})
 
-	oldItems := store.GetHistory("old-pane", 10)
+	oldItems := store.GetHistory("", "old-pane", 10)
 	if len(oldItems) != 0 {
 		t.Fatalf("expected old pane to be pruned, got %d items", len(oldItems))
 	}
 
-	newItems := store.GetHistory("new-pane", 10)
+	newItems := store.GetHistory("", "new-pane", 10)
 	if len(newItems) != 1 {
 		t.Fatalf("expected new pane to exist, got %d items", len(newItems))
 	}

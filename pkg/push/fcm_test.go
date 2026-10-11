@@ -55,7 +55,7 @@ func TestFCM_Payload(t *testing.T) {
 		{
 			name: "blocked",
 			msg: Message{
-				Event: EventBlocked, PaneID: "w5:pAE", Agent: "claude", Label: "my-app",
+				Event: EventBlocked, PaneID: "w5:pAE", Host: "main", HostName: "Mac", Agent: "claude", Label: "my-app",
 				Title: "my-app needs approval", Body: "Bash command: go test ./...",
 				StateChangeSeq: 334, Fingerprint: "9f2c61d0a4b3e871",
 				AllowOptionID: "opt-1", DenyOptionID: "opt-3", Kind: "permission",
@@ -64,7 +64,8 @@ func TestFCM_Payload(t *testing.T) {
 			// §4.1), with kind and options (a permission has no one-tap options
 			// beyond allow and deny).
 			want: `{"message":{"token":"device-token-1",
-				"data":{"event":"blocked","pane_id":"w5:pAE","agent":"claude","label":"my-app",
+				"data":{"event":"blocked","pane_id":"w5:pAE","host":"main","host_name":"Mac",
+				        "agent":"claude","label":"my-app",
 				        "title":"my-app needs approval","body":"Bash command: go test ./...",
 				        "state_change_seq":"334","fingerprint":"9f2c61d0a4b3e871",
 				        "allow_option_id":"opt-1","deny_option_id":"opt-3",
@@ -74,12 +75,13 @@ func TestFCM_Payload(t *testing.T) {
 		{
 			name: "blocked question",
 			msg: Message{
-				Event: EventBlocked, PaneID: "w5:pAE", Agent: "claude", Label: "my-app",
+				Event: EventBlocked, PaneID: "w5:pAE", Host: "main", HostName: "Mac", Agent: "claude", Label: "my-app",
 				Title: "my-app needs you", Body: "Color: ¿Qué color?", StateChangeSeq: 40, Fingerprint: "ab12",
 				Kind: "question", Options: []Choice{{ID: "opt-1", Label: "Rojo"}, {ID: "opt-2", Label: "Verde"}},
 			},
 			want: `{"message":{"token":"device-token-1",
-				"data":{"event":"blocked","pane_id":"w5:pAE","agent":"claude","label":"my-app",
+				"data":{"event":"blocked","pane_id":"w5:pAE","host":"main","host_name":"Mac",
+				        "agent":"claude","label":"my-app",
 				        "title":"my-app needs you","body":"Color: ¿Qué color?",
 				        "state_change_seq":"40","fingerprint":"ab12",
 				        "allow_option_id":"","deny_option_id":"",
@@ -89,12 +91,13 @@ func TestFCM_Payload(t *testing.T) {
 		{
 			name: "done",
 			msg: Message{
-				Event: EventDone, PaneID: "w5:pAE", Agent: "claude", Label: "my-app",
-				Title: "my-app finished", Body: "Task finished", StateChangeSeq: 335,
+				Event: EventDone, PaneID: "w5:pAE", Host: "linux-1", HostName: "Build box", Agent: "claude", Label: "my-app",
+				Title: "Build box · my-app finished", Body: "Task finished", StateChangeSeq: 335,
 			},
 			want: `{"message":{"token":"device-token-1",
-				"data":{"event":"done","pane_id":"w5:pAE","agent":"claude","label":"my-app",
-				        "title":"my-app finished","body":"Task finished",
+				"data":{"event":"done","pane_id":"w5:pAE","host":"linux-1","host_name":"Build box",
+				        "agent":"claude","label":"my-app",
+				        "title":"Build box · my-app finished","body":"Task finished",
 				        "state_change_seq":"335","fingerprint":"",
 				        "allow_option_id":"","deny_option_id":""},
 				"android":{"priority":"normal","ttl":"600s"}}}`,
@@ -105,7 +108,7 @@ func TestFCM_Payload(t *testing.T) {
 			name: "digest with a blocked agent",
 			msg:  Message{Event: EventDigest, Title: "4 agents need you", Body: "a, b, c, d", AnyBlocked: true},
 			want: `{"message":{"token":"device-token-1",
-				"data":{"event":"digest","pane_id":"","agent":"","label":"",
+				"data":{"event":"digest","pane_id":"","host":"","host_name":"","agent":"","label":"",
 				        "title":"4 agents need you","body":"a, b, c, d",
 				        "state_change_seq":"0","fingerprint":"",
 				        "allow_option_id":"","deny_option_id":""},
@@ -115,21 +118,21 @@ func TestFCM_Payload(t *testing.T) {
 			name: "digest of done agents",
 			msg:  Message{Event: EventDigest, Title: "4 agents finished", Body: "a, b, c, d"},
 			want: `{"message":{"token":"device-token-1",
-				"data":{"event":"digest","pane_id":"","agent":"","label":"",
+				"data":{"event":"digest","pane_id":"","host":"","host_name":"","agent":"","label":"",
 				        "title":"4 agents finished","body":"a, b, c, d",
 				        "state_change_seq":"0","fingerprint":"",
 				        "allow_option_id":"","deny_option_id":""},
 				"android":{"priority":"normal","ttl":"600s"}}}`,
 		},
 		{
-			// Exactly three data keys: the app withdraws the pane's notification.
+			// Exactly four data keys: the app withdraws the pane's notification.
 			name: "resolved",
 			msg: Message{
-				Event: EventResolved, PaneID: "w5:pAE", Agent: "claude", Label: "my-app",
+				Event: EventResolved, PaneID: "w5:pAE", Host: "main", HostName: "ignored", Agent: "claude", Label: "my-app",
 				Title: "ignored", Body: "ignored", StateChangeSeq: 335, Fingerprint: "ignored",
 			},
 			want: `{"message":{"token":"device-token-1",
-				"data":{"event":"resolved","pane_id":"w5:pAE","state_change_seq":"335"},
+				"data":{"event":"resolved","host":"main","pane_id":"w5:pAE","state_change_seq":"335"},
 				"android":{"priority":"normal","ttl":"600s"}}}`,
 		},
 	}
@@ -245,17 +248,17 @@ func TestDispatcher_ResolvedReachesFCMNotNtfy(t *testing.T) {
 	ntfy := &Ntfy{BaseURL: ntfyServer.URL, Topic: "test-topic", Client: ntfyServer.Client()}
 	d, _, _ := newTestDispatcher(fcm, ntfy)
 
-	blocked := model.AgentState{PaneID: "w5:pAE", Agent: "claude", Label: "my-app", Status: model.StatusBlocked, StateChangeSeq: 334}
+	blocked := model.AgentState{PaneID: "w5:pAE", Host: "main", Agent: "claude", Label: "my-app", Status: model.StatusBlocked, StateChangeSeq: 334}
 	d.OnAgentUpdate(nil, blocked)
 	d.Wait()
 	<-fcmBodies // the blocked push
-	d.OnAgentUpdate(&blocked, model.AgentState{PaneID: "w5:pAE", Agent: "claude", Label: "my-app", Status: model.StatusWorking, StateChangeSeq: 335})
+	d.OnAgentUpdate(&blocked, model.AgentState{PaneID: "w5:pAE", Host: "main", Agent: "claude", Label: "my-app", Status: model.StatusWorking, StateChangeSeq: 335})
 	d.Wait()
 
 	select {
 	case body := <-fcmBodies:
 		assertSameJSON(t, body, `{"message":{"token":"device-token-1",
-			"data":{"event":"resolved","pane_id":"w5:pAE","state_change_seq":"335"},
+			"data":{"event":"resolved","host":"main","pane_id":"w5:pAE","state_change_seq":"335"},
 			"android":{"priority":"normal","ttl":"600s"}}}`)
 	default:
 		t.Fatalf("FCM never got the resolved message")

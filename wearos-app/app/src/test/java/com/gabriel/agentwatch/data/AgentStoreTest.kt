@@ -1,8 +1,10 @@
 package com.gabriel.agentwatch.data
 
+import com.gabriel.agentwatch.model.AgentKey
 import com.gabriel.agentwatch.model.AgentState
 import com.gabriel.agentwatch.model.AgentsSnapshot
 import com.gabriel.agentwatch.model.HostEvent
+import com.gabriel.agentwatch.model.HostInfo
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -95,7 +97,7 @@ class AgentStoreTest {
         val store = AgentStore()
         store.applySnapshot(snapshot(agent("A", 1), agent("B", 1)))
         val since = store.beginFetch()
-        store.applyRemoved("B")
+        store.applyRemoved(AgentKey("", "B"))
 
         store.applyFetched(snapshot(agent("A", 1), agent("B", 1)), since)
 
@@ -186,5 +188,69 @@ class AgentStoreTest {
 
         assertTrue(store.agents().isEmpty())
         assertFalse(store.hostOnline)
+    }
+
+    // ---- phase 8: two hosts that share a pane id
+
+    private fun on(host: String, pane: String, seq: Long, status: String = "working") =
+        AgentState(pane_id = pane, host = host, label = "$host-$pane", status = status, state_change_seq = seq)
+
+    private val hosts = listOf(
+        HostInfo(id = "box", name = "Box", online = true, herdr_online = true),
+        HostInfo(id = "main", name = "Mac", online = true, herdr_online = false)
+    )
+
+    @Test
+    fun twoHostsSharingAPaneIdAreTwoAgents() {
+        val store = AgentStore()
+        store.applySnapshot(AgentsSnapshot(host_online = true, herdr_online = false, agents = listOf(on("main", "w1:p1", 1), on("box", "w1:p1", 7)), hosts = hosts))
+
+        assertEquals(2, store.agents().size)
+        assertEquals(hosts, store.hosts)
+
+        assertTrue(store.applyAgent(on("box", "w1:p1", 8, status = "blocked")))
+        val byHost = store.agents().associateBy { it.host }
+        assertEquals("blocked", byHost.getValue("box").status)
+        assertEquals("the other host's pane is untouched", "working", byHost.getValue("main").status)
+
+        assertTrue(store.applyRemoved(AgentKey("main", "w1:p1")))
+        assertEquals(listOf("box"), store.agents().map { it.host })
+        assertFalse("a removal without the host is another key", store.applyRemoved(AgentKey("", "w1:p1")))
+        assertEquals(1, store.agents().size)
+    }
+
+    @Test
+    fun aRefreshMergesEachHostsPaneOnItsOwn() {
+        val store = AgentStore()
+        store.applySnapshot(AgentsSnapshot(host_online = true, agents = listOf(on("main", "w1:p1", 5), on("box", "w1:p1", 5)), hosts = hosts))
+        val since = store.beginFetch()
+        store.applyAgent(on("box", "w1:p1", 6, status = "blocked"))
+
+        store.applyFetched(AgentsSnapshot(host_online = true, agents = listOf(on("main", "w1:p1", 9, status = "done"), on("box", "w1:p1", 5)), hosts = hosts), since)
+
+        val byHost = store.agents().associateBy { it.host }
+        assertEquals("done", byHost.getValue("main").status)
+        assertEquals("SSE kept the newer state of box's pane", "blocked", byHost.getValue("box").status)
+    }
+
+    @Test
+    fun theHostEventCarriesEveryHostsFlags() {
+        val store = AgentStore()
+        store.applySnapshot(AgentsSnapshot(host_online = true, herdr_online = true, hosts = hosts))
+        val offline = hosts.map { it.copy(online = it.id == "box", herdr_online = it.id == "box") }
+
+        store.applyHost(HostEvent(host_online = true, herdr_online = true, hosts = offline))
+
+        assertEquals(offline, store.hosts)
+        store.clear()
+        assertTrue(store.hosts.isEmpty())
+    }
+
+    @Test
+    fun aRelayWithoutHostsLeavesTheListEmpty() {
+        val store = AgentStore()
+        store.applySnapshot(snapshot(agent("A", 1)))
+        assertTrue(store.hosts.isEmpty())
+        assertEquals(listOf(""), store.agents().map { it.host })
     }
 }

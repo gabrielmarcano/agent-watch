@@ -25,6 +25,7 @@ import com.gabriel.agentwatch.MainActivity
 import com.gabriel.agentwatch.R
 import com.gabriel.agentwatch.data.Prefs
 import com.gabriel.agentwatch.model.AgentState
+import com.gabriel.agentwatch.model.key
 import kotlin.time.Duration.Companion.minutes
 
 /**
@@ -58,7 +59,7 @@ class AgentsTileService : Material3TileService(allowDynamicTheme = false, defaul
                         } else {
                             column(
                                 *content.shown.flatMapIndexed { i, agent ->
-                                    listOfNotNull(if (i > 0) spacer(height = dp(4f)) else null, agentButton(agent))
+                                    listOfNotNull(if (i > 0) spacer(height = dp(4f)) else null, agentButton(agent, content.hostNames[agent.host]))
                                 }.toTypedArray(),
                                 width = expand(),
                                 horizontalAlignment = HORIZONTAL_ALIGN_CENTER
@@ -69,8 +70,11 @@ class AgentsTileService : Material3TileService(allowDynamicTheme = false, defaul
         )
     }
 
-    /** One agent: its name, then its status and agent; a blocked one stands out in amber. */
-    private fun MaterialScope.agentButton(agent: AgentState): LayoutElement {
+    /**
+     * One agent: its name, then its status and agent, or its host's name ([hostName]) when the relay
+     * knows several hosts; a blocked one stands out in amber.
+     */
+    private fun MaterialScope.agentButton(agent: AgentState, hostName: String?): LayoutElement {
         val (word, color) = tileStatus(agent.status)
         val blocked = agent.status == "blocked"
         val colors = if (blocked) {
@@ -78,9 +82,9 @@ class AgentsTileService : Material3TileService(allowDynamicTheme = false, defaul
         } else {
             ButtonColors(containerColor = TileColors.surfaceContainer, iconColor = color, labelColor = TileColors.onSurface, secondaryLabelColor = color)
         }
-        val secondary = listOf(word, agent.agent).filter { it.isNotBlank() }.joinToString(" · ")
+        val secondary = listOf(word, hostName ?: agent.agent).filter { it.isNotBlank() }.joinToString(" · ")
         return button(
-            onClick = clickable(launchInApp(MainActivity::class.java.name, agent.pane_id), id = "agent-${agent.pane_id}"),
+            onClick = clickable(launchInApp(MainActivity::class.java.name, agent.key), id = "agent-${agent.key.token}"),
             labelContent = { text(agent.label.ifBlank { agent.pane_id }.layoutString, maxLines = 1) },
             secondaryLabelContent = { text(secondary.layoutString, maxLines = 1) },
             width = expand(),

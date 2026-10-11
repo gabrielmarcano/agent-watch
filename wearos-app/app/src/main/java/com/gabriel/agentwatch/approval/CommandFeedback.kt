@@ -57,6 +57,8 @@ fun commandErrorFeedback(error: Throwable, surface: FeedbackSurface = FeedbackSu
             "prompt_changed" -> if (error.isFocusRefusal()) problem("Answer on the device") else changed("Prompt changed")
             "unknown_option" -> changed("Prompt changed")
             "unknown_pane" -> problem("Agent closed", refresh = true)
+            // An old command path while several hosts have the pane (contracts §2.4): a refresh brings each agent's host.
+            "host_required" -> changed("Several devices")
             "agent_busy" -> problem("Agent is busy", refresh = true)
             "agent_blocked" -> problem("Answer the question first", refresh = true)
             "agent_state_unknown" -> problem("Agent state unknown", refresh = true)

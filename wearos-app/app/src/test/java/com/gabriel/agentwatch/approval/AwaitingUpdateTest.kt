@@ -63,4 +63,11 @@ class AwaitingUpdateTest {
     fun cancelOnUnknownPromptWithEmptyFingerprintStaysLocked() {
         assertTrue(isAwaitingUpdate(blocked(fingerprint = ""), SentAnswer("w5:pAE", 334, "")))
     }
+
+    @Test
+    fun theSamePaneOnAnotherHostIsNotLocked() {
+        val sentToBox = sent.copy(host = "box")
+        assertTrue(isAwaitingUpdate(blocked().copy(host = "box"), sentToBox))
+        assertFalse(isAwaitingUpdate(blocked().copy(host = "main"), sentToBox))
+    }
 }

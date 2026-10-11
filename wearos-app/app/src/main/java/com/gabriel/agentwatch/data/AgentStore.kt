@@ -1,8 +1,11 @@
 package com.gabriel.agentwatch.data
 
+import com.gabriel.agentwatch.model.AgentKey
 import com.gabriel.agentwatch.model.AgentState
 import com.gabriel.agentwatch.model.AgentsSnapshot
 import com.gabriel.agentwatch.model.HostEvent
+import com.gabriel.agentwatch.model.HostInfo
+import com.gabriel.agentwatch.model.key
 import com.gabriel.agentwatch.model.severity
 
 /**
@@ -18,14 +21,16 @@ import com.gabriel.agentwatch.model.severity
  * SSE `agent` events are only seq-guarded against a state that came from a refresh. Otherwise stream
  * order wins, so a herdr restart (whose seq counter restarts) cannot freeze a pane.
  *
+ * Agents are keyed by (host, pane_id) ([AgentKey]): every herdr numbers its own panes.
+ *
  * Not thread-safe: the owner serialises access.
  */
 class AgentStore {
-    private var agents = LinkedHashMap<String, AgentState>()
+    private var agents = LinkedHashMap<AgentKey, AgentState>()
     /** Pane → mark of its last SSE mutation (update or removal). */
-    private val marks = HashMap<String, Long>()
+    private val marks = HashMap<AgentKey, Long>()
     /** Panes whose current state came from a refresh rather than the stream. */
-    private val fromFetch = HashSet<String>()
+    private val fromFetch = HashSet<AgentKey>()
     /** Mark of the last SSE snapshot: it vouches for every pane, listed or not. */
     private var snapshotMark = 0L
     private var hostMark = 0L
@@ -35,6 +40,9 @@ class AgentStore {
         private set
     var herdrOnline = false
         private set
+    /** Every host the relay knows (contracts §1.6), in its order; empty from a relay that predates hosts. */
+    var hosts: List<HostInfo> = emptyList()
+        private set
 
     /** Sorted by severity (contracts §1.1), then label, like the relay's own list. */
     fun agents(): List<AgentState> = agents.values.sortedWith(AGENT_ORDER)
@@ -42,34 +50,36 @@ class AgentStore {
     /** SSE `snapshot`: replaces everything (contracts §2.3). */
     fun applySnapshot(snapshot: AgentsSnapshot) {
         counter++
-        agents = LinkedHashMap(snapshot.agents.associateBy { it.pane_id })
+        agents = LinkedHashMap(snapshot.agents.associateBy { it.key })
         marks.clear()
         fromFetch.clear()
         snapshotMark = counter
         hostMark = counter
         hostOnline = snapshot.host_online
         herdrOnline = snapshot.herdr_online
+        hosts = snapshot.hosts.orEmpty()
     }
 
     /** SSE `agent`. Returns false when it was dropped as older than a refreshed state. */
     fun applyAgent(agent: AgentState): Boolean {
-        val current = agents[agent.pane_id]
-        if (current != null && agent.pane_id in fromFetch && agent.state_change_seq < current.state_change_seq) {
+        val key = agent.key
+        val current = agents[key]
+        if (current != null && key in fromFetch && agent.state_change_seq < current.state_change_seq) {
             return false
         }
         counter++
-        agents[agent.pane_id] = agent
-        marks[agent.pane_id] = counter
-        fromFetch.remove(agent.pane_id)
+        agents[key] = agent
+        marks[key] = counter
+        fromFetch.remove(key)
         return true
     }
 
     /** SSE `agent_removed`. Returns true if the pane was known. */
-    fun applyRemoved(paneId: String): Boolean {
+    fun applyRemoved(key: AgentKey): Boolean {
         counter++
-        marks[paneId] = counter
-        fromFetch.remove(paneId)
-        return agents.remove(paneId) != null
+        marks[key] = counter
+        fromFetch.remove(key)
+        return agents.remove(key) != null
     }
 
     /** SSE `host`. */
@@ -78,6 +88,7 @@ class AgentStore {
         hostMark = counter
         hostOnline = host.host_online
         herdrOnline = host.herdr_online
+        hosts = host.hosts.orEmpty()
     }
 
     /** Call before sending `GET /v1/agents`; pass the result to [applyFetched]. */
@@ -85,10 +96,10 @@ class AgentStore {
 
     /** Merges a `GET /v1/agents` response requested when [beginFetch] returned [since]. */
     fun applyFetched(snapshot: AgentsSnapshot, since: Long) {
-        fun touchedSince(paneId: String) = maxOf(marks[paneId] ?: 0L, snapshotMark) > since
+        fun touchedSince(paneId: AgentKey) = maxOf(marks[paneId] ?: 0L, snapshotMark) > since
 
-        val fetched = snapshot.agents.associateBy { it.pane_id }
-        val merged = LinkedHashMap<String, AgentState>()
+        val fetched = snapshot.agents.associateBy { it.key }
+        val merged = LinkedHashMap<AgentKey, AgentState>()
         for ((paneId, current) in agents) {
             val incoming = fetched[paneId]
             val keepCurrent = when {
@@ -116,6 +127,7 @@ class AgentStore {
         if (maxOf(hostMark, snapshotMark) <= since) {
             hostOnline = snapshot.host_online
             herdrOnline = snapshot.herdr_online
+            hosts = snapshot.hosts.orEmpty()
         }
     }
 
@@ -129,6 +141,7 @@ class AgentStore {
         hostMark = counter
         hostOnline = false
         herdrOnline = false
+        hosts = emptyList()
     }
 
     companion object {

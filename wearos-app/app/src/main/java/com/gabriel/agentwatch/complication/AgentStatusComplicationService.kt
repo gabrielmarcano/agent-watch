@@ -16,6 +16,7 @@ import androidx.wear.watchface.complications.datasource.SuspendingComplicationDa
 import com.gabriel.agentwatch.MainActivity
 import com.gabriel.agentwatch.R
 import com.gabriel.agentwatch.data.Prefs
+import com.gabriel.agentwatch.network.NotificationIntents
 import com.gabriel.agentwatch.network.RelayClient
 import kotlinx.coroutines.CancellationException
 
@@ -65,11 +66,12 @@ class AgentStatusComplicationService : SuspendingComplicationDataSourceService()
     private fun texts(c: ComplicationContent): Texts {
         val n = c.count
         val app = getString(R.string.app_name)
-        // "Blocked · claude" for one agent, "Blocked · +1 more" for several.
+        // "Blocked · claude" for one agent ("Blocked · Mac", its host, when there are several hosts),
+        // "Blocked · +1 more" for several.
         fun status(word: Int) = if (n > 1) {
             getString(R.string.complication_status_more, getString(word), n - 1)
         } else {
-            getString(R.string.complication_status_agent, getString(word), c.agent.orEmpty().ifBlank { app })
+            getString(R.string.complication_status_agent, getString(word), c.hostName ?: c.agent.orEmpty().ifBlank { app })
         }
         fun plural(id: Int) = resources.getQuantityString(id, n, n)
         return when (c.kind) {
@@ -112,7 +114,7 @@ class AgentStatusComplicationService : SuspendingComplicationDataSourceService()
         val t = texts(content)
         val image = MonochromaticImage.Builder(Icon.createWithResource(this, t.icon)).build()
         val description = PlainComplicationText.Builder(t.description).build()
-        val tap = tapAction(content.paneId)
+        val tap = tapAction(content.paneId, content.host)
         return when (type) {
             ComplicationType.LONG_TEXT -> LongTextComplicationData.Builder(PlainComplicationText.Builder(t.longText).build(), description)
                 .setTitle(PlainComplicationText.Builder(t.longTitle).build())
@@ -141,11 +143,14 @@ class AgentStatusComplicationService : SuspendingComplicationDataSourceService()
             BadgeIcon.DEVICE_OFFLINE -> R.drawable.ic_computer
         }
 
-    /** Opens [paneId]'s screen (its prompt or last reply) when there is one, else the list. */
-    private fun tapAction(paneId: String?): PendingIntent {
+    /** Opens the agent's screen (its prompt or last reply) when there is one, else the list. */
+    private fun tapAction(paneId: String?, host: String): PendingIntent {
         val intent = Intent(this, MainActivity::class.java)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
-        if (!paneId.isNullOrBlank()) intent.putExtra("pane_id", paneId)
+        if (!paneId.isNullOrBlank()) {
+            intent.putExtra(NotificationIntents.EXTRA_PANE_ID, paneId)
+            intent.putExtra(NotificationIntents.EXTRA_HOST, host)
+        }
         return PendingIntent.getActivity(this, 0, intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
     }
 }

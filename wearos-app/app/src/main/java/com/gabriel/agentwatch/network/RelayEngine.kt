@@ -29,8 +29,10 @@ sealed interface AgentsUpdate {
     data class All(val agents: List<AgentState>) : AgentsUpdate
     /** One agent changed (SSE `agent`, applied). */
     data class Changed(val agent: AgentState) : AgentsUpdate
-    /** A pane closed or lost its agent (SSE `agent_removed`). */
-    data class Removed(val paneId: String) : AgentsUpdate
+    /** A pane closed or lost its agent (SSE `agent_removed`). [host]: "" from a relay that predates hosts. */
+    data class Removed(val paneId: String, val host: String = "") : AgentsUpdate {
+        val key: AgentKey get() = AgentKey(host, paneId)
+    }
 }
 
 /** Side effects the engine triggers but does not own. Called outside the engine's lock. */
@@ -249,7 +251,8 @@ class RelayEngine(
         val agents = store.agents()
         val hostOnline = store.hostOnline
         val herdrOnline = store.herdrOnline
-        state.update { it.copy(agents = agents, hostOnline = hostOnline, herdrOnline = herdrOnline) }
+        val hosts = store.hosts
+        state.update { it.copy(agents = agents, hostOnline = hostOnline, herdrOnline = herdrOnline, hosts = hosts) }
     }
 
     /** Applies one SSE event; returns the agent news it carries, if any. */
@@ -275,10 +278,11 @@ class RelayEngine(
                     return AgentsUpdate.Changed(agent)
                 }
                 "agent_removed" -> {
-                    val paneId = gson.fromJson(data, PaneRef::class.java).pane_id
-                    store.applyRemoved(paneId)
+                    val ref = gson.fromJson(data, PaneRef::class.java)
+                    val removed = AgentsUpdate.Removed(ref.pane_id, ref.host.orEmpty())
+                    store.applyRemoved(removed.key)
                     publishAgentsLocked()
-                    return AgentsUpdate.Removed(paneId)
+                    return removed
                 }
                 "host" -> {
                     store.applyHost(gson.fromJson(data, HostEvent::class.java))
@@ -340,19 +344,19 @@ class RelayEngine(
         return res
     }
 
-    suspend fun answer(paneId: String, optionId: String, expectedSeq: Long, fingerprint: String): Result<Unit> {
+    suspend fun answer(agent: AgentKey, optionId: String, expectedSeq: Long, fingerprint: String): Result<Unit> {
         val currentClient = getClient() ?: return notPaired()
-        return refreshAfter(currentClient.answer(paneId, optionId, expectedSeq, fingerprint))
+        return refreshAfter(currentClient.answer(agent, optionId, expectedSeq, fingerprint))
     }
 
-    suspend fun cancel(paneId: String, expectedSeq: Long, fingerprint: String? = null): Result<Unit> {
+    suspend fun cancel(agent: AgentKey, expectedSeq: Long, fingerprint: String? = null): Result<Unit> {
         val currentClient = getClient() ?: return notPaired()
-        return refreshAfter(currentClient.cancel(paneId, expectedSeq, fingerprint))
+        return refreshAfter(currentClient.cancel(agent, expectedSeq, fingerprint))
     }
 
-    suspend fun prompt(paneId: String, text: String, expectedSeq: Long): Result<Unit> {
+    suspend fun prompt(agent: AgentKey, text: String, expectedSeq: Long): Result<Unit> {
         val currentClient = getClient() ?: return notPaired()
-        return refreshAfter(currentClient.prompt(paneId, text, expectedSeq))
+        return refreshAfter(currentClient.prompt(agent, text, expectedSeq))
     }
 }
 

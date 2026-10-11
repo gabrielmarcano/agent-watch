@@ -373,7 +373,8 @@ func TestServer_PushWiring(t *testing.T) {
 	select {
 	case m := <-fcm.msgs:
 		if m.Event != push.EventBlocked || m.PaneID != "w5:pAE" || m.Fingerprint != "9f2c61d0a4b3e871" ||
-			m.AllowOptionID != "opt-1" || m.DenyOptionID != "opt-3" || m.StateChangeSeq != 334 {
+			m.AllowOptionID != "opt-1" || m.DenyOptionID != "opt-3" || m.StateChangeSeq != 334 ||
+			m.Host != DefaultHostID || m.HostName != DefaultHostID || m.Title != "my-app needs approval" {
 			t.Fatalf("FCM message = %+v", m)
 		}
 	case <-ctx.Done():

@@ -16,14 +16,15 @@ The relay can make agents on the owner's Mac type and approve things, so treat i
 
 ## Tokens and auth
 - **Only the `Authorization: Bearer` header authenticates;** ignore query-string tokens.
-- **Device tokens are 32 random bytes.** Store only `sha256` hashes, and compare with `crypto/subtle.ConstantTimeCompare`. The host token is compared the same way.
+- **Device and host tokens are 32 random bytes.** Store only `sha256` hashes, and compare with `crypto/subtle.ConstantTimeCompare`. `AW_HOST_TOKEN` is compared the same way.
 - **Pairing codes** come from `crypto/rand`, and follow the pairing limits in `contracts.md` §2.1 (single use, expiry, rate limits per client IP and global).
 - **Client IP:** forwarding headers are read **only** from peers in `AW_TRUSTED_PROXIES`; otherwise the TCP peer is the client. Never trust a header from an untrusted peer (the algorithm: `contracts.md` §5).
 - **Never log** request bodies or history content, besides what `AGENTS.md` §3 forbids.
 
 ## Behaviour
-- **Exactly one host connection;** a new one replaces the old (`contracts.md` §3).
-- **Commands** get one budget for sending and waiting, longer than the bridge's and shorter than the watch's, so inner layers always time out first (values: `contracts.md` §2.4). With no host they fail immediately (`host_offline`), and in-flight ones fail the moment their host disconnects, misses a ping or is replaced.
+- **A host is who its token says, never what the bridge says:** the relay stamps the host's id on everything a connection sends, and keys agents, history, commands and pushes by `(host, pane_id)`, never by `pane_id` alone (`contracts.md` §1.2, §3).
+- **One connection per host;** a new one with the same host's token replaces the old, and other hosts' connections are untouched (`contracts.md` §3). Revoking a host closes its connection, and nothing it sent before is applied after.
+- **Commands** go only to their agent's host and get one budget for sending and waiting, longer than the bridge's and shorter than the watch's, so inner layers always time out first (values: `contracts.md` §2.4). With their host offline they fail immediately (`host_offline`), and in-flight ones fail the moment their host disconnects, misses a ping, is replaced or is revoked. Only the connection a command went to may answer it.
 - **Host keepalive:** ping the host; no pong in time → drop it (`contracts.md` §3).
 - **Keepalives stay short** (SSE comments, WebSocket pings; `contracts.md` §2–§3): they must stay below the proxies' idle timeouts (`deploy/relay/README.md` § Proxy idle timeouts), so never lengthen them.
 - **HTTP server:** no `ReadTimeout` or `WriteTimeout` (they kill SSE and WebSocket); keep `ReadHeaderTimeout` and `IdleTimeout` (`pkg/relay/server.go`). Shutdown cancels every request context, so open streams end at once.

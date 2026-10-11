@@ -174,6 +174,40 @@ bash "$A" merge "$T/merged4" "$T/updates" "$T/merged5" 2>"$T/err5"
 expect "$(cat "$T/merged4")" "$(cat "$T/merged5")" "merge: idempotent"
 contains "$(cat "$T/err5")" "changed: none; added: none" "merge: second run changes nothing"
 
+# ── same-host ──
+# same_host <server lines> <agent-watch.env lines> → exit status; the env file
+# goes through relay-env first, as deploy.sh --sync-env does.
+same_host() {
+	printf '%b' "$1" >"$T/sh-server.env"
+	printf '%b' "$2" >"$T/sh-local.env"
+	bash "$A" relay-env "$T/sh-local.env" "$T/sh-updates" 2>/dev/null || return 9
+	cp "$T/sh-server.env" "$T/sh-server.before"
+	bash "$A" same-host "$T/sh-server.env" "$T/sh-updates" >"$T/sh-out" 2>&1
+	local rc=$?
+	cmp -s "$T/sh-server.env" "$T/sh-server.before" || no "same-host: changed the server file"
+	return $rc
+}
+same_host "AW_HOST_TOKEN=$TOK\n" "AW_HOST_TOKEN=$TOK\n"
+expect 0 $? "same-host: both unset (main)"
+same_host "AW_HOST_ID=main\nAW_HOST_TOKEN=$TOK\n" "AW_HOST_TOKEN=$TOK\n"
+expect 0 $? "same-host: main on the server, unset in the file"
+same_host "AW_HOST_ID=\"mac\"\n" "AW_HOST_ID=mac\nAW_HOST_TOKEN=$TOK\n"
+expect 0 $? "same-host: a quoted equal id"
+same_host "AW_HOST_TOKEN=$TOK\n" "AW_HOST_ID=\nAW_HOST_TOKEN=$TOK\n"
+expect 0 $? "same-host: an empty id is main"
+same_host "# AW_HOST_ID=linux\nAW_HOST_TOKEN=$TOK\n" "AW_HOST_TOKEN=$TOK\n"
+expect 0 $? "same-host: a commented-out id is ignored"
+same_host "AW_HOST_TOKEN=$TOK\n" "AW_HOST_ID=linux\nAW_HOST_TOKEN=$TOK\n"
+expect 1 $? "same-host: another host's file is refused"
+out="$(cat "$T/sh-out")"
+contains "$out" "host linux" "same-host: names the file's host"
+contains "$out" "host main" "same-host: names the relay's host"
+lacks "$out" "$TOK" "same-host: token printed"
+same_host "AW_HOST_ID=mac\nAW_HOST_TOKEN=$TOK\n" "AW_HOST_TOKEN=$TOK\n"
+expect 1 $? "same-host: the server's id differs from the default"
+grep -q 'same-host "$env_file" "$remote_dir/relay.env"' "$ROOT/deploy/relay/deploy.sh" && ok || no "deploy.sh: --sync-env does not run same-host"
+awk '/same-host "\$env_file"/ { s = NR } /awenv.sh" merge/ { m = NR } END { exit !(s && m && s < m) }' "$ROOT/deploy/relay/deploy.sh" && ok || no "deploy.sh: same-host must run before merge"
+
 # ── xcconfig ──
 printf 'AW_RELAY_DOMAIN=relay.example.com\nAW_WATCHOS_BUNDLE_ID=com.example.agentwatch\n' >"$T/x.env"
 bash "$A" xcconfig "$T/x.env" "$T/x.xcconfig"

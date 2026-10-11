@@ -170,6 +170,7 @@ func fcmData(m Message) map[string]string {
 	if m.Event == EventResolved {
 		return map[string]string{
 			"event":            string(m.Event),
+			"host":             m.Host,
 			"pane_id":          m.PaneID,
 			"state_change_seq": seq,
 		}
@@ -177,6 +178,8 @@ func fcmData(m Message) map[string]string {
 	data := map[string]string{
 		"event":            string(m.Event),
 		"pane_id":          m.PaneID,
+		"host":             m.Host,
+		"host_name":        m.HostName,
 		"agent":            m.Agent,
 		"label":            m.Label,
 		"title":            m.Title,

@@ -346,10 +346,10 @@ func TestAPI_SSEStreaming(t *testing.T) {
 	})
 
 	// Trigger agent_removed event
-	server.State().Remove("p1")
+	server.State().Remove("main", "p1")
 
 	// Trigger host event
-	server.State().SetHost(true, true)
+	server.State().SetHost("main", true, true)
 
 	// Trigger history event
 	server.State().BroadcastHistory(model.HistoryItem{
@@ -431,12 +431,18 @@ func TestAPI_HistoryQuery(t *testing.T) {
 // given panes, and waits until the relay has applied the snapshot.
 func connectTestHost(t *testing.T, ctx context.Context, server *Server, ts *httptest.Server, panes ...string) *websocket.Conn {
 	t.Helper()
+	return connectTestHostWithToken(t, ctx, server, ts, testHostToken, panes...)
+}
+
+// connectTestHostWithToken is connectTestHost for the host of token.
+func connectTestHostWithToken(t *testing.T, ctx context.Context, server *Server, ts *httptest.Server, token string, panes ...string) *websocket.Conn {
+	t.Helper()
 	sub, ch := server.State().Subscribe()
 	defer server.State().Unsubscribe(sub)
 
 	wsURL := strings.Replace(ts.URL, "http://", "ws://", 1) + "/v1/host"
 	conn, _, err := websocket.Dial(ctx, wsURL, &websocket.DialOptions{
-		HTTPHeader: http.Header{"Authorization": []string{"Bearer " + testHostToken}},
+		HTTPHeader: http.Header{"Authorization": []string{"Bearer " + token}},
 	})
 	if err != nil {
 		t.Fatalf("dial host: %v", err)
@@ -739,11 +745,14 @@ func TestAPI_SSEHostOnlineAndOffline(t *testing.T) {
 			if name != "host" {
 				continue
 			}
-			var payload map[string]bool
+			var payload model.HostEvent
 			if err := json.Unmarshal([]byte(data), &payload); err != nil {
 				t.Fatalf("decode host event %q: %v", data, err)
 			}
-			if payload["host_online"] == online {
+			if payload.HostOnline == online {
+				if len(payload.Hosts) != 1 || payload.Hosts[0].ID != DefaultHostID || payload.Hosts[0].Online != online {
+					t.Fatalf("host event hosts = %+v, want main with online=%v", payload.Hosts, online)
+				}
 				return
 			}
 		}

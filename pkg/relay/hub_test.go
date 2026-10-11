@@ -139,7 +139,7 @@ func TestHub_ConnectAndReplace(t *testing.T) {
 	// 3. Disconnect conn2; state should revert to HostOnline = false
 	conn2.Close(websocket.StatusNormalClosure, "bye")
 	waitHostOnline(t, events, false, 5*time.Second)
-	if state.HostOnline() {
+	if state.HostOnline("main") {
 		t.Fatalf("expected hostOnline to be false after disconnect")
 	}
 }
@@ -213,13 +213,19 @@ func TestHub_CommandRoundTrip(t *testing.T) {
 		OptionID:    "opt-1",
 	}
 
-	res, err := hub.Command(ctx, cmd)
+	res, err := hub.Command(ctx, "main", cmd)
 	if err != nil {
 		t.Fatalf("hub.Command err: %v", err)
 	}
 	if !res.OK {
 		t.Fatalf("expected command result OK=true, got %+v", res)
 	}
+}
+
+// testHostConn is a connection of host id for calling handleWireMessage
+// directly, without a socket.
+func testHostConn(id string) *hostConnection {
+	return newHostConnection(id, nil)
 }
 
 // drainEvents returns the names of the events already queued on ch.
@@ -253,8 +259,8 @@ func TestHub_HistoryBroadcastOnlyWhenStored(t *testing.T) {
 	at := func(d time.Duration) string { return base.Add(d).Format(time.RFC3339) }
 
 	item := model.HistoryItem{ID: "h-1", PaneID: "w1:p1", CompletedAt: at(0)}
-	hub.handleWireMessage(model.HistoryItemMsg{Type: model.WireHistoryItem, Item: item})
-	hub.handleWireMessage(model.HistoryItemMsg{Type: model.WireHistoryItem, Item: item}) // bridge resend
+	hub.handleWireMessage(testHostConn("main"), model.HistoryItemMsg{Type: model.WireHistoryItem, Item: item})
+	hub.handleWireMessage(testHostConn("main"), model.HistoryItemMsg{Type: model.WireHistoryItem, Item: item}) // bridge resend
 	if got := drainEvents(ch); len(got) != 1 || got[0] != "history" {
 		t.Fatalf("events after an item and its duplicate = %v, want one history", got)
 	}
@@ -269,11 +275,11 @@ func TestHub_HistoryBroadcastOnlyWhenStored(t *testing.T) {
 		})
 	}
 	old := model.HistoryItem{ID: "too-old", PaneID: "w9:p9", CompletedAt: at(-time.Hour)}
-	hub.handleWireMessage(model.HistoryItemMsg{Type: model.WireHistoryItem, Item: old})
+	hub.handleWireMessage(testHostConn("main"), model.HistoryItemMsg{Type: model.WireHistoryItem, Item: old})
 	if got := drainEvents(ch); len(got) != 0 {
 		t.Fatalf("events after an item trimmed on arrival = %v, want none", got)
 	}
-	if items := store.GetHistory("w9:p9", 10); len(items) != 0 {
+	if items := store.GetHistory("", "w9:p9", 10); len(items) != 0 {
 		t.Fatalf("trimmed item is stored: %v", items)
 	}
 }
@@ -298,8 +304,8 @@ func TestHub_NotifierGetsNewRepliesOnce(t *testing.T) {
 	hub := NewHub(NewAuthManager("valid-host-token", store, ClientIPPolicy{}), NewState(), store, notifier)
 
 	item := model.HistoryItem{ID: "h-1", PaneID: "w1:p1", CompletedAt: time.Now().UTC().Format(time.RFC3339)}
-	hub.handleWireMessage(model.HistoryItemMsg{Type: model.WireHistoryItem, Item: item})
-	hub.handleWireMessage(model.HistoryItemMsg{Type: model.WireHistoryItem, Item: item}) // bridge resend
+	hub.handleWireMessage(testHostConn("main"), model.HistoryItemMsg{Type: model.WireHistoryItem, Item: item})
+	hub.handleWireMessage(testHostConn("main"), model.HistoryItemMsg{Type: model.WireHistoryItem, Item: item}) // bridge resend
 	if fmt.Sprint(notifier.items) != "[h-1]" {
 		t.Fatalf("notified = %v, want [h-1]", notifier.items)
 	}
@@ -411,7 +417,7 @@ type commandOutcome struct {
 func startCommand(ctx context.Context, hub *Hub) <-chan commandOutcome {
 	out := make(chan commandOutcome, 1)
 	go func() {
-		res, err := hub.Command(ctx, model.CommandMsg{Action: "cancel", PaneID: "w1:p1", ExpectedSeq: 1})
+		res, err := hub.Command(ctx, "main", model.CommandMsg{Action: "cancel", PaneID: "w1:p1", ExpectedSeq: 1})
 		out <- commandOutcome{res, err}
 	}()
 	return out
@@ -432,7 +438,7 @@ func TestHub_PingFailureDropsHost(t *testing.T) {
 	waitHostOnline(t, ch, true, 5*time.Second)
 	waitHostOnline(t, ch, false, 5*time.Second)
 
-	res, err := hh.hub.Command(ctx, model.CommandMsg{Action: "cancel", PaneID: "w1:p1"})
+	res, err := hh.hub.Command(ctx, "main", model.CommandMsg{Action: "cancel", PaneID: "w1:p1"})
 	if err != nil || res.ErrorCode != string(model.ErrHostOffline) {
 		t.Fatalf("command after the host was dropped = %+v, %v; want host_offline", res, err)
 	}
@@ -465,7 +471,7 @@ func TestHub_PingKeepsResponsiveHost(t *testing.T) {
 			t.Fatalf("only %d pings happened", i)
 		}
 	}
-	if !hh.state.HostOnline() {
+	if !hh.state.HostOnline("main") {
 		t.Fatalf("responsive host went offline")
 	}
 }
@@ -557,7 +563,7 @@ func TestHub_ReplacedHostClosedAsynchronously(t *testing.T) {
 	}
 	// A synchronous close handshake alone waits 5 s for the frozen peer.
 	waitEvent(t, ch, "snapshot", 2*time.Second)
-	if !hh.state.HasPane("b:1") {
+	if !hh.state.HasPane("main", "b:1") {
 		t.Fatalf("new host's snapshot not applied")
 	}
 }
@@ -591,7 +597,7 @@ func TestHub_CancelledCallerDoesNotKillHost(t *testing.T) {
 	gone, goneCancel := context.WithCancel(context.Background())
 	goneCancel()
 	for i := 0; i < 20; i++ {
-		res, err := hh.hub.Command(gone, model.CommandMsg{Action: "cancel", PaneID: "w1:p1"})
+		res, err := hh.hub.Command(gone, "main", model.CommandMsg{Action: "cancel", PaneID: "w1:p1"})
 		// The command is still sent; if the host answers before Command
 		// notices the cancelled caller, the delivered answer wins (by design).
 		if err == nil && !res.OK {
@@ -599,11 +605,11 @@ func TestHub_CancelledCallerDoesNotKillHost(t *testing.T) {
 		}
 	}
 
-	res, err := hh.hub.Command(ctx, model.CommandMsg{Action: "cancel", PaneID: "w1:p1"})
+	res, err := hh.hub.Command(ctx, "main", model.CommandMsg{Action: "cancel", PaneID: "w1:p1"})
 	if err != nil || !res.OK {
 		t.Fatalf("command after cancelled callers = %+v, %v; want ok (host connection intact)", res, err)
 	}
-	if !hh.state.HostOnline() {
+	if !hh.state.HostOnline("main") {
 		t.Fatalf("host went offline after cancelled callers")
 	}
 }
@@ -615,16 +621,23 @@ type presenceNotifier struct {
 	idles    []time.Duration
 	locked   []bool
 	offlines int
+	revoked  []string
 }
 
-func (n *presenceNotifier) OnHostPresence(idle time.Duration, locked bool) {
+func (n *presenceNotifier) OnHostRevoked(host string) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	n.revoked = append(n.revoked, host)
+}
+
+func (n *presenceNotifier) OnHostPresence(host string, idle time.Duration, locked bool) {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 	n.idles = append(n.idles, idle)
 	n.locked = append(n.locked, locked)
 }
 
-func (n *presenceNotifier) OnHostOffline() {
+func (n *presenceNotifier) OnHostOffline(host string) {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 	n.offlines++
@@ -639,8 +652,8 @@ func (n *presenceNotifier) offlineCount() int {
 func TestHub_PassesHostPresence(t *testing.T) {
 	n := &presenceNotifier{}
 	h := NewHub(nil, NewState(), nil, n)
-	h.handleWireMessage(model.HostPresenceMsg{Type: model.WireHostPresence, IdleSeconds: 42, Locked: true})
-	h.handleWireMessage(model.HostPresenceMsg{Type: model.WireHostPresence, IdleSeconds: math.MaxUint64})
+	h.handleWireMessage(testHostConn("main"), model.HostPresenceMsg{Type: model.WireHostPresence, IdleSeconds: 42, Locked: true})
+	h.handleWireMessage(testHostConn("main"), model.HostPresenceMsg{Type: model.WireHostPresence, IdleSeconds: math.MaxUint64})
 	if len(n.idles) != 2 || n.idles[0] != 42*time.Second || !n.locked[0] {
 		t.Fatalf("presence calls = %v %v", n.idles, n.locked)
 	}
@@ -700,5 +713,20 @@ func TestHub_ReplaceIsNotOffline(t *testing.T) {
 	time.Sleep(50 * time.Millisecond)
 	if got := n.offlineCount(); got != 1 {
 		t.Fatalf("OnHostOffline calls after closing the current host = %d, want exactly 1", got)
+	}
+}
+
+// Revoking a host tells the notifier even when the host is not connected: a
+// push held for it (a reply wait, presence) must not go out afterwards.
+func TestHub_RevokeReportsHostRevoked(t *testing.T) {
+	n := &presenceNotifier{}
+	h := NewHub(nil, NewState(), nil, n)
+	if h.RevokeHost("linux") {
+		t.Fatal("RevokeHost reported an unconnected host as connected")
+	}
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	if fmt.Sprint(n.revoked) != "[linux]" || n.offlines != 0 {
+		t.Fatalf("revoked = %v, offline calls = %d; want [linux] and 0", n.revoked, n.offlines)
 	}
 }

@@ -7,6 +7,7 @@ import androidx.wear.protolayout.types.LayoutColor
 import androidx.wear.protolayout.types.argb
 import com.gabriel.agentwatch.R
 import com.gabriel.agentwatch.data.Prefs
+import com.gabriel.agentwatch.model.AgentKey
 import com.gabriel.agentwatch.model.AgentsSnapshot
 import com.gabriel.agentwatch.network.RelayClient
 import kotlinx.coroutines.CancellationException
@@ -57,18 +58,22 @@ internal suspend fun fetchAgentsForTile(prefs: Prefs): Result<AgentsSnapshot>? {
     }
 }
 
-/** Opens [className] in this app (whatever its applicationId), with the pane when there is one. */
-internal fun Context.launchInApp(className: String, paneId: String?): ActionBuilders.LaunchAction =
+/** Opens [className] in this app (whatever its applicationId), with the agent (pane and host) when there is one. */
+internal fun Context.launchInApp(className: String, agent: AgentKey?): ActionBuilders.LaunchAction =
     ActionBuilders.LaunchAction.Builder()
         .setAndroidActivity(
             ActionBuilders.AndroidActivity.Builder()
                 .setPackageName(packageName)
                 .setClassName(className)
                 .apply {
-                    if (!paneId.isNullOrBlank()) {
+                    if (agent != null && agent.paneId.isNotBlank()) {
                         addKeyToExtraMapping(
                             QuickDictateActivity.EXTRA_PANE_ID,
-                            ActionBuilders.AndroidStringExtra.Builder().setValue(paneId).build()
+                            ActionBuilders.AndroidStringExtra.Builder().setValue(agent.paneId).build()
+                        )
+                        addKeyToExtraMapping(
+                            QuickDictateActivity.EXTRA_HOST,
+                            ActionBuilders.AndroidStringExtra.Builder().setValue(agent.host).build()
                         )
                     }
                 }

@@ -37,7 +37,9 @@ data class AgentState(
     val background_agents: Int = 0,        // agents the last turn left running while it waits on them; only with "working" (omitempty)
     val background_shells: Int = 0,        // shell commands still running in the background; any status (omitempty)
     val background_monitors: Int = 0,      // monitors still running in the background; any status (omitempty)
-    val updated_at: String = ""
+    val updated_at: String = "",
+    // New fields go last: tests build these classes with positional arguments.
+    val host: String = ""                  // relay-stamped host id; the key is (host, pane_id). "" from an older relay
 )
 
 @Keep
@@ -49,26 +51,38 @@ data class HistoryItem(
     val query: String? = null,
     val response: String = "",
     val source: String = "screen",         // "transcript" | "screen"
-    val completed_at: String = ""
+    val completed_at: String = "",
+    val host: String = ""
 )
 
 @Keep
 data class AgentsSnapshot(
-    val host_online: Boolean = false,
-    val herdr_online: Boolean = false,
+    val host_online: Boolean = false,      // at least one host connected
+    val herdr_online: Boolean = false,     // every connected host reaches its herdr
     val agents: List<AgentState> = emptyList(),
-    val generated_at: String = ""
+    val generated_at: String = "",
+    val hosts: List<HostInfo> = emptyList() // omitted by a relay that predates hosts
+)
+
+@Keep
+data class HostInfo(
+    val id: String = "",
+    val name: String = "",
+    val online: Boolean = false,
+    val herdr_online: Boolean = false
 )
 
 @Keep
 data class HostEvent(
     val host_online: Boolean = false,
-    val herdr_online: Boolean = false
+    val herdr_online: Boolean = false,
+    val hosts: List<HostInfo> = emptyList()
 )
 
 @Keep
 data class PaneRef(
-    val pane_id: String = ""
+    val pane_id: String = "",
+    val host: String = ""
 )
 
 @Keep
@@ -134,10 +148,10 @@ fun AgentState.severity(): Int = when (status) {
 
 /**
  * Quick-dictation target (wearos-app/ARCHITECTURE.md §4b): the pinned agent if it still exists, else the most
- * recently finished (`done`) one, else herdr's focused pane, else none. Never an arbitrary agent: a
- * dictated prompt must not land in a pane the user did not choose.
+ * recently finished (`done`) one, else herdr's focused pane (only with [useFocused]), else none. Never an
+ * arbitrary agent: a dictated prompt must not land in a pane the user did not choose.
  */
-fun resolveTargetAgent(agents: List<AgentState>, pinnedPaneId: String?): AgentState? {
+fun resolveTargetAgent(agents: List<AgentState>, pinnedPaneId: String?, useFocused: Boolean = true): AgentState? {
     if (agents.isEmpty()) return null
     if (!pinnedPaneId.isNullOrEmpty()) {
         val pinned = agents.find { it.pane_id == pinnedPaneId }
@@ -147,5 +161,5 @@ fun resolveTargetAgent(agents: List<AgentState>, pinnedPaneId: String?): AgentSt
     if (doneAgents.isNotEmpty()) {
         return doneAgents.maxByOrNull { it.updated_at }
     }
-    return agents.find { it.focused }
+    return if (useFocused) agents.find { it.focused } else null
 }

@@ -1,5 +1,6 @@
 package com.gabriel.agentwatch.complication
 
+import com.gabriel.agentwatch.model.HostInfo
 import com.gabriel.agentwatch.model.AgentState
 import com.gabriel.agentwatch.model.AgentsSnapshot
 import org.junit.Assert.assertEquals
@@ -61,5 +62,43 @@ class ComplicationContentTest {
         assertEquals(ComplicationBadge(BadgeIcon.NOT_PAIRED, "–"), complicationBadge(ComplicationContent(ComplicationKind.NOT_PAIRED, 0)))
         assertEquals(ComplicationBadge(BadgeIcon.UNREACHABLE, "–"), complicationBadge(ComplicationContent(ComplicationKind.UNREACHABLE, 0)))
         assertEquals(ComplicationBadge(BadgeIcon.DEVICE_OFFLINE, "–"), complicationBadge(ComplicationContent(ComplicationKind.DEVICE_OFFLINE, 0)))
+    }
+
+    // ---- phase 8: across hosts
+
+    private val box = HostInfo(id = "box", name = "Box", online = true, herdr_online = true)
+    private val mac = HostInfo(id = "main", name = "Mac", online = true, herdr_online = true)
+
+    private fun hosted(host: String, pane: String, status: String, updated: String = "2026-09-25T18:00:00Z") =
+        agent(pane, status, updated).copy(host = host)
+
+    @Test
+    fun theMostUrgentAgentAcrossHostsWithItsHostsName() {
+        val result = Result.success(AgentsSnapshot(
+            host_online = true, herdr_online = true, hosts = listOf(box, mac),
+            agents = listOf(hosted("main", "w1:p1", "blocked"), hosted("box", "w1:p1", "done"))
+        ))
+        assertEquals(
+            ComplicationContent(ComplicationKind.NEEDS_YOU, 1, paneId = "w1:p1", label = "label-w1:p1", agent = "claude", host = "main", hostName = "Mac"),
+            complicationContent(true, result)
+        )
+    }
+
+    @Test
+    fun oneHostIsNotNamed() {
+        val result = Result.success(AgentsSnapshot(host_online = true, herdr_online = true, hosts = listOf(mac), agents = listOf(hosted("main", "a", "done"))))
+        val content = complicationContent(true, result)
+        assertEquals("main", content.host)
+        assertEquals(null, content.hostName)
+    }
+
+    @Test
+    fun offlineOnlyWhenEveryHostIsOffline() {
+        val agents = listOf(hosted("main", "w1:p1", "blocked"), hosted("box", "w1:p2", "working"))
+        val macDown = AgentsSnapshot(host_online = true, herdr_online = true, hosts = listOf(box, mac.copy(online = false)), agents = agents)
+        // The offline host's last known prompt cannot be answered: only the online host counts.
+        assertEquals(ComplicationContent(ComplicationKind.WORKING, 1), complicationContent(true, Result.success(macDown)))
+        val allDown = macDown.copy(host_online = false, hosts = listOf(box.copy(online = false), mac.copy(online = false)))
+        assertEquals(ComplicationContent(ComplicationKind.DEVICE_OFFLINE, 0), complicationContent(true, Result.success(allDown)))
     }
 }
