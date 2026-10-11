@@ -349,8 +349,12 @@ func AdminListHosts(ctx context.Context, dataDir string) ([]HostAdminInfo, error
 // in this result: the relay stores its hash. When a relay is running on
 // dataDir the running relay registers it (viaRelay is true); otherwise
 // store.json is edited under the data-dir lock (the data dir is created if
-// needed). It returns ErrHostExists for an id already registered.
-func AdminAddHost(ctx context.Context, dataDir, id, name string) (info HostAdminInfo, token string, viaRelay bool, err error) {
+// needed). It returns ErrHostExists for an id already registered, and
+// ErrHostIsEnv for the host of AW_HOST_TOKEN: the running relay knows it, and
+// a stopped one is described by envHostID, AW_HOST_TOKEN's host id when it is
+// set (EnvHost), "" when it is not. Registering that id would stop the relay
+// from starting.
+func AdminAddHost(ctx context.Context, dataDir, id, name, envHostID string) (info HostAdminInfo, token string, viaRelay bool, err error) {
 	if !ValidHostID(id) {
 		return HostAdminInfo{}, "", false, ErrInvalidHostID
 	}
@@ -367,6 +371,9 @@ func AdminAddHost(ctx context.Context, dataDir, id, name string) (info HostAdmin
 	req := addHostRequest{ID: id, Name: name, TokenHash: Sha256Hex(token)}
 	viaRelay, err = withRelayOrStore(ctx, dataDir,
 		func(st *Store) error {
+			if envHostID != "" && req.ID == envHostID {
+				return ErrHostIsEnv
+			}
 			h, err := st.AddHost(req.ID, req.Name, req.TokenHash)
 			info = HostAdminInfo{ID: h.ID, Name: h.Name, CreatedAt: h.CreatedAt}
 			return err
@@ -508,8 +515,12 @@ func adminCall(ctx context.Context, c *http.Client, method, path string, body, o
 		return notFound
 	case resp.StatusCode < 200 || resp.StatusCode > 299:
 		if json.Unmarshal(respBody, &eb) == nil && eb.Error != "" {
-			if resp.StatusCode == http.StatusConflict && eb.Error == ErrHostExists.Error() {
-				return ErrHostExists
+			if resp.StatusCode == http.StatusConflict {
+				for _, known := range []error{ErrHostExists, ErrHostIsEnv} {
+					if eb.Error == known.Error() {
+						return known
+					}
+				}
 			}
 			return fmt.Errorf("relay: %s", eb.Error)
 		}

@@ -99,7 +99,9 @@ Environment variables:
 they go through its local admin socket ($AW_DATA_DIR/admin.sock): a revoked
 device or host is rejected immediately and its open connections are closed.
 Run them as the service user or as root, with the same AW_DATA_DIR (and
-AW_HOST_ID, if set) as the service.
+AW_HOST_ID, if set) as the service. "hosts add" refuses AW_HOST_TOKEN's host;
+for that check it reads AW_HOST_ID and AW_HOST_TOKEN, when missing from the
+environment, from /etc/agent-watch-relay/env.
 `, buildinfo.String(version))
 }
 
@@ -131,6 +133,41 @@ func dataDirFromEnv() string {
 	return relay.DefaultDataDir
 }
 
+// serviceEnvFile is the relay service's environment file (systemd's
+// EnvironmentFile, deploy/relay). Tests point it elsewhere.
+var serviceEnvFile = "/etc/agent-watch-relay/env"
+
+// serviceEnv returns an environment variable as the relay service sees it:
+// the process's own value when set, else the service's env file, which a
+// `sudo agent-watch-relay hosts …` does not load. An unreadable or missing
+// file counts as empty. Values are never printed.
+func serviceEnv(key string) string {
+	if v, ok := os.LookupEnv(key); ok {
+		return v
+	}
+	data, err := os.ReadFile(serviceEnvFile)
+	if err != nil {
+		return ""
+	}
+	value := ""
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(line, ";") {
+			continue
+		}
+		k, v, ok := strings.Cut(line, "=")
+		if !ok || strings.TrimSpace(k) != key {
+			continue
+		}
+		v = strings.TrimSpace(v)
+		if len(v) >= 2 && (v[0] == '"' || v[0] == '\'') && v[len(v)-1] == v[0] {
+			v = v[1 : len(v)-1]
+		}
+		value = v // systemd: the last assignment wins
+	}
+	return value
+}
+
 const hostsUsage = "usage: agent-watch-relay hosts <add <id> [--name <name>] | list | revoke <id>>"
 
 // runHosts manages the registered hosts. "add" prints the new token alone on
@@ -147,10 +184,19 @@ func runHosts(ctx context.Context, args []string, stdout, stderr io.Writer) erro
 		if err != nil {
 			return err
 		}
-		info, token, viaRelay, err := relay.AdminAddHost(ctx, dataDir, id, name)
+		envHostID, tokenSet, err := relay.EnvHost(serviceEnv)
+		if err != nil {
+			return fmt.Errorf("the relay's environment: %w", err)
+		}
+		if !tokenSet {
+			envHostID = ""
+		}
+		info, token, viaRelay, err := relay.AdminAddHost(ctx, dataDir, id, name, envHostID)
 		switch {
 		case errors.Is(err, relay.ErrHostExists):
 			return fmt.Errorf("host %q already exists (revoke it first to issue a new token)", id)
+		case errors.Is(err, relay.ErrHostIsEnv):
+			return fmt.Errorf("host %q: %w", id, err)
 		case err != nil:
 			return fmt.Errorf("add host %q: %w", id, err)
 		}

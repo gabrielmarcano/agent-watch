@@ -66,6 +66,21 @@ func (c *Config) ClientIPPolicy() ClientIPPolicy {
 	return ClientIPPolicy{TrustedProxies: c.TrustedProxies, Header: c.ClientIPHeader}
 }
 
+// EnvHost reads AW_HOST_TOKEN's host from an environment the way the relay
+// does: its id is AW_HOST_ID (trimmed; default DefaultHostID), and tokenSet
+// reports whether AW_HOST_TOKEN is set (not blank). The token itself is not
+// returned.
+func EnvHost(getenv func(string) string) (id string, tokenSet bool, err error) {
+	id = strings.TrimSpace(getenv("AW_HOST_ID"))
+	if id == "" {
+		id = DefaultHostID
+	}
+	if !ValidHostID(id) {
+		return "", false, fmt.Errorf("AW_HOST_ID %q: %w", id, ErrInvalidHostID)
+	}
+	return id, strings.TrimSpace(getenv("AW_HOST_TOKEN")) != "", nil
+}
+
 // LoadConfig loads and validates configuration from environment variables.
 func LoadConfig() (*Config, error) {
 	listenAddr := os.Getenv("AW_LISTEN")
@@ -85,12 +100,9 @@ func LoadConfig() (*Config, error) {
 		}
 	}
 
-	hostID := strings.TrimSpace(os.Getenv("AW_HOST_ID"))
-	if hostID == "" {
-		hostID = DefaultHostID
-	}
-	if !ValidHostID(hostID) {
-		return nil, fmt.Errorf("AW_HOST_ID %q: %w", hostID, ErrInvalidHostID)
+	hostID, _, err := EnvHost(os.Getenv)
+	if err != nil {
+		return nil, err
 	}
 	hostName, err := NormalizeHostName(hostID, os.Getenv("AW_HOST_NAME"))
 	if err != nil {

@@ -435,6 +435,7 @@ func dialHost(t *testing.T, ctx context.Context, base, token string) (*websocket
 // rejected and its connection closed, and the AW_HOST_TOKEN host is listed
 // but managed in the environment.
 func TestCLI_Hosts(t *testing.T) {
+	setServiceEnvFile(t, "")
 	dir := shortTempDir(t)
 	t.Setenv("AW_DATA_DIR", dir)
 	t.Setenv("AW_HOST_TOKEN", "")
@@ -522,6 +523,70 @@ func TestCLI_Hosts(t *testing.T) {
 	}
 	if _, _, err := hostsCmd(t, "revoke", "main"); err == nil || !strings.Contains(err.Error(), "AW_HOST_TOKEN") {
 		t.Fatalf("hosts revoke main = %v", err)
+	}
+}
+
+// setServiceEnvFile points serviceEnvFile at a temp file holding content
+// ("" for no file) for the test.
+func setServiceEnvFile(t *testing.T, content string) {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "env")
+	if content != "" {
+		if err := os.WriteFile(path, []byte(content), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	old := serviceEnvFile
+	serviceEnvFile = path
+	t.Cleanup(func() { serviceEnvFile = old })
+}
+
+// unsetEnv removes key from the environment for the test.
+func unsetEnv(t *testing.T, key string) {
+	t.Helper()
+	t.Setenv(key, "") // restores the old value afterwards
+	_ = os.Unsetenv(key)
+}
+
+// With the relay stopped, "hosts add" refuses AW_HOST_TOKEN's host as the
+// running relay does: registering it would stop the relay from starting. It
+// reads AW_HOST_ID and AW_HOST_TOKEN like the service, from the environment
+// or else the service's env file (sudo does not load it).
+func TestCLI_HostsAddRefusesEnvHostOffline(t *testing.T) {
+	dir := shortTempDir(t)
+	t.Setenv("AW_DATA_DIR", dir)
+	unsetEnv(t, "AW_HOST_TOKEN")
+	unsetEnv(t, "AW_HOST_ID")
+
+	cases := []struct {
+		name    string
+		envFile string
+		hostID  string // AW_HOST_ID in the process environment; "" unset
+		refused string
+		allowed string
+	}{
+		{"token in the env file, default id", "# relay\nAW_HOST_TOKEN=" + testHostToken + "\n", "", "main", "mac"},
+		{"id and token in the env file", "AW_HOST_ID=mac\nAW_HOST_TOKEN=\"" + testHostToken + "\"\n", "", "mac", "main"},
+		{"id from the process", "AW_HOST_TOKEN=" + testHostToken + "\n", "mac", "mac", "main"},
+		{"no token", "AW_HOST_ID=mac\n", "", "", "mac"},
+	}
+	for i, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("AW_DATA_DIR", filepath.Join(dir, fmt.Sprint(i)))
+			setServiceEnvFile(t, tc.envFile)
+			if tc.hostID != "" {
+				t.Setenv("AW_HOST_ID", tc.hostID)
+			}
+			if tc.refused != "" {
+				_, _, err := hostsCmd(t, "add", tc.refused)
+				if err == nil || !strings.Contains(err.Error(), "AW_HOST_TOKEN") {
+					t.Fatalf("hosts add %s = %v, want it refused as AW_HOST_TOKEN's host", tc.refused, err)
+				}
+			}
+			if _, _, err := hostsCmd(t, "add", tc.allowed); err != nil {
+				t.Fatalf("hosts add %s = %v", tc.allowed, err)
+			}
+		})
 	}
 }
 
