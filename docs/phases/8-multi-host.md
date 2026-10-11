@@ -38,8 +38,8 @@ The only host identity on the wire, `hello.host`, is logged and dropped.
 
 - `AgentState`, `HistoryItem`: `host` (host id).
 - `AgentsSnapshot`: `hosts: [{id, name, online, herdr_online}]`. `host_online` / `herdr_online` stay, meaning "any host online" / "every online host's herdr online", for old apps.
-- SSE: `agent_removed` and `host` gain `host`; a `host` event describes one host.
-- Watch API: new `POST /v1/hosts/{host}/agents/{pane_id}/{prompt|answer|cancel}` and `GET /v1/history?host=&pane_id=`. The old `/v1/agents/{pane_id}/…` works only while one host is connected; otherwise `409 host_required` (new error code).
+- SSE: `agent_removed` gains `host`; a `host` event carries the full `hosts` list, also after a host is registered or renamed.
+- Watch API: new `POST /v1/hosts/{host}/agents/{pane_id}/{prompt|answer|cancel}` and `GET /v1/history?host=&pane_id=`. The old `/v1/agents/{pane_id}/…` works while one connected host has the pane; `409 host_required` (new error code) when several do, `host_offline` when only offline hosts have it.
 - FCM data: `host`, `host_name`. The resolved-seq rule becomes per host and pane.
 - `HistoryItem.id` stays as it is (the relay buckets by host and pane, so a cross-host collision is harmless).
 
@@ -49,7 +49,8 @@ The only host identity on the wire, `hello.host`, is logged and dropped.
 - `Hub`: one connection per host id. A second connection **with the same token** replaces the first (4000 `replaced`), as today; different hosts coexist. Commands route to the agent's host; `host_offline` is per host.
 - History: buckets per `(host, pane_id)`; the 20-per-pane cap stays, the 200-item total stays global. Migration to `version` 2: existing history belongs to `AW_HOST_ID`.
 - Push: every per-pane map keyed by `(host, pane_id)`; titles prefixed with the host's name when more than one host is registered.
-- Presence: one global state (the owner's decision). A host going offline clears it only if that host sent the last report.
+- Presence: one global state (the owner's decision). A host going offline clears it only if that host sent the last report; the prompts held back for the hosts still online are then pushed at once, and its own wait for its next report.
+- Revoking a host drops its held pushes and withdraws its approvals.
 - Pairing stays global: a paired watch sees every host; any host can mint a pairing code. `GET /v1/host/status` answers for the calling host, plus relay-wide counts.
 
 ### Bridge
@@ -61,8 +62,8 @@ The only host identity on the wire, `hello.host`, is logged and dropped.
 
 - Identity = `(host, pane_id)` everywhere: `AgentStore` keys, Compose `key`s, nav routes (`agent/{host}/{paneId}`), intent extras and URIs, notification ids (`hash(host + pane)`), `ResolvedSeqs`, the pinned target, tile and complication extras.
 - **List screen:** a horizontal pager, one page per host in `hosts` order (by name), with a page indicator; each page has the host's name and its own offline / herdr-stopped state. With one host it looks as today (no indicator).
-- Notifications and the digest name the host when more than one is registered.
-- Tiles and complication: the most urgent agent across all hosts, with the host's name when there is more than one; "offline" only when every host is.
+- Notifications name the host when more than one is registered; the digest lists agent labels only.
+- Tiles and complication: the most urgent agent across the online hosts, with the host's name when there is more than one; "offline" only when every host is. With more than one host online, the focused pane is never a target (the owner's decision, 2026-10-11): each herdr has one.
 - watchOS (legacy, `docs/STATUS.md`): out of scope; it keeps working while one host is connected.
 
 ## Steps and what can run in parallel
@@ -72,8 +73,8 @@ The only host identity on the wire, `hello.host`, is logged and dropped.
 | 1 | Contract: `contracts.md`, `pkg/model`, Kotlin and Swift copies, golden file (`schema-sync` skill). **Done 2026-10-10:** §1.2, §1.4–§1.6, §2.1–§2.4, §4.1. §3, §4.3, §5 and §7 followed in 2a | **Alone:** every layer reads these files |
 | 2a | Relay + push + relay CLI (`pkg/relay`, `pkg/push`, `cmd/relay`, `deploy/relay/README.md`) | **With 2b**: disjoint directories |
 | 2b | Wear OS (`wearos-app/`, `ARCHITECTURE.md`) | **With 2a** |
-| 3 | Deploy the relay; register the hosts; install the bridge on each Linux machine | After 2a. Installing on the owner's machines is his call |
-| 4 | End to end on the watch: two hosts with the same pane id, commands to each, a host going offline | After 2b and 3 |
+| 3 | Deploy the relay; install Wear OS `1.4.0` on the watch **before** a second host connects (`1.3.1` mixes agents that share a pane id, until the relay restarts); register the hosts; install the bridge on each Linux machine | After 2a and 2b. The owner chose (2026-10-11) to have it installed on his machines over SSH |
+| 4 | End to end on the watch: two hosts with the same pane id, commands to each, a host going offline; with two hosts online and no pin or finished agent the Quick Dictate tile has no target; an offline host's agents are never the tile's target or count | After 2b and 3. A local run first (relay on the Mac, test bridges, the emulator) |
 
 Shared files in 2a ‖ 2b: `docs/STATUS.md`, `docs/GUIDE.md`, `VERSIONS`. Commit them by path, one session at a time: the git index is shared.
 

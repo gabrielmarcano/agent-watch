@@ -129,8 +129,10 @@ The relay (step 1), the watch app (step 3) and pairing (step 4) are unchanged. T
 
 Each machine with herdr runs its own bridge, with **its own host token**; the watch shows one page per machine (relay `0.7.0`, Wear OS `1.4.0`).
 
+**Install Wear OS `1.4.0` on the watch first.** An older app mixes up the agents of two machines that share a pane id (herdr numbers each machine's panes alike), and keeps doing so until the relay restarts.
+
 1. On the VPS, register the machine and copy the token it prints once: `sudo agent-watch-relay hosts add <id> --name "<name>"` ([`deploy/relay/README.md` § Hosts](../deploy/relay/README.md#hosts-one-per-machine)).
-2. On that machine, clone the repo, create its `agent-watch.env` with `make config`, and replace its `AW_HOST_TOKEN` with that token (the relay keys stay the same).
+2. On that machine, clone the repo, create its `agent-watch.env` with `make config`, replace its `AW_HOST_TOKEN` with that token, and set `AW_HOST_ID=<id>`. Deploy and sync the relay only from the first machine: `make deploy-relay ARGS=--sync-env` refuses another machine's file, which would hand the relay its token.
 3. Install and start its bridge as in [step 2](#2-install-and-configure-the-host-bridge). Linux runs it as a `systemd --user` unit.
 
 The first machine's token, `AW_HOST_TOKEN` in the relay's env file, keeps working as the host `AW_HOST_ID` (default `main`).
@@ -283,4 +285,4 @@ How each agent's menus, keys and history work: [`docs/reference/agents.md`](refe
   - Indicates that the bridge is running but the herdr daemon is not responding on its UNIX socket. Start herdr to restore live monitoring.
 - **"Relay offline" on the watch** (or "Can't reach the relay" after a tap): the watch has no internet path to the relay. On Bluetooth only, check the phone itself is online (the watch goes out through it). `curl https://relay.<domain>/v1/healthz` from any network tells whether the relay is up.
 - **`status` shows a relay error with "close 4000":** two bridges use the same host token (a foreground `run` beside the service, or a second machine given the first one's token) and replace each other in a loop. Stop one, or give the second machine its own token ([Another Machine](#another-machine-several-hosts)).
-- **Relay rejects the host token:** `status` shows the relay error. The relay and the bridge must hold the same `AW_HOST_TOKEN`: give both the one in `agent-watch.env` with `make deploy-relay ARGS=--sync-env` and `make configure-bridge && make restart`.
+- **Relay rejects the host token:** `status` shows the relay error. The relay and the bridge must hold the same `AW_HOST_TOKEN`: give both the one in `agent-watch.env` with `make deploy-relay ARGS=--sync-env` and `make configure-bridge && make restart`. If the relay log says `AW_HOST_TOKEN is the token of a registered host`, another machine's token reached the relay's env file: put the first machine's own token back in its `agent-watch.env` and sync from there.

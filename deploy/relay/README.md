@@ -190,7 +190,7 @@ sudo agent-watch-relay devices revoke <device_id>
 
 ## Hosts: one per machine
 
-Each machine that runs a bridge is one host with its own token; the watch shows one page per host. The host of `AW_HOST_TOKEN` (`AW_HOST_ID`, default `main`) is set in the env file; every other machine gets its token here. Like `devices`, these commands work **with the relay running or stopped**.
+Each machine that runs a bridge is one host with its own token; the watch shows one page per host. The host of `AW_HOST_TOKEN` (`AW_HOST_ID`, default `main`) is set in the env file; every other machine gets its token here. Like `devices`, these commands work **with the relay running or stopped**. Before a second host connects, the watch needs Wear OS `1.4.0` ([`docs/GUIDE.md` § Another Machine](../../docs/GUIDE.md#another-machine-several-hosts)).
 
 ```bash
 sudo agent-watch-relay hosts add <id> --name "<name>"   # prints the new token, once, alone on stdout
