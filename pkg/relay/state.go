@@ -243,18 +243,24 @@ func (s *State) HasPane(host, paneID string) bool {
 }
 
 // HostsWithPane returns the ids of the hosts whose agents include paneID,
-// sorted.
-func (s *State) HostsWithPane(paneID string) []string {
+// sorted: the connected ones in online, the others in offline (an offline
+// host's agents stay listed until it reconnects or is revoked).
+func (s *State) HostsWithPane(paneID string) (online, offline []string) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	var out []string
 	for id, e := range s.hosts {
-		if _, ok := e.agents[paneID]; ok {
-			out = append(out, id)
+		if _, ok := e.agents[paneID]; !ok {
+			continue
+		}
+		if e.info.Online {
+			online = append(online, id)
+		} else {
+			offline = append(offline, id)
 		}
 	}
-	sort.Strings(out)
-	return out
+	sort.Strings(online)
+	sort.Strings(offline)
+	return online, offline
 }
 
 // AgentCount returns the count of a host's agents.

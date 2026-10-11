@@ -262,7 +262,7 @@ Never accept a token in the query string.
 | `POST /v1/push/register` | device | `PushRegisterRequest` | `200 CommandResponse` |
 | `GET /v1/healthz` | none | — | `200 {"ok":true}` |
 
-**Commands name the host.** A client that has `host` on the agent uses the `/v1/hosts/{host}/…` paths. The older `/v1/agents/{pane_id}/…` paths stay for clients that predate hosts: the relay sends the command to the one host whose agents include `pane_id`, and answers `409 host_required` when several do (`unknown_pane` when none does).
+**Commands name the host.** A client that has `host` on the agent uses the `/v1/hosts/{host}/…` paths. The older `/v1/agents/{pane_id}/…` paths stay for clients that predate hosts: the relay sends the command to the one connected host whose agents include `pane_id`, and answers `409 host_required` when several connected hosts do. When no connected host does, it answers `host_offline` if an offline host's agents include it (an offline host's agents stay listed), `unknown_pane` otherwise.
 
 `GET /v1/history` parameters:
 - `host` and `pane_id` are optional. Without `pane_id`, the response mixes all panes (of `host`, when given). `pane_id` without `host` matches that pane on every host.
@@ -384,7 +384,7 @@ Every non-200 response of the endpoints in §2.1 carries an `ErrorResponse`. A p
 | `invalid_request` | 400 | Malformed body or bad parameter |
 | `unauthorized` | 401 | Missing or unknown token |
 | `unknown_pane` | 404 | Pane is not in the relay's list (for that host, or an unknown host); or herdr's list no longer has it, or it has no agent (bridge) |
-| `host_required` | 409 | A command on `/v1/agents/{pane_id}/…` for a `pane_id` that several hosts have: use `/v1/hosts/{host}/agents/{pane_id}/…` |
+| `host_required` | 409 | A command on `/v1/agents/{pane_id}/…` for a `pane_id` that several connected hosts have: use `/v1/hosts/{host}/agents/{pane_id}/…` |
 | `stale_state` | 409 | `expected_seq` no longer matches; also `answer`/`cancel` to an agent that is not `blocked`, or a repeated command |
 | `prompt_changed` | 409 | Fingerprint mismatch; the menu is no longer on the screen; a cancel without `fingerprint` for which the bridge published no prompt; or, for OpenCode, the focus on the host is not on the button the keys assume (the `message` says to answer on the Mac; nothing was pressed) |
 | `agent_busy` | 409 | Prompt sent while `working` to an agent that cannot queue |

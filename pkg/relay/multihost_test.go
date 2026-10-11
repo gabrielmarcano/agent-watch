@@ -318,6 +318,43 @@ func TestMultiHost_ReplaceIsPerHost(t *testing.T) {
 	}
 }
 
+// An offline host keeps its agents in the list, but the paths that predate
+// hosts count only connected hosts: a pane the one connected host has goes
+// there, and a pane only an offline host has answers host_offline.
+func TestMultiHost_LegacyPathIgnoresOfflineHosts(t *testing.T) {
+	th := newTwoHostServer(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	mac := connectTestHost(t, ctx, th.server, th.ts, "w1:p1")
+	macCmds := answerCommands(ctx, mac)
+	linux := connectTestHostWithToken(t, ctx, th.server, th.ts, th.linuxToken, "w1:p1", "w1:p2")
+	_ = linux.CloseNow()
+	deadline := time.Now().Add(5 * time.Second)
+	for th.server.State().HostOnline("linux") && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if th.server.State().HostOnline("linux") || !th.server.State().HasPane("linux", "w1:p1") {
+		t.Fatal("linux should be offline with its agents still listed")
+	}
+
+	cancelBody := model.CancelRequest{ExpectedSeq: 10}
+	if code, errCode, _ := th.do(t, "POST", "/v1/agents/w1%3Ap1/cancel", th.devToken, cancelBody); code != http.StatusOK {
+		t.Fatalf("legacy cancel of w1:p1 = %d %s, want 200 (only mac is connected)", code, errCode)
+	}
+	select {
+	case cmd := <-macCmds:
+		if cmd.PaneID != "w1:p1" {
+			t.Fatalf("mac got %+v", cmd)
+		}
+	case <-ctx.Done():
+		t.Fatal("the legacy cancel never reached mac")
+	}
+	if code, errCode, _ := th.do(t, "POST", "/v1/agents/w1%3Ap2/cancel", th.devToken, cancelBody); code != http.StatusServiceUnavailable || errCode != string(model.ErrHostOffline) {
+		t.Fatalf("legacy cancel of offline linux's w1:p2 = %d %s, want 503 host_offline", code, errCode)
+	}
+}
+
 // Revoking a host closes its connection, removes its agents from the watch's
 // list and rejects its token; AW_HOST_TOKEN's host cannot be revoked there.
 func TestMultiHost_RevokeHost(t *testing.T) {

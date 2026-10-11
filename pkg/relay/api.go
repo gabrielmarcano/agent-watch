@@ -263,8 +263,10 @@ type commandTarget struct {
 }
 
 // targetFromPath reads {host} and {pane_id}. Without {host} (the paths that
-// predate hosts) the command goes to the one host whose agents include the
-// pane: host_required when several do, unknown_pane when none does.
+// predate hosts) the command goes to the one connected host whose agents
+// include the pane: host_required when several do. When no connected host
+// has it, an offline host that has it is the target (the command then fails
+// with host_offline), and unknown_pane when no host has it.
 func (s *Server) targetFromPath(r *http.Request) (commandTarget, model.ErrorCode, string) {
 	paneID := r.PathValue("pane_id")
 	if paneID == "" {
@@ -277,11 +279,15 @@ func (s *Server) targetFromPath(r *http.Request) (commandTarget, model.ErrorCode
 		}
 		return commandTarget{host: host, pane: paneID}, "", ""
 	}
-	switch hosts := s.state.HostsWithPane(paneID); len(hosts) {
+	online, offline := s.state.HostsWithPane(paneID)
+	switch len(online) {
 	case 0:
+		if len(offline) > 0 {
+			return commandTarget{host: offline[0], pane: paneID}, "", ""
+		}
 		return commandTarget{}, model.ErrUnknownPane, "unknown pane"
 	case 1:
-		return commandTarget{host: hosts[0], pane: paneID}, "", ""
+		return commandTarget{host: online[0], pane: paneID}, "", ""
 	default:
 		return commandTarget{}, model.ErrHostRequired, "several hosts have this pane: use /v1/hosts/{host}/agents/{pane_id}/..."
 	}
