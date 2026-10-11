@@ -356,7 +356,7 @@ Every 15 s the relay writes the comment line `:` followed by a blank line, as a 
 | `snapshot` | `AgentsSnapshot` | Immediately on connect; after any host sends its snapshot (on every bridge (re)connect); after a host is revoked |
 | `agent` | `AgentState` | An agent was added or changed |
 | `agent_removed` | `AgentRemovedEvent`: `{"host": "...", "pane_id": "..."}` | A pane closed or lost its agent. `host` is omitted by a relay that predates hosts |
-| `host` | `HostEvent`: `{"host_online": bool, "herdr_online": bool, "hosts": [HostInfo]}` | A host connected or disconnected, or its herdr flag changed. The two flags are the aggregates of §1.5; `hosts` is the full list, as in the snapshot |
+| `host` | `HostEvent`: `{"host_online": bool, "herdr_online": bool, "hosts": [HostInfo]}` | A host connected or disconnected, its herdr flag changed, or a host was registered (`hosts add`, §5) or renamed. Every `host` event carries the full list in `hosts`, as in the snapshot, not only the host that changed; the two flags are the aggregates of §1.5. (A revoked host leaves through a `snapshot` event instead.) |
 | `history` | `HistoryItem` | A new history item was stored (never for a resent duplicate, same `id`) |
 
 ```go

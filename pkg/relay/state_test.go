@@ -124,6 +124,48 @@ func TestState_SetHost(t *testing.T) {
 	}
 }
 
+// Registering or renaming a host broadcasts a "host" event with the full host
+// list (contracts.md §2.3); an unchanged name broadcasts nothing.
+func TestState_AddHostBroadcastsFullList(t *testing.T) {
+	state := NewState()
+	state.AddHost("main", "Mac")
+	sub, subCh := state.Subscribe()
+	defer state.Unsubscribe(sub)
+
+	next := func(what string) model.HostEvent {
+		t.Helper()
+		select {
+		case ev := <-subCh:
+			if ev.Name != "host" {
+				t.Fatalf("%s: event %s, want host", what, ev.Name)
+			}
+			var he model.HostEvent
+			if err := json.Unmarshal(ev.Data, &he); err != nil {
+				t.Fatalf("%s: %v", what, err)
+			}
+			return he
+		default:
+			t.Fatalf("%s: no host event", what)
+		}
+		return model.HostEvent{}
+	}
+
+	state.AddHost("linux", "Linux box")
+	if he := next("register"); len(he.Hosts) != 2 || he.Hosts[0].ID != "linux" || he.Hosts[1].ID != "main" {
+		t.Fatalf("register: hosts = %+v, want linux and main", he.Hosts)
+	}
+	state.AddHost("linux", "Build box")
+	if he := next("rename"); len(he.Hosts) != 2 || he.Hosts[0].Name != "Build box" {
+		t.Fatalf("rename: hosts = %+v, want both, linux renamed", he.Hosts)
+	}
+	state.AddHost("linux", "Build box")
+	select {
+	case ev := <-subCh:
+		t.Fatalf("same name: unexpected %s event", ev.Name)
+	default:
+	}
+}
+
 func TestState_SlowSubscriberDropped(t *testing.T) {
 	state := NewState()
 
