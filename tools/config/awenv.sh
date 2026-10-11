@@ -7,6 +7,9 @@
 #                                          generate AW_HOST_TOKEN when it is empty
 #   awenv.sh get <env> <key>               print a non-secret value ("" when unset)
 #   awenv.sh relay-env <env> <out>         write the relay server keys <env> sets to <out> (0600)
+#   awenv.sh same-host <current> <updates> refuse (exit 1) when <updates> would sync
+#                                          another host's token: its effective
+#                                          AW_HOST_ID is not <current>'s
 #   awenv.sh merge <current> <updates> <out>
 #                                          write <current> with each key of <updates>
 #                                          replaced in place or appended
@@ -140,6 +143,44 @@ cmd_relay_env() {
 	echo "relay keys in $env:${keys:- none}" >&2
 }
 
+# host_id FILE: the AW_HOST_ID the relay would use with FILE (systemd's
+# EnvironmentFile syntax, which also reads the KEY=value lines relay-env
+# writes): the last assignment, unquoted and trimmed; "main" when unset or
+# empty, as the relay defaults it. AW_HOST_ID is not a secret.
+host_id() {
+	awk -v q="'" '
+		{ t = $0; sub(/^[ \t]+/, "", t) }
+		t ~ /^[#;]/ { next }
+		{
+			eq = index(t, "="); if (eq == 0) next
+			k = substr(t, 1, eq - 1); sub(/[ \t]+$/, "", k)
+			if (k != "AW_HOST_ID") next
+			v = substr(t, eq + 1); sub(/^[ \t]+/, "", v); sub(/[ \t\r]+$/, "", v)
+			f = substr(v, 1, 1)
+			if (length(v) >= 2 && (f == "\"" || f == q) && substr(v, length(v), 1) == f)
+				v = substr(v, 2, length(v) - 2)
+			sub(/^[ \t]+/, "", v); sub(/[ \t]+$/, "", v)
+			id = v
+		}
+		END { printf "%s", (id == "" ? "main" : id) }
+	' "$1"
+}
+
+# same-host: run on the relay before merge. AW_HOST_TOKEN authenticates the
+# host AW_HOST_ID, so an agent-watch.env whose AW_HOST_ID (default main) is not
+# the relay's comes from another machine: syncing it would give that
+# machine's token to the relay's env host. Both files are only read.
+cmd_same_host() {
+	[ $# -eq 2 ] || die "usage: awenv.sh same-host <current> <updates>"
+	[ -f "$1" ] || die "$1 not found"
+	[ -f "$2" ] || die "$2 not found"
+	local relay_id file_id
+	relay_id="$(host_id "$1")"
+	file_id="$(host_id "$2")"
+	[ "$relay_id" = "$file_id" ] && return 0
+	die "refusing --sync-env: agent-watch.env is for host $file_id (its AW_HOST_ID, default main), but the relay's AW_HOST_TOKEN is host $relay_id's. Run --sync-env from host $relay_id's machine, or fix AW_HOST_ID; nothing was changed"
+}
+
 # merge: the key-by-key update of the relay's env file. Lines that assign a
 # key of <updates> (after optional blanks) are replaced; every other line,
 # comments included, is kept as it was. Keys <current> does not assign are
@@ -216,13 +257,14 @@ cmd_xcconfig() {
 }
 
 main() {
-	[ $# -ge 1 ] || die "usage: awenv.sh init|get|relay-env|merge|xcconfig ..."
+	[ $# -ge 1 ] || die "usage: awenv.sh init|get|relay-env|same-host|merge|xcconfig ..."
 	local sub="$1"
 	shift
 	case "$sub" in
 	init) cmd_init "$@" ;;
 	get) cmd_get "$@" ;;
 	relay-env) cmd_relay_env "$@" ;;
+	same-host) cmd_same_host "$@" ;;
 	merge) cmd_merge "$@" ;;
 	xcconfig) cmd_xcconfig "$@" ;;
 	*) die "unknown command: $sub" ;;

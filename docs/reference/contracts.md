@@ -753,7 +753,7 @@ One file at the repo root holds everything a deployment needs. `agent-watch.env.
 | Key | Read by | Meaning |
 |---|---|---|
 | `AW_RELAY_DOMAIN` | bridge `configure --env-file`, Wear OS build, `make watchos-config` | Relay host (`host[:port]`, no scheme or path). Derived: `wss://<domain>/v1/host` (bridge), `https://<domain>` (watch pairing default) |
-| `AW_HOST_TOKEN` | bridge `configure --env-file`, `deploy.sh --sync-env` | 64 hex chars shared by the relay (§5) and the bridge (§6). `make config` fills it when empty and never prints it. On a machine whose host was registered with `hosts add`, it holds that host's token |
+| `AW_HOST_TOKEN` | bridge `configure --env-file`, `deploy.sh --sync-env` | 64 hex chars shared by the relay (§5) and the bridge (§6). `make config` fills it when empty and never prints it. On a machine whose host was registered with `hosts add`, it holds that host's token, and `AW_HOST_ID` that host's id: `deploy.sh --sync-env` refuses a file whose `AW_HOST_ID` (default `main`) is not the relay's |
 | `AW_RELAY_SSH` | `make deploy-relay` / `deploy.sh` without a target | SSH target of the VPS (root) |
 | `AW_RELAY_SSH_OPTS` | same | Extra `ssh`/`scp` options, word-split (`-i <key> -o Port=<n>`). `SSH_OPTS` in the environment overrides it |
 | `AW_HOST_ID`, `AW_HOST_NAME`, `AW_LISTEN`, `AW_TRUSTED_PROXIES`, `AW_CLIENT_IP_HEADER`, `AW_PUSH_RESOLVED`, `AW_PUSH_PRESENCE_IDLE`, `AW_FCM_CREDENTIALS`, `AW_NTFY_URL`, `AW_NTFY_TOPIC`, `AW_NTFY_TOKEN` | `deploy.sh --sync-env` only | Relay variables (§5). Commented out in the example; `AW_FCM_CREDENTIALS` is a path **on the server** |
