@@ -153,6 +153,13 @@ func NewServer(cfg *Config) (_ *Server, err error) {
 // initialState checks that some host can connect and returns a State that
 // lists every known host: AW_HOST_TOKEN's, if set, and the registered ones.
 func initialState(auth *AuthManager, store *Store) (*State, error) {
+	if registered, ok := auth.dropLegacyTokenOfRegisteredHost(); ok {
+		// Never fatal: the registered host keeps working. The token itself is
+		// never logged.
+		slog.Error("AW_HOST_TOKEN is the token of a registered host: ignoring AW_HOST_TOKEN, so its host cannot connect. "+
+			"Put that host's own token back in AW_HOST_TOKEN (agent-watch.env of the machine whose host it is, then deploy.sh --sync-env)",
+			"env_host", auth.legacy.ID, "registered_host", registered)
+	}
 	hosts := store.ListHosts()
 	legacy, hasLegacy := auth.LegacyHost()
 	if !hasLegacy && len(hosts) == 0 {

@@ -165,24 +165,41 @@ func (a *AuthManager) LegacyHost() (HostIdentity, bool) {
 	return a.legacy, a.hostToken != ""
 }
 
-// VerifyHostToken returns the host a token belongs to: AW_HOST_TOKEN's host,
-// or a host registered in the store. Both compare in constant time (the store
-// compares token hashes).
+// VerifyHostToken returns the host a token belongs to: a host registered in
+// the store, or else AW_HOST_TOKEN's host. Both compare in constant time (the
+// store compares token hashes). The registered hosts come first: a token is
+// never AW_HOST_TOKEN's host while a registered host has it.
 func (a *AuthManager) VerifyHostToken(token string) (HostIdentity, bool) {
 	if token == "" {
 		return HostIdentity{}, false
+	}
+	if a.store != nil {
+		if h, ok := a.store.FindHostByTokenHash(Sha256Hex(token)); ok {
+			return HostIdentity{ID: h.ID, Name: h.Name}, true
+		}
 	}
 	if a.hostToken != "" && len(token) == len(a.hostToken) &&
 		subtle.ConstantTimeCompare([]byte(token), []byte(a.hostToken)) == 1 {
 		return a.legacy, true
 	}
-	if a.store == nil {
-		return HostIdentity{}, false
-	}
-	if h, ok := a.store.FindHostByTokenHash(Sha256Hex(token)); ok {
-		return HostIdentity{ID: h.ID, Name: h.Name}, true
-	}
 	return HostIdentity{}, false
+}
+
+// dropLegacyTokenOfRegisteredHost ignores AW_HOST_TOKEN when it is the token
+// of a host registered in the store (another machine's agent-watch.env synced
+// to the relay): that host wins, and AW_HOST_TOKEN authenticates no one, so
+// revoking that host later cannot turn its token into AW_HOST_TOKEN's host.
+// It returns the registered host's id. Call it before serving.
+func (a *AuthManager) dropLegacyTokenOfRegisteredHost() (string, bool) {
+	if a.hostToken == "" || a.store == nil {
+		return "", false
+	}
+	h, ok := a.store.FindHostByTokenHash(Sha256Hex(a.hostToken))
+	if !ok {
+		return "", false
+	}
+	a.hostToken = ""
+	return h.ID, true
 }
 
 // HostAuthMiddleware validates the host bearer token and attaches the

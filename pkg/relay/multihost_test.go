@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -444,6 +445,43 @@ func TestMultiHost_HostTokenRules(t *testing.T) {
 		_, err := NewServer(&Config{ListenAddr: ":0", DataDir: dir, HostToken: testHostToken, HostID: "mac"})
 		if err == nil || !strings.Contains(err.Error(), "both AW_HOST_ID") {
 			t.Fatalf("NewServer = %v, want the AW_HOST_ID conflict", err)
+		}
+	})
+
+	// Another machine's agent-watch.env synced to the relay makes its own
+	// registered token AW_HOST_TOKEN: the registered host keeps it, and
+	// AW_HOST_TOKEN authenticates no one, also after that host is revoked.
+	t.Run("AW_HOST_TOKEN is a registered host's token", func(t *testing.T) {
+		var buf bytes.Buffer
+		prev := slog.Default()
+		slog.SetDefault(slog.New(slog.NewTextHandler(&buf, nil)))
+		t.Cleanup(func() { slog.SetDefault(prev) })
+
+		dir := t.TempDir()
+		st, _ := NewStore(dir)
+		_, _ = st.AddHost("linux", "", Sha256Hex(testHostToken))
+		_ = st.Close()
+		s, err := NewServer(&Config{ListenAddr: ":0", DataDir: dir, HostToken: testHostToken})
+		if err != nil {
+			t.Fatalf("NewServer = %v, want it to start", err)
+		}
+		defer s.Close()
+
+		logs := buf.String()
+		if !strings.Contains(logs, "level=ERROR") || !strings.Contains(logs, "env_host=main") || !strings.Contains(logs, "registered_host=linux") || strings.Contains(logs, testHostToken) {
+			t.Fatalf("logs = %q, want an error naming main and linux, without the token", logs)
+		}
+		if id, ok := s.Auth().VerifyHostToken(testHostToken); !ok || id.ID != "linux" {
+			t.Fatalf("VerifyHostToken = %+v, %v; want linux", id, ok)
+		}
+		if hosts := s.State().Hosts(); len(hosts) != 1 || hosts[0].ID != "linux" {
+			t.Fatalf("hosts = %+v, want only linux", hosts)
+		}
+		if found, err := s.RevokeHost("linux"); !found || err != nil {
+			t.Fatalf("RevokeHost(linux) = %v, %v", found, err)
+		}
+		if id, ok := s.Auth().VerifyHostToken(testHostToken); ok {
+			t.Fatalf("the revoked token authenticates as %+v", id)
 		}
 	})
 

@@ -609,7 +609,7 @@ The relay reads them from `/etc/agent-watch-relay/env` (systemd `EnvironmentFile
 | Variable | Required | Default | Meaning |
 |---|---|---|---|
 | `AW_LISTEN` | no | `:8080` | Listen address. Bind it to the address the reverse proxy reaches, never to a public interface (the value per proxy topology: `deploy/relay/README.md`) |
-| `AW_HOST_TOKEN` | **until a host is registered** | — | 64 hex chars; the same value goes in the config of the bridge of host `AW_HOST_ID`. Optional once `store.json` holds a host (`hosts add`, below); with neither, the relay refuses to start |
+| `AW_HOST_TOKEN` | **until a host is registered** | — | 64 hex chars; the same value goes in the config of the bridge of host `AW_HOST_ID`. Optional once `store.json` holds a host (`hosts add`, below); with neither, the relay refuses to start. A token that a registered host also has (another machine's `agent-watch.env` synced, §7) stays that host's: the relay starts, logs an error naming both host ids, and ignores `AW_HOST_TOKEN` |
 | `AW_HOST_ID` | no | `main` | The id (§1.6) of `AW_HOST_TOKEN`'s host, which is not in `store.json`; also the host of the history a version 1 `store.json` held. A registered host with the same id stops startup |
 | `AW_HOST_NAME` | no | `AW_HOST_ID` | The name clients show for that host (§1.6): at most 64 characters, no control characters |
 | `AW_DATA_DIR` | no | `/var/lib/agent-watch-relay` | Holds `store.json`, `relay.lock` and `admin.sock` (see below) |
