@@ -9,8 +9,9 @@ import path from "node:path";
 export default {
   id: "agent-watch-guards",
   async setup(ctx) {
-    const root =
-      ctx.location.project?.canonical ?? ctx.location.directory;
+    // The checkout this session runs in. project.canonical is the main
+    // checkout, even in a linked git worktree (checked live, 2.0.25).
+    const root = ctx.location.project?.directory ?? ctx.location.directory;
     const guard = path.join(root, "tools", "guards", "guards.py");
 
     const run = (mode, payload) =>
