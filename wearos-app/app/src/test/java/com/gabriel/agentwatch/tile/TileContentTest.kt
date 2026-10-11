@@ -112,4 +112,23 @@ class TileContentTest {
         ))
         assertEquals(TileContent.Target(onMac, othersNeedingYou = 0, macOnline = false, hostName = "Mac"), tileContent(true, snapshot, null))
     }
+
+    @Test
+    fun withSeveralOnlineHostsTheFocusedPaneIsNoTarget() {
+        // Every herdr has its own focused pane: picking one would be arbitrary (ARCHITECTURE.md §4b).
+        val onMac = idle.copy(host = "main")
+        val onBox = idle.copy(host = "box", pane_id = "w2:pA")
+        val both = AgentsSnapshot(host_online = true, herdr_online = true, hosts = listOf(box, mac), agents = listOf(onMac, onBox))
+        assertEquals(TileContent.NoTarget(needingYou = 0), tileContent(true, Result.success(both), null))
+        // One online host: its focused pane, as before.
+        val boxOffline = both.copy(hosts = listOf(box.copy(online = false), mac))
+        assertEquals(TileContent.Target(onMac, othersNeedingYou = 0, macOnline = true, hostName = "Mac"), tileContent(true, Result.success(boxOffline), null))
+        // A pin or a finished agent still decides.
+        assertEquals(TileContent.Target(onBox, othersNeedingYou = 0, macOnline = true, hostName = "Box"), tileContent(true, Result.success(both), AgentKey("box", "w2:pA")))
+        val finished = onBox.copy(status = "done", focused = false)
+        assertEquals(
+            TileContent.Target(finished, othersNeedingYou = 0, macOnline = true, hostName = "Box"),
+            tileContent(true, Result.success(both.copy(agents = listOf(onMac, finished))), null)
+        )
+    }
 }

@@ -148,10 +148,10 @@ fun AgentState.severity(): Int = when (status) {
 
 /**
  * Quick-dictation target (wearos-app/ARCHITECTURE.md §4b): the pinned agent if it still exists, else the most
- * recently finished (`done`) one, else herdr's focused pane, else none. Never an arbitrary agent: a
- * dictated prompt must not land in a pane the user did not choose.
+ * recently finished (`done`) one, else herdr's focused pane (only with [useFocused]), else none. Never an
+ * arbitrary agent: a dictated prompt must not land in a pane the user did not choose.
  */
-fun resolveTargetAgent(agents: List<AgentState>, pinnedPaneId: String?): AgentState? {
+fun resolveTargetAgent(agents: List<AgentState>, pinnedPaneId: String?, useFocused: Boolean = true): AgentState? {
     if (agents.isEmpty()) return null
     if (!pinnedPaneId.isNullOrEmpty()) {
         val pinned = agents.find { it.pane_id == pinnedPaneId }
@@ -161,5 +161,5 @@ fun resolveTargetAgent(agents: List<AgentState>, pinnedPaneId: String?): AgentSt
     if (doneAgents.isNotEmpty()) {
         return doneAgents.maxByOrNull { it.updated_at }
     }
-    return agents.find { it.focused }
+    return if (useFocused) agents.find { it.focused } else null
 }

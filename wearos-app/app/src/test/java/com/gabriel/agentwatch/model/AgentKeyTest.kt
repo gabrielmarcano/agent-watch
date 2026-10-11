@@ -44,10 +44,21 @@ class AgentKeyTest {
     fun thePinnedTargetIsTheOneOnItsHost() {
         val done = onMac.copy(status = "done", updated_at = "2026-10-10T10:00:00Z")
         val agents = listOf(done, onBox)
-        assertEquals(onBox, resolveTarget(agents, AgentKey("box", "w1:p1")))
-        assertEquals(done, resolveTarget(agents, AgentKey("main", "w1:p1")))
-        assertEquals("a gone pin falls back to the rule", done, resolveTarget(agents, AgentKey("box", "w9:p9")))
-        assertNull(resolveTarget(emptyList(), AgentKey("box", "w1:p1")))
+        assertEquals(onBox, resolveTarget(agents, AgentKey("box", "w1:p1"), listOf(mac, box)))
+        assertEquals(done, resolveTarget(agents, AgentKey("main", "w1:p1"), listOf(mac, box)))
+        assertEquals("a gone pin falls back to the rule", done, resolveTarget(agents, AgentKey("box", "w9:p9"), listOf(mac, box)))
+        assertNull(resolveTarget(emptyList(), AgentKey("box", "w1:p1"), listOf(mac, box)))
+    }
+
+    @Test
+    fun theFocusedPaneIsATargetOnlyWithOneOnlineHost() {
+        val focusedMac = onMac.copy(focused = true)
+        val focusedBox = onBox.copy(focused = true)
+        val agents = listOf(focusedMac, focusedBox)
+        assertNull("two herdrs, two focused panes", resolveTarget(agents, null, listOf(mac, box)))
+        assertEquals(focusedMac, resolveTarget(agents, null, listOf(mac, box.copy(online = false))))
+        assertEquals("a relay before hosts", focusedMac, resolveTarget(agents, null, emptyList()))
+        assertEquals("a pin still decides", focusedBox, resolveTarget(agents, AgentKey("box", "w1:p1"), listOf(mac, box)))
     }
 
     @Test

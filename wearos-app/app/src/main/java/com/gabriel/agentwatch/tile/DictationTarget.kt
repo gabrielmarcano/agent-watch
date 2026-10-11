@@ -25,5 +25,5 @@ fun dictationTarget(snapshot: AgentsSnapshot, launch: AgentKey?, pinned: AgentKe
     if (launch != null && launch.paneId.isNotBlank()) {
         return snapshot.agents.findAgent(launch)?.let { DictationTarget.Found(it) } ?: DictationTarget.Closed
     }
-    return resolveTarget(snapshot.targetCandidates(), pinned)?.let { DictationTarget.Found(it) } ?: DictationTarget.None
+    return resolveTarget(snapshot.targetCandidates(), pinned, snapshot.hosts.orEmpty())?.let { DictationTarget.Found(it) } ?: DictationTarget.None
 }

@@ -61,4 +61,15 @@ class DictationTargetTest {
         assertEquals(DictationTarget.Found(onMac), dictationTarget(snapshot, launch = null, pinned = null))
         assertEquals("a pin on an offline host falls back to the rule", DictationTarget.Found(onMac), dictationTarget(snapshot, launch = null, pinned = staleDone.key))
     }
+
+    @Test
+    fun withSeveralOnlineHostsTheFocusedPaneIsNoTarget() {
+        val mac = HostInfo(id = "main", name = "Mac", online = true, herdr_online = true)
+        val box = HostInfo(id = "box", name = "Box", online = true, herdr_online = true)
+        val onMac = a.copy(host = "main")
+        val onBox = a.copy(host = "box", pane_id = "w2:pA")
+        val snapshot = AgentsSnapshot(host_online = true, herdr_online = true, hosts = listOf(box, mac), agents = listOf(onMac, onBox))
+        assertEquals(DictationTarget.None, dictationTarget(snapshot, launch = null, pinned = null))
+        assertEquals(DictationTarget.Found(onMac), dictationTarget(snapshot.copy(hosts = listOf(box.copy(online = false), mac)), launch = null, pinned = null))
+    }
 }

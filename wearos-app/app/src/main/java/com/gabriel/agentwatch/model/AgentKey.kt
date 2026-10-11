@@ -30,11 +30,13 @@ fun List<AgentState>.findAgent(key: AgentKey): AgentState? {
 
 /**
  * Quick-dictation target (wearos-app/ARCHITECTURE.md §4b) across every host: the [pinned] agent if it
- * still exists, else the rule of [resolveTargetAgent] (latest `done`, else herdr's focused pane).
+ * still exists, else the rule of [resolveTargetAgent] (latest `done`, else herdr's focused pane). Every
+ * herdr has its own focused pane, so while more than one of [hosts] is online the focused fallback is
+ * skipped: no target rather than an arbitrary one.
  */
-fun resolveTarget(agents: List<AgentState>, pinned: AgentKey?): AgentState? {
+fun resolveTarget(agents: List<AgentState>, pinned: AgentKey?, hosts: List<HostInfo>): AgentState? {
     if (pinned != null && pinned.paneId.isNotEmpty()) agents.findAgent(pinned)?.let { return it }
-    return resolveTargetAgent(agents, null)
+    return resolveTargetAgent(agents, null, useFocused = hosts.count { it.online } <= 1)
 }
 
 /**

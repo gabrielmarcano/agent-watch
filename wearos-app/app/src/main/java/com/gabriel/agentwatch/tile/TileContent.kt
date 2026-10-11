@@ -36,7 +36,7 @@ fun tileContent(paired: Boolean, snapshot: Result<AgentsSnapshot>?, pinned: Agen
     if (!paired) return TileContent.NotPaired
     val agents = snapshot?.getOrNull() ?: return TileContent.Unreachable
     val blocked = agents.onlineAgents().filter { it.status == "blocked" }
-    val target = resolveTarget(agents.targetCandidates(), pinned) ?: return TileContent.NoTarget(blocked.size)
+    val target = resolveTarget(agents.targetCandidates(), pinned, agents.hosts.orEmpty()) ?: return TileContent.NoTarget(blocked.size)
     return TileContent.Target(
         agent = target,
         othersNeedingYou = blocked.count { it.key != target.key },

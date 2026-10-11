@@ -42,7 +42,7 @@ fun surfaceSignature(state: UiState, pinned: AgentKey?): SurfaceSignature = Surf
     blocked = state.agents.count { it.status == "blocked" },
     working = state.agents.count { it.status == "working" },
     agents = state.agents.size,
-    targetLabel = resolveTarget(targetCandidates(state.agents, state.hosts, state.hostOnline), pinned)?.label,
+    targetLabel = resolveTarget(targetCandidates(state.agents, state.hosts, state.hostOnline), pinned, state.hosts)?.label,
     done = state.agents.count { it.status == "done" },
     hosts = state.hosts.map { Triple(it.id, it.name, it.online) }
 )
