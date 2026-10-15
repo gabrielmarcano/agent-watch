@@ -15,6 +15,7 @@ dependencyResolutionManagement {
 }
 
 rootProject.name = "agent-watch"
-include(":app")
 // The shared Kotlin data layer (:core), the Wear OS app (:app) and the Android phone app (:mobile).
 include(":core")
+include(":app")
+include(":mobile")

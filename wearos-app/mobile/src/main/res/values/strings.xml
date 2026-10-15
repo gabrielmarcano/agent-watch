@@ -1,0 +1,88 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Agent Watch</string>
+
+    <!-- Agent status words (herdr's enum, shown to the user) -->
+    <string name="status_blocked">Blocked</string>
+    <string name="status_done">Done</string>
+    <string name="status_working">Working</string>
+    <string name="status_idle">Idle</string>
+    <string name="status_unknown">Unknown</string>
+    <!-- Under the status word: what the agent still runs in the background, joined by the separator. -->
+    <string name="background_separator">" · "</string>
+    <plurals name="background_agents">
+        <item quantity="one">%d agent</item>
+        <item quantity="other">%d agents</item>
+    </plurals>
+    <plurals name="background_shells">
+        <item quantity="one">%d shell</item>
+        <item quantity="other">%d shells</item>
+    </plurals>
+    <plurals name="background_monitors">
+        <item quantity="one">%d monitor</item>
+        <item quantity="other">%d monitors</item>
+    </plurals>
+
+    <!-- List -->
+    <string name="agents_title">Agents</string>
+    <string name="section_needs_you">Needs you</string>
+    <string name="section_done">Done</string>
+    <string name="section_working">Working</string>
+    <string name="section_idle">Idle</string>
+    <string name="section_unknown">Unknown state</string>
+    <string name="notice_connecting">Connecting…</string>
+    <string name="notice_relay_unreachable">Relay offline</string>
+    <string name="notice_device_offline">Device offline</string>
+    <string name="notice_herdr_stopped">herdr stopped</string>
+    <string name="no_agents">No agents</string>
+    <string name="refresh">Refresh</string>
+    <string name="history">History</string>
+
+    <!-- Age -->
+    <string name="age_now">now</string>
+    <string name="age_minutes">%d min ago</string>
+    <string name="age_hours">%d h ago</string>
+    <string name="age_days">%d d ago</string>
+
+    <!-- Agent detail -->
+    <string name="agent_closed">Agent closed</string>
+    <string name="back">Back</string>
+    <string name="reply">Reply</string>
+    <string name="reply_hint">Message the agent</string>
+    <string name="send">Send</string>
+    <string name="reply_empty">Empty reply — nothing sent</string>
+    <string name="last_reply">Last reply</string>
+    <string name="read_all">Read all</string>
+    <string name="agent_history">History</string>
+    <string name="no_reply_yet">No reply yet</string>
+
+    <!-- Prompt -->
+    <string name="prompt_permission">Permission</string>
+    <string name="prompt_question">Question</string>
+    <string name="prompt_unknown">Prompt</string>
+    <string name="allow">Allow</string>
+    <string name="deny">Deny</string>
+    <string name="more_options">More options</string>
+    <string name="cancel_prompt">Cancel</string>
+    <string name="answer_on_device">Answer on the device</string>
+    <string name="confirm_always_title">Don\'t ask again?</string>
+    <string name="confirm_always_text">This changes the agent\'s rules for good.</string>
+    <string name="confirm">Confirm</string>
+
+    <!-- History and the full-text reader -->
+    <string name="history_title">History</string>
+    <string name="no_history">No answers yet</string>
+
+    <!-- Pairing -->
+    <string name="pair_title">Pair this phone</string>
+    <string name="pair_intro">Run `agent-watch-bridge pair` on the machine running the bridge and type the 6-digit code.</string>
+    <string name="session_expired">Session expired — pair again</string>
+    <string name="relay_url">Relay URL</string>
+    <string name="relay_url_missing">Not set</string>
+    <string name="relay_url_invalid">Use an https:// address</string>
+    <string name="pair_code">Pairing code</string>
+    <string name="pair_code_missing">6 digits</string>
+    <string name="pair_code_incomplete">Needs 6 digits</string>
+    <string name="pair">Pair</string>
+    <string name="pairing">Pairing…</string>
+</resources>

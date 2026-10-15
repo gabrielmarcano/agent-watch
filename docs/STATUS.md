@@ -14,14 +14,14 @@ The one place for the project's state: what is done, what is open, what comes ne
 |---|---|---|
 | **[5 End-to-end](phases/5-e2e.md) (release gate)** | **open** | — |
 | [6 watchOS](phases/6-watchos.md) (best-effort) | not started; after 5 | — |
-| [7 Android phone client](phases/7-android-mobile.md) | in progress: minimal phone app (core loop, no push) | OpenCode (2026-10-15) |
+| [7 Android phone client](phases/7-android-mobile.md) | in progress: `:core` extracted from the Wear OS app and the minimal phone app (`:mobile`: pair, live list, detail with approvals and reply, history; no push, no settings) builds, lints and passes its tests; not installed on the phone yet | OpenCode (2026-10-15) |
 | [8 Several hosts on one relay](phases/8-multi-host.md) | steps 1 (contract), 2a (relay `0.7.0`) and 2b (Wear OS `1.4.0`) done 2026-10-10 on branch `multi-host-contract` (PR #31), tests only; a review on 2026-10-11 fixed 7 relay findings (presence catch-up when the Mac drops, offline `hosts add` of the env host, a second machine's token synced as `AW_HOST_TOKEN`, legacy paths and offline hosts, revoked hosts' pushes, re-migration after a rollback) and 4 Wear OS ones (targets on offline hosts, focused pane across hosts, approvals and pins from before hosts); a local end-to-end run on 2026-10-11 passed (a test relay, four bridges: the Mac twice, two Linux machines; the debug app on the emulator): one page per host, two hosts with the same pane id kept apart in the list, history and notifications, commands reaching only their host, `host_required` on a legacy path, `host_offline` and the offline page, a revoked host's page gone, and pairing from a non-first host; step 3 (deploy, register hosts, install the bridges) and step 4 (on the watch) not started | — |
 
 **Deployed** (2026-10-16): the relay at `0.6.0` (commit `050328a` on `main`); on the owner's Mac, the bridge `0.8.1` (commit `e788337` on `main`; Only Notify When Away on) and the menu bar `0.6.0` (rebuilt from `main` on 2026-10-07); the Wear OS app `1.3.1` (release build, version code 12, 2026-10-07; built before the squash merge, from the same code as `050328a`) on the owner's Pixel Watch 2. The component versions are in `VERSIONS`.
 
 **What can run in parallel:**
 - **5 runs alone:** it tests the whole system.
-- **6 and 7** start after 5 and can run together (disjoint code directories), **except 7's step 1**, which moves `wearos-app/`: nothing else may touch the Android tree while it runs. Both edit `docs/GUIDE.md`, `contracts.md`, this file and the `schema-sync` skill: commit those by path, one at a time.
+- **6 and 7** start after 5 and can run together (disjoint code directories). 7's step 1 (extracting `:core` from the Wear OS app in place; the owner kept `wearos-app/`) is done (2026-10-15). Both edit `docs/GUIDE.md`, `contracts.md`, this file and the `schema-sync` skill: commit those by path, one at a time.
 - **8** starts with a contract change (its step 1, alone); then its relay and Wear OS steps can run together. It touches the same relay and Wear OS code as 5's fixes and 7: not at the same time as 7.
 - **A contract change** is cross-cutting: stop parallel work and follow the `schema-sync` skill.
 
@@ -31,6 +31,11 @@ The one place for the project's state: what is done, what is open, what comes ne
 
 ### Phase 5 (release gate)
 - Run the whole of [`phases/5-e2e.md`](phases/5-e2e.md) (every row and the security checks). No row has a valid result yet. Row 23 (`AW_PUSH_RESOLVED=1`) is unblocked: the watch runs the app that handles `resolved`.
+
+### Phase 7 (Android phone client)
+- Install the `:mobile` release build on the owner's phone and run the checks of the phase's step 5 with sandbox agents only: pair; the list is live; approve and deny from the app; a prompt reaches the agent; history opens; `agent-watch-relay devices revoke <id>` cuts the phone at once. This first slice has no push and no settings screen.
+- Re-confirm pairing and push on the owner's Pixel Watch 2 after the `:core` extraction: the application id, signing key and behaviour are unchanged, the data layer is now a library (`:core`).
+- Finish the phase's definition of done: describe the phone client in `docs/GUIDE.md`, then delete `phases/7-android-mobile.md`.
 
 ### Quiet pushes while the owner is at the Mac
 - Implemented in bridge `0.5.0` and relay `0.5.0` (design: [`phases/quiet-at-mac.md`](phases/quiet-at-mac.md), plan: [`phases/quiet-at-mac-plan.md`](phases/quiet-at-mac-plan.md)), deployed 2026-10-06 (the relay logs `push presence idle=10m0s`; the bridge sends `host_presence` under launchd), not verified on the watch yet; claimed by Claude (2026-10-05). Since bridge `0.6.0` it is opt-in, **Only Notify When Away** (off by default): the menu bar item or `agent-watch-bridge presence on`.

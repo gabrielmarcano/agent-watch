@@ -221,7 +221,7 @@ GitHub Actions, sized for the free plan (macOS minutes count ten times, so macOS
 | Workflow | Runner | When | What |
 |---|---|---|---|
 | [`ci.yml`](../.github/workflows/ci.yml) | Linux | every push to `main` and pull request | `gofmt`, `go vet`, `go test -race`, static cross-builds; guard and `agent-watch.env` tool tests |
-| [`wearos.yml`](../.github/workflows/wearos.yml) | Linux | changes under `wearos-app/` or `VERSIONS` | unit tests, lint and a debug build (with a placeholder `google-services.json`) |
+| [`wearos.yml`](../.github/workflows/wearos.yml) | Linux | changes under `wearos-app/` or `VERSIONS` | unit tests, lint and debug builds of both Android clients — the Wear OS app and the phone app — with a placeholder `google-services.json` |
 | [`macos-bar.yml`](../.github/workflows/macos-bar.yml) | macOS | changes to the menu bar, the bridge CLI or `VERSIONS` | `make bar-test` and `make bar` |
 | [`release.yml`](../.github/workflows/release.yml) | Linux + macOS | changes to released components on `main` (or by hand, as a dry run without publishing) | the release above |
 
