@@ -164,6 +164,14 @@ fun screenBlocks(screen: String): List<MdBlock> {
 }
 
 /**
+ * The blocks a reader shows for one stored answer: [parseMarkdown] when `source` is `transcript`,
+ * [screenBlocks] otherwise (a screen capture must not be rendered as markdown, contracts.md §2).
+ * Both clients' readers go through here, so the rule has one home.
+ */
+fun readerBlocks(text: String, source: String): List<MdBlock> =
+    if (source == "transcript") parseMarkdown(text) else screenBlocks(text)
+
+/**
  * Inline markdown: `code`, **bold** / __bold__, *italic* / _italic_, [text](url) (the text only),
  * ~~strike~~ (plain). An unmatched marker stays literal; `_` inside a word (snake_case) is not italic.
  * Neighbouring spans with the same style are merged.

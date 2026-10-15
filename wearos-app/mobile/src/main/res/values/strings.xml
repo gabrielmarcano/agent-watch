@@ -72,6 +72,8 @@
     <!-- History and the full-text reader -->
     <string name="history_title">History</string>
     <string name="no_history">No answers yet</string>
+    <string name="you_asked">You asked</string>
+    <string name="reader_screen_source">Screen capture — shown as it appears</string>
 
     <!-- Pairing -->
     <string name="pair_title">Pair this phone</string>

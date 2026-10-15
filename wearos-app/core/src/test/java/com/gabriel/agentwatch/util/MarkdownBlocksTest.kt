@@ -164,4 +164,16 @@ class MarkdownBlocksTest {
         val blocks = screenBlocks("✦ Done.\n  ran 3 migrations\n\n\n  > Type your message\n")
         assertEquals(listOf(Code("✦ Done.\n  ran 3 migrations"), Code("  > Type your message")), blocks)
     }
+
+    @Test
+    fun theReaderPicksMarkdownForATranscriptAndVerbatimForAScreen() {
+        // Same text, two sources: a transcript is markdown, a screen capture must never be.
+        val text = "# Title\n- one\n- two"
+        assertEquals(
+            listOf(Heading(1, plain("Title")), ListItem("•", plain("one"), 0), ListItem("•", plain("two"), 0)),
+            readerBlocks(text, "transcript")
+        )
+        assertEquals(listOf(Code(text)), readerBlocks(text, "screen"))
+        assertEquals(listOf(Code(text)), readerBlocks(text, ""))
+    }
 }

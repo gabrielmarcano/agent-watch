@@ -82,7 +82,7 @@ fun AgentDetailScreen(
     hostName: String?,
     lastReply: HistoryItem?,
     onBack: () -> Unit,
-    onReadAll: (title: String, body: String, source: String) -> Unit,
+    onReadAll: (title: String, body: String, source: String, query: String) -> Unit,
     onHistory: () -> Unit
 ) {
     val scope = rememberCoroutineScope()
@@ -381,7 +381,7 @@ private fun UnknownPromptActions(prompt: PendingPrompt, locked: Boolean, onCance
 }
 
 @Composable
-private fun LastReplyCard(reply: HistoryItem?, onReadAll: (title: String, body: String, source: String) -> Unit) {
+private fun LastReplyCard(reply: HistoryItem?, onReadAll: (title: String, body: String, source: String, query: String) -> Unit) {
     Card {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Text(stringResource(R.string.last_reply), style = MaterialTheme.typography.titleSmall)
@@ -402,7 +402,14 @@ private fun LastReplyCard(reply: HistoryItem?, onReadAll: (title: String, body: 
             )
             if (preview != clean) {
                 TextButton(
-                    onClick = { onReadAll(reply.label.ifBlank { reply.agent }, reply.response, reply.source) }
+                    onClick = {
+                        onReadAll(
+                            reply.label.ifBlank { reply.agent },
+                            reply.response,
+                            reply.source,
+                            reply.query.orEmpty()
+                        )
+                    }
                 ) { Text(stringResource(R.string.read_all)) }
             }
         }

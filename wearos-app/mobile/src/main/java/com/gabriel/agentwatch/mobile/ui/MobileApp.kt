@@ -41,12 +41,14 @@ fun MobileApp() {
     var textTitle by rememberSaveable { mutableStateOf("") }
     var textBody by rememberSaveable { mutableStateOf("") }
     var textSource by rememberSaveable { mutableStateOf("") }
+    var textQuery by rememberSaveable { mutableStateOf("") }
     var backRoute by rememberSaveable { mutableStateOf(Routes.AGENTS) }
 
-    fun openText(title: String, body: String, source: String, from: String) {
+    fun openText(title: String, body: String, source: String, query: String, from: String) {
         textTitle = title
         textBody = body
         textSource = source
+        textQuery = query
         backRoute = from
         route = Routes.TEXT
     }
@@ -76,8 +78,9 @@ fun MobileApp() {
                 // No snapshot yet (cold start, reconnecting) is not the same as a closed agent.
                 TextScreen(
                     title = null,
-                    body = stringResource(if (state.stale) R.string.notice_connecting else R.string.agent_closed),
-                    monospace = false,
+                    text = stringResource(if (state.stale) R.string.notice_connecting else R.string.agent_closed),
+                    source = "transcript",
+                    query = null,
                     onBack = { route = Routes.AGENTS }
                 )
             } else {
@@ -87,7 +90,7 @@ fun MobileApp() {
                     hostName = hostNameFor(state.hosts, agent.host),
                     lastReply = state.history.firstOrNull { it.key == agentKey },
                     onBack = { route = Routes.AGENTS },
-                    onReadAll = { title, body, source -> openText(title, body, source, Routes.AGENT) },
+                    onReadAll = { title, body, source, query -> openText(title, body, source, query, Routes.AGENT) },
                     onHistory = { route = Routes.HISTORY }
                 )
             }
@@ -101,6 +104,7 @@ fun MobileApp() {
                     item.label.ifBlank { item.agent },
                     item.response,
                     item.source,
+                    item.query.orEmpty(),
                     Routes.HISTORY
                 )
             }
@@ -108,8 +112,9 @@ fun MobileApp() {
 
         Routes.TEXT -> TextScreen(
             title = textTitle.ifBlank { null },
-            body = textBody,
-            monospace = textSource == "screen",
+            text = textBody,
+            source = textSource,
+            query = textQuery.ifBlank { null },
             onBack = { route = backRoute }
         )
 
