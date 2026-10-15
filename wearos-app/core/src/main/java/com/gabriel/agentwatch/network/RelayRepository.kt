@@ -20,6 +20,25 @@ private class PrefsCredentials(private val prefs: Prefs) : RelayCredentials {
 }
 
 /**
+ * The platform callbacks a client installs on [RelayRepository]. They carry the side effects the
+ * engine triggers but does not own; `:core` stays free of any client's UI. The Wear OS app installs
+ * the surface refresh ([SurfaceUpdates]) and approval-notification dismissal; the phone app, which
+ * shows nothing outside its own screen, installs none ([NONE]).
+ */
+interface RelayObservers {
+    /** The agent list changed: dismiss approvals that no longer match, refresh tiles and complications. */
+    fun onAgentsUpdated(context: Context, update: AgentsUpdate) {}
+
+    /** Every state change; carries the pinned target so an observer can resolve its label. */
+    fun onState(context: Context, state: UiState, pinned: AgentKey?) {}
+
+    companion object {
+        /** What a client that owns no surface (the phone app) installs. */
+        val NONE: RelayObservers = object : RelayObservers {}
+    }
+}
+
+/**
  * Process-wide owner of the relay link and the live [state]. Android façade over [RelayEngine].
  *
  * Every 401 (stream, refresh, commands, notification actions, and clients built elsewhere once [init]
@@ -29,6 +48,13 @@ private class PrefsCredentials(private val prefs: Prefs) : RelayCredentials {
  */
 object RelayRepository {
     private const val TAG = "RelayRepository"
+
+    /**
+     * The client's side effects. Set before [init] (the app sets it in `Application.onCreate`); the
+     * phone app leaves it as [RelayObservers.NONE].
+     */
+    @Volatile
+    var observers: RelayObservers = RelayObservers.NONE
 
     private val _state = MutableStateFlow(UiState())
     val state: StateFlow<UiState> = _state.asStateFlow()
@@ -50,7 +76,7 @@ object RelayRepository {
                 override fun onStreamOpened() = PushRegistration.ensure(appContext)
 
                 // An agent that is no longer blocked must not keep an approval notification around.
-                override fun onAgentsUpdated(update: AgentsUpdate) = ApprovalNotifications.onAgentsUpdated(appContext, update)
+                override fun onAgentsUpdated(update: AgentsUpdate) = observers.onAgentsUpdated(appContext, update)
             },
             log = { Log.d(TAG, it) }
         )
@@ -59,7 +85,7 @@ object RelayRepository {
         RelayClient.unauthorizedListener = newEngine::onUnauthorized
         // Complication and tile: refresh when what they show changes (throttled), not every 15 min.
         CoroutineScope(SupervisorJob() + Dispatchers.Default).launch {
-            _state.collect { SurfaceUpdates.onState(appContext, it, prefs.pinnedTarget) }
+            _state.collect { observers.onState(appContext, it, prefs.pinnedTarget) }
         }
     }
 

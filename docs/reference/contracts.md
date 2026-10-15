@@ -398,7 +398,7 @@ Every non-200 response of the endpoints in §2.1 carries an `ErrorResponse`. A p
 | `timeout` | 504 | The relay's 7 s budget ran out (one budget for sending the command and waiting for `command_result`), or the bridge's own 6 s budget did (e.g. waiting behind another command on the same pane). Timeouts nest from the inside out, bridge 6 s < relay 7 s < watch 8 s, so a `timeout` means the bridge has already given up |
 | `internal` | 500 | Bug, or herdr failed `agent.prompt` / `agent.send_keys` for an unclassified reason (the text or keys may have reached the pane) |
 
-What the Wear OS app shows for each code: `commandErrorFeedback` in `wearos-app/app/src/main/java/com/gabriel/agentwatch/approval/CommandFeedback.kt`.
+What the Wear OS app shows for each code: `commandErrorFeedback` in `wearos-app/core/src/main/java/com/gabriel/agentwatch/approval/CommandFeedback.kt`.
 
 ---
 

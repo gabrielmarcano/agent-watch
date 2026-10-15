@@ -47,4 +47,4 @@ jobs:
             "configuration_version": "1"
           }
           JSON
-      - run: ./gradlew --no-daemon :app:testDebugUnitTest :app:lintDebug :app:assembleDebug
+      - run: ./gradlew --no-daemon :core:testDebugUnitTest :app:testDebugUnitTest :app:lintDebug :app:assembleDebug

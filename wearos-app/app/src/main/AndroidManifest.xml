@@ -7,6 +7,7 @@
 
     <!-- allowBackup=false: the device token in SharedPreferences must never reach cloud backup. -->
     <application
+        android:name=".AgentWatchApp"
         android:allowBackup="false"
         android:icon="@mipmap/ic_launcher"
         android:roundIcon="@mipmap/ic_launcher"

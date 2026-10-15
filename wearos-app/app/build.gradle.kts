@@ -96,6 +96,9 @@ kotlin {
 }
 
 dependencies {
+    // The shared data layer (contracts, relay client/engine, store, approval logic).
+    implementation(project(":core"))
+
     // Wear OS Compose Material 3. 1.6.x is the newest line that builds with AGP 8
     // (1.7 needs AGP 9.1 and compileSdk 37).
     implementation("androidx.wear.compose:compose-material3:1.6.2")
