@@ -2,11 +2,12 @@
 
 > **Temporary.** Remove the override as soon as herdr detects the dialogs itself. `check` tells you when.
 
-herdr is the source of truth for agent status: the bridge only publishes a prompt, and the watch can only answer it, when herdr says `blocked`. herdr 0.9.1 misses some open Claude permission dialogs:
+herdr is the source of truth for agent status: the bridge only publishes a prompt, and the watch can only answer it, when herdr says `blocked`. herdr misses some open Claude dialogs:
 
 | Agent | Missed dialogs | Cause |
 |---|---|---|
 | `claude` | Any permission dialog after Claude was relaunched in the same pane (reported `idle`) | A stale input box from the previous run is still on screen and wins |
+| `claude` | A question dialog (`AskUserQuestion`) or a WebFetch-style permission in a **named** conversation (reported `idle`) | Claude Code 2.1.301 draws the conversation name in a divider under the dialog, and the upstream rules that read only what follows the last horizontal rule then see nothing |
 
 Hooks can't fix it: herdr 0.9.1 ignores the state that the claude integration reports (a reserved source). herdr does support **local manifest overrides**, which always win over its remote manifests. Details and the draft upstream issue: [`UPSTREAM-ISSUES.md`](UPSTREAM-ISSUES.md).
 
@@ -14,7 +15,8 @@ Hooks can't fix it: herdr 0.9.1 ignores the state that the claude integration re
 
 - `<agent>.rule.toml` holds the one extra rule. Nothing from herdr is copied into this repo.
 - `install` builds `~/.config/herdr/agent-detection/<agent>.toml` from herdr's **cached remote manifest** (`~/.local/state/herdr/agent-detection/remote/<agent>.toml`), bumps its version with a `.900` suffix, appends the rule and a marker line with the base version, then runs `herdr server reload-agent-manifests`.
-- Re-running `install` rebases the override on whatever upstream manifest herdr has now, so new upstream rules are not lost.
+- Re-running `install` rebases the override on whatever upstream manifest herdr has now, so new upstream rules are not lost. **The override shadows the newer upstream rules until then**, which is what `check` warns about: the live herdr kept reporting `idle` for every dialog in a named conversation while it was pinned to upstream `2026.09.11.1`.
+- The claude rule reads the **whole visible screen** (`whole_recent`), not what follows the last horizontal rule: the divider Claude draws under a dialog in a named conversation leaves that region empty.
 - An invalid override is ignored by herdr with a warning (it falls back to the remote manifest).
 
 ## Commands
@@ -33,7 +35,7 @@ All commands take optional agent names (only `claude` now). `install` refuses to
 
 ## Fixtures
 
-`verify` runs `herdr agent explain --file` over real captures: the dialogs and no-dialog screens in `pkg/agents/testdata/claude/`, plus the live cases in `testdata/` here (Claude dialogs with and without a stale input box; an idle Claude with a typed `❯` prompt). Run `verify` (and `verify --upstream`) for the current numbers.
+`verify` runs `herdr agent explain --file` over real captures: the dialogs and no-dialog screens in `pkg/agents/testdata/claude/`, plus the live cases in `testdata/` here (Claude dialogs with and without a stale input box, with and without a named conversation's divider under them; an idle Claude with a typed `❯` prompt). Run `verify` (and `verify --upstream`) for the current numbers.
 
 ## When to remove
 

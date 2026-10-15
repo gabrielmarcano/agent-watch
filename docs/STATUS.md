@@ -106,7 +106,7 @@ Only changes that affect what the system does (the owner's rule, 2026-10-07): a 
 
 ## Blocked / waiting on upstream
 
-- **herdr misses Claude's dialogs after a relaunch in the same pane:** mitigated by the temporary override in [`tools/herdr-overrides/`](../tools/herdr-overrides/README.md), which explains the cause. Last check (`herdr-overrides.sh check`), 2026-10-07 with the herdr 0.9.3 server: still needed for claude (upstream manifest `2026.09.11.1`); agy's override was uninstalled on 2026-10-05 (upstream fixed it). The upstream issue is drafted (`tools/herdr-overrides/UPSTREAM-ISSUES.md`) and, by the owner's decision, not being filed for now.
+- **herdr misses some Claude dialogs:** mitigated by the temporary override in [`tools/herdr-overrides/`](../tools/herdr-overrides/README.md), which explains the causes: a dialog after a relaunch in the same pane, and any dialog in a **named** conversation (the divider Claude draws under the dialog leaves the region upstream's `after_last_horizontal_rule` rules read empty). Last check (`herdr-overrides.sh check`), 2026-10-15 with the herdr 0.9.3 server: the override had been left on upstream manifest `2026.09.11.1`, shadowing the newer `2026.10.11.1` and making the live herdr report every such dialog as `idle` (no prompt reached the watch); it was rebased on `2026.10.11.1` and its rule moved to `whole_recent`, and it is still needed for claude (upstream alone misses the WebFetch and stale-input-box dialogs). agy's override was uninstalled on 2026-10-05 (upstream fixed it). The upstream issue is drafted (`tools/herdr-overrides/UPSTREAM-ISSUES.md`) and, by the owner's decision, not being filed for now.
 
 ---
 

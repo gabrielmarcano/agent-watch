@@ -1,14 +1,18 @@
-# TEMPORARY (agent-watch): a live Claude permission dialog, read only below the
-# last horizontal rule. Claude hides its input box while a dialog is open, so the
-# dialog is the bottom of the screen. Without this, a stale input box left in the
-# visible rows by an earlier Claude run makes live_prompt_box (950) report idle,
-# and dialogs without "Esc to cancel" (WebFetch) miss the other blocked rules.
-# Delete this file once upstream covers it.
+# TEMPORARY (agent-watch): a live Claude permission dialog whose options no
+# upstream rule sees, read from the whole visible screen. Claude hides its input
+# box while a dialog is open, so the dialog is the bottom of the screen. Without
+# this, a stale input box left in the visible rows by an earlier Claude run makes
+# live_prompt_box (950) report idle, and dialogs without "Esc to cancel"
+# (WebFetch) miss the other blocked rules.
+# region = whole_recent, not after_last_horizontal_rule: a named conversation
+# draws its name in the divider under the dialog (Claude Code 2.1.301), and that
+# divider would leave the "after the last horizontal rule" region empty, hiding
+# every such dialog. Delete this file once upstream covers it.
 [[rules]]
 id = "aw_live_permission_dialog"
 state = "blocked"
 priority = 990
-region = "after_last_horizontal_rule"
+region = "whole_recent"
 visible_blocker = true
 # The cursor row of a numbered menu...
 line_regex = ['^\s*❯\s*[1-9]\.\s+\S']

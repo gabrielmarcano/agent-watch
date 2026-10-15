@@ -77,6 +77,14 @@ func (c *claudeAdapter) ParsePrompt(screen string) (Prompt, bool) {
 			lineIdx++
 		}
 
+		// A multi-question AskUserQuestion dialog draws a tab bar of its
+		// questions as the first line under the rule; the title is the
+		// question below it, not that bar.
+		if lineIdx < m.StartLine && isQuestionTabBar(cleanBoxChars(lines[lineIdx])) {
+			for lineIdx++; lineIdx < m.StartLine && strings.TrimSpace(lines[lineIdx]) == ""; lineIdx++ {
+			}
+		}
+
 		if lineIdx < m.StartLine {
 			rawTitle := cleanBoxChars(lines[lineIdx])
 			// Strip Claude question indicator markers (e.g. ☐ or [ ])
@@ -124,6 +132,13 @@ func (c *claudeAdapter) ParsePrompt(screen string) (Prompt, bool) {
 		return o.Label == "Type something."
 	})
 	return p, true
+}
+
+// isQuestionTabBar reports whether a line is the tab bar of Claude's
+// multi-question AskUserQuestion dialog ("←  ☒ Nombre  ☐ Estados  ✔ Submit  →"):
+// one entry per question, marked answered (☒) or not (☐).
+func isQuestionTabBar(s string) bool {
+	return strings.HasPrefix(s, "←") && (strings.Contains(s, "☒") || strings.Contains(s, "☐"))
 }
 
 // SplitScreenTurn implements ScreenTurnReader: Claude echoes the user's

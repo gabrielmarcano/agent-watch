@@ -34,7 +34,9 @@ $fx/claude/permission-write-numbered-list.txt blocked
 $fx/claude/permission-bash-dont-ask-again.txt blocked
 $fx/claude/plan-approval.txt blocked
 $fx/claude/question-multiple.txt blocked
+$td/claude-question-named-session.txt blocked
 $td/claude-webfetch-fresh.txt blocked
+$td/claude-webfetch-named-session.txt blocked
 $td/claude-webfetch-stale-box.txt blocked
 $td/claude-bash-stale-box.txt blocked
 $fx/claude/no-menu-working.txt not-blocked
