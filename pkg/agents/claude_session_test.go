@@ -174,8 +174,9 @@ func TestClaudeTranscriptTitles_GrowsTheRead(t *testing.T) {
 
 // A turn that ends in a tool call nobody answered yet (AskUserQuestion, a
 // permission) has no reply: ErrNoReply, so the bridge does not publish the
-// dialog's screen as one. A tool call with its result and no text after it is
-// still ErrNoTranscript (screen fallback).
+// dialog's screen as one. A tool call whose result arrived but with no text
+// after it has no reply yet either: the turn still runs, and its screen only
+// holds live progress.
 func TestClaudeLastTurn_PendingToolCall(t *testing.T) {
 	ask := `{"type":"assistant","message":{"content":[{"type":"text","text":"Let me ask."},{"type":"tool_use","id":"toolu_1","name":"AskUserQuestion"}]}}` + "\n"
 	answer := `{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"toolu_1","content":"red"}]}}` + "\n"
@@ -183,13 +184,14 @@ func TestClaudeLastTurn_PendingToolCall(t *testing.T) {
 	cases := []struct {
 		name, transcript string
 		wantErr          error
+		wantErrNames     string // the error must name this tool
 		wantResponse     string
 	}{
-		{"question open", claudeTurnLines("pick a color", "") + ask, ErrNoReply, ""},
-		{"question in its own line", `{"type":"user","message":{"content":"pick"}}` + "\n" + ask, ErrNoReply, ""},
-		{"answered, then the reply", `{"type":"user","message":{"content":"pick"}}` + "\n" + ask + answer + final, nil, "Red it is."},
-		{"answered, no text yet", `{"type":"user","message":{"content":"pick"}}` + "\n" + ask + answer, ErrNoTranscript, ""},
-		{"an older call open, text after it", `{"type":"user","message":{"content":"pick"}}` + "\n" + ask + final, nil, "Red it is."},
+		{"question open", claudeTurnLines("pick a color", "") + ask, ErrNoReply, "AskUserQuestion", ""},
+		{"question in its own line", `{"type":"user","message":{"content":"pick"}}` + "\n" + ask, ErrNoReply, "AskUserQuestion", ""},
+		{"answered, then the reply", `{"type":"user","message":{"content":"pick"}}` + "\n" + ask + answer + final, nil, "", "Red it is."},
+		{"answered, no text yet", `{"type":"user","message":{"content":"pick"}}` + "\n" + ask + answer, ErrNoReply, "", ""},
+		{"an older call open, text after it", `{"type":"user","message":{"content":"pick"}}` + "\n" + ask + final, nil, "", "Red it is."},
 	}
 	c := newClaudeAdapter(Config{})
 	for _, tc := range cases {
@@ -198,7 +200,7 @@ func TestClaudeLastTurn_PendingToolCall(t *testing.T) {
 			if !errors.Is(err, tc.wantErr) {
 				t.Errorf("%s: got %+v, %v; want %v", tc.name, item, err, tc.wantErr)
 			}
-			if tc.wantErr == ErrNoReply && !strings.Contains(err.Error(), "AskUserQuestion") {
+			if tc.wantErrNames != "" && !strings.Contains(err.Error(), tc.wantErrNames) {
 				t.Errorf("%s: error %q does not name the tool", tc.name, err)
 			}
 			continue
@@ -209,9 +211,27 @@ func TestClaudeLastTurn_PendingToolCall(t *testing.T) {
 	}
 }
 
+// The message is in the transcript and its answer is not: the turn still
+// runs. ErrNoReply, so the bridge keeps the last published item instead of
+// falling back to the screen (which would publish the turn's live progress,
+// or the chrome over the input box).
+func TestClaudeLastTurn_NoAnswerYet(t *testing.T) {
+	const id, title = "cccccccc-0000-4000-8000-000000000000", "sandbox session initialization"
+	p := newClaudeProfile(t, t.TempDir(), ".claude-work")
+	p.transcript(id, claudeTitleLines(id, title)+claudeTurnLines("first", "first reply")+
+		`{"type":"user","message":{"role":"user","content":"still working"}}`+"\n")
+	c := newClaudeAdapter(Config{Home: p.home})
+	item, err := c.LastTurn(context.Background(), SessionRef{Agent: "claude", Kind: "id", Value: id, CWD: "/private/tmp/aw-sandbox", Title: title})
+	if !errors.Is(err, ErrNoReply) {
+		t.Errorf("got %+v, %v; want ErrNoReply", item, err)
+	}
+}
+
 // The agents view is not a conversation: by its title, and by its screen
 // (captured in aw-sandbox), so it is never published as a reply. Every other
-// Claude screen in testdata is a conversation.
+// Claude screen in testdata is a conversation; it yields an item unless the
+// pane's last turn has no reply yet — running (and with a message queued), or
+// waiting on a permission/question dialog, whose chrome is not a reply.
 func TestClaudeViewDetector(t *testing.T) {
 	var c ViewDetector = newClaudeAdapter(Config{})
 	for title, want := range map[string]bool{
@@ -231,6 +251,18 @@ func TestClaudeViewDetector(t *testing.T) {
 	if err != nil || len(files) == 0 {
 		t.Fatalf("no claude screens: %v", err)
 	}
+	noReply := map[string]bool{ // the last turn has no reply on the screen
+		"no-menu-working.txt":                true,
+		"no-menu-working-numbered-list.txt":  true,
+		"no-menu-working-queued.txt":         true,
+		"permission-bash.txt":                true,
+		"permission-edit.txt":                true,
+		"permission-webfetch.txt":            true,
+		"permission-write-numbered-list.txt": true,
+		"plan-approval.txt":                  true,
+		"question-multiple.txt":              true,
+		"question-plan-mode.txt":             true,
+	}
 	for _, f := range files {
 		b, err := os.ReadFile(f)
 		if err != nil {
@@ -240,8 +272,9 @@ func TestClaudeViewDetector(t *testing.T) {
 		if got := c.ConversationScreen(string(b)); got != want {
 			t.Errorf("%s: ConversationScreen = %v, want %v", f, got, want)
 		}
-		if item := ScreenTurnFor(c.(Adapter), string(b)); (item != nil) != want {
-			t.Errorf("%s: ScreenTurnFor = %+v, want an item: %v", f, item, want)
+		wantItem := want && !noReply[filepath.Base(f)]
+		if item := ScreenTurnFor(c.(Adapter), string(b)); (item != nil) != wantItem {
+			t.Errorf("%s: ScreenTurnFor = %+v, want an item: %v", f, item, wantItem)
 		}
 	}
 

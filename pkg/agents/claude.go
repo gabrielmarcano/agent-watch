@@ -141,22 +141,142 @@ func isQuestionTabBar(s string) bool {
 	return strings.HasPrefix(s, "←") && (strings.Contains(s, "☒") || strings.Contains(s, "☐"))
 }
 
+// The glyphs Claude animates in its status line ("✻ Booping…", "✢ Cooking…").
+const claudeSpinnerGlyphs = "✻✳✶✢✽·*"
+
 // SplitScreenTurn implements ScreenTurnReader: Claude echoes the user's
 // message as "❯ text" (wrapped lines indented by 2), marks its reply with "⏺"
-// and ends the turn with a status line such as "✻ Worked for 1s · done 10:25 AM".
+// and closes the turn with a status line such as "✻ Worked for 1s · done
+// 10:25 AM". Only that closing line makes a turn complete: the last echo with
+// only live progress under it is the pane's running turn, or a queued
+// message, and yields no reply. The reply is what lies between the echo and
+// the closing line; what follows the closing line — a recap, an update
+// notice, the titled rule over the input box — is not part of it. With no
+// echo on the screen, the reply alone is kept, without the chrome over the
+// box.
 func (c *claudeAdapter) SplitScreenTurn(lines []string) (string, []string, bool) {
 	query, rest, ok := echoedMessage(lines, "❯ ")
 	if !ok {
-		return "", nil, false
+		if body := trimClaudeChrome(lines); len(body) > 0 {
+			reply := make([]string, len(body))
+			for i, l := range body {
+				reply[i] = strings.Replace(l, "⏺ ", "  ", 1)
+			}
+			return "", reply, true
+		}
+		return "", nil, true
+	}
+	end := -1
+	for i, l := range rest {
+		if claudeTurnEndLine(l) {
+			end = i
+		}
+	}
+	if end < 0 {
+		return "", nil, true
 	}
 	var reply []string
-	for _, l := range rest {
-		if strings.HasPrefix(l, "✻ ") {
+	for _, l := range rest[:end] {
+		if claudeStatusLine(l) {
 			continue
 		}
 		reply = append(reply, strings.Replace(l, "⏺ ", "  ", 1))
 	}
 	return query, reply, true
+}
+
+// claudeTurnEndLine reports the line that closes a turn: "✻ Cogitated for
+// 14s · done 2:26 AM · 1 shell still running". The "· done " marker keeps any
+// other "✻ …" line from closing one.
+func claudeTurnEndLine(s string) bool {
+	t := strings.TrimSpace(s)
+	return strings.HasPrefix(t, "✻ ") && strings.Contains(t, "· done ")
+}
+
+// claudeStatusLine reports a Claude status or live-progress line above its
+// input box: "✻ Waiting for 1 background agent to finish", "✢ Cooking… (10s ·
+// ↓ 121 tokens)", the turn's closing "✻ Worked for 34s · done 3:41 AM". A
+// reply never starts with one of the spinner glyphs and a space; "· " and "* "
+// only count with the "…" of a live status.
+func claudeStatusLine(s string) bool {
+	rs := []rune(strings.TrimSpace(s))
+	if len(rs) < 3 || rs[1] != ' ' || !strings.ContainsRune(claudeSpinnerGlyphs, rs[0]) {
+		return false
+	}
+	if rs[0] == '·' || rs[0] == '*' {
+		return strings.ContainsRune(string(rs[2:]), '…')
+	}
+	return true
+}
+
+// claudeTitledRule reports the rule Claude draws over its input box with the
+// conversation's title inside: "──── rename-note-to-notes ────".
+func claudeTitledRule(s string) bool {
+	rs := []rune(strings.TrimSpace(s))
+	i := 0
+	for i < len(rs) && claudeRuleRune(rs[i]) {
+		i++
+	}
+	if i < 3 {
+		return false
+	}
+	for i < len(rs) && rs[i] == ' ' {
+		i++
+	}
+	title := i
+	for i < len(rs) && !claudeRuleRune(rs[i]) {
+		i++
+	}
+	if strings.TrimSpace(string(rs[title:i])) == "" {
+		return false
+	}
+	tail := 0
+	for i < len(rs) && claudeRuleRune(rs[i]) {
+		i++
+		tail++
+	}
+	for i < len(rs) && rs[i] == ' ' {
+		i++
+	}
+	return tail >= 3 && i == len(rs)
+}
+
+func claudeRuleRune(r rune) bool {
+	return strings.ContainsRune("─━═╌┄┈", r)
+}
+
+// claudeTipLine reports the tip Claude shows under its live status:
+// "⎿  Tip: Use /feedback to help us improve!".
+func claudeTipLine(t string) bool {
+	if !strings.HasPrefix(t, "⎿") {
+		return false
+	}
+	return strings.HasPrefix(strings.TrimSpace(strings.TrimPrefix(t, "⎿")), "Tip:")
+}
+
+// trimClaudeChrome drops the chrome Claude leaves over its input box from the
+// end of lines: live progress, the closing status line, a recap, an update
+// notice, the titled rule. What is left ends at the reply's last line.
+func trimClaudeChrome(lines []string) []string {
+	for len(lines) > 0 {
+		t := strings.TrimSpace(lines[len(lines)-1])
+		switch {
+		case t == "",
+			claudeStatusLine(t),
+			claudeTitledRule(t),
+			claudeTipLine(t),
+			strings.HasPrefix(t, "※ recap:"),
+			strings.Contains(t, "(disable recaps in /config)"),
+			strings.Contains(t, "Update available"),
+			strings.Contains(t, "currentVersion:"),
+			t == "Press up to edit queued messages",
+			strings.HasPrefix(t, "ctrl+") && strings.HasSuffix(t, "to send now"):
+			lines = lines[:len(lines)-1]
+		default:
+			return lines
+		}
+	}
+	return lines
 }
 
 type claudeLine struct {
@@ -187,7 +307,9 @@ type claudeContentBlock struct {
 // last message is in it. If even the largest window does not reach it, the
 // item holds the final answer without its query. A turn that ends in a tool
 // call still waiting for its result (a question, or a permission herdr did
-// not report as blocked) has no reply yet: ErrNoReply.
+// not report as blocked) has no reply yet: ErrNoReply. So does a turn whose
+// answer is not in the transcript yet (it still runs, or it ended with no
+// text): a screen capture would only show its live progress.
 func (c *claudeAdapter) LastTurn(ctx context.Context, ref SessionRef) (*model.HistoryItem, error) {
 	path, err := c.sessionPath(ctx, ref)
 	if err != nil {
@@ -211,10 +333,17 @@ func (c *claudeAdapter) LastTurn(ctx context.Context, ref SessionRef) (*model.Hi
 			continue
 		}
 		if turn.response == "" {
+			if !turn.found {
+				// Nothing in the file reads as a turn: not a transcript to
+				// publish from.
+				return nil, ErrNoTranscript
+			}
 			if turn.pendingTool != "" {
 				return nil, fmt.Errorf("%w: the turn waits on its %s call", ErrNoReply, turn.pendingTool)
 			}
-			return nil, ErrNoTranscript
+			// The answer is not in the transcript yet: the turn still
+			// runs, or it ended with no text to publish.
+			return nil, fmt.Errorf("%w: the last turn has no answer yet", ErrNoReply)
 		}
 		return &model.HistoryItem{
 			Query:    turn.query,

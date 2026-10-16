@@ -91,7 +91,7 @@ func TestEngine_HistoryAgentsViewPublishesNothing(t *testing.T) {
 // the conversation was in the background.
 func TestEngine_HistoryBackToConversation(t *testing.T) {
 	h := newTestHarness(t)
-	h.server.SetScreen("w1:p1", "recent_unwrapped", "❯ say hi\n\n⏺ hi there\n\n✻ Worked for 1s\n\n────\n❯ \n────\n")
+	h.server.SetScreen("w1:p1", "recent_unwrapped", "❯ say hi\n\n⏺ hi there\n\n✻ Worked for 1s · done 10:25 AM\n\n────\n❯ \n────\n")
 	h.engine.OnHerdrOnline(true, herdr.Pong{Version: "0.9.3", Protocol: 22})
 
 	inView := claudePane("done", "claude agents", 5, nil)
@@ -118,7 +118,7 @@ func TestEngine_HistoryScreenReadRetried(t *testing.T) {
 	h := newTestHarness(t)
 	h.engine.ScreenReadTimeout = 100 * time.Millisecond
 	h.engine.ScreenRetryTimeout = 2 * time.Second
-	h.server.SetScreen("w1:p1", "recent_unwrapped", "❯ say hi\n\n⏺ hi again\n\n────\n❯ \n────\n")
+	h.server.SetScreen("w1:p1", "recent_unwrapped", "❯ say hi\n\n⏺ hi again\n\n✻ Worked for 1s · done 10:25 AM\n\n────\n❯ \n────\n")
 	hold := h.server.HoldNext("agent.read") // never released: the first read times out
 	defer hold.Release()
 

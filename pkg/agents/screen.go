@@ -13,7 +13,9 @@ type ScreenTurnReader interface {
 	// SplitScreenTurn gets the screen's lines above the agent's input box. It
 	// returns the user's last message and the lines of the agent's reply,
 	// without the adapter's own chrome (markers, status lines). ok is false
-	// when no message of the user is on screen.
+	// when no message of the user is on screen; with ok true and an empty
+	// reply the message has no reply yet (the agent still works on it) and
+	// there is nothing to publish.
 	SplitScreenTurn(lines []string) (query string, reply []string, ok bool)
 }
 
@@ -31,6 +33,10 @@ func ScreenTurnFor(ad Adapter, text string) *model.HistoryItem {
 			if reply = dedent(reply); len(reply) > 0 {
 				return screenItem(query, reply)
 			}
+			// The adapter recognised the pane's last message but has no
+			// reply for it: the agent still works on it. The whole screen
+			// would be the running turn's live progress — publish nothing.
+			return nil
 		}
 	}
 	return screenItem("", lines)
