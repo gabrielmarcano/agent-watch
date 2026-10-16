@@ -20,3 +20,36 @@ line_regex = ['^\s*❯\s*[1-9]\.\s+\S']
 all = [
   { line_regex = ['(?i)^\s*(?:❯\s*)?[1-9]\.\s*(?:yes|no)\b'] },
 ]
+
+# TEMPORARY (agent-watch): a Claude pane whose turn ended while its background
+# subagents keep running (herdr issue #5004). Claude Code 2.1.301 lists the live
+# agents under the prompt box, one row per running subagent (a row of an active
+# agent starts with ◯); the upstream background_agents_working rule needs
+# "Waiting for N background agents to finish" to be the LAST line above the
+# prompt box, and Claude writes more transcript lines after it (the "waiting on
+# its own background work" event and the turn summary), so herdr falls to
+# live_prompt_box (950, idle) about ten seconds after the turn ends. Without
+# this, the pane reads idle/done while the agent still waits: the bridge's
+# turn-end watch never runs (pkg/bridge/engine.go) and background_agents is
+# never published. Priority 960: above live_prompt_box (950); the blocked rules
+# at 980+ outrank it, and the `not` list keeps the ones at 300-850 in charge
+# whenever a dialog is in the frame. On 2.1.301 a dialog replaces the input box
+# and the agent rows entirely (live capture, 2026-10-16), so that list is
+# belt-and-braces, the same fail-closed set upstream puts on its own working
+# rule background_mcp_task_working: a masked dialog (user cannot answer) is a
+# worse failure than a missed count. Delete this rule once upstream fixes #5004.
+[[rules]]
+id = "aw_background_agents_working"
+state = "working"
+priority = 960
+region = "after_last_horizontal_rule"
+visible_working = true
+line_regex = ['^\s*◯\s+\S']
+not = [
+  { contains = ["do you want to proceed?"] },
+  { contains = ["esc to cancel"] },
+  { contains = ["waiting for permission"] },
+  { contains = ["do you want to allow this connection?"] },
+  { contains = ["tab to amend"] },
+  { contains = ["ctrl+e to explain"] },
+]

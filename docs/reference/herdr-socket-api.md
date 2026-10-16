@@ -1,6 +1,6 @@
 # Herdr Socket API Reference (verified)
 
-Everything here was **probed live against herdr 0.9.1, socket protocol 22**, on 2026-09-23, re-probed on 2026-10-05 against the 0.9.3 schema (`herdr api schema`: protocol 22, every method, param and field used here kept), and on 2026-10-07 against a live **herdr 0.9.3 server** (protocol 22): `ping`, `agent.list`, `agent.get` and the error responses behave as below. When in doubt, re-derive it with the `herdr-probe` skill (`.agents/skills/herdr-probe/SKILL.md`). Do not trust memory or blog posts.
+Everything here was **probed live against herdr 0.9.1, socket protocol 22**, on 2026-09-23, re-probed on 2026-10-05 against the 0.9.3 schema (`herdr api schema`: protocol 22, every method, param and field used here kept), on 2026-10-07 against a live **herdr 0.9.3 server** (protocol 22): `ping`, `agent.list`, `agent.get` and the error responses behave as below, and on 2026-10-16 against a live **herdr 0.9.5 server** (protocol 22 per `herdr api schema`): `agent.list`, `agent.get`, `pane.read` and `agent.send_keys` (the `shift+tab` chord and a literal digit) behave as below. When in doubt, re-derive it with the `herdr-probe` skill (`.agents/skills/herdr-probe/SKILL.md`). Do not trust memory or blog posts.
 
 > ⚠️ **Safety first.** The herdr on the development Mac runs the owner's **real** agent sessions: sending `"1"` to a real Claude pane approves whatever it was asking. Which methods are safe and which are never called on the owner's panes: `.agents/rules/herdr-integration.md` § Safety.
 
