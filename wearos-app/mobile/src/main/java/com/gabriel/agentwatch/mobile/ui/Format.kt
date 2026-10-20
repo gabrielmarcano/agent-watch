@@ -4,22 +4,15 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import com.gabriel.agentwatch.mobile.R
+import com.gabriel.agentwatch.mobile.ui.logic.ChatDay
+import com.gabriel.agentwatch.mobile.ui.logic.ChatStamp
 import com.gabriel.agentwatch.model.AgentState
 import com.gabriel.agentwatch.ui.logic.Age
-import com.gabriel.agentwatch.ui.logic.AttentionSection
 import com.gabriel.agentwatch.ui.logic.backgroundCounts
-
-/** The list section title for [section]. */
-@Composable
-fun sectionTitle(section: AttentionSection): String = stringResource(
-    when (section) {
-        AttentionSection.NEEDS_YOU -> R.string.section_needs_you
-        AttentionSection.DONE -> R.string.section_done
-        AttentionSection.WORKING -> R.string.section_working
-        AttentionSection.IDLE -> R.string.section_idle
-        AttentionSection.UNKNOWN -> R.string.section_unknown
-    }
-)
+import java.time.format.DateTimeFormatter
+import java.time.format.FormatStyle
+import java.time.format.TextStyle
+import java.util.Locale
 
 /** How long ago something happened ("5 min ago"). */
 @Composable
@@ -29,6 +22,25 @@ fun ageText(age: Age): String = when (age) {
     is Age.Hours -> stringResource(R.string.age_hours, age.n)
     is Age.Days -> stringResource(R.string.age_days, age.n)
     Age.Unknown -> ""
+}
+
+/**
+ * The time at the end of a chat row or message, in the phone's own format: the hour today, the day
+ * this week, the date after that. "" when the relay sent no readable time.
+ */
+fun chatStampText(stamp: ChatStamp?, locale: Locale = Locale.getDefault()): String = when (stamp) {
+    null -> ""
+    is ChatStamp.Today -> stamp.time.format(DateTimeFormatter.ofLocalizedTime(FormatStyle.SHORT).withLocale(locale))
+    is ChatStamp.ThisWeek -> stamp.day.getDisplayName(TextStyle.SHORT, locale)
+    is ChatStamp.Older -> stamp.date.format(DateTimeFormatter.ofLocalizedDate(FormatStyle.SHORT).withLocale(locale))
+}
+
+/** The text of a day separator: Today, Yesterday, or the date. */
+@Composable
+fun chatDayText(day: ChatDay): String = when (day) {
+    ChatDay.Today -> stringResource(R.string.chat_today)
+    ChatDay.Yesterday -> stringResource(R.string.chat_yesterday)
+    is ChatDay.Older -> day.date.format(DateTimeFormatter.ofLocalizedDate(FormatStyle.MEDIUM))
 }
 
 /**

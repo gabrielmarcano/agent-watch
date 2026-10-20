@@ -12,7 +12,6 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.gabriel.agentwatch.mobile.R
 import com.gabriel.agentwatch.model.AgentKey
 import com.gabriel.agentwatch.model.findAgent
-import com.gabriel.agentwatch.model.hostNameFor
 import com.gabriel.agentwatch.model.key
 import com.gabriel.agentwatch.network.AuthState
 import com.gabriel.agentwatch.network.RelayRepository
@@ -24,8 +23,8 @@ import kotlinx.coroutines.launch
  * while the phone holds no accepted device token (the same rule the watch follows).
  */
 private object Routes {
-    const val AGENTS = "agents"
-    const val AGENT = "agent"
+    const val CHATS = "chats"
+    const val CHAT = "chat"
     const val HISTORY = "history"
     const val TEXT = "text"
 }
@@ -35,14 +34,14 @@ fun MobileApp() {
     val state by RelayRepository.state.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
 
-    var route by rememberSaveable { mutableStateOf(Routes.AGENTS) }
+    var route by rememberSaveable { mutableStateOf(Routes.CHATS) }
     var routeHost by rememberSaveable { mutableStateOf("") }
     var routePane by rememberSaveable { mutableStateOf("") }
     var textTitle by rememberSaveable { mutableStateOf("") }
     var textBody by rememberSaveable { mutableStateOf("") }
     var textSource by rememberSaveable { mutableStateOf("") }
     var textQuery by rememberSaveable { mutableStateOf("") }
-    var backRoute by rememberSaveable { mutableStateOf(Routes.AGENTS) }
+    var backRoute by rememberSaveable { mutableStateOf(Routes.CHATS) }
 
     fun openText(title: String, body: String, source: String, query: String, from: String) {
         textTitle = title
@@ -53,27 +52,26 @@ fun MobileApp() {
         route = Routes.TEXT
     }
 
-    fun openAgent(key: AgentKey) {
+    fun openChat(key: AgentKey) {
         routeHost = key.host
         routePane = key.paneId
-        route = Routes.AGENT
+        route = Routes.CHAT
     }
 
-    BackHandler(enabled = route != Routes.AGENTS) {
-        route = if (route == Routes.TEXT) backRoute else Routes.AGENTS
+    BackHandler(enabled = route != Routes.CHATS) {
+        route = if (route == Routes.TEXT) backRoute else Routes.CHATS
     }
 
     // Check the pairing first, at runtime: anything but PAIRED shows the pairing screen, never an
     // empty list or "device offline" (wearos-app/ARCHITECTURE.md §4).
     if (state.auth != AuthState.PAIRED) {
-        PairingScreen(revoked = state.auth == AuthState.REVOKED) { route = Routes.AGENTS }
+        PairingScreen(revoked = state.auth == AuthState.REVOKED) { route = Routes.CHATS }
         return
     }
 
     when (route) {
-        Routes.AGENT -> {
-            val key = AgentKey(routeHost, routePane)
-            val agent = state.agents.findAgent(key)
+        Routes.CHAT -> {
+            val agent = state.agents.findAgent(AgentKey(routeHost, routePane))
             if (agent == null) {
                 // No snapshot yet (cold start, reconnecting) is not the same as a closed agent.
                 TextScreen(
@@ -81,24 +79,20 @@ fun MobileApp() {
                     text = stringResource(if (state.stale) R.string.notice_connecting else R.string.agent_closed),
                     source = "transcript",
                     query = null,
-                    onBack = { route = Routes.AGENTS }
+                    onBack = { route = Routes.CHATS }
                 )
             } else {
-                val agentKey = agent.key
-                AgentDetailScreen(
+                ChatScreen(
                     agent = agent,
-                    hostName = hostNameFor(state.hosts, agent.host),
-                    lastReply = state.history.firstOrNull { it.key == agentKey },
-                    onBack = { route = Routes.AGENTS },
-                    onReadAll = { title, body, source, query -> openText(title, body, source, query, Routes.AGENT) },
-                    onHistory = { route = Routes.HISTORY }
+                    hosts = state.hosts,
+                    onBack = { route = Routes.CHATS }
                 )
             }
         }
 
         Routes.HISTORY -> HistoryScreen(
             history = state.history,
-            onBack = { route = Routes.AGENTS },
+            onBack = { route = Routes.CHATS },
             onOpen = { item ->
                 openText(
                     item.label.ifBlank { item.agent },
@@ -118,9 +112,9 @@ fun MobileApp() {
             onBack = { route = backRoute }
         )
 
-        else -> AgentListScreen(
+        else -> ChatListScreen(
             state = state,
-            onOpen = { openAgent(it.key) },
+            onOpen = { openChat(it.key) },
             onHistory = { route = Routes.HISTORY },
             onRefresh = { scope.launch { RelayRepository.refresh() } }
         )
