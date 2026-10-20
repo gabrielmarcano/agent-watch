@@ -1,6 +1,6 @@
 package com.gabriel.agentwatch.ui.logic
 
-import com.gabriel.agentwatch.R
+import com.gabriel.agentwatch.core.R
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
 import org.junit.Test

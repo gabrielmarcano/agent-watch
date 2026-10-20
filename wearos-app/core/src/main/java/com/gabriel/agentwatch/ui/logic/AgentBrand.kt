@@ -1,7 +1,7 @@
 package com.gabriel.agentwatch.ui.logic
 
 import androidx.annotation.DrawableRes
-import com.gabriel.agentwatch.R
+import com.gabriel.agentwatch.core.R
 
 /** How the watch identifies an agent type: a small logo and the name its content description reads. */
 data class AgentBrand(@param:DrawableRes val icon: Int, val name: String)
