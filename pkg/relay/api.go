@@ -109,6 +109,8 @@ func (s *Server) routes() http.Handler {
 	mux.Handle("POST /v1/agents/{pane_id}/answer", s.auth.DeviceAuthMiddleware(http.HandlerFunc(s.answer)))
 	mux.Handle("POST /v1/agents/{pane_id}/cancel", s.auth.DeviceAuthMiddleware(http.HandlerFunc(s.cancel)))
 	mux.Handle("POST /v1/push/register", s.auth.DeviceAuthMiddleware(http.HandlerFunc(s.pushRegister)))
+	mux.Handle("GET /v1/updates/{app}", s.auth.DeviceAuthMiddleware(http.HandlerFunc(s.updateInfo)))
+	mux.Handle("GET /v1/updates/{app}/apk", s.auth.DeviceAuthMiddleware(http.HandlerFunc(s.updateAPK)))
 
 	// Access logging wrapper
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

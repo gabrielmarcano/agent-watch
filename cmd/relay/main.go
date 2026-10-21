@@ -79,6 +79,8 @@ Environment variables:
   AW_HOST_NAME     Name the watch shows for that host (default: AW_HOST_ID)
   AW_DATA_DIR      Directory holding store.json, relay.lock and admin.sock
                    (default "/var/lib/agent-watch-relay")
+  AW_UPDATE_DIR    Directory holding published Android builds
+                   (default "<AW_DATA_DIR>/updates")
   AW_TRUSTED_PROXIES
                    Comma-separated CIDRs of the reverse proxies allowed to report
                    the client IP (X-Forwarded-For, then X-Real-IP). Default empty:

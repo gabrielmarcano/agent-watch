@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -24,6 +25,7 @@ func setBaseEnv(t *testing.T) {
 	t.Setenv("AW_HOST_TOKEN", testHostToken)
 	t.Setenv("AW_LISTEN", "")
 	t.Setenv("AW_DATA_DIR", "")
+	t.Setenv("AW_UPDATE_DIR", "")
 	t.Setenv("AW_TRUSTED_PROXIES", "")
 	t.Setenv("AW_CLIENT_IP_HEADER", "")
 	// Setenv registers the restore; Unsetenv makes the variable really absent.
@@ -106,6 +108,35 @@ func TestLoadConfig_NoLegacyWarningWhenUnset(t *testing.T) {
 	}
 	if strings.Contains(logs.String(), "AW_TRUST_CF_IP") {
 		t.Fatalf("unexpected legacy warning: %q", logs.String())
+	}
+}
+
+func TestLoadConfig_UpdateDir(t *testing.T) {
+	setBaseEnv(t)
+	cfg, err := LoadConfig()
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	if want := filepath.Join(DefaultDataDir, "updates"); cfg.UpdateDir != want {
+		t.Fatalf("default UpdateDir = %q, want %q", cfg.UpdateDir, want)
+	}
+
+	t.Setenv("AW_DATA_DIR", "/srv/relay")
+	cfg, err = LoadConfig()
+	if err != nil {
+		t.Fatalf("LoadConfig with data dir: %v", err)
+	}
+	if want := filepath.Join("/srv/relay", "updates"); cfg.UpdateDir != want {
+		t.Fatalf("UpdateDir = %q, want %q", cfg.UpdateDir, want)
+	}
+
+	t.Setenv("AW_UPDATE_DIR", " /srv/android-updates ")
+	cfg, err = LoadConfig()
+	if err != nil {
+		t.Fatalf("LoadConfig with update dir: %v", err)
+	}
+	if cfg.UpdateDir != "/srv/android-updates" {
+		t.Fatalf("UpdateDir = %q, want the trimmed AW_UPDATE_DIR", cfg.UpdateDir)
 	}
 }
 
