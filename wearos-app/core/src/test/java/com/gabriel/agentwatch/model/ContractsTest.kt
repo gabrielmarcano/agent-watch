@@ -132,6 +132,20 @@ class ContractsTest {
     }
 
     @Test
+    fun updateInfoParses() {
+        // contracts §2.2: an Android build's metadata from GET /v1/updates/{app}.
+        val info = Gson().fromJson(
+            """{"app":"phone","version_code":5,"version_name":"0.4.0","sha256":"8f14e45fceea167a5a36dedd4bea2543f0f5d1c9ae4b5d6f8f9a0b1c2d3e4f50","size":12345678}""",
+            UpdateInfo::class.java
+        )
+        assertEquals("phone", info.app)
+        assertEquals(5L, info.version_code)
+        assertEquals("0.4.0", info.version_name)
+        assertEquals("8f14e45fceea167a5a36dedd4bea2543f0f5d1c9ae4b5d6f8f9a0b1c2d3e4f50", info.sha256)
+        assertEquals(12345678L, info.size)
+    }
+
+    @Test
     fun testResolveTargetAgent() {
         val a1 = AgentState(pane_id = "p1", label = "Agent 1", status = "working", updated_at = "2026-09-23T10:00:00Z")
         val a2 = AgentState(pane_id = "p2", label = "Agent 2", status = "done", updated_at = "2026-09-23T11:00:00Z")

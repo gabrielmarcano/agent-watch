@@ -138,3 +138,12 @@ struct SessionCreated: Codable {
     var kind: String
     var label: String
 }
+
+// /v1 UpdateInfo (contracts.md §2.2); the legacy client does not use the Android updater (Phase 6).
+struct UpdateInfo: Codable, Sendable {
+    var app: String
+    var version_code: Int
+    var version_name: String
+    var sha256: String
+    var size: Int64
+}

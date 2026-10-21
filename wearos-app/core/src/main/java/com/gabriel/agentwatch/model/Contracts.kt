@@ -167,6 +167,15 @@ data class SessionCreated(
 )
 
 @Keep
+data class UpdateInfo(
+    val app: String = "",
+    val version_code: Long = 0,
+    val version_name: String = "",
+    val sha256: String = "",
+    val size: Long = 0
+)
+
+@Keep
 data class ErrorBody(
     val code: String = "internal",
     val message: String = ""

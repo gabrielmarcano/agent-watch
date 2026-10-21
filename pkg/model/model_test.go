@@ -167,6 +167,7 @@ func TestRoundTrip(t *testing.T) {
 		model.AnswerRequest{OptionID: "opt-1", ExpectedSeq: 5, Fingerprint: "fp"},
 		model.CancelRequest{ExpectedSeq: 5},
 		model.PushRegisterRequest{Platform: "fcm", Token: "tok"},
+		model.UpdateInfo{App: "phone", VersionCode: 5, VersionName: "0.4.0", SHA256: "abc123", Size: 42},
 		model.CommandResponse{OK: true},
 		model.ErrorResponse{Error: model.ErrorBody{Code: "invalid_request", Message: "bad"}},
 		model.HelloMsg{
@@ -212,6 +213,22 @@ func TestRoundTrip(t *testing.T) {
 		if !reflect.DeepEqual(s, elem) {
 			t.Errorf("Round-trip mismatch for %T:\nSent: %+v\nGot:  %+v", s, s, elem)
 		}
+	}
+}
+
+func TestUpdateInfo(t *testing.T) {
+	for _, app := range []string{model.UpdateAppPhone, model.UpdateAppWatch} {
+		if !model.ValidUpdateApp(app) {
+			t.Errorf("ValidUpdateApp(%q) = false", app)
+		}
+	}
+	for _, app := range []string{"", "Phone", "android", "phone/watch"} {
+		if model.ValidUpdateApp(app) {
+			t.Errorf("ValidUpdateApp(%q) = true", app)
+		}
+	}
+	if got := model.ErrUpdateUnavailable.HTTPStatus(); got != http.StatusNotFound {
+		t.Errorf("ErrUpdateUnavailable.HTTPStatus() = %d, want 404", got)
 	}
 }
 

@@ -116,6 +116,26 @@ type SessionCreated struct {
 	Label       string `json:"label"` // the name actually used, possibly suffixed to stay unique
 }
 
+// The Android apps the relay can publish updates for (contracts.md §2.1).
+const (
+	UpdateAppPhone = "phone"
+	UpdateAppWatch = "watch"
+)
+
+// ValidUpdateApp reports whether app is one of the update endpoints' closed set.
+func ValidUpdateApp(app string) bool {
+	return app == UpdateAppPhone || app == UpdateAppWatch
+}
+
+// UpdateInfo is one Android app's published build (contracts.md §2.2).
+type UpdateInfo struct {
+	App         string `json:"app"` // "phone" | "watch"
+	VersionCode int    `json:"version_code"`
+	VersionName string `json:"version_name"`
+	SHA256      string `json:"sha256"`
+	Size        int64  `json:"size"` // bytes
+}
+
 // CommandResponse indicates successful command receipt.
 type CommandResponse struct {
 	OK bool `json:"ok"` // always true on 200
@@ -139,6 +159,7 @@ const (
 	ErrInvalidRequest    ErrorCode = "invalid_request"
 	ErrUnauthorized      ErrorCode = "unauthorized"
 	ErrUnknownPane       ErrorCode = "unknown_pane"
+	ErrUpdateUnavailable ErrorCode = "update_not_available"
 	ErrStaleState        ErrorCode = "stale_state"
 	ErrPromptChanged     ErrorCode = "prompt_changed"
 	ErrAgentBusy         ErrorCode = "agent_busy"
@@ -164,7 +185,7 @@ func (c ErrorCode) HTTPStatus() int {
 		return http.StatusUnauthorized // 401
 	case ErrPairCodeInvalid, ErrNotAllowed:
 		return http.StatusForbidden // 403
-	case ErrUnknownPane:
+	case ErrUnknownPane, ErrUpdateUnavailable:
 		return http.StatusNotFound // 404
 	case ErrStaleState, ErrPromptChanged, ErrAgentBusy, ErrAgentBlocked, ErrAgentStateUnknown, ErrUnknownOption, ErrHostRequired:
 		return http.StatusConflict // 409
