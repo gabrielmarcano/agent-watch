@@ -19,8 +19,6 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.gabriel.agentwatch.mobile.R
-import com.gabriel.agentwatch.mobile.ui.theme.OnSurface
-import com.gabriel.agentwatch.mobile.ui.theme.SurfaceHigh
 import com.gabriel.agentwatch.mobile.ui.theme.statusStyle
 import com.gabriel.agentwatch.model.AgentState
 import com.gabriel.agentwatch.ui.logic.agentBrand
@@ -47,13 +45,13 @@ fun AgentAvatar(
             modifier = Modifier
                 .fillMaxSize()
                 .clip(CircleShape)
-                .background(SurfaceHigh),
+                .background(MaterialTheme.colorScheme.surfaceContainerHigh),
             contentAlignment = Alignment.Center
         ) {
             Icon(
                 painter = painterResource(brand.icon),
                 contentDescription = name,
-                tint = OnSurface,
+                tint = MaterialTheme.colorScheme.onSurface,
                 modifier = Modifier.size(size * 0.62f)
             )
         }

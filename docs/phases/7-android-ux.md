@@ -112,7 +112,7 @@ WhatsApp's shape, with our content:
 
 ## 8. Motion and haptics
 
-- **Motion:** the Material 3 Expressive motion scheme (spring-based, no fixed durations). Container transforms for the update card, shared elements between the list and the conversation, a spring on the composer's send button.
+- **Motion:** the Material 3 motion scheme (spring-based, no fixed durations). The *expressive* scheme (`MotionScheme.expressive()`) is still internal in Material 3 1.4.0, so it arrives with the AGP 9 / Compose 1.12 change; until then the standard springs run. Container transforms for the update card, shared elements between the list and the conversation, a spring on the composer's send button.
 - **Haptics:** `TextHandleMove` (the lightest) for a row tap, `Confirm` for Allow, `Reject` for Deny, `LongPress` for the selection mode. Never a haptic for a passive update.
 - **Respect the system's animation scale:** Android's "remove animations" accessibility setting must switch the springs off. No custom loops.
 
@@ -136,7 +136,7 @@ Each slice is one commit, one publish, one look on the device.
 | # | Slice | What it changes | Visible? |
 |---|---|---|---|
 | 1 | **Toolchain** | `:mobile` to `compileSdk 37` / `targetSdk 36`, Compose BOM 2026.03.00 (Material 3 1.4.0, the expressive line), edge-to-edge insets, the suppress flag | No (except the insets) |
-| 2 | **Theme** | The phone's own light/dark palette, dynamic colour, shapes, typography, the expressive motion scheme | Yes |
+| 2 | **Theme** | The phone's own light/dark palette, dynamic colour (on by default; the switch lands with the Settings screen), shapes, typography | Yes |
 | 3 | **Chats** | Search, filter chips, the machine sheet, unread counts, pull-to-refresh, swipe and long-press, the empty state | Yes |
 | 4 | **Conversation** | Bubbles, times and ticks, the top bar, predictive back, the shared element, the agent's info lines | Yes |
 | 5 | **Composer** | The growing field, send/mic, the IME action, the send haptic | Yes |

@@ -27,10 +27,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import com.gabriel.agentwatch.mobile.R
-import com.gabriel.agentwatch.mobile.ui.theme.Blue
-import com.gabriel.agentwatch.mobile.ui.theme.OnSurfaceVariant
-import com.gabriel.agentwatch.mobile.ui.theme.OutlineVariant
-import com.gabriel.agentwatch.mobile.ui.theme.SurfaceLow
 import com.gabriel.agentwatch.util.MdBlock
 import com.gabriel.agentwatch.util.MdSpan
 
@@ -52,10 +48,10 @@ fun AskedBox(query: String) {
     Column(
         Modifier
             .fillMaxWidth()
-            .background(SurfaceLow, RoundedCornerShape(12.dp))
+            .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(12.dp))
             .padding(horizontal = 12.dp, vertical = 8.dp)
     ) {
-        Text(stringResource(R.string.you_asked), color = Blue, style = MaterialTheme.typography.labelSmall)
+        Text(stringResource(R.string.you_asked), color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelSmall)
         Text(query, style = MaterialTheme.typography.bodyMedium)
     }
 }
@@ -70,7 +66,7 @@ private fun MarkdownBlock(block: MdBlock) {
         )
         is MdBlock.Paragraph -> Text(spansToAnnotated(block.spans), style = body)
         is MdBlock.ListItem -> Row(Modifier.padding(start = (block.depth * 16).dp)) {
-            Text(block.marker, style = body, color = OnSurfaceVariant)
+            Text(block.marker, style = body, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Spacer(Modifier.width(8.dp))
             Text(spansToAnnotated(block.spans), style = body)
         }
@@ -78,21 +74,21 @@ private fun MarkdownBlock(block: MdBlock) {
             text = block.text,
             modifier = Modifier
                 .fillMaxWidth()
-                .background(SurfaceLow, RoundedCornerShape(8.dp))
+                .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(8.dp))
                 .padding(horizontal = 12.dp, vertical = 8.dp),
             style = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace),
         )
         is MdBlock.Quote -> Row(Modifier.height(IntrinsicSize.Min)) {
-            Box(Modifier.width(3.dp).fillMaxHeight().background(OutlineVariant))
+            Box(Modifier.width(3.dp).fillMaxHeight().background(MaterialTheme.colorScheme.outlineVariant))
             Spacer(Modifier.width(10.dp))
-            Text(spansToAnnotated(block.spans), style = body, color = OnSurfaceVariant)
+            Text(spansToAnnotated(block.spans), style = body, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
-        MdBlock.Rule -> Box(Modifier.fillMaxWidth().padding(vertical = 4.dp).height(1.dp).background(OutlineVariant))
+        MdBlock.Rule -> Box(Modifier.fillMaxWidth().padding(vertical = 4.dp).height(1.dp).background(MaterialTheme.colorScheme.outlineVariant))
         // A table row: the first cell as the title, then one "header  value" line per column.
         is MdBlock.Record -> Column(
             Modifier
                 .fillMaxWidth()
-                .background(SurfaceLow, RoundedCornerShape(12.dp))
+                .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(12.dp))
                 .padding(horizontal = 12.dp, vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(2.dp)
         ) {
@@ -103,7 +99,7 @@ private fun MarkdownBlock(block: MdBlock) {
                     Text(
                         buildAnnotatedString {
                             if (header.isNotBlank()) {
-                                withStyle(SpanStyle(color = OnSurfaceVariant)) { append(header) }
+                                withStyle(SpanStyle(color = MaterialTheme.colorScheme.onSurfaceVariant)) { append(header) }
                                 append("  ")
                             }
                             append(spansToAnnotated(value))
@@ -116,14 +112,18 @@ private fun MarkdownBlock(block: MdBlock) {
     }
 }
 
-private val codeSpanStyle = SpanStyle(fontFamily = FontFamily.Monospace, background = SurfaceLow)
+@Composable
+private fun codeSpanStyle(): SpanStyle =
+    SpanStyle(fontFamily = FontFamily.Monospace, background = MaterialTheme.colorScheme.surfaceVariant)
 
+@Composable
 private fun spansToAnnotated(spans: List<MdSpan>): AnnotatedString = buildAnnotatedString {
+    val code = codeSpanStyle()
     spans.forEach { span ->
         val style = SpanStyle(
             fontWeight = if (span.bold) FontWeight.Bold else null,
             fontStyle = if (span.italic) FontStyle.Italic else null
-        ).let { if (span.code) it.merge(codeSpanStyle) else it }
+        ).let { if (span.code) it.merge(code) else it }
         withStyle(style) { append(span.text) }
     }
 }

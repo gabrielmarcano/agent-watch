@@ -29,7 +29,6 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.gabriel.agentwatch.mobile.R
-import com.gabriel.agentwatch.mobile.ui.theme.OnSurfaceVariant
 import com.gabriel.agentwatch.model.HistoryItem
 import com.gabriel.agentwatch.ui.logic.ageOf
 import com.gabriel.agentwatch.ui.logic.headPreview
@@ -56,7 +55,7 @@ fun HistoryScreen(history: List<HistoryItem>, onBack: () -> Unit, onOpen: (Histo
     ) { padding ->
         if (history.isEmpty()) {
             Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
-                Text(stringResource(R.string.no_history), color = OnSurfaceVariant)
+                Text(stringResource(R.string.no_history), color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         } else {
             LazyColumn(
@@ -88,7 +87,7 @@ private fun HistoryCard(item: HistoryItem, onClick: () -> Unit) {
             item.query?.takeIf { it.isNotBlank() }?.let {
                 Text(
                     text = it,
-                    color = OnSurfaceVariant,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                     style = MaterialTheme.typography.bodySmall,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
@@ -101,7 +100,7 @@ private fun HistoryCard(item: HistoryItem, onClick: () -> Unit) {
             )
             Text(
                 text = ageText(ageOf(item.completed_at, Instant.now())),
-                color = OnSurfaceVariant,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
                 style = MaterialTheme.typography.labelSmall
             )
         }

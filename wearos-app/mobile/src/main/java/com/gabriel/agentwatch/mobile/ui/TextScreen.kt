@@ -23,7 +23,6 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.gabriel.agentwatch.mobile.R
-import com.gabriel.agentwatch.mobile.ui.theme.OnSurfaceVariant
 import com.gabriel.agentwatch.util.readerBlocks
 
 /**
@@ -60,7 +59,7 @@ fun TextScreen(title: String?, text: String, source: String, query: String?, onB
                 if (source == "screen") {
                     Text(
                         stringResource(R.string.reader_screen_source),
-                        color = OnSurfaceVariant,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                         style = MaterialTheme.typography.labelMedium
                     )
                 }

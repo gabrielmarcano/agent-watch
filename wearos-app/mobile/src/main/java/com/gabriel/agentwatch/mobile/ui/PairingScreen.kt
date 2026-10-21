@@ -34,7 +34,6 @@ import com.gabriel.agentwatch.mobile.R
 import com.gabriel.agentwatch.mobile.ui.logic.cleanPairCode
 import com.gabriel.agentwatch.mobile.ui.logic.pairCodeComplete
 import com.gabriel.agentwatch.mobile.ui.logic.pairDeviceName
-import com.gabriel.agentwatch.mobile.ui.theme.OnSurfaceVariant
 import com.gabriel.agentwatch.approval.commandErrorFeedback
 import com.gabriel.agentwatch.network.RelayClient
 import com.gabriel.agentwatch.network.RelayRepository
@@ -105,7 +104,7 @@ fun PairingScreen(revoked: Boolean, onPaired: () -> Unit) {
             }
             Text(
                 stringResource(R.string.pair_intro),
-                color = OnSurfaceVariant,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
                 style = MaterialTheme.typography.bodyMedium
             )
             OutlinedTextField(

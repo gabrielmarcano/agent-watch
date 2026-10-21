@@ -57,11 +57,8 @@ import com.gabriel.agentwatch.mobile.ui.logic.needsAnswer
 import com.gabriel.agentwatch.mobile.ui.logic.previewLine
 import com.gabriel.agentwatch.mobile.ui.logic.previewText
 import com.gabriel.agentwatch.mobile.ui.logic.unmatchedPending
-import com.gabriel.agentwatch.mobile.ui.theme.Amber
-import com.gabriel.agentwatch.mobile.ui.theme.Blue
-import com.gabriel.agentwatch.mobile.ui.theme.OnSurfaceVariant
-import com.gabriel.agentwatch.mobile.ui.theme.OutlineVariant
 import com.gabriel.agentwatch.mobile.ui.theme.statusStyle
+import com.gabriel.agentwatch.mobile.ui.theme.warningAccent
 import com.gabriel.agentwatch.model.AgentState
 import com.gabriel.agentwatch.model.HistoryItem
 import com.gabriel.agentwatch.model.HostInfo
@@ -218,7 +215,7 @@ private fun HostChips(
                 label = {
                     Text(
                         text = host.name.ifBlank { host.id },
-                        color = if (host.online) MaterialTheme.colorScheme.onSurface else OnSurfaceVariant
+                        color = if (host.online) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
             )
@@ -270,14 +267,14 @@ private fun ChatRow(
                 Text(
                     text = time,
                     style = MaterialTheme.typography.labelSmall,
-                    color = if (unread) Blue else OnSurfaceVariant
+                    color = if (unread) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
                     text = preview,
                     style = MaterialTheme.typography.bodyMedium,
-                    color = OnSurfaceVariant,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f)
@@ -287,7 +284,7 @@ private fun ChatRow(
                     Box(
                         Modifier
                             .size(10.dp)
-                            .background(Blue, CircleShape)
+                            .background(MaterialTheme.colorScheme.primary, CircleShape)
                             .semantics { contentDescription = unreadLabel }
                     )
                 }
@@ -303,7 +300,7 @@ private fun ChatRow(
     }
     HorizontalDivider(
         modifier = Modifier.padding(start = 78.dp, end = 16.dp),
-        color = OutlineVariant.copy(alpha = 0.5f)
+        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
     )
 }
 
@@ -342,7 +339,7 @@ private fun SectionHeader(title: String, count: Int) {
 @Composable
 private fun EmptyList(text: String) {
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        Text(text, color = OnSurfaceVariant)
+        Text(text, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 
@@ -426,7 +423,7 @@ private fun Notice(notice: ListNotice) {
         ListNotice.MAC_OFFLINE -> stringResource(R.string.notice_device_offline)
         ListNotice.HERDR_STOPPED -> stringResource(R.string.notice_herdr_stopped)
     }
-    val color = if (notice == ListNotice.CONNECTING) OnSurfaceVariant else Amber
+    val color = if (notice == ListNotice.CONNECTING) MaterialTheme.colorScheme.onSurfaceVariant else warningAccent()
     Text(
         text = text,
         color = color,

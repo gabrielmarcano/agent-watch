@@ -99,7 +99,7 @@ commandErrorFeedback(error, surface)             // the message to show for a fa
 
 ## 4b. UX rules
 
-Other clients (watchOS, the phone app) copy these.
+Other clients (watchOS, the phone app) copy these. The phone app copies the information rules, not the colours: it has its own palette and layout ([`docs/phases/7-android-ux.md`](docs/phases/7-android-ux.md)).
 
 - **Target agent** for Quick Dictate and the tile, across every online host (§3a): the pinned agent (set only with "Pin to tile"; host and pane), else the latest `done`, else herdr's focused pane while at most one host is online, else none. Every herdr has its own focused pane, so with several online hosts the focused pane names none (the owner's decision, 2026-10-11): the tile and Quick Dictate say there is no agent to dictate to, and the owner picks one in the app (Reply, or "Pin to tile"). Never an arbitrary agent: a dictated prompt must not land in a pane the user did not choose (`resolveTarget` in `model/AgentKey.kt`). The tile passes the agent (pane and host) it showed, and a closed pane gets nothing (`tile/DictationTarget.kt`). The target label is always shown before sending.
 - **Prompt input** (Reply, Change, Quick Dictate): Wear's system RemoteInput, where the user picks voice, keyboard or handwriting. Not `ACTION_RECOGNIZE_SPEECH`: it is documented for voice only (`EXTRA_RESULTS`), and a prompt typed from the voice screen's keyboard never reached the relay. RemoteInput has no voice-first option, so voice costs one tap. Never drop input silently (`ui/logic/InputResult.kt`): text in any known form goes to the confirm screen whatever the result code; only backing out is silent; anything else shows a line and a reject haptic. Logs carry the result code and extra keys, never text.

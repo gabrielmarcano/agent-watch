@@ -18,7 +18,6 @@ import androidx.compose.ui.unit.dp
 import com.gabriel.agentwatch.approval.morePermissionOptions
 import com.gabriel.agentwatch.approval.permissionButtons
 import com.gabriel.agentwatch.mobile.R
-import com.gabriel.agentwatch.mobile.ui.theme.OnSurfaceVariant
 import com.gabriel.agentwatch.model.PendingPrompt
 import com.gabriel.agentwatch.model.PromptOption
 import com.gabriel.agentwatch.ui.logic.tailPreview
@@ -47,7 +46,7 @@ fun PromptPanel(
                     else -> R.string.prompt_unknown
                 }
             ),
-            color = OnSurfaceVariant,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
             style = MaterialTheme.typography.labelLarge
         )
         if (prompt.title.isNotBlank()) {
@@ -98,7 +97,7 @@ private fun PermissionActions(
     if (more.isNotEmpty()) {
         Text(
             stringResource(R.string.more_options),
-            color = OnSurfaceVariant,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
             style = MaterialTheme.typography.labelMedium
         )
         more.forEach { option ->
@@ -110,7 +109,7 @@ private fun PermissionActions(
                 Column(horizontalAlignment = Alignment.Start) {
                     Text(option.label)
                     option.description?.takeIf { it.isNotBlank() }?.let {
-                        Text(it, style = MaterialTheme.typography.bodySmall, color = OnSurfaceVariant)
+                        Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
             }
@@ -158,7 +157,7 @@ private fun UnknownPromptActions(prompt: PendingPrompt, locked: Boolean, onCance
     }
     Text(
         stringResource(R.string.answer_on_device),
-        color = OnSurfaceVariant,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
         style = MaterialTheme.typography.bodySmall
     )
     OutlinedButton(onClick = onCancel, enabled = !locked) { Text(stringResource(R.string.cancel_prompt)) }

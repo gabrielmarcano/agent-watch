@@ -71,10 +71,6 @@ import com.gabriel.agentwatch.mobile.ui.logic.chatEntries
 import com.gabriel.agentwatch.mobile.ui.logic.chatStamp
 import com.gabriel.agentwatch.mobile.ui.logic.replyToSend
 import com.gabriel.agentwatch.mobile.ui.logic.unmatchedPending
-import com.gabriel.agentwatch.mobile.ui.theme.Blue
-import com.gabriel.agentwatch.mobile.ui.theme.OnSurfaceVariant
-import com.gabriel.agentwatch.mobile.ui.theme.Surface as SurfaceColor
-import com.gabriel.agentwatch.mobile.ui.theme.SurfaceHigh
 import com.gabriel.agentwatch.mobile.ui.theme.statusStyle
 import com.gabriel.agentwatch.model.AgentState
 import com.gabriel.agentwatch.model.HistoryItem
@@ -244,7 +240,7 @@ fun ChatScreen(agent: AgentState, hosts: List<HostInfo>, onBack: () -> Unit) {
     ) { padding ->
         if (entries.isEmpty() && info.isEmpty()) {
             Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
-                Text(stringResource(R.string.chat_no_messages), color = OnSurfaceVariant)
+                Text(stringResource(R.string.chat_no_messages), color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         } else {
             Conversation(
@@ -375,7 +371,7 @@ private fun QueryBubble(text: String, askedAt: String?) {
                 text = stamp,
                 modifier = Modifier.align(Alignment.End),
                 style = MaterialTheme.typography.labelSmall,
-                color = OnSurfaceVariant
+                color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
     }
@@ -383,7 +379,7 @@ private fun QueryBubble(text: String, askedAt: String?) {
 
 @Composable
 private fun AnswerBubble(item: HistoryItem) {
-    Bubble(mine = false, container = SurfaceHigh) {
+    Bubble(mine = false, container = MaterialTheme.colorScheme.surface) {
         if (item.source == "screen") {
             // A terminal capture keeps its own spacing and never reflows; the bubble scrolls sideways.
             Box(Modifier.horizontalScroll(rememberScrollState())) {
@@ -400,13 +396,13 @@ private fun AnswerBubble(item: HistoryItem) {
             Text(
                 text = chatStampText(chatStamp(item.completed_at, Instant.now())),
                 style = MaterialTheme.typography.labelSmall,
-                color = OnSurfaceVariant
+                color = MaterialTheme.colorScheme.onSurfaceVariant
             )
             if (item.source == "screen") {
                 Text(
                     text = stringResource(R.string.chat_screen_source),
                     style = MaterialTheme.typography.labelSmall,
-                    color = OnSurfaceVariant
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
         }
@@ -420,16 +416,16 @@ private fun SentBubble(text: String) {
         Text(
             text = stringResource(R.string.chat_sent),
             style = MaterialTheme.typography.labelSmall,
-            color = OnSurfaceVariant
+            color = MaterialTheme.colorScheme.onSurfaceVariant
         )
     }
 }
 
 @Composable
 private fun WorkingBubble(waiting: Boolean) {
-    Bubble(mine = false, container = SurfaceHigh) {
+    Bubble(mine = false, container = MaterialTheme.colorScheme.surface) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp, color = Blue)
+            CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp, color = MaterialTheme.colorScheme.primary)
             Text(
                 text = stringResource(if (waiting) R.string.chat_waiting_background else R.string.chat_working),
                 style = MaterialTheme.typography.bodyMedium
@@ -444,9 +440,9 @@ private fun DaySeparator(date: LocalDate) {
         Text(
             text = chatDayText(chatDay(date, LocalDate.now())),
             style = MaterialTheme.typography.labelSmall,
-            color = OnSurfaceVariant,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier
-                .background(SurfaceColor, RoundedCornerShape(50))
+                .background(MaterialTheme.colorScheme.surface, RoundedCornerShape(50))
                 .padding(horizontal = 10.dp, vertical = 3.dp)
         )
     }
@@ -458,11 +454,11 @@ private fun AgentInfo(lines: List<String>) {
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(12.dp))
-            .background(SurfaceColor)
+            .background(MaterialTheme.colorScheme.surface)
             .padding(horizontal = 12.dp, vertical = 8.dp),
         verticalArrangement = Arrangement.spacedBy(2.dp)
     ) {
-        lines.forEach { Text(it, style = MaterialTheme.typography.bodySmall, color = OnSurfaceVariant) }
+        lines.forEach { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
     }
 }
 
@@ -513,7 +509,7 @@ private fun Composer(
     error: String?,
     onSend: () -> Unit
 ) {
-    Surface(color = SurfaceColor, shadowElevation = 8.dp) {
+    Surface(color = MaterialTheme.colorScheme.surface, shadowElevation = 8.dp) {
         Column(Modifier.fillMaxWidth().imePadding().navigationBarsPadding()) {
             error?.let {
                 Text(

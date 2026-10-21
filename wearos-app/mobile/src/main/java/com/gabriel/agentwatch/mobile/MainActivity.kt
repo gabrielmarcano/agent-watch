@@ -7,7 +7,6 @@ import android.os.Build
 import android.os.Bundle
 import android.util.Log
 import androidx.activity.ComponentActivity
-import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
@@ -27,13 +26,10 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        // The app draws behind the system bars (targetSdk 36). The phone's look is dark
-        // for now, so the bars keep their light icons; the theme slice makes them follow
-        // the light/dark scheme (docs/phases/7-android-ux.md § 1).
-        enableEdgeToEdge(
-            statusBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT),
-            navigationBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT)
-        )
+        // The app draws behind the system bars (targetSdk 36). The phone follows the system's
+        // light/dark setting, so the bars pick their icons the same way
+        // (docs/phases/7-android-ux.md § 1).
+        enableEdgeToEdge()
         pendingDeepLink = MobileNotifications.agentOf(intent)
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&

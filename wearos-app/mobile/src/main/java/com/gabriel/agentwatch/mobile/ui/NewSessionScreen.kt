@@ -58,8 +58,6 @@ import com.gabriel.agentwatch.mobile.ui.logic.canCreateSession
 import com.gabriel.agentwatch.mobile.ui.logic.defaultSessionLabel
 import com.gabriel.agentwatch.mobile.ui.logic.sessionHosts
 import com.gabriel.agentwatch.mobile.ui.logic.sessionKinds
-import com.gabriel.agentwatch.mobile.ui.theme.OnSurfaceVariant
-import com.gabriel.agentwatch.mobile.ui.theme.Surface as SurfaceColor
 import com.gabriel.agentwatch.model.FolderListResponse
 import com.gabriel.agentwatch.model.HostInfo
 import com.gabriel.agentwatch.model.SessionCreated
@@ -197,7 +195,7 @@ fun NewSessionScreen(
     ) { padding ->
         Column(Modifier.fillMaxSize().padding(padding)) {
             when {
-                startable.isEmpty() -> Centered(stringResource(R.string.session_no_hosts), OnSurfaceVariant)
+                startable.isEmpty() -> Centered(stringResource(R.string.session_no_hosts), MaterialTheme.colorScheme.onSurfaceVariant)
                 optionsError != null -> Centered(stringResource(optionsError!!), MaterialTheme.colorScheme.error)
                 else -> {
                     if (startable.size > 1) {
@@ -210,7 +208,7 @@ fun NewSessionScreen(
                     if (options != null && options!!.roots.isEmpty()) {
                         Text(
                             text = stringResource(R.string.session_not_configured),
-                            color = OnSurfaceVariant,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                             style = MaterialTheme.typography.bodyMedium,
                             modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
                         )
@@ -270,7 +268,7 @@ private fun ChosenFolder(path: String) {
         Text(
             text = stringResource(R.string.session_folder),
             style = MaterialTheme.typography.labelLarge,
-            color = OnSurfaceVariant
+            color = MaterialTheme.colorScheme.onSurfaceVariant
         )
         Text(
             text = path.ifBlank { stringResource(R.string.session_folder_none) },
@@ -327,7 +325,7 @@ private fun FolderBrowser(
                 item(key = "empty") {
                     Text(
                         text = stringResource(R.string.session_empty_folder),
-                        color = OnSurfaceVariant,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                         style = MaterialTheme.typography.bodyMedium,
                         modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)
                     )
@@ -367,7 +365,7 @@ private fun FolderRow(
             Icon(
                 Icons.Filled.KeyboardArrowUp,
                 contentDescription = stringResource(R.string.session_up),
-                tint = OnSurfaceVariant,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.size(20.dp)
             )
             Spacer(Modifier.width(8.dp))
@@ -401,14 +399,14 @@ private fun ChosenBar(path: String, chosen: Boolean, onChoose: () -> Unit) {
             .fillMaxWidth()
             .padding(horizontal = 16.dp, vertical = 4.dp)
             .clip(RoundedCornerShape(12.dp))
-            .background(SurfaceColor)
+            .background(MaterialTheme.colorScheme.surface)
             .padding(horizontal = 12.dp, vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Text(
             text = path,
             style = MaterialTheme.typography.bodySmall,
-            color = OnSurfaceVariant,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.weight(1f)
@@ -429,7 +427,7 @@ private fun CreateBar(
     error: Int?,
     onCreate: () -> Unit
 ) {
-    Surface(color = SurfaceColor, shadowElevation = 8.dp) {
+    Surface(color = MaterialTheme.colorScheme.surface, shadowElevation = 8.dp) {
         Column(Modifier.fillMaxWidth().imePadding().navigationBarsPadding()) {
             error?.let {
                 Text(
@@ -501,7 +499,7 @@ fun StartingSessionScreen(label: String, onBack: () -> Unit) {
             )
             Text(
                 text = stringResource(R.string.starting_session_hint),
-                color = OnSurfaceVariant,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
                 style = MaterialTheme.typography.bodyMedium,
                 modifier = Modifier.padding(horizontal = 24.dp, vertical = 4.dp)
             )
