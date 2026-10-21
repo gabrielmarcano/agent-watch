@@ -2,15 +2,20 @@ package com.gabriel.agentwatch.mobile.ui
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.gabriel.agentwatch.mobile.BuildConfig
 import com.gabriel.agentwatch.mobile.R
 import com.gabriel.agentwatch.mobile.push.MobileNotifications
 import com.gabriel.agentwatch.model.AgentKey
@@ -19,6 +24,7 @@ import com.gabriel.agentwatch.model.key
 import com.gabriel.agentwatch.network.AgentsUpdate
 import com.gabriel.agentwatch.network.AuthState
 import com.gabriel.agentwatch.network.RelayRepository
+import com.gabriel.agentwatch.update.UpdateManager
 import kotlinx.coroutines.launch
 
 /**
@@ -43,6 +49,15 @@ fun MobileApp(
     val state by RelayRepository.state.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
+    val updateManager = remember {
+        UpdateManager(context, app = "phone", currentVersionCode = BuildConfig.VERSION_CODE.toLong())
+    }
+    val update by updateManager.state.collectAsStateWithLifecycle()
+    DisposableEffect(updateManager) {
+        onDispose { updateManager.close() }
+    }
+    // The one-time "allow this source" screen is a different activity: refresh when we come back.
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { updateManager.refreshInstallPermission() }
 
     var route by rememberSaveable { mutableStateOf(Routes.CHATS) }
     var routeHost by rememberSaveable { mutableStateOf("") }
@@ -82,6 +97,12 @@ fun MobileApp(
     if (state.auth != AuthState.PAIRED) {
         PairingScreen(revoked = state.auth == AuthState.REVOKED) { route = Routes.CHATS }
         return
+    }
+
+    // One relay call on start (and after pairing): the metadata is small, and an update is worth
+    // showing at once. An offline start fails silently; the card appears only when a build exists.
+    LaunchedEffect(state.auth) {
+        updateManager.check()
     }
 
     // A notification tap names the chat; it waits here until the device is paired, so a cold start
@@ -163,10 +184,18 @@ fun MobileApp(
 
         else -> ChatListScreen(
             state = state,
+            update = update,
             onOpen = { openChat(it.key) },
             onHistory = { route = Routes.HISTORY },
             onNewSession = { route = Routes.NEW_SESSION },
-            onRefresh = { scope.launch { RelayRepository.refresh() } }
+            onRefresh = { scope.launch { RelayRepository.refresh() } },
+            onUpdate = { updateManager.download() },
+            onRetryUpdate = {
+                if (update.info != null) updateManager.download() else updateManager.check(manual = true)
+            },
+            onCancelUpdate = { updateManager.cancelDownload() },
+            onInstallUpdate = { updateManager.install() },
+            onDismissUpdate = { updateManager.dismiss() }
         )
     }
 }

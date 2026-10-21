@@ -115,6 +115,24 @@
     <string name="pair">Pair</string>
     <string name="pairing">Pairing…</string>
 
+    <!-- Android updates: relay-hosted APK, Android's own install confirmation (docs/GUIDE.md) -->
+    <string name="update_title">Update available</string>
+    <string name="update_available">Version %1$s is ready to download.</string>
+    <string name="update_downloading">Downloading… %1$d%%</string>
+    <string name="update_ready">Version %1$s is downloaded. Android will ask you to confirm the install.</string>
+    <string name="update_permission">Allow Agent Watch to install apps in Settings, then tap Open settings again.</string>
+    <string name="update_action">Update</string>
+    <string name="update_cancel">Cancel</string>
+    <string name="update_install">Install</string>
+    <string name="update_open_settings">Open settings</string>
+    <string name="update_later">Later</string>
+    <string name="update_retry">Retry</string>
+    <string name="update_error_download">The download was incomplete or damaged. Try again.</string>
+    <string name="update_error_install">Android could not open the installer. Open the relay download on this device instead.</string>
+    <string name="update_error_auth">Pair this phone again, then retry.</string>
+    <string name="update_error_network">Couldn\'t reach the relay. Check the connection and try again.</string>
+    <string name="update_error_generic">The update failed. Try again.</string>
+
     <!-- Notifications: the phone builds them locally from data-only pushes -->
     <string name="notification_channel_chats">Agent chats</string>
     <string name="notification_channel_chats_description">Approvals and finished replies from your agents</string>

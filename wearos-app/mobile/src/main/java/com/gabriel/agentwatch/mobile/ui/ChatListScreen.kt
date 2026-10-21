@@ -20,11 +20,14 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material3.Button
+import androidx.compose.material3.Card
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -66,6 +69,8 @@ import com.gabriel.agentwatch.model.hostNameFor
 import com.gabriel.agentwatch.model.key
 import com.gabriel.agentwatch.network.UiState
 import com.gabriel.agentwatch.ui.logic.ListNotice
+import com.gabriel.agentwatch.update.UpdatePhase
+import com.gabriel.agentwatch.update.UpdateState
 import com.gabriel.agentwatch.ui.logic.listStatus
 import com.gabriel.agentwatch.ui.logic.shownStatus
 import java.time.Instant
@@ -83,10 +88,16 @@ import java.time.Instant
 @Composable
 fun ChatListScreen(
     state: UiState,
+    update: UpdateState,
     onOpen: (AgentState) -> Unit,
     onHistory: () -> Unit,
     onNewSession: () -> Unit,
-    onRefresh: () -> Unit
+    onRefresh: () -> Unit,
+    onUpdate: () -> Unit,
+    onRetryUpdate: () -> Unit,
+    onCancelUpdate: () -> Unit,
+    onInstallUpdate: () -> Unit,
+    onDismissUpdate: () -> Unit
 ) {
     val context = LocalContext.current
     val seen = remember(context) { ChatSeen(context) }
@@ -131,6 +142,14 @@ fun ChatListScreen(
         }
     ) { padding ->
         Column(Modifier.fillMaxSize().padding(padding)) {
+            UpdateBanner(
+                update = update,
+                onUpdate = onUpdate,
+                onRetry = onRetryUpdate,
+                onCancel = onCancelUpdate,
+                onInstall = onInstallUpdate,
+                onDismiss = onDismissUpdate
+            )
             status.notice?.let { Notice(it) }
             if (state.hosts.size > 1) {
                 HostChips(hosts = state.hosts, selected = hostFilter, onSelect = { hostFilter = it })
@@ -325,6 +344,78 @@ private fun EmptyList(text: String) {
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         Text(text, color = OnSurfaceVariant)
     }
+}
+
+@Composable
+private fun UpdateBanner(
+    update: UpdateState,
+    onUpdate: () -> Unit,
+    onRetry: () -> Unit,
+    onCancel: () -> Unit,
+    onInstall: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    if (update.phase == UpdatePhase.IDLE || update.phase == UpdatePhase.CHECKING || update.phase == UpdatePhase.UP_TO_DATE) {
+        return
+    }
+    val info = update.info
+    val version = info?.version_name?.takeIf { it.isNotBlank() } ?: info?.version_code?.toString().orEmpty()
+
+    Card(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
+        Column(
+            modifier = Modifier.padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            Text(stringResource(R.string.update_title), style = MaterialTheme.typography.titleSmall)
+            when (update.phase) {
+                UpdatePhase.AVAILABLE -> Text(stringResource(R.string.update_available, version))
+                UpdatePhase.DOWNLOADING -> {
+                    Text(stringResource(R.string.update_downloading, (update.progress * 100).toInt()))
+                    LinearProgressIndicator(
+                        progress = { update.progress.coerceIn(0f, 1f) },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+                UpdatePhase.READY -> Text(stringResource(R.string.update_ready, version))
+                UpdatePhase.NEEDS_PERMISSION -> Text(stringResource(R.string.update_permission))
+                UpdatePhase.FAILED -> Text(updateErrorText(update.errorCode))
+                else -> Unit
+            }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                when (update.phase) {
+                    UpdatePhase.AVAILABLE -> {
+                        TextButton(onClick = onDismiss) { Text(stringResource(R.string.update_later)) }
+                        Button(onClick = onUpdate) { Text(stringResource(R.string.update_action)) }
+                    }
+                    UpdatePhase.DOWNLOADING -> {
+                        TextButton(onClick = onCancel) { Text(stringResource(R.string.update_cancel)) }
+                    }
+                    UpdatePhase.READY -> {
+                        TextButton(onClick = onDismiss) { Text(stringResource(R.string.update_later)) }
+                        Button(onClick = onInstall) { Text(stringResource(R.string.update_install)) }
+                    }
+                    UpdatePhase.NEEDS_PERMISSION -> {
+                        TextButton(onClick = onDismiss) { Text(stringResource(R.string.update_later)) }
+                        Button(onClick = onInstall) { Text(stringResource(R.string.update_open_settings)) }
+                    }
+                    UpdatePhase.FAILED -> {
+                        TextButton(onClick = onDismiss) { Text(stringResource(R.string.update_later)) }
+                        Button(onClick = onRetry) { Text(stringResource(R.string.update_retry)) }
+                    }
+                    else -> Unit
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun updateErrorText(code: String?): String = when (code) {
+    "bad_download", "bad_update" -> stringResource(R.string.update_error_download)
+    "install_unavailable", "install_settings_unavailable" -> stringResource(R.string.update_error_install)
+    "not_paired", "unauthorized" -> stringResource(R.string.update_error_auth)
+    "network", "timeout" -> stringResource(R.string.update_error_network)
+    else -> stringResource(R.string.update_error_generic)
 }
 
 @Composable
