@@ -104,7 +104,7 @@ The relay does not care what kind of client it serves. Any app that pairs (`POST
 - **No duplicate notification on the watch.**
 
 ### 6. UI and UX pass (the owner's focus, from 2026-10-21)
-The watch's information architecture is the reference (`wearos-app/ARCHITECTURE.md` §4a–§4b); the phone's layout is its own. The owner drives this step: they say what feels wrong on the device, and each change goes through the same loop — code, JVM test, lint, `:mobile:assembleRelease`, `deploy/relay/publish-android.sh --phone`, then the update card on the phone. The release key makes that loop a couple of minutes, so changes are small and one at a time, each visible on the device before the next.
+The redesign is written up in [`7-android-ux.md`](7-android-ux.md): the principles, the screens, the toolchain and the slices. The watch's information architecture is the reference (`wearos-app/ARCHITECTURE.md` §4a–§4b); the phone's layout and palette are its own. The owner drives this step: they say what feels wrong on the device, and each change goes through the same loop — code, JVM test, lint, `:mobile:assembleRelease`, `deploy/relay/publish-android.sh --phone`, then the update card on the phone. The release key makes that loop a couple of minutes, so changes are small and one at a time, each visible on the device before the next.
 
 Checklist (each row is a decision to take, not a promise):
 - **Chat list:** the order (today "Needs you" first, then by recency); what a row shows (name, preview, status, host, time) and what it drops; the unread dot; pull to refresh instead of the refresh icon; what a swipe does; where the global **History** screen belongs; searching the chats.
