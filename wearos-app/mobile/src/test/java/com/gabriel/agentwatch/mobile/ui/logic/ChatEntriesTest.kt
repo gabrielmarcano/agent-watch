@@ -3,6 +3,8 @@ package com.gabriel.agentwatch.mobile.ui.logic
 import com.gabriel.agentwatch.model.AgentState
 import com.gabriel.agentwatch.model.HistoryItem
 import com.gabriel.agentwatch.model.PendingPrompt
+import com.gabriel.agentwatch.util.MdBlock
+import com.gabriel.agentwatch.util.MdSpan
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -304,6 +306,28 @@ class ChatEntriesTest {
             0,
             unreadCount(agent(pane = "w1:p9"), history, read)
         )
+    }
+
+    @Test
+    fun aLongAnswerIsShownAsAPartWithReadMore() {
+        val blocks = listOf(
+            MdBlock.Paragraph(listOf(MdSpan("a".repeat(200)))),
+            MdBlock.Paragraph(listOf(MdSpan("b".repeat(200)))),
+            MdBlock.Paragraph(listOf(MdSpan("c".repeat(200))))
+        )
+
+        val short = truncateBlocks(blocks, limit = 240)
+        assertTrue(short.truncated)
+        assertEquals(1, short.blocks.size)
+
+        val whole = truncateBlocks(blocks, limit = 1000)
+        assertFalse(whole.truncated)
+        assertEquals(3, whole.blocks.size)
+
+        // The first block always shows, even when it is longer than the limit.
+        val one = truncateBlocks(blocks.take(1), limit = 10)
+        assertEquals(1, one.blocks.size)
+        assertFalse(one.truncated)
     }
 
     @Test
