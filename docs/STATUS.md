@@ -17,6 +17,20 @@ The one place for the project's state: what is done, what is open, what comes ne
 | [7 Android phone client](phases/7-android-mobile.md) | steps 1–2 on `main` (2026-10-20, commits `8e17ace`–`2bfdada`): `:core` extracted from the Wear OS app and the minimal phone app (`:mobile`: pair, live list, detail with approvals and reply, history). The conversation UI landed 2026-10-20 (`42b20d1`): the phone lists agents as chats (host chips, unread dots) and opens each as turns with an inline prompt and a composer; the old list and detail screens are gone. New sessions landed 2026-10-20 (`c2acdf1`, `c4df542`, `ad960d6`): the phone starts an agent on a chosen device, kind and folder, inside that bridge's configured roots. Conversation history landed 2026-10-20 (`15b48d8`): transcripts give `asked_at` and `completed_at`, the relay keeps 100 items per pane, and the bridge backfills 20 turns. Phone push landed 2026-10-20 (`e7af181`, `7961b48`): local-only chat notifications from the relay's data-only pushes, one per agent, with replies, approvals and `resolved`, and approving actions behind the phone lock. Relay-hosted OTA updates landed 2026-10-21 (`6a7e8de`, `46cbeb4`, `ab5c86f`, `0732f57`, `431e22d`): authenticated metadata and APK endpoints under `AW_UPDATE_DIR`, a shared `:core` checker/downloader that verifies size and SHA-256, update cards on both apps, release signing from git-ignored `keystore.properties`, and `make publish-android`. Builds, lints and passes its JVM tests (206 `:core` tests per variant, 79 `:app`, 27 `:mobile`); the phone app is now release-signed: `0.4.0` (code 5) was installed by hand and `0.4.1` (code 6) is published on the relay (`publish-android.sh --phone`), the watch still runs the debug-signed `1.3.1`, and the update flow is not verified on a device yet. Push is unexercised until the owner adds `mobile/google-services.json`; relay `0.9.0` and bridge `0.9.0` are deployed (temporary branch build, to be rebuilt from `main` after the PR merges). Next: settings, then the device check | OpenCode (2026-10-20) |
 | [8 Several hosts on one relay](phases/8-multi-host.md) | steps 1 (contract), 2a (relay `0.7.0`) and 2b (Wear OS `1.4.0`) done 2026-10-10 on branch `multi-host-contract` (PR #31), tests only; a review on 2026-10-11 fixed 7 relay findings (presence catch-up when the Mac drops, offline `hosts add` of the env host, a second machine's token synced as `AW_HOST_TOKEN`, legacy paths and offline hosts, revoked hosts' pushes, re-migration after a rollback) and 4 Wear OS ones (targets on offline hosts, focused pane across hosts, approvals and pins from before hosts); a local end-to-end run on 2026-10-11 passed (a test relay, four bridges: the Mac twice, two Linux machines; the debug app on the emulator): one page per host, two hosts with the same pane id kept apart in the list, history and notifications, commands reaching only their host, `host_required` on a legacy path, `host_offline` and the offline page, a revoked host's page gone, and pairing from a non-first host; step 3 (deploy, register hosts, install the bridges) and step 4 (on the watch) not started | — |
 
+## Apps
+
+One line per app: what runs today and what is left. The versions live in [`VERSIONS`](../VERSIONS); the deploys are in the line below.
+
+| App | State | What is left |
+|---|---|---|
+| **Phone (`:mobile`)** | Release-signed, paired and it updated itself over the relay: the update card, the download, the SHA-256 check and Android's installer all worked (2026-10-21). The chat list, the conversation, the approval card, the new-session form and the update banner are in place. | The settings screen, push (needs the owner's `mobile/google-services.json`), the phase's step-5 device checks, and the UI/UX pass ([`docs/phases/7-android-mobile.md`](phases/7-android-mobile.md) § step 6). |
+| **Watch (`:app`)** | Runs on the Pixel Watch 2 as a debug-signed build; the several-hosts work is in the code but not on the wrist. | Its own release build, its update card, the unknown-sources screen and the pending watch checks (the owner's watch day). |
+| **watchOS** | Not started (phase 6); the Swift models mirror `pkg/model`. | After phase 5. |
+| **Bridge** | Runs on the owner's Mac: the relay link, the transcript reads, the host sessions and the presence switch. | Rebuild from `main` after PR #32 merges; the "Only Notify When Away" checks. |
+| **Relay** | Runs on the VPS: the snapshots, the SSE stream, the commands and the phone's update. | Rebuild from `main` after PR #32 merges; phase 8 steps 3–4 (the other hosts). |
+| **macOS menu bar** | Released; the presence switch lives in it. | The single-app packaging idea, later. |
+| **herdr overrides** | The Claude override is still installed and still needed (upstream #5004). | Drop it when upstream detects the dialogs and the background-agent wait. |
+
 **Deployed** (2026-10-21): the relay `0.9.0` and, on the owner's Mac, the bridge `0.9.0` (Only Notify When Away on), both built from `bbce7a7` on branch `android-phone-ota` while its PR is open; rebuild and redeploy both from `main` after the squash merge. The menu bar `0.6.0` (rebuilt from `main` on 2026-10-07) and the Wear OS app `1.3.1` (release build, version code 12, 2026-10-07) are unchanged. The phone app `0.4.1` (version code 6) is release-signed, installed and paired on the owner's phone and published to the relay's update directory (2026-10-21); the watch app was neither rebuilt nor published (its release build comes with the watch's own day). The component versions are in `VERSIONS`.
 
 **What can run in parallel:**
@@ -38,6 +52,9 @@ The one place for the project's state: what is done, what is open, what comes ne
 - The `:mobile` release build is installed and paired on the owner's phone (2026-10-21, `0.4.0` then the update to `0.4.1`); run the checks of the phase's step 5 with sandbox agents only: pair; the chat list is live and sorts by recency with "Needs you" above; with both machines online, the host chips filter it; answering a prompt inline and typing a message both reach the agent; an unread dot appears for a chat that changed; history opens; "+" starts a session in a sandbox root and opens its chat; a folder or kind outside the bridge's config is refused; `agent-watch-relay devices revoke <id>` cuts the phone at once. For push: a blocked sandbox agent posts one chat notification per agent, the summary groups two or more chats, tapping one opens that chat, a reply from the notification reaches the agent, Allow is refused while the phone is locked and works unlocked, Deny/Cancel/reply work locked, a reply from the computer withdraws the approval when the relay has `AW_PUSH_RESOLVED` on, and the watch shows no duplicate notification. No settings screen yet. The conversation UI, the history, the new-session form and the notifications have run only through their JVM tests and lint, not on a phone or emulator: pairing there registers a device on the production relay that the owner must then revoke.
 - Re-confirm pairing and push on the owner's Pixel Watch 2 after the `:core` extraction: the application id, signing key and behaviour are unchanged, the data layer is now a library (`:core`).
 - Finish the phase's definition of done: the phone is described in `docs/GUIDE.md` (§ 3); delete `phases/7-android-mobile.md` when the device check and push land.
+
+### Phone UI and UX (claimed by OpenCode, 2026-10-21)
+The owner's focus now: the phone's design and usability. The checklist lives in [`docs/phases/7-android-mobile.md`](phases/7-android-mobile.md) § step 6; the open question is the owner's own list of what feels wrong on the device. The loop is short: change the code, run the `:mobile` JVM tests and lint, `deploy/relay/publish-android.sh --phone` (the release key is in place, so the phone updates itself), and check the change on the phone through the update card. One change at a time, each one visible on the device before the next.
 
 ### Phone client: conversation UI, several hosts and new sessions (2026-10-20)
 Claimed by OpenCode (2026-10-20). The owner's decisions: the Gradle root stays `wearos-app/` (no `android/` rename); a session created from the phone lands in one herdr workspace per folder, one tab and one agent per session; the bridge may start only configured agent kinds (default `claude`, `agy`, `opencode`) under configured root folders; phone push arrives with the conversation UI. Order: (1) chat UI with host filter, (2) new sessions from the phone (contract, relay, bridge, folder picker), (3) conversation history with timestamps, longer retention and transcript backfill, (4) phone push.
@@ -128,11 +145,13 @@ Only changes that affect what the system does (the owner's rule, 2026-10-07): a 
 
 ## Next steps
 
-1. **Phase 5**, above.
-2. **Drop the claude herdr override** once herdr detects the dialogs and the background-agent wait (#5004) by itself (the drafted upstream issue for the dialogs stays unfiled for now).
-3. **Phase 7**, the Android phone client.
-4. **Phase 6**, the watchOS client.
-5. **Later ideas:**
+1. **The phone's UI and UX pass** (phase 7, step 6): the owner's list of what to change on the device, one change at a time, published with `publish-android.sh --phone` and checked on the phone.
+2. **Phase 7's rest**: the settings screen, push (owner action), the step-5 device checks with sandbox agents.
+3. **Phase 5**, above (the release gate).
+4. **Drop the claude herdr override** once herdr detects the dialogs and the background-agent wait (#5004) by itself (the drafted upstream issue for the dialogs stays unfiled for now).
+5. **Phase 8** steps 3–4: the other hosts on the relay, and the watch.
+6. **Phase 6**, the watchOS client.
+7. **Later ideas:**
    - a Telegram bot with inline approval buttons, for when the watch is charging;
    - Discord webhook summaries;
    - dedicated adapters for Codex, Pi, Amp and other CLI agents;

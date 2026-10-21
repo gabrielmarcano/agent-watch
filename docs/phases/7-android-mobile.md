@@ -103,6 +103,17 @@ The relay does not care what kind of client it serves. Any app that pairs (`POST
 - `agent-watch-relay devices revoke <id>` cuts the phone at once.
 - **No duplicate notification on the watch.**
 
+### 6. UI and UX pass (the owner's focus, from 2026-10-21)
+The watch's information architecture is the reference (`wearos-app/ARCHITECTURE.md` §4a–§4b); the phone's layout is its own. The owner drives this step: they say what feels wrong on the device, and each change goes through the same loop — code, JVM test, lint, `:mobile:assembleRelease`, `deploy/relay/publish-android.sh --phone`, then the update card on the phone. The release key makes that loop a couple of minutes, so changes are small and one at a time, each visible on the device before the next.
+
+Checklist (each row is a decision to take, not a promise):
+- **Chat list:** the order (today "Needs you" first, then by recency); what a row shows (name, preview, status, host, time) and what it drops; the unread dot; pull to refresh instead of the refresh icon; what a swipe does; where the global **History** screen belongs; searching the chats.
+- **Chat screen:** the top bar (name, status, host); the composer (size, keyboard action, voice through the system keyboard, attachments); the approval card (Allow, Deny, More options, "Don't ask again"); what a blocked agent looks like; stopping a running turn; copying an answer; the agent's info lines (workspace, folder, screen capture).
+- **New session:** how the device, the agent kind and the folder are chosen; how much the form asks before the session starts.
+- **Settings (missing today):** relay URL, unpair, notification behaviour (channels, quiet), the update check, about (version, links to the guide).
+- **States:** connecting, offline, revoked, an expired session, an empty list, a failed action — each one says what to do next.
+- **Feel:** haptics on an approval, the dark theme, font scaling, one-handed reach, the back gesture.
+
 ---
 
 ## Tests
@@ -117,6 +128,7 @@ The relay does not care what kind of client it serves. Any app that pairs (`POST
 - [ ] Step 1 committed on its own; the Wear OS app behaves the same on the watch; guards, skills and docs use the new paths.
 - [ ] `:mobile` release build installed on the owner's phone.
 - [ ] Every step-5 check passes with the watch paired: no duplicate notification on the wrist; a locked phone cannot approve.
+- [ ] The step-6 UI/UX pass is done with the owner, each change seen on the device.
 - [ ] No personal values in tracked files (relay domain, Firebase ids): `git grep` before committing.
 - [ ] `docs/STATUS.md` updated per its workflow, and this guide deleted; `docs/GUIDE.md` and `AGENTS.md` §2 describe the phone client and the new layout.
 
