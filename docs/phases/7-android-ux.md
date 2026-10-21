@@ -43,14 +43,13 @@ Bottom navigation, like WhatsApp's, with three destinations and one FAB:
 
 ```
 ┌─────────────────────────────────┐
-│  Chats        History    Settings│   ← bottom navigation bar
+│   Chats      Machines  Settings│   ← bottom navigation bar
 │      ⊕                          │   ← FAB: new session (Chats only)
 └─────────────────────────────────┘
 ```
 
 - **Chats** — the conversation list (the current home screen).
 - **Machines** — the hosts the relay knows, above all the owner's other machine (section 12).
-- **History** — the current global history screen, moved out of the top bar (it is a place you visit, not a button you remember).
 - **Settings** — new: relay, pairing, notifications, appearance, about.
 - **FAB → New session** — a three-step sheet, not a long form.
 
@@ -141,11 +140,12 @@ Each slice is one commit, one publish, one look on the device.
 | 4 | **Conversation** | The time inside the bubble, a tick on a sent message, the top bar with the agent's face, its real state and a menu (mark read, mute, details), the predictive back, the shared face that flies from the row into the chat | Yes |
 | 5 | **Composer** | The growing field, the IME action, the send haptic, a failure with a retry | Yes |
 | 6 | **Approvals** | The choice confirmed in the card, the haptics (confirm on Allow, reject on Deny) | Yes |
-| 7 | **Navigation and settings** | The bottom bar (Chats, Machines, History, Settings) with the waiting count on the Chats tab; the Settings screen (relay, device, forget, the theme switches, the muted chats, the update check, the connection) | Yes |
+| 7 | **Navigation and settings** | The bottom bar (Chats, Machines, Settings) with the waiting count on the Chats tab; the Settings screen (relay, device, forget, the theme switches, the muted and hidden chats, the update check, the connection) | Yes |
 | 8 | **New session** | Three steps: the machine, the agent, the folder | Yes |
 | 9 | **Machines** | The hosts the relay knows: their state, their agents, their projects, their chats, a session started there | Yes |
 | 10 | **Notifications** | A muted chat stays quiet, the approvals have their own channel (a short double pulse) and the replies a light tick | Yes |
 | 11 | **States and polish** | The connection strip in the chat, the avatar's status name for the screen reader, the refresh error | Yes |
+| 12 | **The owner's first look (2026-10-21)** | The chat opens at the end at once, the global **history goes away** (every chat has its own), the back gesture works, the long press offers WhatsApp's options (pin, mute, mark as read, hide) and the pinned chats sit on top | Yes |
 
 What the build left out, and why:
 
@@ -153,6 +153,22 @@ What the build left out, and why:
 - **The long-press selection mode.** The swipe marks a chat read; the mode waits for the mute work, which is in the notifications slice.
 - **The expressive motion scheme.** Still internal in Material 3 1.4.0: it comes with the AGP 9 / Compose 1.12 change, which touches the watch too.
 - **The new session is a full-screen wizard**, not a modal sheet: the sheet would hide the machine list it starts from, and the wizard keeps the three steps obvious.
+- **The long-press selection mode** (a multi-select with a bar of actions) is still not there: the sheet
+  with the options is, and it is what the owner asked for. A multi-select comes later, if it is asked
+  for again.
+
+## 13. What the owner's first look changed (2026-10-21)
+
+- **The chat opens at the end, at once.** The first jump to the last message is a scroll, not an
+  animation: a long conversation used to crawl down to the bottom for seconds. Later turns animate.
+- **The global history is gone.** Every chat carries its own history (the relay keeps 100 turns per
+  pane), so a separate list of past answers was a second place to look at the same thing. The bottom
+  navigation is now Chats, Machines and Settings.
+- **The back gesture works.** The predictive back handler now navigates when the gesture *completes*
+  (its flow ends) instead of waiting for a progress value that never arrived.
+- **A long press on a chat opens WhatsApp's sheet:** pin, mute, mark as read, hide. Pinned chats sit
+  on top of the list with a pin mark; a hidden chat leaves the list and comes back from the settings
+  (the agent keeps running: hiding is the phone's own reading habit, not relay state).
 
 ## 12. Machines: the other herdr hosts
 
