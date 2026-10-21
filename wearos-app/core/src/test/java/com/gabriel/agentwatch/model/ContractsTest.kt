@@ -115,6 +115,23 @@ class ContractsTest {
     }
 
     @Test
+    fun testParseHistoryItemTimes() {
+        val item = Gson().fromJson(
+            """{"id":"h1","pane_id":"w1:p1","agent":"claude","label":"app","query":"q","response":"a","source":"transcript","asked_at":"2026-10-05T10:00:00Z","completed_at":"2026-10-05T10:01:00Z"}""",
+            HistoryItem::class.java
+        )
+        assertEquals("2026-10-05T10:00:00Z", item.asked_at)
+        assertEquals("2026-10-05T10:01:00Z", item.completed_at)
+
+        // A relay that predates the field, or a screen capture, sends no asked_at.
+        val old = Gson().fromJson(
+            """{"id":"h2","pane_id":"w1:p1","agent":"claude","label":"app","response":"a","source":"screen","completed_at":"2026-10-05T10:01:00Z"}""",
+            HistoryItem::class.java
+        )
+        assertEquals(null, old.asked_at)
+    }
+
+    @Test
     fun testResolveTargetAgent() {
         val a1 = AgentState(pane_id = "p1", label = "Agent 1", status = "working", updated_at = "2026-09-23T10:00:00Z")
         val a2 = AgentState(pane_id = "p2", label = "Agent 2", status = "done", updated_at = "2026-09-23T11:00:00Z")

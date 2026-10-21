@@ -70,6 +70,10 @@ type AgentRemovedMsg struct {
 type HistoryItemMsg struct {
 	Type string      `json:"type"` // "history_item"
 	Item HistoryItem `json:"item"`
+	// Backfill marks an older turn the bridge read from the transcript when
+	// it first saw the pane: the relay stores and shows it like any other
+	// item but must not take it for the reply of a pending "done" push.
+	Backfill bool `json:"backfill,omitempty"`
 }
 
 // Command actions. The first three act on one pane; the last three are

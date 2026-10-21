@@ -360,15 +360,24 @@ private fun Conversation(
 @Composable
 private fun TurnRow(item: HistoryItem) {
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        item.query?.takeIf { it.isNotBlank() }?.let { QueryBubble(it) }
+        item.query?.takeIf { it.isNotBlank() }?.let { QueryBubble(it, item.asked_at) }
         AnswerBubble(item)
     }
 }
 
 @Composable
-private fun QueryBubble(text: String) {
+private fun QueryBubble(text: String, askedAt: String?) {
     Bubble(mine = true, container = MaterialTheme.colorScheme.primaryContainer) {
         Text(text, style = MaterialTheme.typography.bodyLarge)
+        val stamp = chatStampText(chatStamp(askedAt.orEmpty(), Instant.now()))
+        if (stamp.isNotEmpty()) {
+            Text(
+                text = stamp,
+                modifier = Modifier.align(Alignment.End),
+                style = MaterialTheme.typography.labelSmall,
+                color = OnSurfaceVariant
+            )
+        }
     }
 }
 

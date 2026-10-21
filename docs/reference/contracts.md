@@ -181,12 +181,15 @@ type HistoryItem struct {
     Query       string `json:"query,omitempty"`
     Response    string `json:"response"`
     Source      string `json:"source"` // "transcript" | "screen"
+    AskedAt     string `json:"asked_at,omitempty"`
     CompletedAt string `json:"completed_at"`
 }
 ```
 
 - **`id`** is the first 16 hex characters of `sha256(pane_id + "\n" + session_value + "\n" + query + "\n" + response)`. It is deterministic, so a resent item deduplicates on the relay, which keeps history per `(host, pane_id)`.
 - **`host`**: as in `AgentState` (§1.2), stamped by the relay.
+- **`asked_at`** is when the user sent the query, RFC 3339 UTC, as the agent's transcript records it. Omitted when the source cannot tell (a screen capture, or a relay that predates the field): clients then fall back to `completed_at` for where the turn sits in the conversation.
+- **`completed_at`** is when the turn finished, from the transcript when it records it (`turn_duration` in Claude, the response step's time elsewhere), else when the bridge captured it (a screen capture, a transcript without a timestamp).
 - **`response`** is truncated to 65 536 bytes (`model.MaxResponseBytes`; why that bound: its comment) on a UTF-8 boundary, with `\n\n…[truncated]` appended when cut.
 - **`source`:**
   - `"transcript"` means `response` is the agent's own markdown.
@@ -272,7 +275,7 @@ Never accept a token in the query string.
 - `limit` defaults to 20, maximum 200. A missing, invalid or ≤ 0 value means 20.
 - Items are sorted newest first.
 
-**History retention** (`pkg/relay/store.go`): the relay keeps at most 20 items per pane (per `(host, pane_id)`) and 200 in total (the oldest go first), and, each time a history item arrives, drops every pane whose newest item is older than 7 days. So a request with `pane_id` never returns more than 20.
+**History retention** (`pkg/relay/store.go`): the relay keeps at most 100 items per pane (per `(host, pane_id)`) and 500 in total (the oldest go first), and, each time a history item arrives, drops every pane whose newest item is older than 30 days. So a request with `pane_id` never returns more than 100.
 
 **New sessions** (`POST /v1/hosts/{host}/sessions`, `GET …/sessions/options`, `GET …/folders`):
 
@@ -489,8 +492,9 @@ type AgentRemovedMsg struct {
     PaneID string `json:"pane_id"`
 }
 type HistoryItemMsg struct {
-    Type string      `json:"type"` // "history_item"
-    Item HistoryItem `json:"item"`
+    Type     string      `json:"type"` // "history_item"
+    Item     HistoryItem `json:"item"`
+    Backfill bool        `json:"backfill,omitempty"` // an older turn read at startup
 }
 type CommandMsg struct {
     Type        string `json:"type"`       // "command"
@@ -522,6 +526,8 @@ type ResyncMsg struct {
 ```
 
 **Pane commands and host requests:** `prompt`, `answer` and `cancel` name a pane; the bridge re-lists, re-reads and re-validates before acting (§4, `.agents/rules/herdr-integration.md`). `session.options`, `folders.list` and `session.create` are host-level: no `pane_id`, no `expected_seq`, and their result carries the payload in `options`, `folders` or `session`. They share the request ids, the per-host budget and the duplicate-request guard. The bridge serialises `session.create` calls on one host, so two creates cannot race for the same workspace.
+
+**Backfilled turns:** when the bridge first sees a pane, or a new `agent_session` in it, it reads the last finished turns from the transcript (`agents.md` §1) and sends them oldest first with `backfill: true`. The relay stores and broadcasts them like any other `history_item`, but never uses one as the reply of a pending `done` push (§4.3). A turn the live capture also sends carries the same `id`, so the relay drops one.
 
 **Sequence on connect:**
 1. The bridge sends `hello`.

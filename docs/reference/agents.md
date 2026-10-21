@@ -16,7 +16,7 @@ The rest of the system (`pkg/herdr`, the relay, the clients) must stay agent-agn
 
 ## 1. Adapter contract
 
-The interfaces (`Adapter`, the optional `FocusGuard`, `ViewDetector`, `ScreenTurnReader`) and the registry: `pkg/agents/adapter.go` and `pkg/agents/screen.go`.
+The interfaces (`Adapter`, the optional `FocusGuard`, `ViewDetector`, `ScreenTurnReader`, `HistoryReader`) and the registry: `pkg/agents/adapter.go` and `pkg/agents/screen.go`.
 
 - **Registry:** an exact match on herdr's `agent` field. Anything not registered uses `generic`.
 - **Focus guard:** only `opencode` implements it: §5.1.
@@ -26,6 +26,7 @@ The interfaces (`Adapter`, the optional `FocusGuard`, `ViewDetector`, `ScreenTur
 - **Overrides:** adapters embed the generic behaviour and override only what differs.
 - **Missing transcript:** `LastTurn` returns `ErrNoTranscript` (possibly wrapped with the reason, ids only) when it cannot find or read one; a cancelled context returns `ctx.Err()` (opencode only when it is cancelled before its query; mid-query, `ErrNoTranscript`). On any error the bridge falls back to a screen capture (§6), except `ErrNoReply`.
 - **No reply yet:** `LastTurn` returns `ErrNoReply` when the last turn has no reply to publish yet (claude: §3.2 step 5). The bridge then publishes nothing, not even a screen capture.
+- **History reader (backfill):** `claude`, `agy` and `opencode` implement `HistoryReader` (`RecentTurns`): up to `max` finished turns of the same transcript, newest first, only turns with a query and an answer, with `asked_at` and `completed_at` when the transcript records them. The bridge asks for 20 when it first sees a pane, or a new `agent_session` in it, and the pane's view shows a conversation; it sends the items oldest first marked `backfill` (`contracts.md` §3) and reads again only when the session changes. A failed read publishes nothing (the live capture covers the last turn); a turn the live capture also sends carries the same `id`, so the relay drops one.
 
 ---
 
@@ -41,7 +42,7 @@ The interfaces (`Adapter`, the optional `FocusGuard`, `ViewDetector`, `ScreenTur
 | Keys for option n | `[fmt.Sprint(n)]` (digit selection) |
 | Cancel | `["esc"]` |
 | Prompt while working | `false` |
-| History | none — always `ErrNoTranscript` |
+| History | none — always `ErrNoTranscript`; no `HistoryReader` |
 
 **Hard rules:**
 - **Never map options by position.** Always use the label.
@@ -104,7 +105,9 @@ The interfaces (`Adapter`, the optional `FocusGuard`, `ViewDetector`, `ScreenTur
    - with no query either: no turn in the file — `ErrNoTranscript` (a screen capture would show nothing either).
 
    `ErrNoReply` publishes nothing, never a screen capture: the screen would hold the running turn's live progress, a message queued in the composer or the chrome over the input box (§6).
-6. `LastTurn` fills only `query`, `response` and `source`. The bridge computes `HistoryItem.id` with `SessionRef.Value` as `session_value` (the UUID for `kind="id"`, the path for `kind="path"`), herdr's session even when §3.3 picked another.
+6. `LastTurn` fills `query`, `response`, `source`, and `asked_at` (the query line's `timestamp`) and `completed_at` (the turn's last timestamped line, normally its `turn_duration`) when the transcript has them. The bridge computes `HistoryItem.id` with `SessionRef.Value` as `session_value` (the UUID for `kind="id"`, the path for `kind="path"`), herdr's session even when §3.3 picked another, and stamps `completed_at` only when it is empty.
+
+**`RecentTurns` (backfill)** reads the largest tail window (4 MiB) once and parses it as `LastTurn` does. It takes the last `max` main-chain `turn_duration` lines, newest first; for each, the query is the last user line after the previous turn end, the answer is `LastTurn` steps 3–4 on the slice up to this one, and `asked_at`/`completed_at` are the query line's and the `turn_duration` line's `timestamp`. A turn whose query lies before the window, or whose answer has no text, is skipped; an interrupted turn has no `turn_duration` and is never backfilled.
 
 ### 3.3 Which session the pane shows
 
@@ -178,6 +181,9 @@ Limits: a task started before the 16 MiB, or in the file a `continued-in` record
 2. **Query** = the last `USER_INPUT` step's `content` inside `<USER_REQUEST>…</USER_REQUEST>`, trimmed. Antigravity 1.2.x appends `<ADDITIONAL_METADATA>` (local time) and sometimes `<USER_SETTINGS_CHANGE>` after it; content without the wrapper is used as is.
 3. **Response** = `content` of the last `PLANNER_RESPONSE` after that query that has a non-empty `content` and an empty or missing `tool_calls`. `PLANNER_RESPONSE` steps with tool calls have no `content`.
 4. If there is no such response, return `ErrNoTranscript`.
+5. **Times:** `asked_at` = the `USER_INPUT` step's `created_at`; `completed_at` = the chosen response step's `created_at`.
+
+**`RecentTurns` (backfill)** splits the 256 KiB tail at `USER_INPUT` steps; for each, the query and answer follow steps 2–3, and the times step 5. A turn with no text answer is skipped, and only the newest `max` are returned, newest first.
 
 ---
 
@@ -211,7 +217,7 @@ Limits: a task started before the 16 MiB, or in the file a `continued-in` record
 
 **`LastTurn` algorithm:**
 ```sql
-SELECT id, data FROM message
+SELECT id, time_created, data FROM message
 WHERE session_id = ?
 ORDER BY time_created DESC, id DESC
 LIMIT 40;
@@ -226,13 +232,17 @@ LIMIT 40;
 
 4. Join the `text` of the parts whose `type == "text"`. Skip `reasoning` and `tool`.
 5. If either side is empty, return `ErrNoTranscript`.
+6. **Times:** `asked_at` and `completed_at` are the two messages' `time_created` (Unix milliseconds), as RFC 3339 UTC.
 
 **V2 (2.0.25, 2026-10-10):** V2 writes to `session_message(id, session_id, type, seq, time_created, time_updated, data)` and keeps the V1 tables (V1 sessions were copied over; their new turns go only to `session_message`). `type` ∈ `user`, `assistant` (one row per step), `synthetic` (e.g. a restart notice), `system`, `idle`, `compaction`. A user row's `data.text` is the message; an assistant row's `data.content` is a list like V1's parts (`text`, `reasoning`, `tool`). Sample: `session-v2.json`.
 
 **V2 `LastTurn`**, tried first; the V1 algorithm runs only when the database has no `session_message` table or no user row for the session:
-1. **Query** = `SELECT seq, data FROM session_message WHERE session_id = ? AND type = 'user' ORDER BY seq DESC LIMIT 1`, its `text`. Looked up alone, because a turn can have more than 40 steps (one had 43).
-2. **Response** = the newest of `SELECT data FROM session_message WHERE session_id = ? AND type = 'assistant' AND seq > <query seq> ORDER BY seq DESC LIMIT 40` whose `content` has text, its `text` items joined.
+1. **Query** = `SELECT seq, time_created, data FROM session_message WHERE session_id = ? AND type = 'user' ORDER BY seq DESC LIMIT 1`, its `text`. Looked up alone, because a turn can have more than 40 steps (one had 43).
+2. **Response** = the newest of `SELECT time_created, data FROM session_message WHERE session_id = ? AND type = 'assistant' AND seq > <query seq> ORDER BY seq DESC LIMIT 40` whose `content` has text, its `text` items joined.
 3. Either side empty → `ErrNoTranscript`.
+4. **Times:** `asked_at` and `completed_at` are the two rows' `time_created` (Unix milliseconds), as RFC 3339 UTC.
+
+**`RecentTurns` (backfill)** reads the last `max` user rows and, for each, the newest assistant row with text between it and the next user row (`session_message`); when V2 has no user row it takes the last `max`×8 messages of the V1 window (at most 400) and pairs each user with the newest assistant step with text before the next user. Turns without text are skipped; the items are newest first, with the times above.
 
 ⚠️ This schema is internal to OpenCode and may change between versions. On any SQL error, return `ErrNoTranscript`; a row whose JSON does not decode is skipped. Never crash. The screen fallback covers it.
 
@@ -253,7 +263,7 @@ Used when an agent has no transcript reader, when herdr gives no trusted `agent_
    Otherwise the whole screen above the input box is kept.
 5. **Tables drawn with box characters become markdown tables** (`pkg/agents/boxtable.go`), so clients handle one table form. A grid needs a top border with at least one junction (`┌─┬─┐`, also rounded, heavy or double) and rows whose cells match it; anything else, such as a one-column dialog box, stays as it is. Claude Code draws a separator under every row, so each group of lines between separators is one row, its wrapped lines joined per column. With a separator under the header only (or none), each line is a row, and a line with an empty first cell continues the row above. A missing bottom border (cut with the input box) ends the table at its last row. Fixture: `testdata/claude/table-box.txt`.
 6. Keep the last 80 lines.
-7. `HistoryItem{Source: "screen", Query: <message or "">, Response: <text>}`.
+7. `HistoryItem{Source: "screen", Query: <message or "">, Response: <text>}`. A screen capture has no `asked_at`, and no `completed_at` either: the bridge stamps `completed_at` when it publishes the item.
 
 ---
 

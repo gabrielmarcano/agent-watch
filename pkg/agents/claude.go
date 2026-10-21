@@ -286,6 +286,7 @@ type claudeLine struct {
 	IsSidechain bool            `json:"isSidechain"`
 	IsMeta      bool            `json:"isMeta"`
 	Subtype     string          `json:"subtype"`
+	Timestamp   string          `json:"timestamp"`
 	Message     json.RawMessage `json:"message"`
 }
 
@@ -346,12 +347,82 @@ func (c *claudeAdapter) LastTurn(ctx context.Context, ref SessionRef) (*model.Hi
 			return nil, fmt.Errorf("%w: the last turn has no answer yet", ErrNoReply)
 		}
 		return &model.HistoryItem{
-			Query:    turn.query,
-			Response: model.TruncateUTF8(turn.response, model.MaxResponseBytes),
-			Source:   "transcript",
+			Query:       turn.query,
+			Response:    model.TruncateUTF8(turn.response, model.MaxResponseBytes),
+			Source:      "transcript",
+			AskedAt:     turn.askedAt,
+			CompletedAt: turn.completedAt,
 		}, nil
 	}
 	return nil, ErrNoTranscript
+}
+
+// RecentTurns implements HistoryReader: up to max finished turns of the
+// conversation the pane shows, newest first, from the largest tail window.
+// Only turns closed by a turn_duration record count (an interrupted turn has
+// none); the live capture publishes the last one as it ends.
+func (c *claudeAdapter) RecentTurns(ctx context.Context, ref SessionRef, max int) ([]model.HistoryItem, error) {
+	if max <= 0 {
+		return nil, ErrNoTranscript
+	}
+	path, err := c.sessionPath(ctx, ref)
+	if err != nil {
+		return nil, err
+	}
+	content, err := TailFile(path, c.tailWindows[len(c.tailWindows)-1])
+	if err != nil {
+		return nil, ErrNoTranscript
+	}
+	entries, err := parseClaudeEntries(ctx, content)
+	if err != nil {
+		return nil, err
+	}
+
+	var ends []int
+	for i, e := range entries {
+		if e.turnEnd {
+			ends = append(ends, i)
+		}
+	}
+	if len(ends) == 0 {
+		return nil, ErrNoTranscript
+	}
+	if len(ends) > max {
+		ends = ends[len(ends)-max:]
+	}
+
+	items := make([]model.HistoryItem, 0, len(ends))
+	for i := len(ends) - 1; i >= 0; i-- { // newest first
+		start := 0
+		if i > 0 {
+			start = ends[i-1] + 1
+		}
+		userIdx := -1
+		for j := ends[i] - 1; j >= start; j-- {
+			if entries[j].isUser {
+				userIdx = j
+				break
+			}
+		}
+		if userIdx < 0 {
+			continue
+		}
+		turn := claudeTurnIn(entries, userIdx, ends[i]+1)
+		if strings.TrimSpace(turn.query) == "" || strings.TrimSpace(turn.response) == "" {
+			continue
+		}
+		items = append(items, model.HistoryItem{
+			Query:       turn.query,
+			Response:    model.TruncateUTF8(turn.response, model.MaxResponseBytes),
+			Source:      "transcript",
+			AskedAt:     turn.askedAt,
+			CompletedAt: turn.completedAt,
+		})
+	}
+	if len(items) == 0 {
+		return nil, ErrNoTranscript
+	}
+	return items, nil
 }
 
 // isCommandWrapper reports whether a user line's trimmed text is Claude
@@ -390,9 +461,22 @@ func taskNotificationSummary(t string) (string, bool) {
 	return strings.Join(summaries, "\n"), true
 }
 
-// claudeTurn is the last turn found in a transcript tail.
+// claudeEntry is one main-chain line of a transcript that history reads.
+type claudeEntry struct {
+	isUser    bool
+	isAssist  bool
+	queryText string
+	blocks    []claudeContentBlock
+	results   []string // the tool_use ids a tool_result line answers
+	turnEnd   bool     // Claude's turn_duration record
+	timestamp string   // the line's RFC 3339 time, when it has one
+}
+
+// claudeTurn is one turn found in a transcript tail.
 type claudeTurn struct {
 	query, response string
+	askedAt         string // the query line's time
+	completedAt     string // the turn's last recorded time
 	// found is false when no message of the user is in the tail; the
 	// response is then the text after the last tool call in all of it.
 	found bool
@@ -401,24 +485,13 @@ type claudeTurn struct {
 	pendingTool string
 }
 
-// claudeLastTurn finds, in a transcript tail, the user's last message and the
-// answer after the last tool call that follows it.
-func claudeLastTurn(ctx context.Context, content string) (claudeTurn, error) {
-	lines := strings.Split(content, "\n")
-	type parsedEntry struct {
-		isUser    bool
-		isAssist  bool
-		queryText string
-		blocks    []claudeContentBlock
-		results   []string // the tool_use ids a tool_result line answers
-		turnEnd   bool     // Claude's turn_duration record
-	}
-
-	var entries []parsedEntry
-
-	for _, l := range lines {
+// parseClaudeEntries reads the main-chain user, assistant and turn-end lines
+// of a transcript tail, in order.
+func parseClaudeEntries(ctx context.Context, content string) ([]claudeEntry, error) {
+	var entries []claudeEntry
+	for _, l := range strings.Split(content, "\n") {
 		if err := ctx.Err(); err != nil {
-			return claudeTurn{}, err
+			return nil, err
 		}
 		trimmed := strings.TrimSpace(l)
 		if trimmed == "" {
@@ -433,7 +506,7 @@ func claudeLastTurn(ctx context.Context, content string) (claudeTurn, error) {
 			continue
 		}
 		if row.Type == "system" && row.Subtype == "turn_duration" {
-			entries = append(entries, parsedEntry{turnEnd: true})
+			entries = append(entries, claudeEntry{turnEnd: true, timestamp: row.Timestamp})
 			continue
 		}
 		if row.Type != "user" && row.Type != "assistant" {
@@ -468,8 +541,10 @@ func claudeLastTurn(ctx context.Context, content string) (claudeTurn, error) {
 					}
 					if len(results) > 0 {
 						// Tool output, not a message of the user.
-						entries = append(entries, parsedEntry{results: results})
-					} else if len(textParts) > 0 {
+						entries = append(entries, claudeEntry{results: results, timestamp: row.Timestamp})
+						continue
+					}
+					if len(textParts) > 0 {
 						textContent = strings.Join(textParts, "\n")
 					}
 				}
@@ -477,56 +552,65 @@ func claudeLastTurn(ctx context.Context, content string) (claudeTurn, error) {
 
 			// Filter out command wrappers and system reminders
 			t := strings.TrimSpace(textContent)
-			if row.IsMeta {
+			switch {
+			case row.IsMeta:
 				// Written by Claude Code, not typed by the user. Right after a
 				// turn ended (a background agent's notification) it starts a
 				// turn whose query is the notification's summary, if any;
 				// inside a turn (a skill's text) it is not a message at all.
 				if t != "" && (len(entries) == 0 || entries[len(entries)-1].turnEnd) {
 					summary, _ := taskNotificationSummary(t)
-					entries = append(entries, parsedEntry{isUser: true, queryText: summary})
+					entries = append(entries, claudeEntry{isUser: true, queryText: summary, timestamp: row.Timestamp})
 				}
-			} else if summary, ok := taskNotificationSummary(t); ok && strings.HasPrefix(t, taskNotificationTag) {
+			case strings.HasPrefix(t, taskNotificationTag):
 				// A background task's report, not the user's message: its
 				// summary stands for the raw markup.
-				entries = append(entries, parsedEntry{isUser: true, queryText: summary})
-			} else if t != "" && !isCommandWrapper(t) {
-				entries = append(entries, parsedEntry{
+				summary, _ := taskNotificationSummary(t)
+				entries = append(entries, claudeEntry{isUser: true, queryText: summary, timestamp: row.Timestamp})
+			case t != "" && !isCommandWrapper(t):
+				entries = append(entries, claudeEntry{
 					isUser:    true,
 					queryText: textContent,
+					timestamp: row.Timestamp,
 				})
 			}
-		} else if row.Type == "assistant" {
+		} else {
 			var blocks []claudeContentBlock
 			if err := json.Unmarshal(msg.Content, &blocks); err == nil {
-				entries = append(entries, parsedEntry{
-					isAssist: true,
-					blocks:   blocks,
+				entries = append(entries, claudeEntry{
+					isAssist:  true,
+					blocks:    blocks,
+					timestamp: row.Timestamp,
 				})
 			}
 		}
 	}
+	return entries, nil
+}
 
-	// Find the last user query
-	lastUserIdx := -1
-	for i := len(entries) - 1; i >= 0; i-- {
-		if entries[i].isUser {
-			lastUserIdx = i
-			break
-		}
-	}
+// claudeTurnIn walks forward from the user entry at lastUserIdx (-1: from the
+// start) to end (exclusive) and collects the answer after the last tool call.
+func claudeTurnIn(entries []claudeEntry, lastUserIdx, end int) claudeTurn {
 	var turn claudeTurn
 	if lastUserIdx >= 0 {
 		turn.query, turn.found = entries[lastUserIdx].queryText, true
+		turn.askedAt = transcriptTime(entries[lastUserIdx].timestamp)
+	}
+	for i := end - 1; i > lastUserIdx && i >= 0; i-- {
+		if ts := transcriptTime(entries[i].timestamp); ts != "" {
+			turn.completedAt = ts
+			break
+		}
 	}
 
-	// Walk forward from lastUserIdx (from the start without one) and collect
-	// assistant text blocks, resetting on tool_use. Track the calls still
-	// waiting for their tool_result.
+	start := lastUserIdx + 1
+	if lastUserIdx < 0 {
+		start = 0
+	}
 	var responseBlocks []string
 	pending := map[string]string{} // tool_use id -> tool name
 	lastCall := ""                 // the last tool_use, while no text follows it
-	for i := lastUserIdx + 1; i < len(entries); i++ {
+	for i := start; i < end; i++ {
 		e := entries[i]
 		for _, id := range e.results {
 			delete(pending, id)
@@ -549,7 +633,24 @@ func claudeLastTurn(ctx context.Context, content string) (claudeTurn, error) {
 		}
 	}
 	turn.response = strings.TrimSpace(strings.Join(responseBlocks, "\n\n"))
-	return turn, nil
+	return turn
+}
+
+// claudeLastTurn finds, in a transcript tail, the user's last message and the
+// answer after the last tool call that follows it.
+func claudeLastTurn(ctx context.Context, content string) (claudeTurn, error) {
+	entries, err := parseClaudeEntries(ctx, content)
+	if err != nil {
+		return claudeTurn{}, err
+	}
+	lastUserIdx := -1
+	for i := len(entries) - 1; i >= 0; i-- {
+		if entries[i].isUser {
+			lastUserIdx = i
+			break
+		}
+	}
+	return claudeTurnIn(entries, lastUserIdx, len(entries)), nil
 }
 
 func (c *claudeAdapter) resolvePath(ref SessionRef) string {

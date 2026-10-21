@@ -118,30 +118,22 @@ func (a *agyAdapter) ParsePrompt(screen string) (Prompt, bool) {
 type agyStep struct {
 	Type      string          `json:"type"`
 	Content   string          `json:"content"`
+	CreatedAt string          `json:"created_at"`
 	ToolCalls json.RawMessage `json:"tool_calls,omitempty"`
 }
 
-func (a *agyAdapter) LastTurn(ctx context.Context, ref SessionRef) (*model.HistoryItem, error) {
-	path := a.resolvePath(ref)
-	if path == "" {
-		return nil, ErrNoTranscript
-	}
+// agyEntry is one parsed step of an agy transcript.
+type agyEntry struct {
+	stepType  string
+	content   string
+	createdAt string
+	toolCalls bool
+}
 
-	content, err := TailFile(path, 256*1024)
-	if err != nil {
-		return nil, ErrNoTranscript
-	}
-
-	lines := strings.Split(content, "\n")
-	type parsedAgyStep struct {
-		stepType  string
-		content   string
-		toolCalls bool
-	}
-
-	var steps []parsedAgyStep
-
-	for _, l := range lines {
+// parseAgyEntries reads the steps of an agy transcript tail, in order.
+func parseAgyEntries(ctx context.Context, content string) ([]agyEntry, error) {
+	var entries []agyEntry
+	for _, l := range strings.Split(content, "\n") {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
@@ -160,11 +152,30 @@ func (a *agyAdapter) LastTurn(ctx context.Context, ref SessionRef) (*model.Histo
 			hasToolCalls = true
 		}
 
-		steps = append(steps, parsedAgyStep{
+		entries = append(entries, agyEntry{
 			stepType:  row.Type,
 			content:   row.Content,
+			createdAt: row.CreatedAt,
 			toolCalls: hasToolCalls,
 		})
+	}
+	return entries, nil
+}
+
+func (a *agyAdapter) LastTurn(ctx context.Context, ref SessionRef) (*model.HistoryItem, error) {
+	path := a.resolvePath(ref)
+	if path == "" {
+		return nil, ErrNoTranscript
+	}
+
+	content, err := TailFile(path, 256*1024)
+	if err != nil {
+		return nil, ErrNoTranscript
+	}
+
+	steps, err := parseAgyEntries(ctx, content)
+	if err != nil {
+		return nil, err
 	}
 
 	// Query = content of last USER_INPUT step
@@ -183,11 +194,11 @@ func (a *agyAdapter) LastTurn(ctx context.Context, ref SessionRef) (*model.Histo
 
 	// Response = content of the last PLANNER_RESPONSE after that query that has
 	// non-empty content and no tool_calls.
-	var response string
+	var response, completedAt string
 	for i := lastUserIdx + 1; i < len(steps); i++ {
 		s := steps[i]
 		if s.stepType == "PLANNER_RESPONSE" && !s.toolCalls && strings.TrimSpace(s.content) != "" {
-			response = s.content
+			response, completedAt = s.content, transcriptTime(s.createdAt)
 		}
 	}
 
@@ -199,10 +210,73 @@ func (a *agyAdapter) LastTurn(ctx context.Context, ref SessionRef) (*model.Histo
 	response = model.TruncateUTF8(response, model.MaxResponseBytes)
 
 	return &model.HistoryItem{
-		Query:    query,
-		Response: response,
-		Source:   "transcript",
+		Query:       query,
+		Response:    response,
+		Source:      "transcript",
+		AskedAt:     transcriptTime(steps[lastUserIdx].createdAt),
+		CompletedAt: completedAt,
 	}, nil
+}
+
+// RecentTurns implements HistoryReader: up to max finished turns, newest
+// first, from the transcript's 256 KiB tail. A turn ends where the next
+// USER_INPUT starts; its answer is the last PLANNER_RESPONSE with text and no
+// tool calls in between.
+func (a *agyAdapter) RecentTurns(ctx context.Context, ref SessionRef, max int) ([]model.HistoryItem, error) {
+	if max <= 0 {
+		return nil, ErrNoTranscript
+	}
+	path := a.resolvePath(ref)
+	if path == "" {
+		return nil, ErrNoTranscript
+	}
+	content, err := TailFile(path, 256*1024)
+	if err != nil {
+		return nil, ErrNoTranscript
+	}
+	steps, err := parseAgyEntries(ctx, content)
+	if err != nil {
+		return nil, err
+	}
+
+	items := make([]model.HistoryItem, 0, max)
+	for i, s := range steps {
+		if s.stepType != "USER_INPUT" {
+			continue
+		}
+		query := agyUserRequest(s.content)
+		if query == "" {
+			continue
+		}
+		var response, completedAt string
+		for j := i + 1; j < len(steps) && steps[j].stepType != "USER_INPUT"; j++ {
+			next := steps[j]
+			if next.stepType == "PLANNER_RESPONSE" && !next.toolCalls && strings.TrimSpace(next.content) != "" {
+				response, completedAt = next.content, transcriptTime(next.createdAt)
+			}
+		}
+		if strings.TrimSpace(response) == "" {
+			continue
+		}
+		items = append(items, model.HistoryItem{
+			Query:       query,
+			Response:    model.TruncateUTF8(strings.TrimSpace(response), model.MaxResponseBytes),
+			Source:      "transcript",
+			AskedAt:     transcriptTime(s.createdAt),
+			CompletedAt: completedAt,
+		})
+	}
+	if len(items) == 0 {
+		return nil, ErrNoTranscript
+	}
+	// Oldest first in the file: keep the newest max, newest first.
+	if len(items) > max {
+		items = items[len(items)-max:]
+	}
+	for i, j := 0, len(items)-1; i < j; i, j = i+1, j-1 {
+		items[i], items[j] = items[j], items[i]
+	}
+	return items, nil
 }
 
 // agyUserRequest returns what the user typed. Antigravity (1.2.x) stores a

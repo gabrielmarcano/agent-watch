@@ -18,7 +18,7 @@ import com.gabriel.agentwatch.network.RelayRepository
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 
-private const val PANE_PAGE = 50
+private const val PANE_PAGE = 100
 
 /**
  * One agent's finished turns (its host and pane), newest first: the live state's items (SSE and the

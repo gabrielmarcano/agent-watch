@@ -51,6 +51,7 @@ data class HistoryItem(
     val query: String? = null,
     val response: String = "",
     val source: String = "screen",         // "transcript" | "screen"
+    val asked_at: String? = null,          // when the user sent it; omitted when unknown
     val completed_at: String = "",
     val host: String = ""
 )

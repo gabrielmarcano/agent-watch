@@ -24,6 +24,7 @@ class ChatEntriesTest {
         query: String? = null,
         response: String = "answer",
         completedAt: String,
+        askedAt: String? = null,
         host: String = "h1",
         pane: String = "w1:p1",
         source: String = "transcript"
@@ -35,6 +36,7 @@ class ChatEntriesTest {
         query = query,
         response = response,
         source = source,
+        asked_at = askedAt,
         completed_at = completedAt,
         host = host
     )
@@ -87,6 +89,22 @@ class ChatEntriesTest {
                 ChatEntry.Turn(sameDay[0])
             ),
             chatEntries(sameDay, hasPrompt = false, working = false, zone = utc)
+        )
+    }
+
+    @Test
+    fun aTurnTakesTheDayItWasAskedEvenWhenTheAnswerCameTheNextDay() {
+        val item = turn(
+            "a",
+            completedAt = "2026-10-21T00:30:00Z",
+            askedAt = "2026-10-20T23:59:00Z"
+        )
+        assertEquals(
+            listOf(
+                ChatEntry.Day(LocalDate.of(2026, 10, 20)),
+                ChatEntry.Turn(item)
+            ),
+            chatEntries(listOf(item), hasPrompt = false, working = false, zone = utc)
         )
     }
 

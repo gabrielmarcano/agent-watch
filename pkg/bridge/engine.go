@@ -24,6 +24,9 @@ type paneState struct {
 	prompt     *agents.Prompt
 	lastHistID string
 	turnMarker string // the last turn end seen while working (StartTurnWatch)
+	// backfilledSession is the transcript session whose older turns this pane
+	// has already sent (engine.go, backfillHistory); "" before the first read.
+	backfilledSession string
 }
 
 // Engine connects herdr events and agent adapters to the remote relay.
@@ -252,6 +255,8 @@ func (e *Engine) OnChanges(changes []herdr.Change) {
 				})
 			}
 
+			e.maybeBackfillHistoryLocked(info.PaneID, cwd, agentName, info)
+
 			// History triggers: working -> done|idle, and a pane coming back
 			// to a conversation from a view without one (Claude's agents
 			// view), whose turns may have finished out of sight.
@@ -471,7 +476,10 @@ func (e *Engine) publishHistory(paneID, agent, sessionValue string, item model.H
 	item.ID = model.HistoryID(paneID, sessionValue, item.Query, item.Response)
 	item.PaneID = paneID
 	item.Agent = agent
-	item.CompletedAt = model.Now()
+	if item.CompletedAt == "" {
+		// A transcript turn carries its own time; a screen capture has none.
+		item.CompletedAt = model.Now()
+	}
 
 	e.mu.Lock()
 	st, exists := e.states[paneID]
@@ -493,6 +501,106 @@ func (e *Engine) publishHistory(paneID, agent, sessionValue string, item model.H
 			Type: model.WireHistoryItem,
 			Item: item,
 		})
+	}
+}
+
+// historyBackfillTurns is how many finished turns the bridge reads from a
+// transcript when it first sees a pane or a new session in it.
+const historyBackfillTurns = 20
+
+// maybeBackfillHistoryLocked starts a transcript backfill when the pane shows
+// a conversation whose session has not been read yet. e.mu must be held.
+func (e *Engine) maybeBackfillHistoryLocked(paneID, cwd, agent string, info herdr.AgentInfo) {
+	if e.Relay == nil || e.Agents == nil {
+		return
+	}
+	ref := info.TrustedSession()
+	if ref == nil {
+		return
+	}
+	ad := e.Agents.For(agent)
+	if _, ok := ad.(agents.HistoryReader); !ok {
+		return
+	}
+	if v, ok := ad.(agents.ViewDetector); ok && !v.ShowsConversation(titleOf(info)) {
+		return
+	}
+	st, ok := e.states[paneID]
+	if !ok || st.backfilledSession == ref.Value {
+		return
+	}
+	st.backfilledSession = ref.Value
+	go e.backfillHistory(paneID, cwd, agent, info, ref)
+}
+
+// backfillHistory publishes the older turns of a pane's transcript, oldest
+// first, so the relay's newest-first bucket ends up in order. The items are
+// marked Backfill: the relay stores and shows them but never takes one for
+// the reply of a pending "done" push (contracts.md §3). A read failure is
+// logged and forgotten: the live capture covers the last turn, and the relay
+// drops anything it already holds.
+func (e *Engine) backfillHistory(paneID, cwd, agent string, info herdr.AgentInfo, ref *herdr.AgentSession) {
+	ad := e.Agents.For(agent)
+	reader, ok := ad.(agents.HistoryReader)
+	if !ok {
+		return
+	}
+	budget := 2 * e.TranscriptTimeout
+	if budget <= 0 {
+		budget = 6 * time.Second
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), budget)
+	defer cancel()
+
+	items, err := reader.RecentTurns(ctx, agents.SessionRef{
+		Agent: ref.Agent,
+		Kind:  ref.Kind,
+		Value: ref.Value,
+		CWD:   cwd,
+		Title: titleOf(info),
+	}, historyBackfillTurns)
+	if err != nil {
+		if !errors.Is(err, agents.ErrNoTranscript) && e.Logger != nil {
+			e.Logger.Info("no history backfill", "pane_id", paneID, "agent", agent, "err", err)
+		}
+		if !errors.Is(err, agents.ErrNoTranscript) {
+			// A transient failure may succeed on the pane's next change;
+			// a missing transcript will not.
+			e.mu.Lock()
+			if st, ok := e.states[paneID]; ok && st.backfilledSession == ref.Value {
+				st.backfilledSession = ""
+			}
+			e.mu.Unlock()
+		}
+		return
+	}
+
+	e.mu.RLock()
+	st, exists := e.states[paneID]
+	if !exists || st.backfilledSession != ref.Value {
+		e.mu.RUnlock()
+		return // the pane went away or moved to another session
+	}
+	label := st.public.Label
+	e.mu.RUnlock()
+
+	for i := len(items) - 1; i >= 0; i-- { // RecentTurns is newest first
+		item := items[i]
+		item.ID = model.HistoryID(paneID, ref.Value, item.Query, item.Response)
+		item.PaneID = paneID
+		item.Agent = agent
+		item.Label = label
+		if item.CompletedAt == "" {
+			item.CompletedAt = model.Now()
+		}
+		e.Relay.Send(model.HistoryItemMsg{
+			Type:     model.WireHistoryItem,
+			Item:     item,
+			Backfill: true,
+		})
+	}
+	if e.Logger != nil && len(items) > 0 {
+		e.Logger.Info("history backfilled", "pane_id", paneID, "agent", agent, "turns", len(items))
 	}
 }
 

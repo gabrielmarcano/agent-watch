@@ -648,13 +648,13 @@ func TestStore_Hosts(t *testing.T) {
 	}
 }
 
-// History per (host, pane): the 20-per-pane cap is per host, the 200 cap is
-// global, and a pane-only query never returns more than 20.
+// History per (host, pane): the 100-per-pane cap is per host, the 500 cap is
+// global, and a pane-only query never returns more than 100.
 func TestStore_HistoryPerHost(t *testing.T) {
 	st, _ := NewStore(t.TempDir())
 	defer st.Close()
 	base := time.Now().UTC().Add(-time.Hour)
-	for i := 0; i < 25; i++ {
+	for i := 0; i < maxHistoryPane+5; i++ {
 		for _, host := range []string{"a", "b"} {
 			st.AddHistory(model.HistoryItem{ID: host + string(rune('A'+i)), Host: host, PaneID: "w1:p1", CompletedAt: base.Add(time.Duration(i) * time.Second).Format(time.RFC3339)})
 		}

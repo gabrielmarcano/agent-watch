@@ -24,9 +24,9 @@ import (
 const (
 	// storeVersion 2 added hosts and keyed history by (host, pane_id).
 	storeVersion    = 2
-	maxHistoryPane  = 20
-	maxHistoryTotal = 200
-	historyMaxAge   = 7 * 24 * time.Hour
+	maxHistoryPane  = 100
+	maxHistoryTotal = 500
+	historyMaxAge   = 30 * 24 * time.Hour
 
 	// DefaultHostID is AW_HOST_ID's default: the host AW_HOST_TOKEN
 	// authenticates, and the owner of the history a version 1 store held.

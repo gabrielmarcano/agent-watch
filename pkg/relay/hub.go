@@ -476,7 +476,11 @@ func (h *Hub) handleWireMessage(host *hostConnection, msg any) {
 		// Duplicates (the bridge resends after a reconnect) are not news.
 		if h.store.AddHistory(m.Item) {
 			h.state.BroadcastHistory(m.Item)
-			h.notifier.OnHistoryItem(m.Item)
+			if !m.Backfill {
+				// An older turn read at startup must not fill a pending
+				// "done" push with a reply that is not the turn's own.
+				h.notifier.OnHistoryItem(m.Item)
+			}
 		}
 	case model.HerdrStatusMsg:
 		h.state.SetHost(id, true, m.HerdrOnline)

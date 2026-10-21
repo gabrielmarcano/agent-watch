@@ -47,7 +47,7 @@ fun chatEntries(
     val entries = mutableListOf<ChatEntry>()
     var lastDay: LocalDate? = null
     history.asReversed().forEach { item ->
-        val day = completedDay(item, zone)
+        val day = turnDay(item, zone)
         if (day != null && day != lastDay) {
             entries += ChatEntry.Day(day)
             lastDay = day
@@ -62,9 +62,10 @@ fun chatEntries(
     return entries
 }
 
-/** The calendar day a turn finished on, or null when the relay sent no parseable `completed_at`. */
-fun completedDay(item: HistoryItem, zone: ZoneId = ZoneId.systemDefault()): LocalDate? =
-    parseInstant(item.completed_at)?.atZone(zone)?.toLocalDate()
+/** The calendar day a turn belongs to: when the user asked it, else when it finished; null when
+ *  neither time parses (a screen capture from a relay that predates `asked_at`). */
+fun turnDay(item: HistoryItem, zone: ZoneId = ZoneId.systemDefault()): LocalDate? =
+    parseInstant(item.asked_at ?: item.completed_at)?.atZone(zone)?.toLocalDate()
 
 /**
  * When this agent last did anything: its newest turn's `completed_at`, else its own `updated_at`.

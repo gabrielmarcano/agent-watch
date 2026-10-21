@@ -117,14 +117,17 @@ type AgentState struct {
 
 // HistoryItem represents a single completed query-response turn for a pane.
 type HistoryItem struct {
-	ID          string `json:"id"`
-	PaneID      string `json:"pane_id"`
-	Host        string `json:"host,omitempty"` // stamped by the relay, like AgentState.Host
-	Agent       string `json:"agent"`
-	Label       string `json:"label"`
-	Query       string `json:"query,omitempty"`
-	Response    string `json:"response"`
-	Source      string `json:"source"` // "transcript" | "screen"
+	ID       string `json:"id"`
+	PaneID   string `json:"pane_id"`
+	Host     string `json:"host,omitempty"` // stamped by the relay, like AgentState.Host
+	Agent    string `json:"agent"`
+	Label    string `json:"label"`
+	Query    string `json:"query,omitempty"`
+	Response string `json:"response"`
+	Source   string `json:"source"` // "transcript" | "screen"
+	// AskedAt is when the user sent the query, from the agent's transcript;
+	// empty for a screen capture or an older relay.
+	AskedAt     string `json:"asked_at,omitempty"`
 	CompletedAt string `json:"completed_at"`
 }
 
