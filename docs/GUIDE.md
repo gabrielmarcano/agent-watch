@@ -88,6 +88,7 @@ On the machine that runs herdr:
    # or: ./bin/agent-watch-bridge start
    ```
    Already installed? After `make configure-bridge`, apply the new config with `make restart`.
+   On Linux, a `systemd --user` unit stops when you log out unless lingering is on: `loginctl enable-linger` (a server you only reach over SSH needs it).
 5. Verify the bridge:
    ```bash
    ./bin/agent-watch-bridge status
@@ -134,7 +135,7 @@ Each machine with herdr runs its own bridge, with **its own host token**; the wa
 
 1. On the VPS, register the machine and copy the token it prints once: `sudo agent-watch-relay hosts add <id> --name "<name>"` ([`deploy/relay/README.md` § Hosts](../deploy/relay/README.md#hosts-one-per-machine)).
 2. On that machine, clone the repo, create its `agent-watch.env` with `make config`, replace its `AW_HOST_TOKEN` with that token, and set `AW_HOST_ID=<id>`. Deploy and sync the relay only from the first machine: `make deploy-relay ARGS=--sync-env` refuses another machine's file, which would hand the relay its token.
-3. Install and start its bridge as in [step 2](#2-install-and-configure-the-host-bridge). Linux runs it as a `systemd --user` unit.
+3. Install and start its bridge as in [step 2](#2-install-and-configure-the-host-bridge). Linux runs it as a `systemd --user` unit. Without Go on that machine, put a [release](#versions-and-releases)'s bridge for it in the checkout's `bin/` instead of `make bridge`; `herdr plugin link` and the plugin actions work the same.
 
 The first machine's token, `AW_HOST_TOKEN` in the relay's env file, keeps working as the host `AW_HOST_ID` (default `main`). The phone lists every machine too (one filter, not pages), and can start a session on any of them whose bridge is `0.9.0` and has session roots (below).
 
