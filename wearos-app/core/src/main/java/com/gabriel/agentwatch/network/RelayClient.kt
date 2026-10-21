@@ -9,10 +9,12 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.sse.EventSource
 import okhttp3.sse.EventSourceListener
 import okhttp3.sse.EventSources
+import java.io.File
 import java.io.IOException
 import java.io.InterruptedIOException
 import java.net.SocketTimeoutException
 import java.net.URLEncoder
+import java.security.MessageDigest
 import java.util.concurrent.TimeUnit
 import kotlin.coroutines.resume
 
@@ -23,7 +25,7 @@ class RelayError(
 ) : Exception("[$code] $message (HTTP $httpStatus)")
 
 /**
- * The OkHttp clients every [RelayClient] uses. All three derive from one base client, so the whole
+ * The OkHttp clients every [RelayClient] uses. All of them derive from one base client, so the whole
  * process shares a single connection pool and dispatcher, however many [RelayClient]s exist.
  */
 class RelayHttpClients private constructor(
@@ -37,7 +39,9 @@ class RelayHttpClients private constructor(
      */
     val session: OkHttpClient,
     /** `GET /v1/events`: its read timeout is the silence limit ([SSE_SILENCE_TIMEOUT_MS]). */
-    val sse: OkHttpClient
+    val sse: OkHttpClient,
+    /** `GET /v1/updates/{app}/apk`: no whole-call cap; a slow mobile download may take minutes. */
+    val download: OkHttpClient
 ) {
     companion object {
         const val CONNECT_TIMEOUT_MS = 10_000L
@@ -52,6 +56,11 @@ class RelayHttpClients private constructor(
          * is a dead (often half-open) socket: the read times out and the engine reconnects.
          */
         const val SSE_SILENCE_TIMEOUT_MS = 45_000L
+        /**
+         * An update download has no whole-call cap; this read timeout only catches a stalled socket.
+         * A wear download can pause between packets, so it is longer than the REST one.
+         */
+        const val DOWNLOAD_READ_TIMEOUT_MS = 30_000L
 
         val shared: RelayHttpClients by lazy { create() }
 
@@ -59,7 +68,8 @@ class RelayHttpClients private constructor(
             restCallTimeoutMs: Long = REST_CALL_TIMEOUT_MS,
             commandCallTimeoutMs: Long = COMMAND_CALL_TIMEOUT_MS,
             sseSilenceTimeoutMs: Long = SSE_SILENCE_TIMEOUT_MS,
-            sessionCallTimeoutMs: Long = SESSION_CALL_TIMEOUT_MS
+            sessionCallTimeoutMs: Long = SESSION_CALL_TIMEOUT_MS,
+            downloadReadTimeoutMs: Long = DOWNLOAD_READ_TIMEOUT_MS
         ): RelayHttpClients {
             val base = OkHttpClient.Builder()
                 .connectTimeout(CONNECT_TIMEOUT_MS, TimeUnit.MILLISECONDS)
@@ -74,6 +84,10 @@ class RelayHttpClients private constructor(
                     .connectTimeout(15, TimeUnit.SECONDS)
                     .readTimeout(sseSilenceTimeoutMs, TimeUnit.MILLISECONDS)
                     .retryOnConnectionFailure(true)
+                    .build(),
+                download = base.newBuilder()
+                    .callTimeout(0, TimeUnit.MILLISECONDS)
+                    .readTimeout(downloadReadTimeoutMs, TimeUnit.MILLISECONDS)
                     .build()
             )
         }
@@ -180,6 +194,129 @@ class RelayClient(
     suspend fun agents(): Result<AgentsSnapshot> {
         val request = newRequestBuilder("/v1/agents").get().build()
         return executeRequest(http.rest, request, AgentsSnapshot::class.java)
+    }
+
+    /** `GET /v1/updates/{app}`: [app] is `phone` or `watch` (contracts §2.1). */
+    suspend fun updateInfo(app: String): Result<UpdateInfo> {
+        val request = newRequestBuilder("/v1/updates/${URLEncoder.encode(app, "UTF-8")}").get().build()
+        return executeRequest(http.rest, request, UpdateInfo::class.java)
+    }
+
+    /**
+     * `GET /v1/updates/{app}/apk`: downloads the build [info] describes into [dest], checking its exact
+     * size and SHA-256 before the file is visible. [onProgress] runs on OkHttp's thread, at most every
+     * 256 KiB and once at the end, with bytes read and the expected total. A failed or cancelled
+     * download leaves no partial file behind.
+     */
+    suspend fun downloadUpdate(
+        app: String,
+        info: UpdateInfo,
+        dest: File,
+        onProgress: (bytes: Long, total: Long) -> Unit = { _, _ -> }
+    ): Result<File> {
+        if (info.size <= 0 || info.size > MAX_UPDATE_BYTES) {
+            return Result.failure(
+                RelayError("bad_update", "The relay returned an invalid update size (${info.size} bytes)", 0)
+            )
+        }
+        if (!SHA256_RE.matches(info.sha256)) {
+            return Result.failure(
+                RelayError("bad_update", "The relay returned an invalid update checksum", 0)
+            )
+        }
+        val parent = dest.parentFile
+        if (parent == null || (!parent.isDirectory && !parent.mkdirs())) {
+            return Result.failure(IOException("cannot create the update directory"))
+        }
+
+        val part = File(parent, dest.name + ".part")
+        part.delete()
+        val request = newRequestBuilder("/v1/updates/${URLEncoder.encode(app, "UTF-8")}/apk").get().build()
+        val call = http.download.newCall(request)
+
+        return suspendCancellableCoroutine { cont ->
+            cont.invokeOnCancellation {
+                call.cancel()
+                part.delete()
+            }
+            call.enqueue(object : Callback {
+                override fun onFailure(call: Call, e: IOException) {
+                    part.delete()
+                    if (cont.isActive) cont.resume(Result.failure(asTimeout(e)))
+                }
+
+                override fun onResponse(call: Call, response: Response) {
+                    response.use { resp ->
+                        if (!resp.isSuccessful) {
+                            val err = parseError(resp, resp.body?.string())
+                            if (resp.code == 401) reportUnauthorized()
+                            if (cont.isActive) cont.resume(Result.failure(err))
+                            return
+                        }
+                        try {
+                            val body = resp.body ?: throw IOException("the relay sent an empty update")
+                            val digest = MessageDigest.getInstance("SHA-256")
+                            var read = 0L
+                            var lastReport = 0L
+                            body.byteStream().use { input ->
+                                part.outputStream().use { output ->
+                                    val buffer = ByteArray(64 * 1024)
+                                    while (true) {
+                                        if (!cont.isActive) throw IOException("download cancelled")
+                                        val n = input.read(buffer)
+                                        if (n < 0) break
+                                        read += n
+                                        if (read > MAX_UPDATE_BYTES) {
+                                            throw IOException("the update is larger than $MAX_UPDATE_BYTES bytes")
+                                        }
+                                        output.write(buffer, 0, n)
+                                        digest.update(buffer, 0, n)
+                                        if (read - lastReport >= 256 * 1024 || read == info.size) {
+                                            onProgress(read, info.size)
+                                            lastReport = read
+                                        }
+                                    }
+                                }
+                            }
+                            onProgress(read, info.size)
+                            if (!cont.isActive) {
+                                part.delete()
+                                return
+                            }
+                            if (read != info.size) {
+                                throw RelayError(
+                                    "bad_download",
+                                    "Downloaded $read bytes, expected ${info.size}",
+                                    0
+                                )
+                            }
+                            val sha = digest.digest().joinToString("") { "%02x".format(it.toInt() and 0xff) }
+                            if (!sha.equals(info.sha256, ignoreCase = true)) {
+                                throw RelayError(
+                                    "bad_download",
+                                    "The downloaded update failed its checksum; try again",
+                                    0
+                                )
+                            }
+
+                            if (dest.exists() && !dest.delete()) {
+                                throw IOException("cannot replace ${dest.name}")
+                            }
+                            if (!part.renameTo(dest)) {
+                                part.copyTo(dest, overwrite = true)
+                                part.delete()
+                            }
+                            if (cont.isActive) cont.resume(Result.success(dest))
+                        } catch (e: Exception) {
+                            part.delete()
+                            if (cont.isActive) {
+                                cont.resume(Result.failure(if (e is IOException) asTimeout(e) else e))
+                            }
+                        }
+                    }
+                }
+            })
+        }
     }
 
     /** `GET /v1/history`: every pane's, or one agent's ([agent]; its host is sent when it has one, contracts §2.1). */
@@ -296,6 +433,11 @@ class RelayClient(
     }
 
     companion object {
+        /** A sanity cap on an update APK; a phone or watch build is far below it. */
+        const val MAX_UPDATE_BYTES = 100L * 1024 * 1024
+
+        private val SHA256_RE = Regex("^[0-9a-fA-F]{64}$")
+
         /**
          * Receives 401s from clients built without an [onUnauthorized] handler (tile, complication,
          * QuickDictate). Set by [RelayRepository.init]; null until then.

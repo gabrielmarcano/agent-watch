@@ -1,6 +1,7 @@
 package com.gabriel.agentwatch.network
 
 import com.gabriel.agentwatch.model.AgentKey
+import com.gabriel.agentwatch.model.UpdateInfo
 import com.gabriel.agentwatch.approval.FeedbackSurface
 import com.gabriel.agentwatch.approval.commandErrorFeedback
 import kotlinx.coroutines.Dispatchers
@@ -14,12 +15,15 @@ import okhttp3.mockwebserver.MockWebServer
 import okhttp3.mockwebserver.SocketPolicy
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
+import java.io.File
 import java.net.SocketTimeoutException
+import java.security.MessageDigest
 
 class RelayClientTest {
     private lateinit var server: MockWebServer
@@ -91,9 +95,11 @@ class RelayClientTest {
         assertSame(a.rest.connectionPool, a.command.connectionPool)
         assertSame(a.rest.connectionPool, a.session.connectionPool)
         assertSame(a.rest.connectionPool, a.sse.connectionPool)
+        assertSame(a.rest.connectionPool, a.download.connectionPool)
         assertSame(a.rest.dispatcher, a.command.dispatcher)
         assertSame(a.rest.dispatcher, a.session.dispatcher)
         assertSame(a.rest.dispatcher, a.sse.dispatcher)
+        assertSame(a.rest.dispatcher, a.download.dispatcher)
     }
 
     @Test
@@ -297,4 +303,143 @@ class RelayClientTest {
         assertEquals("not_allowed", err.code)
         assertEquals(403, err.httpStatus)
     }
+
+    // ---- Android updates (contracts §2.1)
+
+    @Test
+    fun updateInfoSendsBearerTokenAndParsesTheBuild() = runBlocking {
+        server.enqueue(
+            MockResponse().setBody(
+                """{"app":"phone","version_code":5,"version_name":"0.4.0","sha256":"${"a".repeat(64)}","size":42}"""
+            )
+        )
+
+        val info = RelayClient(baseUrl(), "tok").updateInfo("phone").getOrThrow()
+
+        assertEquals("phone", info.app)
+        assertEquals(5L, info.version_code)
+        assertEquals("0.4.0", info.version_name)
+        assertEquals(42L, info.size)
+        val req = server.takeRequest()
+        assertEquals("/v1/updates/phone", req.path)
+        assertEquals("Bearer tok", req.getHeader("Authorization"))
+    }
+
+    @Test
+    fun updateInfoKeepsTheUpdateNotAvailableCode() = runBlocking {
+        server.enqueue(
+            MockResponse().setResponseCode(404)
+                .setBody("""{"error":{"code":"update_not_available","message":"no update published"}}""")
+        )
+
+        val err = RelayClient(baseUrl(), "tok").updateInfo("watch").exceptionOrNull() as RelayError
+
+        assertEquals("update_not_available", err.code)
+        assertEquals(404, err.httpStatus)
+    }
+
+    @Test
+    fun downloadVerifiesTheChecksumAndWritesTheFile() = runBlocking {
+        val bytes = "the apk bytes".toByteArray()
+        val info = updateInfoFor(bytes)
+        server.enqueue(
+            MockResponse()
+                .setHeader("Content-Type", "application/vnd.android.package-archive")
+                .setBody(String(bytes, Charsets.UTF_8))
+        )
+        val dir = File(System.getProperty("java.io.tmpdir"), "aw-update-${System.nanoTime()}")
+        val dest = File(dir, "phone-5.apk")
+        val progress = mutableListOf<Pair<Long, Long>>()
+
+        try {
+            val file = RelayClient(baseUrl(), "tok")
+                .downloadUpdate("phone", info, dest) { read, total -> progress += read to total }
+                .getOrThrow()
+
+            assertEquals(dest, file)
+            assertTrue(dest.readBytes().contentEquals(bytes))
+            assertEquals(bytes.size.toLong() to bytes.size.toLong(), progress.last())
+            val req = server.takeRequest()
+            assertEquals("/v1/updates/phone/apk", req.path)
+            assertEquals("Bearer tok", req.getHeader("Authorization"))
+            assertFalse(File(dir, "phone-5.apk.part").exists())
+        } finally {
+            dir.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun downloadRejectsAChecksumMismatchAndLeavesNoFile() = runBlocking {
+        val bytes = "the apk bytes".toByteArray()
+        val info = updateInfoFor(bytes).copy(sha256 = "0".repeat(64))
+        server.enqueue(MockResponse().setBody(String(bytes, Charsets.UTF_8)))
+        val dir = File(System.getProperty("java.io.tmpdir"), "aw-update-${System.nanoTime()}")
+        val dest = File(dir, "phone-5.apk")
+
+        try {
+            val err = RelayClient(baseUrl(), "tok")
+                .downloadUpdate("phone", info, dest)
+                .exceptionOrNull() as RelayError
+
+            assertEquals("bad_download", err.code)
+            assertFalse(dest.exists())
+            assertFalse(File(dir, "phone-5.apk.part").exists())
+        } finally {
+            dir.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun downloadRejectsAShortBody() = runBlocking {
+        val bytes = "the apk bytes".toByteArray()
+        val info = updateInfoFor(bytes).copy(size = bytes.size.toLong() + 1)
+        server.enqueue(MockResponse().setBody(String(bytes, Charsets.UTF_8)))
+        val dir = File(System.getProperty("java.io.tmpdir"), "aw-update-${System.nanoTime()}")
+        val dest = File(dir, "phone-5.apk")
+
+        try {
+            val err = RelayClient(baseUrl(), "tok")
+                .downloadUpdate("phone", info, dest)
+                .exceptionOrNull() as RelayError
+
+            assertEquals("bad_download", err.code)
+            assertFalse(dest.exists())
+        } finally {
+            dir.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun downloadReportsUnauthorizedWithTheRejectedToken() = runBlocking {
+        val bytes = "the apk bytes".toByteArray()
+        var rejected: String? = null
+        server.enqueue(
+            MockResponse().setResponseCode(401)
+                .setBody("""{"error":{"code":"unauthorized","message":"bad token"}}""")
+        )
+        val dir = File(System.getProperty("java.io.tmpdir"), "aw-update-${System.nanoTime()}")
+        val dest = File(dir, "phone-5.apk")
+
+        try {
+            val err = RelayClient(baseUrl(), "tok", onUnauthorized = { rejected = it })
+                .downloadUpdate("phone", updateInfoFor(bytes), dest)
+                .exceptionOrNull() as RelayError
+
+            assertEquals("unauthorized", err.code)
+            assertEquals("tok", rejected)
+            assertFalse(dest.exists())
+        } finally {
+            dir.deleteRecursively()
+        }
+    }
+
+    private fun updateInfoFor(bytes: ByteArray): UpdateInfo = UpdateInfo(
+        app = "phone",
+        version_code = 5,
+        version_name = "0.4.0",
+        sha256 = MessageDigest.getInstance("SHA-256")
+            .digest(bytes)
+            .joinToString("") { "%02x".format(it.toInt() and 0xff) },
+        size = bytes.size.toLong()
+    )
 }

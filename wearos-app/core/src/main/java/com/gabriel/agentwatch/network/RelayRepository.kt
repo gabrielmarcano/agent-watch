@@ -7,6 +7,7 @@ import com.gabriel.agentwatch.model.AgentKey
 import com.gabriel.agentwatch.model.FolderListResponse
 import com.gabriel.agentwatch.model.SessionCreated
 import com.gabriel.agentwatch.model.SessionOptionsResponse
+import com.gabriel.agentwatch.model.UpdateInfo
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -14,6 +15,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import java.io.File
 
 /** [RelayCredentials] backed by the app's [Prefs]. */
 private class PrefsCredentials(private val prefs: Prefs) : RelayCredentials {
@@ -124,6 +126,19 @@ object RelayRepository {
 
     private fun <T> notPaired(): Result<T> =
         Result.failure(RelayError("not_paired", "Client not configured", 0))
+
+    /** `GET /v1/updates/{app}`: the build published for `phone` or `watch` (contracts §2.1). */
+    suspend fun updateInfo(app: String): Result<UpdateInfo> =
+        getClient()?.updateInfo(app) ?: notPaired()
+
+    /** Downloads the build [info] describes, checking its size and SHA-256 before returning the file. */
+    suspend fun downloadUpdate(
+        app: String,
+        info: UpdateInfo,
+        dest: File,
+        onProgress: (bytes: Long, total: Long) -> Unit = { _, _ -> }
+    ): Result<File> =
+        getClient()?.downloadUpdate(app, info, dest, onProgress) ?: notPaired()
 
     /** Commands go to [agent]'s host (contracts §2.1): pass the key of the `AgentState` shown. */
     suspend fun answer(agent: AgentKey, optionId: String, expectedSeq: Long, fingerprint: String): Result<Unit> =

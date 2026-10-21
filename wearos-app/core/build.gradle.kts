@@ -39,6 +39,8 @@ dependencies {
     api("com.google.code.gson:gson:2.10.1")
     api("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
     api("androidx.annotation:annotation:1.9.1")
+    // FileProvider, for handing a downloaded APK to the system installer.
+    implementation("androidx.core:core-ktx:1.13.1")
 
     // Testing
     testImplementation("junit:junit:4.13.2")
