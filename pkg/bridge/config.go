@@ -26,6 +26,12 @@ type Config struct {
 	// host's presence so the relay holds back pushes while the owner is
 	// there (contracts.md §4.3). Off unless the owner turns it on.
 	PushPresence bool `toml:"push_presence,omitempty"`
+	// SessionRoots are the absolute folders in which the phone may start new
+	// agent sessions. Empty: the feature is off on this host.
+	SessionRoots []string `toml:"session_roots,omitempty"`
+	// SessionKinds are the agent kinds the phone may start there. Empty:
+	// DefaultSessionKinds.
+	SessionKinds []string `toml:"session_kinds,omitempty"`
 }
 
 // StatusFile is written by the bridge daemon every 5 s to report health.
@@ -101,6 +107,17 @@ func ValidateConfig(cfg *Config) error {
 
 	if !hexTokenRe.MatchString(cfg.HostToken) {
 		return errors.New("host_token must be exactly 64 hexadecimal characters")
+	}
+
+	for _, root := range cfg.SessionRoots {
+		if !filepath.IsAbs(root) {
+			return fmt.Errorf("session_roots must be absolute paths: %q", root)
+		}
+	}
+	for _, kind := range cfg.SessionKinds {
+		if strings.TrimSpace(kind) == "" {
+			return errors.New("session_kinds must not contain blank values")
+		}
 	}
 
 	return nil

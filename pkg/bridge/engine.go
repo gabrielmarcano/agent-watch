@@ -58,6 +58,15 @@ type Engine struct {
 	// CommandTimeout bounds a command from its arrival, including the wait
 	// for the pane lock (defaults to commandTimeout, below the relay's wait).
 	CommandTimeout time.Duration
+	// SessionRoots and SessionKinds are the host's new-session allowlist,
+	// from config.toml (contracts.md §6). Empty roots turn the feature off;
+	// empty kinds mean DefaultSessionKinds.
+	SessionRoots []string
+	SessionKinds []string
+	// SessionTimeout and FolderTimeout bound the host-level commands; 0
+	// means defaultSessionTimeout / defaultFolderTimeout.
+	SessionTimeout time.Duration
+	FolderTimeout  time.Duration
 
 	mu            sync.RWMutex
 	states        map[string]*paneState
@@ -71,9 +80,11 @@ type Engine struct {
 	herdrErr      string                      // why herdr is offline; "" while online
 	consumed      map[string]*consumedPrompts // pane_id -> prompts already acted on (guarded by mu)
 
-	lockMu    sync.Mutex
-	paneLocks map[string]*paneLock // pane_id -> lock, only while commands are in flight
-	requests  requestIDLog
+	lockMu        sync.Mutex
+	paneLocks     map[string]*paneLock // pane_id -> lock, only while commands are in flight
+	requests      requestIDLog
+	sessionLock   chan struct{} // cap 1: session.create runs one at a time
+	sessionLockDo sync.Once
 }
 
 // NewEngine creates a new bridge Engine instance.
