@@ -1,3 +1,4 @@
+import java.util.Properties
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
 plugins {
@@ -39,6 +40,24 @@ val mobileVersionName: String = versions["MOBILE_VERSION_NAME"].orEmpty().also {
 val mobileVersionCode: Int = versions["MOBILE_VERSION_CODE"]?.toIntOrNull()?.takeIf { it > 0 }
     ?: error("MOBILE_VERSION_CODE in VERSIONS must be a positive integer (got \"${versions["MOBILE_VERSION_CODE"].orEmpty()}\")")
 
+// Release signing: the owner's key, described by wearos-app/keystore.properties
+// (git-ignored; format in docs/GUIDE.md § Android updates). Without it, release
+// builds stay debug-signed so tests and CI work; `make publish-android` refuses
+// to publish a debug-signed APK.
+val keystoreProperties: Properties? = rootProject.file("keystore.properties")
+    .takeIf { it.isFile }
+    ?.let { file ->
+        Properties().apply { file.inputStream().use { load(it) } }
+    }
+
+fun keystoreProperty(name: String): String {
+    val value = keystoreProperties?.getProperty(name)?.trim().orEmpty()
+    require(value.isNotEmpty()) {
+        "wearos-app/keystore.properties is missing $name (docs/GUIDE.md § Android updates)"
+    }
+    return value
+}
+
 // The pairing screen's default relay URL: https://<AW_RELAY_DOMAIN>, or ""
 // (the user types it) when the file or the key is missing.
 val defaultRelayUrl: String = agentWatchEnv["AW_RELAY_DOMAIN"].orEmpty().let { domain ->
@@ -55,6 +74,20 @@ android {
     namespace = "com.gabriel.agentwatch.mobile"
     compileSdk = 36
 
+    signingConfigs {
+        if (keystoreProperties != null) {
+            create("release") {
+                storeFile = rootProject.file(keystoreProperty("storeFile"))
+                storePassword = keystoreProperty("storePassword")
+                keyAlias = keystoreProperty("keyAlias")
+                keyPassword = keystoreProperty("keyPassword")
+                require(storeFile?.isFile == true) {
+                    "keystore.properties storeFile does not exist: $storeFile"
+                }
+            }
+        }
+    }
+
     defaultConfig {
         applicationId = "com.gabriel.agentwatch.mobile"
         // :core is minSdk 30 (Android 11).
@@ -68,8 +101,9 @@ android {
     buildTypes {
         release {
             isMinifyEnabled = true
-            // No release key yet: signed with the debug key, like the watch app (docs/STATUS.md).
-            signingConfig = signingConfigs.getByName("debug")
+            // The owner's key when keystore.properties exists; otherwise the
+            // debug key, which make publish-android refuses to publish.
+            signingConfig = signingConfigs.getByName(if (keystoreProperties != null) "release" else "debug")
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"

@@ -17,6 +17,11 @@ store.json
 google-services.json
 local.properties
 
+# Android release signing: the owner's key and its properties (never committed)
+wearos-app/keystore.properties
+wearos-app/**/*.jks
+wearos-app/**/*.keystore
+
 # Python bytecode (tools/guards tests)
 __pycache__/
 

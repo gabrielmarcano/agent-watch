@@ -140,7 +140,7 @@ The first machine's token, `AW_HOST_TOKEN` in the relay's env file, keeps workin
 
 ### 3. Build and Install the Android Phone App
 
-The phone is its own relay client, with its own device token: pairing it does not touch the watch, and `agent-watch-relay devices revoke <id>` cuts only the phone. New sessions need relay `0.8.0` and bridge `0.9.0`.
+The phone is its own relay client, with its own device token: pairing it does not touch the watch, and `agent-watch-relay devices revoke <id>` cuts only the phone. New sessions need relay `0.9.0` and bridge `0.9.0`.
 
 1. **Build** with the JDK from [Requirements](#requirements):
    ```bash
@@ -149,7 +149,7 @@ The phone is its own relay client, with its own device token: pairing it does no
    ./gradlew :mobile:assembleDebug
    ```
    **Push (optional):** in the same Firebase project as the watch, add another Android app with the package name `com.gabriel.agentwatch.mobile`, download its `google-services.json` to `wearos-app/mobile/`, and build again. It is git-ignored; never commit it. Without that file the app builds and works, it just has no notifications. The relay's FCM service account ([step 4](#4-build-and-install-the-wear-os-app), item 5) sends to both apps.
-2. **Install** it on the phone with the phone connected over USB: `./gradlew :mobile:installDebug` (or `adb install -r mobile/build/outputs/apk/debug/mobile-debug.apk`).
+2. **Install** it on the phone with the phone connected over USB: `./gradlew :mobile:installDebug` (or `adb install -r mobile/build/outputs/apk/debug/mobile-debug.apk`). For updates that install without USB later, install a release-signed build once instead ([Android updates](#android-updates-phone-and-watch)); a debug build cannot be replaced by the release-signed APK.
 3. **Pair:** `./bin/agent-watch-bridge pair`, then enter the relay URL (prefilled from `agent-watch.env` at build time) and the code. The phone keeps its device token in its private app storage (backup off); the relay stores only its hash.
 4. **Allow it to start agents** (bridge `0.9.0`): on each machine, name the folders and agent kinds the phone may use, then apply the config:
    ```bash
@@ -158,7 +158,7 @@ The phone is its own relay client, with its own device token: pairing it does no
    ```
    With no `--session-root`, that machine starts no sessions and the phone says so. The folder browser cannot leave the roots, and a folder or kind outside them is refused (`not_allowed`, [`contracts.md` §2.1](reference/contracts.md)). The first session in a folder creates one herdr workspace for it; each session gets its own tab and agent, and nothing takes focus on that machine.
 
-What the app does today: agents as chats, one list filterable by machine, "Needs you" first, unread dots; a chat shows the agent's turns as a conversation with the approval menu inline, typed replies, and the history reader; "+" starts a session on a chosen machine, agent kind and folder, then opens its chat as soon as herdr reports it. With `mobile/google-services.json` in place it also posts local notifications, one chat per agent, grouped like a messaging app: tapping one opens that chat, and replies and approvals can be sent from the notification. Notifications stay on the phone (Android does not mirror them to the watch); Allow and a question's answer need the phone unlocked, while Deny, Cancel and a reply do not. No settings screen yet: [STATUS](STATUS.md). The release build (`:mobile:assembleRelease`) is signed with the debug key, like the watch app's.
+What the app does today: agents as chats, one list filterable by machine, "Needs you" first, unread dots; a chat shows the agent's turns as a conversation with the approval menu inline, typed replies, and the history reader; "+" starts a session on a chosen machine, agent kind and folder, then opens its chat as soon as herdr reports it. With `mobile/google-services.json` in place it also posts local notifications, one chat per agent, grouped like a messaging app: tapping one opens that chat, and replies and approvals can be sent from the notification. Notifications stay on the phone (Android does not mirror them to the watch); Allow and a question's answer need the phone unlocked, while Deny, Cancel and a reply do not. A newer published build appears as an update card at the top of the chat list ([Android updates](#android-updates-phone-and-watch)). No settings screen yet: [STATUS](STATUS.md). Release builds use the key in `wearos-app/keystore.properties` when it exists; without it they are debug-signed, and `make publish-android` refuses to publish them.
 
 ### 4. Build and Install the Wear OS App
 
@@ -173,12 +173,61 @@ What the app does today: agents as chats, one list filterable by machine, "Needs
 3. **Connect the watch over wireless debugging.** The Pixel Watch has no USB data connection, so `adb` goes over Wi-Fi (watch and computer on the same network):
    - on the watch: Settings → Developer options → **Wireless debugging** → **Pair new device**;
    - on the computer: `adb pair <ip>:<pair-port> <code>`, then `adb connect <ip>:<port>` (the connect port is shown on the Wireless debugging screen and changes after a reboot).
-4. **Install:** `./gradlew :app:installDebug`.
+4. **Install:** `./gradlew :app:installDebug`. For updates that install from the watch later, install a release-signed build once instead ([Android updates](#android-updates-phone-and-watch)); a debug build cannot be replaced by the release-signed APK.
 5. **Push on the relay:** copy the Firebase **service-account** JSON to the VPS only, as [`deploy/relay/README.md` § First-time setup](../deploy/relay/README.md#first-time-setup-once-per-vps) says, set `AW_FCM_CREDENTIALS` to its server path in `agent-watch.env`, and run `make deploy-relay ARGS=--sync-env`. Without it the relay runs with push disabled.
 
 **watchOS** ([status](STATUS.md)): `make watchos-config` writes the git-ignored `watchos-app/Config.generated.xcconfig` ([`contracts.md` §7](reference/contracts.md)).
 
-The release build (`assembleRelease`, R8 on) is signed with the debug key: fine for your own watch, not for distribution.
+The release build (`assembleRelease`, R8 on) uses the key in `wearos-app/keystore.properties` when it exists; without it, it is debug-signed, which is fine for a throwaway build but cannot be updated by a published APK. See [Android updates](#android-updates-phone-and-watch).
+
+### Android updates (phone and watch)
+
+The relay serves the latest APK of each Android app, so later versions install from the phone or the watch without USB or the same Wi-Fi. Android still asks you to confirm each install, and the first one asks you to allow Agent Watch as an install source; that permission is once per app.
+
+**1. Create the release key once.** Every published build must use the same key: Android refuses an APK signed by another key, and the only fix is uninstalling the app (losing its pairing and local state). In `wearos-app/`:
+
+```bash
+keytool -genkeypair -v -keystore agent-watch-release.jks \
+  -alias agent-watch -keyalg RSA -keysize 4096 -validity 10000
+chmod 600 agent-watch-release.jks
+```
+
+Create `wearos-app/keystore.properties` next to it (git-ignored; keep both backed up somewhere safe). Values are bare, without quotes; `storeFile` is relative to `wearos-app/`, or absolute:
+
+```
+storeFile=agent-watch-release.jks
+storePassword=<the keystore password>
+keyAlias=agent-watch
+keyPassword=<the key password>
+```
+
+Both apps use this key. Without the file, release builds fall back to the debug key so tests still run; `make publish-android` refuses a debug-signed APK.
+
+**2. Install a release-signed build once.** A debug-signed app cannot be replaced by a release-signed one. Build and install the release APKs on each device:
+
+```bash
+cd wearos-app
+export JAVA_HOME="/Applications/Android Studio.app/Contents/jbr/Contents/Home"
+./gradlew :mobile:assembleRelease :app:assembleRelease
+
+# Phone, over USB:
+adb install -r mobile/build/outputs/apk/release/mobile-release.apk
+
+# Watch, over the wireless adb from step 4:
+adb install -r app/build/outputs/apk/release/app-release.apk
+```
+
+If a debug-signed build is already installed, uninstall it first (`adb uninstall com.gabriel.agentwatch.mobile` on the phone, `adb uninstall com.gabriel.agentwatch` on the watch) and pair again. The owner's watch `1.3.1` needs that one-time step to leave the debug key.
+
+**3. Bump the versions and publish.** Increase `MOBILE_VERSION_CODE` and/or `WEAROS_VERSION_CODE` in [`VERSIONS`](../VERSIONS) (a published code can never go down), commit the version change, then from a clean tree:
+
+```bash
+make publish-android
+```
+
+It builds both release APKs, checks that each one is release-signed, and publishes only the apps whose `version_code` increased: `<app>-<code>.apk` and `<app>.json` in the relay's `AW_UPDATE_DIR` (default `/var/lib/agent-watch-relay/updates`; [`deploy/relay/README.md`](../deploy/relay/README.md) § Android updates). The relay reads the metadata on every request, so no restart is needed. It needs root over SSH (it chowns the files to the relay's `agentwatch` user) and `AW_RELAY_SSH` in `agent-watch.env`, like `make deploy-relay`.
+
+**4. Update from the device.** The phone checks when it starts and after pairing; the watch checks on start and from Settings → **Check for updates**. A newer build shows an update card: **Update** downloads it (the card shows progress and can be cancelled), verifies its size and SHA-256, then **Install** opens Android's installer. If Android asks to allow installs from Agent Watch, accept it; the card then offers **Install** again. The watch installer is not verified on a device yet: if a watch has no way to allow installs or no installer, update that watch over `adb` (and report it in [STATUS](STATUS.md)).
 
 ### 5. Pair Your Smartwatch
 
@@ -204,6 +253,7 @@ The release build (`assembleRelease`, R8 on) is signed with the debug key: fine 
 | `make config` | Create `agent-watch.env` and its host token ([step 0](#0-create-your-configuration-file)) |
 | `make configure-bridge` | Rewrite the bridge's `config.toml` from `agent-watch.env`; then `make restart` |
 | `make deploy-relay [ARGS=--sync-env]` | Build and deploy the relay to `AW_RELAY_SSH`; `--sync-env` also updates the server's env file from `agent-watch.env` |
+| `make publish-android` | Build, sign and publish both Android APKs to the relay ([Android updates](#android-updates-phone-and-watch)) |
 | `make restart` | Rebuild `bin/agent-watch-bridge` and restart the installed service without rewriting its definition |
 | `./bin/agent-watch-bridge restart` | Restart only (also a plugin action) |
 | `./bin/agent-watch-bridge start` | Install or rewrite the service definition; keeps the installed values unless a flag or herdr's environment gives new ones |
@@ -230,7 +280,7 @@ The [release workflow](../.github/workflows/release.yml) publishes a GitHub rele
 - `Agent Watch.app` (universal) as a zip (`AgentWatchBar_<version>_macos_universal.zip`);
 - `SHA256SUMS`, and notes with each component's version and the commits since the previous tag.
 
-The Wear OS app is not attached: it needs your own `google-services.json` and signing key, so build it from source ([step 4](#4-build-and-install-the-wear-os-app)).
+The Android apps (Wear OS and phone) are not attached: they need your own `google-services.json` and signing key, so build them from source (steps [3](#3-build-and-install-the-android-phone-app) and [4](#4-build-and-install-the-wear-os-app)). To update installed copies without USB, publish them to the relay ([Android updates](#android-updates-phone-and-watch)).
 
 **Installing from a release** instead of building:
 - Check the download with `shasum -a 256 -c SHA256SUMS --ignore-missing`.

@@ -735,7 +735,7 @@ The relay reads them from `/etc/agent-watch-relay/env` (systemd `EnvironmentFile
 {"app":"phone","version_code":5,"version_name":"0.4.0","sha256":"…lowercase hex…","size":12345678,"apk":"phone-5.apk"}
 ```
 
-`apk` must be a bare file name in the same directory (no `/`). The relay reads the metadata on every request, so publishing needs no restart. Old APKs are kept for a short grace period by the publish script; the relay never deletes anything.
+`apk` must be a bare file name in the same directory (no `/`), beginning `<app>-` and ending `.apk`; the relay refuses anything else. The relay reads the metadata on every request, so publishing needs no restart. Old APKs are kept for a short grace period by the publish script; the relay never deletes anything.
 
 **Admin API on `admin.sock`** (`pkg/relay/admin.go`; used by `agent-watch-relay devices` and `agent-watch-relay hosts`, whose behaviour is in `deploy/relay/README.md` § Devices and § Hosts):
 
