@@ -1,5 +1,7 @@
 package com.gabriel.agentwatch.mobile.ui
 
+import androidx.compose.animation.AnimatedVisibilityScope
+import androidx.compose.animation.SharedTransitionScope
 import androidx.compose.foundation.background
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.Spring
@@ -110,8 +112,12 @@ import java.time.Instant
 fun ChatListScreen(
     state: UiState,
     update: UpdateState,
+    hostFilter: String?,
+    onHostFilter: (String?) -> Unit,
+    mutedChats: MutedChats,
+    sharedScope: SharedTransitionScope? = null,
+    visibilityScope: AnimatedVisibilityScope? = null,
     onOpen: (AgentState) -> Unit,
-    onHistory: () -> Unit,
     onNewSession: () -> Unit,
     onRefresh: suspend () -> Unit,
     onMarkRead: (AgentState) -> Unit,
@@ -124,14 +130,14 @@ fun ChatListScreen(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val seen = remember(context) { ChatSeen(context) }
-    var hostFilter by rememberSaveable { mutableStateOf<String?>(null) }
     var filter by rememberSaveable { mutableStateOf(ChatFilter.ALL) }
     var query by rememberSaveable { mutableStateOf("") }
     var refreshing by remember { mutableStateOf(false) }
+    var refreshError by remember { mutableStateOf<Throwable?>(null) }
 
     // A host the relay no longer lists cannot stay selected.
     LaunchedEffect(state.hosts) {
-        if (hostFilter != null && state.hosts.none { it.id == hostFilter }) hostFilter = null
+        if (hostFilter != null && state.hosts.none { it.id == hostFilter }) onHostFilter(null)
     }
     // Agents the phone lists for the first time start read; later turns count until the chat is read.
     LaunchedEffect(state.agents) { seen.prime(state.agents) }
@@ -152,10 +158,7 @@ fun ChatListScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text(stringResource(R.string.chats_title)) },
-                actions = {
-                    TextButton(onClick = onHistory) { Text(stringResource(R.string.history)) }
-                }
+                title = { Text(stringResource(R.string.chats_title)) }
             )
         },
         floatingActionButton = {
@@ -183,7 +186,7 @@ fun ChatListScreen(
                 },
                 hosts = state.hosts,
                 selectedHost = hostFilter,
-                onSelectHost = { hostFilter = it }
+                onSelectHost = onHostFilter
             )
             PullToRefreshBox(
                 isRefreshing = refreshing,
@@ -192,6 +195,9 @@ fun ChatListScreen(
                         refreshing = true
                         try {
                             onRefresh()
+                            refreshError = null
+                        } catch (throwable: Throwable) {
+                            refreshError = throwable
                         } finally {
                             refreshing = false
                         }
@@ -218,9 +224,12 @@ fun ChatListScreen(
                                 hostName = hostNameFor(state.hosts, agent.host),
                                 unread = unreadCount(agent, state.history, seen.seenAt(agent.key)),
                                 changed = isUnread(agent, seen.seen(agent.key)),
+                                muted = mutedChats.isMuted(agent.key.token),
                                 dimmed = status.dimmed,
                                 onClick = { onOpen(agent) },
-                                onMarkRead = { onMarkRead(agent) }
+                                onMarkRead = { onMarkRead(agent) },
+                                sharedScope = sharedScope,
+                                visibilityScope = visibilityScope
                             )
                         }
                     }
@@ -342,9 +351,12 @@ private fun ChatRow(
     hostName: String?,
     unread: Int,
     changed: Boolean,
+    muted: Boolean,
     dimmed: Boolean,
     onClick: () -> Unit,
-    onMarkRead: () -> Unit
+    onMarkRead: () -> Unit,
+    sharedScope: SharedTransitionScope? = null,
+    visibilityScope: AnimatedVisibilityScope? = null
 ) {
     val style = statusStyle(agent.shownStatus())
     val background = backgroundLine(agent)
@@ -404,7 +416,7 @@ private fun ChatRow(
                 .padding(start = 16.dp, end = 16.dp, top = 10.dp, bottom = 10.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            AgentAvatar(agent)
+            AgentAvatar(agent, modifier = sharedFace(agent.key.token, sharedScope, visibilityScope))
             Spacer(Modifier.width(14.dp))
             Column(Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -442,9 +454,17 @@ private fun ChatRow(
                     }
                 }
                 Text(
-                    text = statusLine,
+                    text = if (muted) {
+                        stringResource(R.string.chat_muted)
+                    } else {
+                        statusLine
+                    },
                     style = MaterialTheme.typography.labelSmall,
-                    color = style.accent,
+                    color = if (muted) {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    } else {
+                        style.accent
+                    },
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
@@ -588,21 +608,16 @@ private fun updateErrorText(code: String?): String = when (code) {
 
 @Composable
 private fun Notice(notice: ListNotice) {
-    val text = when (notice) {
-        ListNotice.CONNECTING -> stringResource(R.string.notice_connecting)
-        ListNotice.RELAY_UNREACHABLE -> stringResource(R.string.notice_relay_unreachable)
-        ListNotice.MAC_OFFLINE -> stringResource(R.string.notice_device_offline)
-        ListNotice.HERDR_STOPPED -> stringResource(R.string.notice_herdr_stopped)
+    Box(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
+        Text(
+            text = when (notice) {
+                ListNotice.CONNECTING -> stringResource(R.string.notice_connecting)
+                ListNotice.RELAY_UNREACHABLE -> stringResource(R.string.notice_relay_unreachable)
+                ListNotice.MAC_OFFLINE -> stringResource(R.string.notice_device_offline)
+                ListNotice.HERDR_STOPPED -> stringResource(R.string.notice_herdr_stopped)
+            },
+            color = warningAccent(),
+            style = MaterialTheme.typography.labelLarge
+        )
     }
-    val color = if (notice == ListNotice.CONNECTING) {
-        MaterialTheme.colorScheme.onSurfaceVariant
-    } else {
-        warningAccent()
-    }
-    Text(
-        text = text,
-        color = color,
-        style = MaterialTheme.typography.labelLarge,
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)
-    )
 }

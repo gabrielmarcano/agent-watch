@@ -1,5 +1,7 @@
 package com.gabriel.agentwatch.mobile.ui
 
+import androidx.compose.animation.AnimatedVisibilityScope
+import androidx.compose.animation.SharedTransitionScope
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -28,7 +30,12 @@ import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledIconButton
@@ -54,7 +61,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.ImeAction
@@ -80,6 +89,7 @@ import com.gabriel.agentwatch.model.PromptOption
 import com.gabriel.agentwatch.model.hostNameFor
 import com.gabriel.agentwatch.model.key
 import com.gabriel.agentwatch.network.RelayRepository
+import com.gabriel.agentwatch.ui.logic.ListNotice
 import com.gabriel.agentwatch.ui.logic.shownStatus
 import com.gabriel.agentwatch.ui.logic.waitingOnBackground
 import com.gabriel.agentwatch.util.readerBlocks
@@ -101,7 +111,16 @@ private val BUBBLE_MAX_WIDTH = 340.dp
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ChatScreen(agent: AgentState, hosts: List<HostInfo>, onBack: () -> Unit) {
+fun ChatScreen(
+    agent: AgentState,
+    hosts: List<HostInfo>,
+    mutedChats: MutedChats,
+    notice: ListNotice? = null,
+    sharedScope: SharedTransitionScope? = null,
+    visibilityScope: AnimatedVisibilityScope? = null,
+    onBack: () -> Unit,
+    onMarkRead: () -> Unit = {}
+) {
     val context = LocalContext.current
     val seen = remember(context) { ChatSeen(context) }
     val scope = rememberCoroutineScope()
@@ -115,10 +134,16 @@ fun ChatScreen(agent: AgentState, hosts: List<HostInfo>, onBack: () -> Unit) {
     var sent by remember { mutableStateOf<SentAnswer?>(null) }
     var draft by rememberSaveable(agent.key.token) { mutableStateOf("") }
     var confirmAlways by remember { mutableStateOf<PromptOption?>(null) }
+    // The choice the user just made, shown in the card until the relay reports the change.
+    var chosen by remember { mutableStateOf<String?>(null) }
+    var menuOpen by remember { mutableStateOf(false) }
+    var detailsOpen by remember { mutableStateOf(false) }
+    val haptics = LocalHapticFeedback.current
 
     val prompt = agent.prompt
     val locked = busy || isAwaitingUpdate(agent, sent)
     val emptyReply = stringResource(R.string.reply_empty)
+    val cancelLabel = stringResource(R.string.cancel_prompt)
     val style = statusStyle(agent.shownStatus())
     val hostName = hostNameFor(hosts, agent.host)
 
@@ -130,6 +155,8 @@ fun ChatScreen(agent: AgentState, hosts: List<HostInfo>, onBack: () -> Unit) {
     }
     // An error belongs to the prompt it was about.
     LaunchedEffect(prompt?.fingerprint) { answerError = null }
+    // The card shows the choice until the relay reports the new prompt.
+    LaunchedEffect(prompt?.fingerprint) { chosen = null }
 
     fun run(
         block: suspend () -> Result<Unit>,
@@ -153,21 +180,27 @@ fun ChatScreen(agent: AgentState, hosts: List<HostInfo>, onBack: () -> Unit) {
 
     fun answer(option: PromptOption, waiting: PendingPrompt) {
         val seq = agent.state_change_seq
+        haptics.performHapticFeedback(
+            if (option.role == "deny") HapticFeedbackType.Reject else HapticFeedbackType.Confirm
+        )
         run(
             block = { RelayRepository.answer(agent.key, option.id, seq, waiting.fingerprint) },
             report = { answerError = it }
         ) {
             sent = SentAnswer(agent.pane_id, seq, waiting.fingerprint, agent.host)
+            chosen = option.label.ifBlank { option.id }
         }
     }
 
     fun cancelPrompt(waiting: PendingPrompt) {
         val seq = agent.state_change_seq
+        haptics.performHapticFeedback(HapticFeedbackType.Reject)
         run(
             block = { RelayRepository.cancel(agent.key, seq, waiting.fingerprint) },
             report = { answerError = it }
         ) {
             sent = SentAnswer(agent.pane_id, seq, waiting.fingerprint, agent.host)
+            chosen = cancelLabel
         }
     }
 
@@ -178,6 +211,7 @@ fun ChatScreen(agent: AgentState, hosts: List<HostInfo>, onBack: () -> Unit) {
             sendError = emptyReply
             return
         }
+        haptics.performHapticFeedback(HapticFeedbackType.KeyboardTap)
         run(
             block = { RelayRepository.prompt(agent.key, text, agent.state_change_seq) },
             report = { sendError = it }
@@ -202,27 +236,79 @@ fun ChatScreen(agent: AgentState, hosts: List<HostInfo>, onBack: () -> Unit) {
         topBar = {
             TopAppBar(
                 title = {
-                    Column {
-                        Text(
-                            text = agent.label.ifBlank { agent.agent },
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        AgentAvatar(
+                            agent,
+                            size = 32.dp,
+                            modifier = sharedFace(agent.key.token, sharedScope, visibilityScope)
                         )
-                        Text(
-                            text = listOfNotNull(
-                                stringResource(style.label).takeIf { it.isNotBlank() },
-                                hostName
-                            ).joinToString(" · "),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = style.accent,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
+                        Spacer(Modifier.width(10.dp))
+                        Column {
+                            Text(
+                                text = agent.label.ifBlank { agent.agent },
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                style = MaterialTheme.typography.titleMedium
+                            )
+                            Text(
+                                text = listOfNotNull(
+                                    stringResource(style.label).takeIf { it.isNotBlank() },
+                                    hostName
+                                ).joinToString(" · "),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = style.accent,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
                     }
                 },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.back))
+                    }
+                },
+                actions = {
+                    IconButton(onClick = { menuOpen = true }) {
+                        Icon(Icons.Filled.MoreVert, contentDescription = stringResource(R.string.more_options))
+                    }
+                    DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.mark_read)) },
+                            onClick = {
+                                menuOpen = false
+                                onMarkRead()
+                            }
+                        )
+                        DropdownMenuItem(
+                            text = {
+                                Text(
+                                    stringResource(
+                                        if (mutedChats.isMuted(agent.key.token)) {
+                                            R.string.chat_unmute
+                                        } else {
+                                            R.string.chat_mute
+                                        }
+                                    )
+                                )
+                            },
+                            onClick = {
+                                menuOpen = false
+                                val token = agent.key.token
+                                if (mutedChats.isMuted(token)) {
+                                    mutedChats.unmute(token)
+                                } else {
+                                    mutedChats.mute(token, agent.label.ifBlank { agent.agent })
+                                }
+                            }
+                        )
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.chat_details)) },
+                            onClick = {
+                                menuOpen = false
+                                detailsOpen = true
+                            }
+                        )
                     }
                 }
             )
@@ -238,8 +324,10 @@ fun ChatScreen(agent: AgentState, hosts: List<HostInfo>, onBack: () -> Unit) {
             )
         }
     ) { padding ->
+        Column(Modifier.fillMaxSize().padding(padding)) {
+        notice?.let { ConnectionStrip(it) }
         if (entries.isEmpty() && info.isEmpty()) {
-            Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Text(stringResource(R.string.chat_no_messages), color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         } else {
@@ -249,9 +337,10 @@ fun ChatScreen(agent: AgentState, hosts: List<HostInfo>, onBack: () -> Unit) {
                 agent = agent,
                 prompt = prompt,
                 locked = locked,
+                chosen = chosen,
                 answerError = answerError,
                 itemCount = itemCount,
-                modifier = Modifier.fillMaxSize().padding(padding),
+                modifier = Modifier.fillMaxSize(),
                 onOption = { option ->
                     if (option.needsConfirmation()) confirmAlways = option
                     else prompt?.let { answer(option, it) }
@@ -259,6 +348,30 @@ fun ChatScreen(agent: AgentState, hosts: List<HostInfo>, onBack: () -> Unit) {
                 onCancel = { prompt?.let { cancelPrompt(it) } }
             )
         }
+        }
+    }
+
+    if (detailsOpen) {
+        AlertDialog(
+            onDismissRequest = { detailsOpen = false },
+            title = { Text(agent.label.ifBlank { agent.agent }) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    info.forEach {
+                        Text(it, style = MaterialTheme.typography.bodyMedium)
+                    }
+                    if (info.isEmpty()) {
+                        Text(
+                            stringResource(R.string.chat_details_none),
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { detailsOpen = false }) { Text(stringResource(R.string.confirm)) }
+            }
+        )
     }
 
     confirmAlways?.let { option ->
@@ -286,6 +399,7 @@ private fun Conversation(
     agent: AgentState,
     prompt: PendingPrompt?,
     locked: Boolean,
+    chosen: String?,
     answerError: String?,
     itemCount: Int,
     modifier: Modifier,
@@ -335,6 +449,13 @@ private fun Conversation(
                                 onOption = onOption,
                                 onCancel = onCancel
                             )
+                            chosen?.let {
+                                Text(
+                                    text = stringResource(R.string.prompt_chosen, it),
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    style = MaterialTheme.typography.labelLarge
+                                )
+                            }
                             answerError?.let {
                                 Text(
                                     text = it,
@@ -411,13 +532,25 @@ private fun AnswerBubble(item: HistoryItem) {
 
 @Composable
 private fun SentBubble(text: String) {
-    Bubble(mine = true, container = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f)) {
+    Bubble(mine = true, container = MaterialTheme.colorScheme.primaryContainer) {
         Text(text, style = MaterialTheme.typography.bodyLarge)
-        Text(
-            text = stringResource(R.string.chat_sent),
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.align(Alignment.End)
+        ) {
+            Text(
+                text = stringResource(R.string.chat_sent),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Icon(
+                Icons.Filled.Check,
+                contentDescription = stringResource(R.string.chat_sent),
+                modifier = Modifier.size(14.dp),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
     }
 }
 
@@ -451,14 +584,16 @@ private fun DaySeparator(date: LocalDate) {
 @Composable
 private fun AgentInfo(lines: List<String>) {
     Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
-            .background(MaterialTheme.colorScheme.surface)
-            .padding(horizontal = 12.dp, vertical = 8.dp),
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
         verticalArrangement = Arrangement.spacedBy(2.dp)
     ) {
-        lines.forEach { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+        lines.forEach {
+            Text(
+                it,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
     }
 }
 
@@ -512,12 +647,25 @@ private fun Composer(
     Surface(color = MaterialTheme.colorScheme.surface, shadowElevation = 8.dp) {
         Column(Modifier.fillMaxWidth().imePadding().navigationBarsPadding()) {
             error?.let {
-                Text(
-                    text = it,
-                    color = MaterialTheme.colorScheme.error,
-                    style = MaterialTheme.typography.bodySmall,
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
-                )
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp, top = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        Icons.Filled.Warning,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp),
+                        tint = MaterialTheme.colorScheme.error
+                    )
+                    Spacer(Modifier.width(6.dp))
+                    Text(
+                        text = it,
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.weight(1f)
+                    )
+                    TextButton(onClick = onSend) { Text(stringResource(R.string.update_retry)) }
+                }
             }
             Row(
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp),

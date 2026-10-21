@@ -89,6 +89,7 @@ private fun sessionErrorRes(error: Throwable): Int = when ((error as? RelayError
 @Composable
 fun NewSessionScreen(
     hosts: List<HostInfo>,
+    startHost: String = "",
     onBack: () -> Unit,
     onCreated: (SessionCreated) -> Unit
 ) {
@@ -107,10 +108,17 @@ fun NewSessionScreen(
     var label by rememberSaveable { mutableStateOf("") }
     var creating by remember { mutableStateOf(false) }
     var createError by remember { mutableStateOf<Int?>(null) }
+    // Three steps, the way a messenger asks for a contact: the machine, the agent, the folder.
+    var step by rememberSaveable { mutableStateOf(if (startHost.isBlank()) 0 else 1) }
 
-    // A host that went offline cannot stay selected; the first startable one is the default.
-    LaunchedEffect(startable) {
-        if (startable.none { it.id == hostId }) hostId = startable.firstOrNull()?.id.orEmpty()
+    // A host that went offline cannot stay selected; the machine the caller asked for wins, else
+    // the first startable one.
+    LaunchedEffect(startable, startHost) {
+        if (startHost.isNotBlank() && startable.any { it.id == startHost }) {
+            hostId = startHost
+        } else if (startable.none { it.id == hostId }) {
+            hostId = startable.firstOrNull()?.id.orEmpty()
+        }
     }
 
     // What the chosen host allows: kinds and roots. Both reset with the host.
@@ -170,9 +178,9 @@ fun NewSessionScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text(stringResource(R.string.new_session)) },
+                title = { Text(stringResource(stepTitle(step))) },
                 navigationIcon = {
-                    IconButton(onClick = onBack) {
+                    IconButton(onClick = { if (step > 0) step-- else onBack() }) {
                         Icon(
                             Icons.AutoMirrored.Filled.ArrowBack,
                             contentDescription = stringResource(R.string.back)
@@ -182,29 +190,50 @@ fun NewSessionScreen(
             )
         },
         bottomBar = {
-            CreateBar(
-                label = label,
-                onLabelChange = { label = it; createError = null },
-                hint = defaultSessionLabel(chosen),
-                enabled = canCreateSession(hostId, kind, chosen, creating),
-                creating = creating,
-                error = createError,
-                onCreate = ::create
-            )
+            if (step == 2) {
+                CreateBar(
+                    label = label,
+                    onLabelChange = { label = it; createError = null },
+                    hint = defaultSessionLabel(chosen),
+                    enabled = canCreateSession(hostId, kind, chosen, creating),
+                    creating = creating,
+                    error = createError,
+                    onCreate = ::create
+                )
+            }
         }
     ) { padding ->
         Column(Modifier.fillMaxSize().padding(padding)) {
             when {
-                startable.isEmpty() -> Centered(stringResource(R.string.session_no_hosts), MaterialTheme.colorScheme.onSurfaceVariant)
-                optionsError != null -> Centered(stringResource(optionsError!!), MaterialTheme.colorScheme.error)
-                else -> {
-                    if (startable.size > 1) {
-                        HostChips(startable, hostId) { hostId = it }
+                startable.isEmpty() ->
+                    Centered(stringResource(R.string.session_no_hosts), MaterialTheme.colorScheme.onSurfaceVariant)
+                optionsError != null && step > 0 ->
+                    Centered(stringResource(optionsError!!), MaterialTheme.colorScheme.error)
+                step == 0 -> MachineStep(
+                    hosts = startable,
+                    selected = hostId,
+                    onSelect = {
+                        hostId = it
+                        step = 1
                     }
+                )
+                step == 1 -> {
                     val kinds = sessionKinds(options)
-                    if (kinds.isNotEmpty()) {
-                        KindChips(kinds, kind) { kind = it }
+                    if (kinds.isEmpty()) {
+                        Centered(stringResource(R.string.session_not_configured), MaterialTheme.colorScheme.onSurfaceVariant)
+                    } else {
+                        KindStep(
+                            kinds = kinds,
+                            selected = kind,
+                            machine = startable.firstOrNull { it.id == hostId }?.name.orEmpty(),
+                            onSelect = {
+                                kind = it
+                                step = 2
+                            }
+                        )
                     }
+                }
+                else -> {
                     if (options != null && options!!.roots.isEmpty()) {
                         Text(
                             text = stringResource(R.string.session_not_configured),
@@ -224,6 +253,81 @@ fun NewSessionScreen(
                             onChoose = ::choose
                         )
                     }
+                }
+            }
+        }
+    }
+}
+
+/** The step's title: the machine, the agent, the folder. */
+private fun stepTitle(step: Int): Int = when (step) {
+    0 -> R.string.session_step_machine
+    1 -> R.string.session_step_agent
+    else -> R.string.session_step_folder
+}
+
+/** Step one: the machine the session runs on. */
+@Composable
+private fun MachineStep(hosts: List<HostInfo>, selected: String, onSelect: (String) -> Unit) {
+    LazyColumn(Modifier.fillMaxSize()) {
+        items(hosts, key = { it.id }) { host ->
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { onSelect(host.id) }
+                    .padding(horizontal = 16.dp, vertical = 14.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text(host.name.ifBlank { host.id }, style = MaterialTheme.typography.bodyLarge)
+                    Text(
+                        text = if (host.online) {
+                            stringResource(R.string.machines_online)
+                        } else {
+                            stringResource(R.string.machines_offline)
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                if (host.id == selected) {
+                    Icon(
+                        Icons.Filled.Check,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary
+                    )
+                }
+            }
+        }
+    }
+}
+
+/** Step two: the agent kind the machine may start. */
+@Composable
+private fun KindStep(kinds: List<String>, selected: String, machine: String, onSelect: (String) -> Unit) {
+    Column(Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 8.dp)) {
+        if (machine.isNotBlank()) {
+            Text(
+                text = stringResource(R.string.session_on_machine, machine),
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+        kinds.forEach { kind ->
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { onSelect(kind) }
+                    .padding(vertical = 14.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(kind, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
+                if (kind == selected) {
+                    Icon(
+                        Icons.Filled.Check,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary
+                    )
                 }
             }
         }

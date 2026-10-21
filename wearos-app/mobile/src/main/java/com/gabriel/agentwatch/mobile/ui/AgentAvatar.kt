@@ -12,6 +12,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.painterResource
@@ -33,14 +35,16 @@ import com.gabriel.agentwatch.ui.logic.shownStatus
 fun AgentAvatar(
     agent: AgentState,
     size: Dp = 48.dp,
-    ring: Color = MaterialTheme.colorScheme.background
+    ring: Color = MaterialTheme.colorScheme.background,
+    modifier: Modifier = Modifier
 ) {
     val brand = remember(agent.agent) { agentBrand(agent.agent) }
     val style = statusStyle(agent.shownStatus())
     val name = brand.name.ifBlank { stringResource(R.string.agent_avatar) }
+    val statusLabel = stringResource(style.label)
     val dot = size / 4
 
-    Box(Modifier.size(size)) {
+    Box(modifier.size(size)) {
         Box(
             modifier = Modifier
                 .fillMaxSize()
@@ -61,6 +65,7 @@ fun AgentAvatar(
                 .size(dot)
                 .background(style.accent, CircleShape)
                 .border(2.dp, ring, CircleShape)
+                .semantics { contentDescription = statusLabel }
         )
     }
 }

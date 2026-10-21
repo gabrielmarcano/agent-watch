@@ -152,6 +152,9 @@ dependencies {
     // The Material icons left material3 in Compose 1.10; the core set is its own artifact
     // (the BOM pins its version).
     implementation("androidx.compose.material:material-icons-core")
+    // The extended set for the few icons the core set lacks (a chat bubble, a machine, a clock).
+    // R8 keeps only the ones the app uses.
+    implementation("androidx.compose.material:material-icons-extended")
 
     implementation("androidx.activity:activity-compose:1.12.4")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.10.0")

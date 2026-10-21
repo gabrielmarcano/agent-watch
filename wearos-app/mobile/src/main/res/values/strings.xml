@@ -42,6 +42,9 @@
     <string name="chat_working">Working…</string>
     <string name="chat_waiting_background">Waiting on background agents</string>
     <string name="chat_unread">Unread</string>
+    <string name="chat_muted">Muted</string>
+    <string name="chat_mute">Mute this chat</string>
+    <string name="chat_unmute">Unmute this chat</string>
     <string name="chat_unread_count">%1$d unread</string>
     <string name="chat_sent">Sent</string>
     <string name="no_agents">No agents</string>
@@ -61,13 +64,58 @@
     <string name="chat_workspace">Workspace %1$s</string>
     <string name="chat_folder">Folder %1$s</string>
     <string name="chat_screen_source">Screen capture</string>
+    <string name="chat_details">Agent details</string>
+    <string name="chat_details_none">Nothing more to show</string>
+    <string name="prompt_chosen">Chosen: %1$s</string>
     <string name="agent_closed">Agent closed</string>
     <string name="back">Back</string>
     <string name="send">Send</string>
     <string name="reply_empty">Empty reply — nothing sent</string>
 
+    <!-- The bottom navigation -->
+    <string name="tab_chats">Chats</string>
+    <string name="tab_machines">Machines</string>
+    <string name="tab_history">History</string>
+    <string name="tab_settings">Settings</string>
+
+    <!-- Machines: the hosts the relay knows -->
+    <string name="machines_title">Machines</string>
+    <string name="machines_empty">No machines yet</string>
+    <string name="machines_online">Online</string>
+    <string name="machines_offline">Offline</string>
+    <string name="machines_herdr_stopped">herdr stopped</string>
+    <string name="machines_agents">%1$d agents · %2$d waiting</string>
+    <string name="machines_projects">Projects</string>
+    <string name="machines_chats">Its chats</string>
+
+    <!-- Settings -->
+    <string name="settings_title">Settings</string>
+    <string name="settings_account">Account</string>
+    <string name="settings_relay">Relay</string>
+    <string name="settings_device">This phone</string>
+    <string name="settings_forget">Forget this phone</string>
+    <string name="settings_forget_hint">The phone forgets its pairing and asks for a new code. The relay keeps the device until you revoke it.</string>
+    <string name="settings_appearance">Appearance</string>
+    <string name="settings_theme_system">System</string>
+    <string name="settings_theme_light">Light</string>
+    <string name="settings_theme_dark">Dark</string>
+    <string name="settings_dynamic_color">Wallpaper colours</string>
+    <string name="settings_dynamic_color_hint">Use the system palette (Android 12 and newer)</string>
+    <string name="settings_notifications">Notifications</string>
+    <string name="settings_muted">Muted chats</string>
+    <string name="settings_unmute">Unmute</string>
+    <string name="settings_data">Data</string>
+    <string name="settings_check_updates">Check for updates</string>
+    <string name="settings_version">Version %1$s</string>
+    <string name="settings_connection">Relay connection</string>
+    <string name="settings_connected">Connected</string>
+
     <!-- New session: the device, agent kind and folder the bridge allows -->
     <string name="new_session">New session</string>
+    <string name="session_step_machine">Machine</string>
+    <string name="session_step_agent">Agent</string>
+    <string name="session_step_folder">Folder</string>
+    <string name="session_on_machine">On %1$s</string>
     <string name="session_folder">Folder</string>
     <string name="session_folder_none">Choose a folder below</string>
     <string name="session_name_hint">Name (optional): %1$s</string>
@@ -145,6 +193,8 @@
     <!-- Notifications: the phone builds them locally from data-only pushes -->
     <string name="notification_channel_chats">Agent chats</string>
     <string name="notification_channel_chats_description">Approvals and finished replies from your agents</string>
+    <string name="notification_channel_approvals">Agent approvals</string>
+    <string name="notification_channel_approvals_description">An agent is waiting for your answer</string>
     <string name="notification_channel_feedback">Agent action feedback</string>
     <string name="notification_channel_feedback_description">Brief silent feedback after acting on an agent notification</string>
     <plurals name="notification_summary">

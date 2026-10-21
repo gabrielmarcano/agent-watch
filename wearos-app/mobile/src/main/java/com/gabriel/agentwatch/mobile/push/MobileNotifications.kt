@@ -35,6 +35,7 @@ import com.gabriel.agentwatch.util.MarkdownFormatter
  */
 object MobileNotifications {
     const val CHATS = "agent_chats"
+    const val APPROVALS = "agent_approvals"
     const val FEEDBACK = "agent_feedback"
 
     private const val GROUP = "com.gabriel.agentwatch.mobile.agent_chats"
@@ -60,19 +61,44 @@ object MobileNotifications {
 
     fun ensure(context: Context) {
         val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        // A chat replies with a light tick; an approval gets a short double pulse (the app's own
+        // taps are quieter still). The importance of a channel is fixed when it is created, so a
+        // channel whose importance changed is replaced (the owner's own setting for it is lost).
+        channel(context, manager, CHATS, R.string.notification_channel_chats, R.string.notification_channel_chats_description,
+            NotificationManager.IMPORTANCE_DEFAULT, longArrayOf(0, 120))
+        channel(context, manager, APPROVALS, R.string.notification_channel_approvals, R.string.notification_channel_approvals_description,
+            NotificationManager.IMPORTANCE_HIGH, longArrayOf(0, 250, 120, 250), lights = true)
+        channel(context, manager, FEEDBACK, R.string.notification_channel_feedback, R.string.notification_channel_feedback_description,
+            NotificationManager.IMPORTANCE_LOW, null)
+    }
+
+    private fun channel(
+        context: Context,
+        manager: NotificationManager,
+        id: String,
+        nameRes: Int,
+        descriptionRes: Int,
+        importance: Int,
+        vibration: LongArray?,
+        lights: Boolean = false
+    ) {
+        val existing = manager.getNotificationChannel(id)
+        if (existing != null && existing.importance != importance) manager.deleteNotificationChannel(id)
         manager.createNotificationChannel(
-            NotificationChannel(CHATS, context.getString(R.string.notification_channel_chats), NotificationManager.IMPORTANCE_HIGH).apply {
-                description = context.getString(R.string.notification_channel_chats_description)
-                enableLights(true)
-                enableVibration(true)
-            }
-        )
-        manager.createNotificationChannel(
-            NotificationChannel(FEEDBACK, context.getString(R.string.notification_channel_feedback), NotificationManager.IMPORTANCE_LOW).apply {
-                description = context.getString(R.string.notification_channel_feedback_description)
+            NotificationChannel(id, context.getString(nameRes), importance).apply {
+                description = context.getString(descriptionRes)
+                if (vibration != null) {
+                    enableVibration(true)
+                    vibrationPattern = vibration
+                }
+                if (lights) enableLights(true)
             }
         )
     }
+
+    /** A chat the owner muted posts no notification (the phone's own, local one). */
+    private fun muted(context: Context, agent: AgentKey): Boolean =
+        com.gabriel.agentwatch.mobile.ui.MutedChats(context).isMuted(agent.token)
 
     /** One chat per `(host, pane)`: a new push for it replaces the old notification. */
     fun idFor(agent: AgentKey): Int = agent.token.hashCode() and 0x7FFFFFFF
@@ -154,8 +180,9 @@ object MobileNotifications {
         agent: AgentKey,
         seq: Long,
         label: String,
-        smallIcon: Int
-    ): NotificationCompat.Builder = NotificationCompat.Builder(context, CHATS)
+        smallIcon: Int,
+        channel: String = CHATS
+    ): NotificationCompat.Builder = NotificationCompat.Builder(context, channel)
         .setSmallIcon(smallIcon)
         .setAutoCancel(true)
         .setLocalOnly(true)
@@ -174,6 +201,7 @@ object MobileNotifications {
             .build()
 
     fun showBlocked(context: Context, message: PushMessage.Blocked) {
+        if (muted(context, message.key)) return
         ensure(context)
         val shown = person(context, message.label, message.agent)
         val style = NotificationCompat.MessagingStyle(
@@ -184,7 +212,7 @@ object MobileNotifications {
 
         val builder = base(
             context, KIND_APPROVAL, message.key, message.seq, message.label,
-            com.gabriel.agentwatch.core.R.drawable.ic_agent_alert
+            com.gabriel.agentwatch.core.R.drawable.ic_agent_alert, channel = APPROVALS
         )
             .setStyle(style)
             .setContentTitle(message.label)
@@ -264,6 +292,7 @@ object MobileNotifications {
     }
 
     fun showDone(context: Context, message: PushMessage.Done) {
+        if (muted(context, message.key)) return
         ensure(context)
         val shown = person(context, message.label, message.agent)
         val style = NotificationCompat.MessagingStyle(
