@@ -125,7 +125,6 @@ import java.time.Instant
 @Composable
 fun ChatListScreen(
     state: UiState,
-    update: UpdateState,
     hostFilter: String?,
     onHostFilter: (String?) -> Unit,
     chatStore: ChatStore,
@@ -135,12 +134,7 @@ fun ChatListScreen(
     onNewSession: () -> Unit,
     onRefresh: suspend () -> Unit,
     onMarkRead: (AgentState) -> Unit,
-    onMarkUnread: (AgentState) -> Unit,
-    onUpdate: () -> Unit,
-    onRetryUpdate: () -> Unit,
-    onCancelUpdate: () -> Unit,
-    onInstallUpdate: () -> Unit,
-    onDismissUpdate: () -> Unit
+    onMarkUnread: (AgentState) -> Unit
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -185,14 +179,6 @@ fun ChatListScreen(
         }
     ) { padding ->
         Column(Modifier.fillMaxSize().padding(padding)) {
-            UpdateBanner(
-                update = update,
-                onUpdate = onUpdate,
-                onRetry = onRetryUpdate,
-                onCancel = onCancelUpdate,
-                onInstall = onInstallUpdate,
-                onDismiss = onDismissUpdate
-            )
             status.notice?.let { Notice(it) }
             PullToRefreshBox(
                 isRefreshing = refreshing,
@@ -302,86 +288,6 @@ fun BigTitle(text: String) {
     )
 }
 
-/**
- * The options a long press on a chat offers, WhatsApp-style: a sheet over the list with pin, mute,
- * mark as read and hide.
- */
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun ChatOptionsSheet(
-    agent: AgentState,
-    chatStore: ChatStore,
-    pinned: Boolean,
-    muted: Boolean,
-    onDismiss: () -> Unit,
-    onMarkRead: () -> Unit,
-    onMarkUnread: () -> Unit
-) {
-    val token = agent.key.token
-    val name = agent.label.ifBlank { agent.agent }
-    ModalBottomSheet(onDismissRequest = onDismiss) {
-        Column(Modifier.fillMaxWidth().padding(bottom = 24.dp)) {
-            Text(
-                text = name,
-                style = MaterialTheme.typography.titleMedium,
-                modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp)
-            )
-            SheetAction(
-                label = stringResource(if (pinned) R.string.chat_unpin else R.string.chat_pin),
-                icon = Icons.Filled.PushPin,
-                onClick = {
-                    if (pinned) chatStore.unpin(token) else chatStore.pin(token, name)
-                    onDismiss()
-                }
-            )
-            SheetAction(
-                label = stringResource(if (muted) R.string.chat_unmute else R.string.chat_mute),
-                icon = Icons.Filled.NotificationsOff,
-                onClick = {
-                    if (muted) chatStore.unmute(token) else chatStore.mute(token, name)
-                    onDismiss()
-                }
-            )
-            SheetAction(
-                label = stringResource(R.string.mark_read),
-                icon = Icons.Filled.DoneAll,
-                onClick = onMarkRead
-            )
-            SheetAction(
-                label = stringResource(R.string.chat_mark_unread),
-                icon = Icons.Filled.MarkEmailUnread,
-                onClick = {
-                    onMarkUnread()
-                    onDismiss()
-                }
-            )
-            SheetAction(
-                label = stringResource(R.string.chat_archive),
-                icon = Icons.Filled.Archive,
-                onClick = {
-                    chatStore.hide(token, name)
-                    onDismiss()
-                }
-            )
-        }
-    }
-}
-
-/** One option in the sheet: its icon and its name, like the ones a messaging app shows. */
-@Composable
-private fun SheetAction(label: String, icon: ImageVector, onClick: () -> Unit) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onClick)
-            .padding(horizontal = 24.dp, vertical = 14.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.onSurface)
-        Spacer(Modifier.width(20.dp))
-        Text(label, style = MaterialTheme.typography.bodyLarge)
-    }
-}
 
 /** The search field, pinned above the list: it filters the chats by name, machine or last message. */
 @Composable
@@ -723,77 +629,6 @@ private fun EmptyList(text: String, action: String? = null, onAction: (() -> Uni
     }
 }
 
-@Composable
-private fun UpdateBanner(
-    update: UpdateState,
-    onUpdate: () -> Unit,
-    onRetry: () -> Unit,
-    onCancel: () -> Unit,
-    onInstall: () -> Unit,
-    onDismiss: () -> Unit
-) {
-    if (update.phase == UpdatePhase.IDLE || update.phase == UpdatePhase.CHECKING || update.phase == UpdatePhase.UP_TO_DATE) {
-        return
-    }
-    val info = update.info
-    val version = info?.version_name?.takeIf { it.isNotBlank() } ?: info?.version_code?.toString().orEmpty()
-
-    Card(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
-        Column(
-            modifier = Modifier.padding(12.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp)
-        ) {
-            Text(stringResource(R.string.update_title), style = MaterialTheme.typography.titleSmall)
-            when (update.phase) {
-                UpdatePhase.AVAILABLE -> Text(stringResource(R.string.update_available, version))
-                UpdatePhase.DOWNLOADING -> {
-                    Text(stringResource(R.string.update_downloading, (update.progress * 100).toInt()))
-                    LinearProgressIndicator(
-                        progress = { update.progress.coerceIn(0f, 1f) },
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                }
-                UpdatePhase.READY -> Text(stringResource(R.string.update_ready, version))
-                UpdatePhase.NEEDS_PERMISSION -> Text(stringResource(R.string.update_permission))
-                UpdatePhase.FAILED -> Text(updateErrorText(update.errorCode))
-                else -> Unit
-            }
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                when (update.phase) {
-                    UpdatePhase.AVAILABLE -> {
-                        TextButton(onClick = onDismiss) { Text(stringResource(R.string.update_later)) }
-                        Button(onClick = onUpdate) { Text(stringResource(R.string.update_action)) }
-                    }
-                    UpdatePhase.DOWNLOADING -> {
-                        TextButton(onClick = onCancel) { Text(stringResource(R.string.update_cancel)) }
-                    }
-                    UpdatePhase.READY -> {
-                        TextButton(onClick = onDismiss) { Text(stringResource(R.string.update_later)) }
-                        Button(onClick = onInstall) { Text(stringResource(R.string.update_install)) }
-                    }
-                    UpdatePhase.NEEDS_PERMISSION -> {
-                        TextButton(onClick = onDismiss) { Text(stringResource(R.string.update_later)) }
-                        Button(onClick = onInstall) { Text(stringResource(R.string.update_open_settings)) }
-                    }
-                    UpdatePhase.FAILED -> {
-                        TextButton(onClick = onDismiss) { Text(stringResource(R.string.update_later)) }
-                        TextButton(onClick = onRetry) { Text(stringResource(R.string.update_retry)) }
-                    }
-                    else -> Unit
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun updateErrorText(code: String?): String = when (code) {
-    "bad_download", "bad_update" -> stringResource(R.string.update_error_download)
-    "install_unavailable", "install_settings_unavailable" -> stringResource(R.string.update_error_install)
-    "not_paired", "unauthorized" -> stringResource(R.string.update_error_auth)
-    "network", "timeout" -> stringResource(R.string.update_error_network)
-    else -> stringResource(R.string.update_error_generic)
-}
 
 @Composable
 private fun Notice(notice: ListNotice) {

@@ -3,6 +3,7 @@ package com.gabriel.agentwatch.mobile.ui.logic
 import com.gabriel.agentwatch.model.AgentState
 import com.gabriel.agentwatch.model.HistoryItem
 import com.gabriel.agentwatch.model.key
+import com.gabriel.agentwatch.util.MdBlock
 import com.gabriel.agentwatch.util.MarkdownFormatter
 import java.time.DayOfWeek
 import java.time.Instant
@@ -137,6 +138,43 @@ fun unreadCount(agent: AgentState, history: List<HistoryItem>, seenAtMillis: Lon
         item.key == agent.key &&
             (parseInstant(item.completed_at) ?: parseInstant(item.asked_at ?: ""))?.isAfter(since) == true
     }
+}
+
+/**
+ * The first blocks of a long answer, and whether more were left: a messaging app shows a long
+ * message as a part with a "Read more" under it.
+ */
+data class TruncatedBlocks(
+    val blocks: List<MdBlock>,
+    val truncated: Boolean
+)
+
+/**
+ * Keeps the blocks that fit in [limit] characters (at least the first one) and says whether the
+ * answer continues.
+ */
+fun truncateBlocks(blocks: List<MdBlock>, limit: Int = 240): TruncatedBlocks {
+    if (blocks.isEmpty()) return TruncatedBlocks(emptyList(), false)
+    var length = 0
+    val kept = mutableListOf<MdBlock>()
+    for (block in blocks) {
+        val size = blockLength(block)
+        if (kept.isNotEmpty() && length + size > limit) break
+        kept += block
+        length += size
+    }
+    return TruncatedBlocks(kept, kept.size < blocks.size)
+}
+
+/** How much room a block takes, in characters. */
+private fun blockLength(block: MdBlock): Int = when (block) {
+    is MdBlock.Heading -> block.spans.sumOf { it.text.length }
+    is MdBlock.Paragraph -> block.spans.sumOf { it.text.length }
+    is MdBlock.ListItem -> block.marker.length + block.spans.sumOf { it.text.length }
+    is MdBlock.Code -> block.text.length
+    is MdBlock.Record -> block.fields.sumOf { (header, spans) -> header.length + spans.sumOf { it.text.length } }
+    is MdBlock.Quote -> block.spans.sumOf { it.text.length }
+    MdBlock.Rule -> 0
 }
 
 /**

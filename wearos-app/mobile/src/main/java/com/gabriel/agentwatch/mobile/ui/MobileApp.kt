@@ -24,6 +24,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Chat
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.filled.Computer
 import androidx.compose.material.icons.filled.Settings
@@ -223,6 +224,7 @@ fun MobileApp(
                                     agent = agent,
                                     hosts = state.hosts,
                                     chatStore = chatStore,
+                                    seen = chatSeen,
                                     notice = listStatus(state).notice,
                                     sharedScope = this@SharedTransitionLayout,
                                     visibilityScope = this,
@@ -248,7 +250,15 @@ fun MobileApp(
 
                         Routes.SETTINGS -> SettingsScreen(
                             state = state,
+                            update = update,
                             chatStore = chatStore,
+                            onUpdate = { updateManager.download() },
+                            onRetryUpdate = {
+                                if (update.info != null) updateManager.download() else updateManager.check(manual = true)
+                            },
+                            onCancelUpdate = { updateManager.cancelDownload() },
+                            onInstallUpdate = { updateManager.install() },
+                            onDismissUpdate = { updateManager.dismiss() },
                             onCheckUpdates = { updateManager.check(manual = true) },
                             onForgetPhone = {
                                 // Forgetting the phone: the token goes, the link restarts and the app
@@ -283,7 +293,6 @@ fun MobileApp(
 
                         else -> ChatListScreen(
                             state = state,
-                            update = update,
                             hostFilter = machineFilter,
                             onHostFilter = { machineFilter = it },
                             chatStore = chatStore,
@@ -302,14 +311,7 @@ fun MobileApp(
                             },
                             onMarkUnread = { agent ->
                                 chatSeen.markUnread(agent.key)
-                            },
-                            onUpdate = { updateManager.download() },
-                            onRetryUpdate = {
-                                if (update.info != null) updateManager.download() else updateManager.check(manual = true)
-                            },
-                            onCancelUpdate = { updateManager.cancelDownload() },
-                            onInstallUpdate = { updateManager.install() },
-                            onDismissUpdate = { updateManager.dismiss() }
+                            }
                         )
                     }
                 }
@@ -348,11 +350,15 @@ private fun PhoneNavigationBar(current: String, waiting: Int, onSelect: (String)
         modifier = Modifier
             .fillMaxWidth()
             .navigationBarsPadding()
-            .padding(horizontal = 12.dp, vertical = 8.dp),
-        shape = RoundedCornerShape(28.dp),
-        color = MaterialTheme.colorScheme.surfaceContainer,
+            .padding(horizontal = 10.dp, vertical = 8.dp),
+        shape = RoundedCornerShape(30.dp),
+        color = MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.96f),
         tonalElevation = 3.dp,
-        shadowElevation = 8.dp
+        shadowElevation = 10.dp,
+        border = androidx.compose.foundation.BorderStroke(
+            1.dp,
+            MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f)
+        )
     ) {
         Row(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp),
@@ -398,21 +404,22 @@ private fun RowScope.NavItem(
     ) {
         Box(contentAlignment = Alignment.Center) {
             if (selected) {
+                // The selected tab sits on a filled circle, the way WhatsApp marks it.
                 Box(
                     Modifier
-                        .size(width = 56.dp, height = 30.dp)
-                        .background(MaterialTheme.colorScheme.primaryContainer, RoundedCornerShape(15.dp))
+                        .size(38.dp)
+                        .background(MaterialTheme.colorScheme.primary, CircleShape)
                 )
             }
             Icon(
                 icon,
                 contentDescription = null,
                 tint = if (selected) {
-                    MaterialTheme.colorScheme.onPrimaryContainer
+                    MaterialTheme.colorScheme.onPrimary
                 } else {
                     MaterialTheme.colorScheme.onSurfaceVariant
                 },
-                modifier = Modifier.size(22.dp)
+                modifier = Modifier.size(21.dp)
             )
             if (badge > 0) {
                 WaitingBadge(badge, Modifier.align(Alignment.TopEnd))

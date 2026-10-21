@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -21,6 +22,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -30,10 +32,12 @@ import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.CircularProgressIndicator
@@ -45,6 +49,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SmallFloatingActionButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -62,6 +67,7 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.clickable
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalContext
@@ -79,6 +85,7 @@ import com.gabriel.agentwatch.mobile.R
 import com.gabriel.agentwatch.mobile.ui.logic.ChatEntry
 import com.gabriel.agentwatch.mobile.ui.logic.chatDay
 import com.gabriel.agentwatch.mobile.ui.logic.chatEntries
+import com.gabriel.agentwatch.mobile.ui.logic.truncateBlocks
 import com.gabriel.agentwatch.mobile.ui.logic.chatStamp
 import com.gabriel.agentwatch.mobile.ui.logic.replyToSend
 import com.gabriel.agentwatch.mobile.ui.logic.unmatchedPending
@@ -102,6 +109,9 @@ import java.time.LocalDate
 
 private val BUBBLE_MAX_WIDTH = 340.dp
 
+/** How much of a terminal capture is shown before "Read more". */
+private const val SHORT_TEXT = 400
+
 /**
  * One agent's conversation, WhatsApp-style: the turns it has finished (question right, answer left,
  * markdown), the prompt waiting as an inline card with its real options, the agent's progress, and a
@@ -118,6 +128,7 @@ fun ChatScreen(
     agent: AgentState,
     hosts: List<HostInfo>,
     chatStore: ChatStore,
+    seen: ChatSeen,
     notice: ListNotice? = null,
     sharedScope: SharedTransitionScope? = null,
     visibilityScope: AnimatedVisibilityScope? = null,
@@ -128,6 +139,7 @@ fun ChatScreen(
     val seen = remember(context) { ChatSeen(context) }
     val scope = rememberCoroutineScope()
     val history = rememberPaneHistory(agent.key)
+    val listState = rememberLazyListState()
     val pending = ChatOutbox.pending(agent.key)
     val openPending = remember(history, pending) { unmatchedPending(history, pending) }
 
@@ -235,9 +247,30 @@ fun ChatScreen(
     val info = agentInfoLines(agent)
     val itemCount = entries.size + if (info.isEmpty()) 0 else 1
 
+    // The chat opens at the newest message, whatever the history was doing when the screen
+    // appeared: the list is reversed, so the first item is the bottom.
+    LaunchedEffect(agent.key) {
+        snapshotFlow { listState.layoutInfo.totalItemsCount }.first { it > 0 }
+        listState.scrollToItem(0)
+    }
+
     Scaffold(
         // The canvas is a step below the surface, so the bubbles (the surface) stand out from it.
         containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+        floatingActionButton = {
+            // WhatsApp's arrow: it appears when the owner has scrolled up, and it takes them back
+            // to the latest message.
+            if (listState.firstVisibleItemIndex != 0) {
+                SmallFloatingActionButton(
+                    onClick = { scope.launch { listState.animateScrollToItem(0) } }
+                ) {
+                    Icon(
+                        Icons.Filled.KeyboardArrowDown,
+                        contentDescription = stringResource(R.string.chat_latest)
+                    )
+                }
+            }
+        },
         topBar = {
             TopAppBar(
                 title = {
@@ -246,6 +279,7 @@ fun ChatScreen(
                             agent,
                             size = 32.dp,
                             modifier = sharedFace(agent.key.token, sharedScope, visibilityScope)
+                                .clickable { detailsOpen = true }
                         )
                         Spacer(Modifier.width(10.dp))
                         Column {
@@ -338,6 +372,7 @@ fun ChatScreen(
             }
         } else {
             Conversation(
+                listState = listState,
                 entries = entries,
                 info = info,
                 agent = agent,
@@ -358,26 +393,39 @@ fun ChatScreen(
     }
 
     if (detailsOpen) {
-        AlertDialog(
-            onDismissRequest = { detailsOpen = false },
-            title = { Text(agent.label.ifBlank { agent.agent }) },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    info.forEach {
-                        Text(it, style = MaterialTheme.typography.bodyMedium)
-                    }
-                    if (info.isEmpty()) {
-                        Text(
-                            stringResource(R.string.chat_details_none),
-                            style = MaterialTheme.typography.bodyMedium
-                        )
-                    }
+        ModalBottomSheet(onDismissRequest = { detailsOpen = false }) {
+            Column(Modifier.fillMaxWidth().padding(bottom = 24.dp)) {
+                Text(
+                    text = agent.label.ifBlank { agent.agent },
+                    style = MaterialTheme.typography.titleMedium,
+                    modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp)
+                )
+                info.forEach {
+                    Text(
+                        it,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(horizontal = 24.dp, vertical = 2.dp)
+                    )
                 }
-            },
-            confirmButton = {
-                TextButton(onClick = { detailsOpen = false }) { Text(stringResource(R.string.confirm)) }
+                Spacer(Modifier.height(8.dp))
+                ChatOptionsSheet(
+                    agent = agent,
+                    chatStore = chatStore,
+                    pinned = chatStore.isPinned(agent.key.token),
+                    muted = chatStore.isMuted(agent.key.token),
+                    onDismiss = { detailsOpen = false },
+                    onMarkRead = {
+                        seen.markRead(agent.key, agent.state_change_seq)
+                        detailsOpen = false
+                    },
+                    onMarkUnread = {
+                        seen.markUnread(agent.key)
+                        detailsOpen = false
+                    }
+                )
             }
-        )
+        }
     }
 
     confirmAlways?.let { option ->
@@ -400,6 +448,7 @@ fun ChatScreen(
 
 @Composable
 private fun Conversation(
+    listState: LazyListState,
     entries: List<ChatEntry>,
     info: List<String>,
     agent: AgentState,
@@ -416,7 +465,6 @@ private fun Conversation(
     // a messaging app draws a conversation. The chat therefore opens at the end without any scroll
     // (a reversed list starts at its first item), and a long last message is read from its bottom
     // because the list grows downwards from there.
-    val listState = rememberLazyListState()
 
     // A new turn appears at the bottom; when the owner is already there, they stay there.
     LaunchedEffect(itemCount) {
@@ -514,18 +562,34 @@ private fun QueryBubble(text: String, askedAt: String?) {
 
 @Composable
 private fun AnswerBubble(item: HistoryItem) {
+    // A long answer is shown as a part with a "Read more" under it, the way a messaging app shows a
+    // long message.
+    val blocks = remember(item.id) { readerBlocks(item.response, item.source) }
+    val shortened = remember(blocks) { truncateBlocks(blocks) }
+    var expanded by remember(item.id) { mutableStateOf(false) }
+
     Bubble(mine = false, container = MaterialTheme.colorScheme.surface) {
         if (item.source == "screen") {
             // A terminal capture keeps its own spacing and never reflows; the bubble scrolls sideways.
             Box(Modifier.horizontalScroll(rememberScrollState())) {
                 Text(
-                    text = item.response,
+                    text = if (expanded) item.response else item.response.take(SHORT_TEXT),
                     fontFamily = FontFamily.Monospace,
                     style = MaterialTheme.typography.bodySmall
                 )
             }
         } else {
-            SelectionContainer { MarkdownBlocks(remember(item.id) { readerBlocks(item.response, item.source) }) }
+            SelectionContainer {
+                MarkdownBlocks(if (expanded) blocks else shortened.blocks)
+            }
+        }
+        if (shortened.truncated) {
+            TextButton(onClick = { expanded = !expanded }) {
+                Text(
+                    stringResource(if (expanded) R.string.chat_read_less else R.string.chat_read_more),
+                    style = MaterialTheme.typography.labelLarge
+                )
+            }
         }
         // The time at the end of the bubble, with the source beside it: a messaging app's stamp.
         Row(

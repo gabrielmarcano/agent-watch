@@ -158,6 +158,20 @@ What the build left out, and why:
   with the options is, and it is what the owner asked for. A multi-select comes later, if it is asked
   for again.
 
+## 15. What the second pass changed (2026-10-21)
+
+- **The update moved to the settings.** The card with the new build, the check and the install are
+  in the settings now, where the version is; the chat list is only the chats.
+- **The settings are a messaging app's settings:** rows with an icon, the name, a hint under it and a
+  chevron; the sections in the accent colour; the destructive action at the end.
+- **The bottom bar** marks the current tab with a filled circle, on a translucent bar with a hairline
+  border, the way WhatsApp's Android bar does since 2026.
+- **A long answer is a part with "Read more"** under it, and "Read less" to fold it back.
+- **The chat opens at the newest message** (the list is reversed) and a **down arrow** appears when
+  the owner has scrolled up, to take them back to the latest.
+- **Tapping the agent's face** in the chat opens its sheet: where it runs, and the same options the
+  long press offers (pin, mute, mark as read or unread, archive).
+
 ## 14. What the WhatsApp audit changed (2026-10-21)
 
 The app was run in an emulator (an Android 14 image), paired with the relay, and looked at screen by
