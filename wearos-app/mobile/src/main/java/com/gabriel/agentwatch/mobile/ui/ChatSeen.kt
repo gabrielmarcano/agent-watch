@@ -41,6 +41,16 @@ class ChatSeen(context: Context) {
      */
     fun markRead(key: AgentKey, seq: Long) = markSeen(key, seq)
 
+    /**
+     * Mark a chat unread again (WhatsApp's "Mark as unread"): every turn counts until it is read.
+     */
+    fun markUnread(key: AgentKey) {
+        prefs.edit()
+            .putLong(AT_PREFIX + key.token, 0L)
+            .remove(KEY_PREFIX + key.token)
+            .apply()
+    }
+
     /** Baseline for agents the list shows for the first time; agents already known keep their sequence. */
     fun prime(agents: List<AgentState>) {
         val editor = prefs.edit()
