@@ -276,12 +276,12 @@ Never accept a token in the query string.
 
 **New sessions** (`POST /v1/hosts/{host}/sessions`, `GET …/sessions/options`, `GET …/folders`):
 
-- The bridge starts a session only for a `kind` in its `session_kinds` (§6) and a `cwd` inside one of its `session_roots`; otherwise it answers `403 not_allowed`. With no `session_roots` configured, session creation is off on that host (`roots` is empty in the options).
+- The bridge starts a session only for a `kind` in its `session_kinds` (§6) and a `cwd` inside one of its `session_roots`; otherwise it answers `not_allowed`, which the relay returns as `403 not_allowed`. With no `session_roots` configured, session creation is off on that host (`roots` is empty in the options).
 - One herdr workspace per folder: the bridge reuses the workspace that already has a pane in `cwd`, else creates one labelled with the folder's name. Each session gets its own tab and its own agent. The first session of a new workspace uses the tab and pane that workspace creation makes; later ones get a new tab. Nothing takes focus on the host (`focus: false`).
 - `label` names the tab and the agent; default: the folder's name. When that name is already used in the workspace, the bridge appends ` 2`, ` 3`, … and returns the name it used.
-- **Never retry a create that timed out:** the session may exist. The budgets nest from the inside out: bridge 25 s < relay 30 s < phone 35 s (a `timeout` means the bridge has already given up).
+- **Never retry a create that timed out:** the session may exist. The budgets nest from the inside out: bridge 35 s < relay 40 s < phone 45 s (a `timeout` means the bridge has already given up). Inside the bridge's 35 s, `agent.start` waits up to 25 s for the agent to become interactive.
 - `GET …/folders` without `path` lists the roots themselves (`path` is `""` and `entries` are the roots). A `path` must be equal to or under a root (symlinks resolved), else `not_allowed`. Only directories are listed, sorted by name, at most 500 (`truncated: true` when there are more); unreadable entries are skipped. `parent` is empty at a root.
-- These three endpoints need the host connected and its herdr reachable: `host_offline` / `herdr_offline`. They take the normal 7 s relay budget, except `POST …/sessions` (30 s).
+- These three endpoints need the host connected and its herdr reachable: `host_offline` / `herdr_offline`. They take the normal 7 s relay budget, except `POST …/sessions` (40 s).
 
 **Pairing limits** (`pkg/relay/auth.go`): a code lives 5 minutes and works once; at most 3 codes are active (a new one evicts the oldest). `POST /v1/pair` allows 5 attempts per client IP and 20 in total per 10 minutes, and counts every attempt it lets through, successful ones included; past that it answers `429 rate_limited`.
 
@@ -436,7 +436,7 @@ Every non-200 response of the endpoints in §2.1 carries an `ErrorResponse`. A p
 | `rate_limited` | 429 | Too many attempts |
 | `host_offline` | 503 | The agent's host is not connected, or its bridge disconnected (or was replaced) before answering a command |
 | `herdr_offline` | 503 | Bridge connected, herdr unreachable |
-| `timeout` | 504 | The relay's 7 s budget ran out (one budget for sending the command and waiting for `command_result`), or the bridge's own 6 s budget did (e.g. waiting behind another command on the same pane). Timeouts nest from the inside out, bridge 6 s < relay 7 s < watch 8 s, so a `timeout` means the bridge has already given up. `session.create` uses longer budgets of the same shape: bridge 25 s < relay 30 s < phone 35 s |
+| `timeout` | 504 | The relay's 7 s budget ran out (one budget for sending the command and waiting for `command_result`), or the bridge's own 6 s budget did (e.g. waiting behind another command on the same pane). Timeouts nest from the inside out, bridge 6 s < relay 7 s < watch 8 s, so a `timeout` means the bridge has already given up. `session.create` uses longer budgets of the same shape: bridge 35 s < relay 40 s < phone 45 s |
 | `internal` | 500 | Bug, or herdr failed `agent.prompt` / `agent.send_keys` for an unclassified reason (the text or keys may have reached the pane) |
 
 What the Wear OS app shows for each code: `commandErrorFeedback` in `wearos-app/core/src/main/java/com/gabriel/agentwatch/approval/CommandFeedback.kt`.
