@@ -120,9 +120,9 @@ version_code_of() {
 }
 
 phone_name=""
-phone_code=""
+phone_code="-"
 watch_name=""
-watch_code=""
+watch_code="-"
 if has_app phone; then
 	phone_name="$(version_of MOBILE_VERSION_NAME)"
 	phone_code="$(version_code_of MOBILE_VERSION_CODE)"
@@ -190,8 +190,8 @@ done
 local_tmp="$(mktemp -d)"
 trap 'rm -rf "$local_tmp"' EXIT
 
-phone_file=""
-watch_file=""
+phone_file="-"
+watch_file="-"
 files=()
 sha_of() { shasum -a 256 "$1" | awk '{print $1}'; }
 size_of() { wc -c <"$1" | tr -d '[:space:]'; }
