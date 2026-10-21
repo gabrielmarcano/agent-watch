@@ -72,7 +72,9 @@ val defaultRelayUrl: String = agentWatchEnv["AW_RELAY_DOMAIN"].orEmpty().let { d
 // so it never touches the watch app's pairing or push registration.
 android {
     namespace = "com.gabriel.agentwatch.mobile"
-    compileSdk = 36
+    // Android 17 (API 37): the owner's phone runs the latest Android, and the phone is
+    // the app that gets the new platform features (docs/phases/7-android-ux.md § 1).
+    compileSdk = 37
 
     signingConfigs {
         if (keystoreProperties != null) {
@@ -92,7 +94,9 @@ android {
         applicationId = "com.gabriel.agentwatch.mobile"
         // :core is minSdk 30 (Android 11).
         minSdk = 30
-        targetSdk = 34
+        // 35+ draws the app behind the system bars, so every screen handles the insets
+        // (the phone's own dark look keeps light icons on the transparent bars).
+        targetSdk = 36
         versionCode = mobileVersionCode
         versionName = mobileVersionName
         buildConfigField("String", "DEFAULT_RELAY_URL", "\"$defaultRelayUrl\"")
@@ -140,11 +144,14 @@ dependencies {
     implementation(project(":core"))
 
     // Compose Material 3 for phones (the watch uses the Wear Compose Material 3 line).
-    implementation(platform("androidx.compose:compose-bom:2025.09.00"))
+    implementation(platform("androidx.compose:compose-bom:2026.03.00"))
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.ui:ui-graphics")
     implementation("androidx.compose.ui:ui-tooling-preview")
     implementation("androidx.compose.material3:material3")
+    // The Material icons left material3 in Compose 1.10; the core set is its own artifact
+    // (the BOM pins its version).
+    implementation("androidx.compose.material:material-icons-core")
 
     implementation("androidx.activity:activity-compose:1.12.4")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.10.0")
