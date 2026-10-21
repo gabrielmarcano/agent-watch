@@ -148,7 +148,7 @@ The phone is its own relay client, with its own device token: pairing it does no
    export JAVA_HOME="/Applications/Android Studio.app/Contents/jbr/Contents/Home"
    ./gradlew :mobile:assembleDebug
    ```
-   No `google-services.json` is needed: the phone has no push yet ([STATUS](STATUS.md)).
+   **Push (optional):** in the same Firebase project as the watch, add another Android app with the package name `com.gabriel.agentwatch.mobile`, download its `google-services.json` to `wearos-app/mobile/`, and build again. It is git-ignored; never commit it. Without that file the app builds and works, it just has no notifications. The relay's FCM service account ([step 4](#4-build-and-install-the-wear-os-app), item 5) sends to both apps.
 2. **Install** it on the phone with the phone connected over USB: `./gradlew :mobile:installDebug` (or `adb install -r mobile/build/outputs/apk/debug/mobile-debug.apk`).
 3. **Pair:** `./bin/agent-watch-bridge pair`, then enter the relay URL (prefilled from `agent-watch.env` at build time) and the code. The phone keeps its device token in its private app storage (backup off); the relay stores only its hash.
 4. **Allow it to start agents** (bridge `0.9.0`): on each machine, name the folders and agent kinds the phone may use, then apply the config:
@@ -158,7 +158,7 @@ The phone is its own relay client, with its own device token: pairing it does no
    ```
    With no `--session-root`, that machine starts no sessions and the phone says so. The folder browser cannot leave the roots, and a folder or kind outside them is refused (`not_allowed`, [`contracts.md` §2.1](reference/contracts.md)). The first session in a folder creates one herdr workspace for it; each session gets its own tab and agent, and nothing takes focus on that machine.
 
-What the app does today: agents as chats, one list filterable by machine, "Needs you" first, unread dots; a chat shows the agent's turns as a conversation with the approval menu inline, typed replies, and the history reader; "+" starts a session on a chosen machine, agent kind and folder, then opens its chat as soon as herdr reports it. No push and no settings screen yet: [STATUS](STATUS.md). The release build (`:mobile:assembleRelease`) is signed with the debug key, like the watch app's.
+What the app does today: agents as chats, one list filterable by machine, "Needs you" first, unread dots; a chat shows the agent's turns as a conversation with the approval menu inline, typed replies, and the history reader; "+" starts a session on a chosen machine, agent kind and folder, then opens its chat as soon as herdr reports it. With `mobile/google-services.json` in place it also posts local notifications, one chat per agent, grouped like a messaging app: tapping one opens that chat, and replies and approvals can be sent from the notification. Notifications stay on the phone (Android does not mirror them to the watch); Allow and a question's answer need the phone unlocked, while Deny, Cancel and a reply do not. No settings screen yet: [STATUS](STATUS.md). The release build (`:mobile:assembleRelease`) is signed with the debug key, like the watch app's.
 
 ### 4. Build and Install the Wear OS App
 
@@ -275,6 +275,7 @@ How each agent's menus, keys and history work: [`docs/reference/agents.md`](refe
   3. The prompt fingerprint matches what is parsed on the screen now (for `cancel` too).
 - **Once only:** a repeated request, a second answer to the same prompt, or the same dictated text sent twice is refused, so a double tap never types twice.
 - **No typing into menus:** dictation is refused while a menu is on screen, whatever herdr reports.
+- **Approving from the phone needs an unlock:** notification actions that grant something (Allow, or a question's answer) are refused while the phone is locked; Deny, Cancel and a reply stay available. The phone's notifications are built locally, marked local-only, and never mirrored to the watch.
 - **Sanitized logs:** The relay and bridge logs never print prompt contents, transcript text, or authentication tokens.
 - **One secret file on the host:** `agent-watch.env` is `0600` and git-ignored, and the guards refuse to commit it. `make config` generates the token without printing it; `configure --env-file` and `deploy.sh --sync-env` read it from the file (never from argv) and print key names only.
 
@@ -286,7 +287,7 @@ How each agent's menus, keys and history work: [`docs/reference/agents.md`](refe
 - **OpenCode approvals need the default focus.** If someone moves the focus in OpenCode's dialog at the computer (arrow keys or mouse hover), the watch's Allow is refused with nothing pressed: answer at the computer. Deny always works. Why: [`agents.md` §5.1](reference/agents.md).
 - **OpenCode 2's history cards come from the screen** (plain text, only what fits on it) when herdr's OpenCode integration is older than v13: OpenCode 2 never loads its TUI plugin, so herdr has no session to read and the bridge cannot read the transcript. **Workaround:** `herdr integration install opencode` (`herdr integration status` must say `current`), then restart OpenCode in each pane. Why: [`agents.md` §5.2](reference/agents.md#52-transcript-sqlite).
 - **The watchOS app is not on the relay API yet** ([status](STATUS.md)).
-- **An approval answered at the computer can stay in the watch's notifications** until the app next sees the live state (e.g. when you open it). The `resolved` push that withdraws them is off by default (`AW_PUSH_RESOLVED`). The current app handles it; whether the relay has it on yet is in [STATUS](STATUS.md).
+- **An approval answered at the computer can stay in the watch's or phone's notifications** until the app next sees the live state (e.g. when you open it). The `resolved` push that withdraws them is off by default (`AW_PUSH_RESOLVED`). The current apps handle it; whether the relay has it on yet is in [STATUS](STATUS.md).
 
 ---
 

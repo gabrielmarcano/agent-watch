@@ -553,9 +553,11 @@ On a `resync` the bridge sends `hello` and `snapshot` again (the current relay n
 
 ## 4. Push payloads (`pkg/push`)
 
-### 4.1 FCM (Wear OS) — data-only message
+### 4.1 FCM (Wear OS and the Android phone) — data-only message
 
-All values are strings (FCM data maps allow only strings). No `notification` block: the app builds the notification itself.
+All values are strings (FCM data maps allow only strings). No `notification` block: the clients build the notification themselves.
+
+Both Android clients parse these fields locally (`:core`'s `PushMessages`, `wearos-app/core`). The phone app (`:mobile`) shows one conversation per `(host, pane_id)` as a `MessagingStyle` notification, grouped under a summary, and sets `setLocalOnly(true)` so Android never mirrors a chat to the watch. Its approving actions (`ALLOW`, and a question's `ANSWER`) are behind the device lock: `setAuthenticationRequired(true)` and a keyguard check in the receiver refuse them while locked; `DENY`, `CANCEL` and `PROMPT` stay available. A `resolved` dismisses the phone's approval too.
 
 | Key | Example | Notes |
 |---|---|---|

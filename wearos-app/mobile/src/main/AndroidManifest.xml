@@ -2,10 +2,15 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Android 13+: asked at start; without it the app works and shows no notifications. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
-    <!-- allowBackup=false: the device token in SharedPreferences must never reach cloud backup. -->
+    <!-- allowBackup=false and the extraction rules: the device token in SharedPreferences must never
+         reach cloud backup or a device-to-device transfer. -->
     <application
+        android:name=".MobileApplication"
         android:allowBackup="false"
+        android:dataExtractionRules="@xml/data_extraction_rules"
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
         android:supportsRtl="true"
@@ -20,6 +25,18 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <service
+            android:name=".push.MobileMessagingService"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.google.firebase.MESSAGING_EVENT" />
+            </intent-filter>
+        </service>
+
+        <receiver
+            android:name=".push.MobileNotificationActionReceiver"
+            android:exported="false" />
     </application>
 
 </manifest>

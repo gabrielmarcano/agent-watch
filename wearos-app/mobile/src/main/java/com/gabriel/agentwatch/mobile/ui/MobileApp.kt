@@ -8,12 +8,15 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.gabriel.agentwatch.mobile.R
+import com.gabriel.agentwatch.mobile.push.MobileNotifications
 import com.gabriel.agentwatch.model.AgentKey
 import com.gabriel.agentwatch.model.findAgent
 import com.gabriel.agentwatch.model.key
+import com.gabriel.agentwatch.network.AgentsUpdate
 import com.gabriel.agentwatch.network.AuthState
 import com.gabriel.agentwatch.network.RelayRepository
 import kotlinx.coroutines.launch
@@ -33,9 +36,13 @@ private object Routes {
 }
 
 @Composable
-fun MobileApp() {
+fun MobileApp(
+    deepLink: AgentKey? = null,
+    onDeepLinkHandled: () -> Unit = {}
+) {
     val state by RelayRepository.state.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
+    val context = LocalContext.current
 
     var route by rememberSaveable { mutableStateOf(Routes.CHATS) }
     var routeHost by rememberSaveable { mutableStateOf("") }
@@ -59,6 +66,8 @@ fun MobileApp() {
     }
 
     fun openChat(key: AgentKey) {
+        // Opening a chat is reading its notification: drop it (and refresh the group summary).
+        MobileNotifications.cancel(context, key)
         routeHost = key.host
         routePane = key.paneId
         route = Routes.CHAT
@@ -66,11 +75,26 @@ fun MobileApp() {
 
     BackHandler(enabled = route != Routes.CHATS) {
         route = if (route == Routes.TEXT) backRoute else Routes.CHATS
-    }    // Check the pairing first, at runtime: anything but PAIRED shows the pairing screen, never an
+    }
+
+    // Check the pairing first, at runtime: anything but PAIRED shows the pairing screen, never an
     // empty list or "device offline" (wearos-app/ARCHITECTURE.md §4).
     if (state.auth != AuthState.PAIRED) {
         PairingScreen(revoked = state.auth == AuthState.REVOKED) { route = Routes.CHATS }
         return
+    }
+
+    // A notification tap names the chat; it waits here until the device is paired, so a cold start
+    // from a notification lands on the right conversation.
+    LaunchedEffect(deepLink) {
+        if (deepLink != null) {
+            onDeepLinkHandled()
+            openChat(deepLink)
+        }
+    }
+    // The relay may report an answered prompt while the app is open: drop its stale approval.
+    LaunchedEffect(state.agents) {
+        MobileNotifications.dismissStale(context, AgentsUpdate.All(state.agents))
     }
 
     when (route) {

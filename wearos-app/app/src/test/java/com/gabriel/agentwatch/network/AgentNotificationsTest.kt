@@ -27,6 +27,7 @@ class AgentNotificationsTest {
         assertEquals("opt-1", msg.allowOptionId)
         assertEquals("opt-3", msg.denyOptionId)
         assertEquals("my-app needs approval", msg.title)
+        assertEquals("claude", msg.agent)
     }
 
     @Test
@@ -50,7 +51,9 @@ class AgentNotificationsTest {
 
     @Test
     fun doneAndDigestParse() {
-        assertTrue(PushMessage.parse(mapOf("event" to "done", "pane_id" to "p", "label" to "x")) is PushMessage.Done)
+        val done = PushMessage.parse(mapOf("event" to "done", "pane_id" to "p", "label" to "x", "agent" to "opencode"))
+        assertTrue(done is PushMessage.Done)
+        assertEquals("opencode", (done as PushMessage.Done).agent)
         assertTrue(PushMessage.parse(mapOf("event" to "digest", "title" to "3 agents need you")) is PushMessage.Digest)
     }
 

@@ -114,4 +114,25 @@
     <string name="pair_code_incomplete">Needs 6 digits</string>
     <string name="pair">Pair</string>
     <string name="pairing">Pairing…</string>
+
+    <!-- Notifications: the phone builds them locally from data-only pushes -->
+    <string name="notification_channel_chats">Agent chats</string>
+    <string name="notification_channel_chats_description">Approvals and finished replies from your agents</string>
+    <string name="notification_channel_feedback">Agent action feedback</string>
+    <string name="notification_channel_feedback_description">Brief silent feedback after acting on an agent notification</string>
+    <plurals name="notification_summary">
+        <item quantity="one">%d chat</item>
+        <item quantity="other">%d chats</item>
+    </plurals>
+    <string name="notification_you">You</string>
+    <string name="notification_open">Open</string>
+    <string name="notification_reply">Reply</string>
+    <string name="notification_reply_hint">Reply to %1$s…</string>
+    <string name="notification_unlock_to_approve">Unlock your phone to approve</string>
+    <string name="notification_approved">Approved</string>
+    <string name="notification_denied">Denied</string>
+    <string name="notification_answered">Answered</string>
+    <string name="notification_canceled">Canceled</string>
+    <string name="notification_sent">Sent</string>
+    <string name="notification_done">Done</string>
 </resources>

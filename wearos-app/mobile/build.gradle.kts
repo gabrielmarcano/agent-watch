@@ -6,6 +6,12 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose")
 }
 
+// Firebase config is the owner's file (`mobile/google-services.json`, never committed). Without it
+// the app still builds and runs; it just cannot fetch an FCM token or receive push.
+if (file("google-services.json").exists()) {
+    apply(plugin = "com.google.gms.google-services")
+}
+
 // Reads a KEY=value file at the repo root with the rules every reader shares
 // (make's): '#' starts a comment, values are trimmed and literal, the last
 // assignment wins; other lines are ignored. null when the file is missing.
@@ -110,6 +116,17 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.10.0")
 
     debugImplementation("androidx.compose.ui:ui-tooling")
+
+    // Firebase Cloud Messaging: notifications are built locally from data-only pushes
+    // (contracts.md §4.1). The BOM matches the watch app's.
+    implementation(platform("com.google.firebase:firebase-bom:32.7.2"))
+    implementation("com.google.firebase:firebase-messaging-ktx")
+
+    constraints {
+        // firebase-messaging pulls Fragment 1.0.0 (play-services-base); the Activity Result API (the
+        // notification permission request) needs 1.3.0 or newer.
+        implementation("androidx.fragment:fragment:1.8.9")
+    }
 
     // Testing
     testImplementation("junit:junit:4.13.2")
