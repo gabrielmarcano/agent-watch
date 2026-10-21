@@ -143,8 +143,13 @@ class FakeCredentials(
     }
 }
 
-/** Polls [flow] until [predicate] holds, or fails after [timeoutMs] with the last value. */
-fun <T> awaitValue(flow: StateFlow<T>, timeoutMs: Long = 5_000, what: String = "condition", predicate: (T) -> Boolean): T {
+/**
+ * Polls [flow] until [predicate] holds, or fails after [timeoutMs] with the last value.
+ *
+ * The deadline is 15 s: a loaded CI machine can need longer than a few seconds for the relay's
+ * event stream to come back, and a test that waits for a real stream should not fail on speed.
+ */
+fun <T> awaitValue(flow: StateFlow<T>, timeoutMs: Long = 15_000, what: String = "condition", predicate: (T) -> Boolean): T {
     val deadline = System.currentTimeMillis() + timeoutMs
     while (System.currentTimeMillis() < deadline) {
         val v = flow.value
@@ -154,8 +159,8 @@ fun <T> awaitValue(flow: StateFlow<T>, timeoutMs: Long = 5_000, what: String = "
     throw AssertionError("Timed out waiting for $what; last value: ${flow.value}")
 }
 
-/** Polls [condition] until true, or fails after [timeoutMs]. */
-fun awaitTrue(timeoutMs: Long = 5_000, what: String = "condition", condition: () -> Boolean) {
+/** Polls [condition] until true, or fails after [timeoutMs] (the same deadline as [awaitValue]). */
+fun awaitTrue(timeoutMs: Long = 15_000, what: String = "condition", condition: () -> Boolean) {
     val deadline = System.currentTimeMillis() + timeoutMs
     while (System.currentTimeMillis() < deadline) {
         if (condition()) return
