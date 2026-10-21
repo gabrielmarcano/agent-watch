@@ -57,6 +57,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -94,6 +95,7 @@ import com.gabriel.agentwatch.ui.logic.ListNotice
 import com.gabriel.agentwatch.ui.logic.shownStatus
 import com.gabriel.agentwatch.ui.logic.waitingOnBackground
 import com.gabriel.agentwatch.util.readerBlocks
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import java.time.Instant
 import java.time.LocalDate
@@ -410,38 +412,28 @@ private fun Conversation(
     onOption: (PromptOption) -> Unit,
     onCancel: () -> Unit
 ) {
+    // The list is reversed: the newest turn is the first item, at the bottom of the screen, the way
+    // a messaging app draws a conversation. The chat therefore opens at the end without any scroll
+    // (a reversed list starts at its first item), and a long last message is read from its bottom
+    // because the list grows downwards from there.
     val listState = rememberLazyListState()
-    // The chat opens at the end, at once: the first jump is a scroll, not an animation (a long
-    // conversation would crawl down to the bottom). After that, a new turn only scrolls into view
-    // when the owner is already at the end, like a messaging app.
-    var jumped by remember { mutableStateOf(false) }
+
+    // A new turn appears at the bottom; when the owner is already there, they stay there.
     LaunchedEffect(itemCount) {
-        if (itemCount == 0) return@LaunchedEffect
-        val layout = listState.layoutInfo
-        val last = layout.visibleItemsInfo.lastOrNull()?.index ?: -1
-        val atEnd = jumped && last >= layout.totalItemsCount - 2
-        if (!jumped || atEnd) {
-            // The offset scrolls past the item's start: the list clamps at its end, so the chat
-            // shows the newest lines even when the last message is long.
-            listState.scrollToItem(itemCount - 1, scrollOffset = 100_000)
-            jumped = true
-        }
+        if (listState.firstVisibleItemIndex == 0) listState.scrollToItem(0)
     }
 
     LazyColumn(
         state = listState,
         modifier = modifier,
+        reverseLayout = true,
         contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
         verticalArrangement = Arrangement.spacedBy(4.dp)
     ) {
-        if (info.isNotEmpty()) {
-            item(key = "info") {
-                AgentInfo(info)
-                Spacer(Modifier.height(4.dp))
-            }
-        }
-        entries.forEachIndexed { index, entry ->
-            item(key = "entry-$index") {
+        // The list is reversed, so the newest turn comes first: the last one in the list is the
+        // oldest, and it is drawn at the top of the screen.
+        entries.reversed().forEach { entry ->
+            item(key = entry.key()) {
                 when (entry) {
                     is ChatEntry.Day -> DaySeparator(entry.date)
                     is ChatEntry.Turn -> TurnRow(entry.item)
@@ -476,7 +468,24 @@ private fun Conversation(
                 }
             }
         }
+        // The agent's own lines (where it runs) stay at the top of the conversation: in a reversed
+        // list that is the last item.
+        if (info.isNotEmpty()) {
+            item(key = "info") {
+                AgentInfo(info)
+                Spacer(Modifier.height(4.dp))
+            }
+        }
     }
+}
+
+/** A stable key for an entry, so a new turn does not rebuild the ones around it. */
+private fun ChatEntry.key(): String = when (this) {
+    is ChatEntry.Day -> "day-$date"
+    is ChatEntry.Turn -> "turn-${item.id}"
+    is ChatEntry.Pending -> "pending-$text"
+    ChatEntry.Prompt -> "prompt"
+    ChatEntry.Working -> "working"
 }
 
 @Composable

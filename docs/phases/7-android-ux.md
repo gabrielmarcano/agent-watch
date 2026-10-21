@@ -170,9 +170,11 @@ screen next to WhatsApp's. What was wrong, and what it is now:
   on a pill, the way WhatsApp's Android bar does since 2026.
 - **The bubbles vanished into the background.** With the system palette the chat's canvas and the
   incoming bubble were the same colour. The canvas is now a step below the surface.
-- **The chat opened in the middle of the last message.** The jump to the end now scrolls past the
-  item's start (the list clamps at its end), and the "keep following the new turns" rule no longer
-  breaks on the first scroll.
+- **The chat opened in the middle of the last message**, or at its first message when the history was
+  already cached. Scrolling to the end by hand was never reliable. The conversation is now a
+  **reversed list** (the newest turn is the first item, at the bottom), the way every messaging app
+  draws it: the chat opens at the end without any scroll, a long last message is read from its
+  bottom, and a new turn appears at the bottom while the owner stays where they are.
 - **The rows were three lines tall.** The status line only shows when the agent is working or
   waiting; a quiet chat is two lines, like WhatsApp's.
 - **The search and the composer were outlined boxes.** Both are filled pills now.
