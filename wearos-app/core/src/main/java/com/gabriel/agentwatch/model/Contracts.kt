@@ -128,6 +128,44 @@ data class PushRegisterRequest(
 )
 
 @Keep
+data class SessionOptionsResponse(
+    val kinds: List<String> = emptyList(),
+    val roots: List<String> = emptyList()
+)
+
+@Keep
+data class FolderEntry(
+    val name: String = "",
+    val path: String = ""
+)
+
+@Keep
+data class FolderListResponse(
+    val path: String = "",
+    val parent: String? = null,
+    val roots: List<String> = emptyList(),
+    val entries: List<FolderEntry> = emptyList(),
+    val truncated: Boolean = false
+)
+
+@Keep
+data class SessionCreateRequest(
+    val kind: String,
+    val cwd: String,
+    val label: String? = null
+)
+
+@Keep
+data class SessionCreated(
+    val host: String = "",
+    val pane_id: String = "",
+    val workspace_id: String = "",
+    val tab_id: String = "",
+    val kind: String = "",
+    val label: String = ""
+)
+
+@Keep
 data class ErrorBody(
     val code: String = "internal",
     val message: String = ""

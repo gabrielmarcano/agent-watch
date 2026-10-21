@@ -334,6 +334,7 @@ func TestErrorCodeHTTPStatus(t *testing.T) {
 		{model.ErrInvalidRequest, http.StatusBadRequest},
 		{model.ErrUnauthorized, http.StatusUnauthorized},
 		{model.ErrPairCodeInvalid, http.StatusForbidden},
+		{model.ErrNotAllowed, http.StatusForbidden},
 		{model.ErrUnknownPane, http.StatusNotFound},
 		{model.ErrStaleState, http.StatusConflict},
 		{model.ErrPromptChanged, http.StatusConflict},

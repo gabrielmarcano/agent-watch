@@ -72,16 +72,31 @@ type HistoryItemMsg struct {
 	Item HistoryItem `json:"item"`
 }
 
+// Command actions. The first three act on one pane; the last three are
+// host-level requests that create or inspect agent sessions.
+const (
+	ActionPrompt         = "prompt"
+	ActionAnswer         = "answer"
+	ActionCancel         = "cancel"
+	ActionSessionCreate  = "session.create"
+	ActionSessionOptions = "session.options"
+	ActionFoldersList    = "folders.list"
+)
+
 // CommandMsg is forwarded from the relay to the bridge to perform an action.
 type CommandMsg struct {
 	Type        string `json:"type"`       // "command"
 	RequestID   string `json:"request_id"` // random 16 hex chars
-	Action      string `json:"action"`     // "prompt" | "answer" | "cancel"
-	PaneID      string `json:"pane_id"`
-	ExpectedSeq uint64 `json:"expected_seq"`
+	Action      string `json:"action"`     // ActionPrompt | ActionAnswer | ActionCancel | ActionSessionCreate | ActionSessionOptions | ActionFoldersList
+	PaneID      string `json:"pane_id,omitempty"`
+	ExpectedSeq uint64 `json:"expected_seq,omitempty"`
 	Text        string `json:"text,omitempty"`        // prompt
 	OptionID    string `json:"option_id,omitempty"`   // answer
 	Fingerprint string `json:"fingerprint,omitempty"` // answer; cancel when the watch sent one
+	Kind        string `json:"kind,omitempty"`        // session.create
+	Cwd         string `json:"cwd,omitempty"`         // session.create
+	Label       string `json:"label,omitempty"`       // session.create
+	Path        string `json:"path,omitempty"`        // folders.list
 }
 
 // CommandResultMsg reports command execution outcome from bridge to relay.
@@ -91,6 +106,10 @@ type CommandResultMsg struct {
 	OK        bool   `json:"ok"`
 	ErrorCode string `json:"error_code,omitempty"`
 	Message   string `json:"message,omitempty"`
+	// Payloads of the host-level actions. A pane command leaves all three nil.
+	Session *SessionCreated         `json:"session,omitempty"` // session.create
+	Options *SessionOptionsResponse `json:"options,omitempty"` // session.options
+	Folders *FolderListResponse     `json:"folders,omitempty"` // folders.list
 }
 
 // ResyncMsg asks the bridge to re-send its full snapshot.
