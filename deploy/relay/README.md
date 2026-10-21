@@ -93,7 +93,7 @@ The relay serves the latest APK of the phone and Wear OS apps to their own clien
   ```bash
   make publish-android
   ```
-  It builds both release APKs, verifies they are not debug-signed, and publishes only the apps whose `version_code` increased. It refuses a lower code. Files are written APK first and metadata second, so a client never sees metadata without its APK.
+  It builds both release APKs, verifies they are not debug-signed, and publishes only the apps whose `version_code` increased. It refuses a lower code. Files are written APK first and metadata second, so a client never sees metadata without its APK. With `--phone` or `--watch` it builds and publishes that app only; the other one is neither built nor touched on the relay.
 - **SSH:** root is needed: the script creates `AW_UPDATE_DIR` with mode `0750` and files with `0640`, owned by `agentwatch:agentwatch` so the relay can read them. It reads `AW_UPDATE_DIR` from `/etc/agent-watch-relay/env` on the server, not from the Mac.
 - **Environment:** if you move the directory, set `AW_UPDATE_DIR` on the server (and in `agent-watch.env` if you use `--sync-env`):
   ```bash

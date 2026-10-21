@@ -2,8 +2,12 @@
 # Build, sign and publish the Android phone and Wear OS APKs to the relay, so
 # both apps can update themselves (docs/GUIDE.md § Android updates).
 #
-# Usage: deploy/relay/publish-android.sh [<ssh-target>]
+# Usage: deploy/relay/publish-android.sh [--phone|--watch] [<ssh-target>]
 #        make publish-android
+#
+# Without an app option it builds and publishes both apps. --phone or --watch
+# restricts the build and the publish to that app, so the other app is neither
+# built nor touched on the relay.
 #
 # <ssh-target> comes from the argument, else AW_RELAY_SSH in agent-watch.env;
 # SSH options come from SSH_OPTS, else AW_RELAY_SSH_OPTS. The SSH user must be
@@ -17,14 +21,17 @@
 set -euo pipefail
 
 usage() {
-	echo "usage: publish-android.sh [<ssh-target>]   (optional env: SSH_OPTS=\"-i key -o Port=2222\", AW_ENV_FILE)" >&2
+	echo "usage: publish-android.sh [--phone|--watch] [<ssh-target>]   (optional env: SSH_OPTS=\"-i key -o Port=2222\", AW_ENV_FILE)" >&2
 	exit "${1:-1}"
 }
 
+apps="phone watch"
 VPS=""
 while [ $# -gt 0 ]; do
 	case "$1" in
 	-h | --help) usage 0 ;;
+	--phone) apps="phone" ;;
+	--watch) apps="watch" ;;
 	-*) echo "publish-android.sh: unknown option $1" >&2 && usage ;;
 	*)
 		[ -z "$VPS" ] || usage
@@ -33,6 +40,13 @@ while [ $# -gt 0 ]; do
 	esac
 	shift
 done
+
+has_app() {
+	case " $apps " in
+	*" $1 "*) return 0 ;;
+	*) return 1 ;;
+	esac
+}
 
 repo="$(git rev-parse --show-toplevel)"
 awenv="$repo/tools/config/awenv.sh"
@@ -105,11 +119,20 @@ version_code_of() {
 	printf '%s' "$v"
 }
 
-phone_name="$(version_of MOBILE_VERSION_NAME)"
-phone_code="$(version_code_of MOBILE_VERSION_CODE)"
-watch_name="$(version_of WEAROS_VERSION_NAME)"
-watch_code="$(version_code_of WEAROS_VERSION_CODE)"
+phone_name=""
+phone_code=""
+watch_name=""
+watch_code=""
+if has_app phone; then
+	phone_name="$(version_of MOBILE_VERSION_NAME)"
+	phone_code="$(version_code_of MOBILE_VERSION_CODE)"
+fi
+if has_app watch; then
+	watch_name="$(version_of WEAROS_VERSION_NAME)"
+	watch_code="$(version_code_of WEAROS_VERSION_CODE)"
+fi
 for name in "$phone_name" "$watch_name"; do
+	[ -n "$name" ] || continue
 	case "$name" in
 	*[!A-Za-z0-9._+-]*)
 		echo "publish-android.sh: version names may only use letters, digits, '.', '_', '+' and '-' (got $name)" >&2
@@ -131,15 +154,24 @@ apksigner="$(find "$sdk/build-tools" -type f -name apksigner 2>/dev/null | sort 
 	exit 1
 }
 
-echo "building Android releases: phone $phone_name ($phone_code), watch $watch_name ($watch_code)"
+what=""
+if has_app phone; then what="phone $phone_name ($phone_code)"; fi
+if has_app watch; then what="${what:+$what, }watch $watch_name ($watch_code)"; fi
+echo "building Android releases: $what"
+tasks=()
+if has_app phone; then tasks+=(":mobile:assembleRelease"); fi
+if has_app watch; then tasks+=(":app:assembleRelease"); fi
 (
 	cd wearos-app
-	./gradlew :mobile:assembleRelease :app:assembleRelease
+	./gradlew "${tasks[@]}"
 )
 
 phone_apk="wearos-app/mobile/build/outputs/apk/release/mobile-release.apk"
 watch_apk="wearos-app/app/build/outputs/apk/release/app-release.apk"
-for apk in "$phone_apk" "$watch_apk"; do
+apk_paths=()
+if has_app phone; then apk_paths+=("$phone_apk"); fi
+if has_app watch; then apk_paths+=("$watch_apk"); fi
+for apk in "${apk_paths[@]}"; do
 	[ -f "$apk" ] || {
 		echo "publish-android.sh: expected $apk after the build" >&2
 		exit 1
@@ -158,25 +190,32 @@ done
 local_tmp="$(mktemp -d)"
 trap 'rm -rf "$local_tmp"' EXIT
 
-phone_file="phone-$phone_code.apk"
-watch_file="watch-$watch_code.apk"
-cp "$phone_apk" "$local_tmp/$phone_file"
-cp "$watch_apk" "$local_tmp/$watch_file"
-
+phone_file=""
+watch_file=""
+files=()
 sha_of() { shasum -a 256 "$1" | awk '{print $1}'; }
 size_of() { wc -c <"$1" | tr -d '[:space:]'; }
 
-phone_sha="$(sha_of "$local_tmp/$phone_file")"
-phone_size="$(size_of "$local_tmp/$phone_file")"
-watch_sha="$(sha_of "$local_tmp/$watch_file")"
-watch_size="$(size_of "$local_tmp/$watch_file")"
-
-cat >"$local_tmp/phone.json" <<EOF
+if has_app phone; then
+	phone_file="phone-$phone_code.apk"
+	cp "$phone_apk" "$local_tmp/$phone_file"
+	phone_sha="$(sha_of "$local_tmp/$phone_file")"
+	phone_size="$(size_of "$local_tmp/$phone_file")"
+	cat >"$local_tmp/phone.json" <<EOF
 {"app":"phone","version_code":$phone_code,"version_name":"$phone_name","sha256":"$phone_sha","size":$phone_size,"apk":"$phone_file"}
 EOF
-cat >"$local_tmp/watch.json" <<EOF
+	files+=("$local_tmp/$phone_file" "$local_tmp/phone.json")
+fi
+if has_app watch; then
+	watch_file="watch-$watch_code.apk"
+	cp "$watch_apk" "$local_tmp/$watch_file"
+	watch_sha="$(sha_of "$local_tmp/$watch_file")"
+	watch_size="$(size_of "$local_tmp/$watch_file")"
+	cat >"$local_tmp/watch.json" <<EOF
 {"app":"watch","version_code":$watch_code,"version_name":"$watch_name","sha256":"$watch_sha","size":$watch_size,"apk":"$watch_file"}
 EOF
+	files+=("$local_tmp/$watch_file" "$local_tmp/watch.json")
+fi
 
 remote_tmp="$(ssh ${SSH_ARGS[@]+"${SSH_ARGS[@]}"} "$VPS" 'mktemp -d /tmp/agent-watch-updates.XXXXXX')"
 case "$remote_tmp" in
@@ -188,19 +227,18 @@ case "$remote_tmp" in
 esac
 trap 'rm -rf "$local_tmp"; ssh ${SSH_ARGS[@]+"${SSH_ARGS[@]}"} "$VPS" "rm -rf $(printf %q "$remote_tmp")" >/dev/null 2>&1 || true' EXIT
 
-scp -q ${SSH_ARGS[@]+"${SSH_ARGS[@]}"} \
-	"$local_tmp/$phone_file" "$local_tmp/$watch_file" \
-	"$local_tmp/phone.json" "$local_tmp/watch.json" "$VPS:$remote_tmp/"
+scp -q ${SSH_ARGS[@]+"${SSH_ARGS[@]}"} "${files[@]}" "$VPS:$remote_tmp/"
 
 # shellcheck disable=SC2087 # the remote script is quoted on purpose; its args follow bash -s
 ssh ${SSH_ARGS[@]+"${SSH_ARGS[@]}"} "$VPS" bash -s -- \
-	"$remote_tmp" "$phone_code" "$phone_file" "$watch_code" "$watch_file" <<'REMOTE'
+	"$remote_tmp" "$apps" "$phone_code" "$phone_file" "$watch_code" "$watch_file" <<'REMOTE'
 set -euo pipefail
 remote_tmp="$1"
-phone_code="$2"
-phone_file="$3"
-watch_code="$4"
-watch_file="$5"
+apps="$2"
+phone_code="$3"
+phone_file="$4"
+watch_code="$5"
+watch_file="$6"
 env_file=/etc/agent-watch-relay/env
 trap 'rm -rf "$remote_tmp"' EXIT
 
@@ -221,7 +259,8 @@ installed_code() {
 }
 
 changed=""
-for app in phone watch; do
+# shellcheck disable=SC2086 # $apps is an internal, space-separated list
+for app in $apps; do
 	case "$app" in
 	phone) new="$phone_code" ;;
 	watch) new="$watch_code" ;;
@@ -239,7 +278,11 @@ for app in phone watch; do
 	fi
 done
 if [ -z "$changed" ]; then
-	echo "nothing to publish: the relay already has phone $phone_code and watch $watch_code"
+	case "$apps" in
+	phone) echo "nothing to publish: the relay already has phone $phone_code" ;;
+	watch) echo "nothing to publish: the relay already has watch $watch_code" ;;
+	*) echo "nothing to publish: the relay already has phone $phone_code and watch $watch_code" ;;
+	esac
 	exit 0
 fi
 
@@ -269,10 +312,26 @@ current_apk() {
 	[ -f "$file" ] || return 0
 	sed -n 's/.*"apk"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$file" | head -n 1
 }
-phone_apk="$(current_apk phone || true)"
-watch_apk="$(current_apk watch || true)"
-find "$dir" -maxdepth 1 -type f \( -name 'phone-*.apk' -o -name 'watch-*.apk' \) \
-	-mtime +7 ! -name "$phone_apk" ! -name "$watch_apk" -delete
+# Only the published apps are swept: a run for the phone leaves the watch's
+# files alone.
+case "$apps" in
+phone)
+	phone_apk="$(current_apk phone || true)"
+	find "$dir" -maxdepth 1 -type f -name 'phone-*.apk' \
+		-mtime +7 ! -name "$phone_apk" -delete
+	;;
+watch)
+	watch_apk="$(current_apk watch || true)"
+	find "$dir" -maxdepth 1 -type f -name 'watch-*.apk' \
+		-mtime +7 ! -name "$watch_apk" -delete
+	;;
+*)
+	phone_apk="$(current_apk phone || true)"
+	watch_apk="$(current_apk watch || true)"
+	find "$dir" -maxdepth 1 -type f \( -name 'phone-*.apk' -o -name 'watch-*.apk' \) \
+		-mtime +7 ! -name "$phone_apk" ! -name "$watch_apk" -delete
+	;;
+esac
 
 echo "published$changed to $dir"
 REMOTE

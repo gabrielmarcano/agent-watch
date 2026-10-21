@@ -228,6 +228,12 @@ make publish-android
 
 It builds both release APKs, checks that each one is release-signed, and publishes only the apps whose `version_code` increased: `<app>-<code>.apk` and `<app>.json` in the relay's `AW_UPDATE_DIR` (default `/var/lib/agent-watch-relay/updates`; [`deploy/relay/README.md`](../deploy/relay/README.md) § Android updates). The relay reads the metadata on every request, so no restart is needed. It needs root over SSH (it chowns the files to the relay's `agentwatch` user) and `AW_RELAY_SSH` in `agent-watch.env`, like `make deploy-relay`.
 
+To publish one app only — the other is neither built nor touched on the relay — run the script with `--phone` or `--watch` (it needs the same environment as the make target):
+
+```bash
+AW_ENV_FILE=agent-watch.env deploy/relay/publish-android.sh --phone
+```
+
 **4. Update from the device.** The phone checks when it starts and after pairing; the watch checks on start and from Settings → **Check for updates**. A newer build shows an update card: **Update** downloads it (the card shows progress and can be cancelled), verifies its size and SHA-256, then **Install** opens Android's installer. If Android asks to allow installs from Agent Watch, accept it; the card then offers **Install** again. The watch installer is not verified on a device yet: if a watch has no way to allow installs or no installer, update that watch over `adb` (and report it in [STATUS](STATUS.md)).
 
 ### 5. Pair Your Smartwatch
