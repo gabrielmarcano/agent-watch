@@ -20,12 +20,26 @@ class ChatSeen(context: Context) {
     /** The sequence [key] was last opened at, or null when no chat was opened or primed for it yet. */
     fun seen(key: AgentKey): Long? = prefs.getLong(KEY_PREFIX + key.token, -1L).takeIf { it >= 0 }
 
+    /**
+     * When the chat was last read, in epoch millis: the line the unread count counts from. Null when
+     * the chat was never opened (the list primes it, so it starts read).
+     */
+    fun seenAt(key: AgentKey): Long? = prefs.getLong(AT_PREFIX + key.token, -1L).takeIf { it >= 0 }
+
     /** The chat was opened (or changed while open): everything up to [seq] is read. Monotonic. */
     fun markSeen(key: AgentKey, seq: Long) {
         if (seq < 0) return
         val current = prefs.getLong(KEY_PREFIX + key.token, -1L)
         if (seq > current) prefs.edit().putLong(KEY_PREFIX + key.token, seq).apply()
+        // The moment the user read it: the unread badge counts the turns after it.
+        prefs.edit().putLong(AT_PREFIX + key.token, System.currentTimeMillis()).apply()
     }
+
+    /**
+     * Mark a chat read without opening it (the swipe on the row): the turns up to now count as seen,
+     * and the count starts again from here.
+     */
+    fun markRead(key: AgentKey, seq: Long) = markSeen(key, seq)
 
     /** Baseline for agents the list shows for the first time; agents already known keep their sequence. */
     fun prime(agents: List<AgentState>) {
@@ -44,5 +58,6 @@ class ChatSeen(context: Context) {
     private companion object {
         const val PREFS = "AgentWatchChatSeen"
         const val KEY_PREFIX = "seen:"
+        const val AT_PREFIX = "seenAt:"
     }
 }

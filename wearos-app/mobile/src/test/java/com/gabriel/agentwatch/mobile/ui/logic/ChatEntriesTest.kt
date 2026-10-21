@@ -271,4 +271,50 @@ class ChatEntriesTest {
         assertEquals(ChatDay.Yesterday, chatDay(LocalDate.of(2026, 10, 19), today))
         assertEquals(ChatDay.Older(LocalDate.of(2026, 10, 18)), chatDay(LocalDate.of(2026, 10, 18), today))
     }
+
+    @Test
+    fun theFiltersKeepTheChatsTheyName() {
+        val waiting = agent(status = "blocked")
+        val working = agent(status = "working", pane = "w1:p2")
+        val done = agent(status = "done", pane = "w1:p3")
+        val idle = agent(status = "idle", pane = "w1:p4")
+
+        assertTrue(ChatFilter.ALL.matches(waiting))
+        assertTrue(ChatFilter.NEEDS_YOU.matches(waiting))
+        assertFalse(ChatFilter.NEEDS_YOU.matches(working))
+        assertTrue(ChatFilter.WORKING.matches(working))
+        assertTrue(ChatFilter.DONE.matches(done))
+        assertFalse(ChatFilter.DONE.matches(idle))
+    }
+
+    @Test
+    fun theUnreadBadgeCountsTheTurnsAfterTheChatWasRead() {
+        val read = Instant.parse("2026-10-20T10:00:00Z").toEpochMilli()
+        val history = listOf(
+            turn(id = "old", completedAt = "2026-10-20T09:00:00Z"),
+            turn(id = "new1", completedAt = "2026-10-20T10:30:00Z"),
+            turn(id = "new2", completedAt = "2026-10-20T11:00:00Z")
+        )
+
+        assertEquals(2, unreadCount(agent(), history, read))
+        // Never read (the list primes it): no badge.
+        assertEquals(0, unreadCount(agent(), history, null))
+        // Another pane's turn is not this chat's.
+        assertEquals(
+            0,
+            unreadCount(agent(pane = "w1:p9"), history, read)
+        )
+    }
+
+    @Test
+    fun theSearchMatchesTheNameTheAgentTheMachineAndTheLastMessage() {
+        val history = listOf(turn(id = "a", response = "the relay is up", completedAt = "2026-10-20T09:00:00Z"))
+        val chat = agent()
+
+        assertTrue(matchesQuery(chat, history, "fix"))
+        assertTrue(matchesQuery(chat, history, "claude"))
+        assertTrue(matchesQuery(chat, history, "relay"))
+        assertTrue(matchesQuery(chat, history, ""))
+        assertFalse(matchesQuery(chat, history, "nothing here"))
+    }
 }

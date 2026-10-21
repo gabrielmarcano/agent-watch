@@ -49,6 +49,8 @@ fun MobileApp(
     val state by RelayRepository.state.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
+    // The reading habit (what each chat was last read at) is shared by the list and the chat screen.
+    val chatSeen = remember(context) { ChatSeen(context) }
     val updateManager = remember {
         UpdateManager(context, app = "phone", currentVersionCode = BuildConfig.VERSION_CODE.toLong())
     }
@@ -188,7 +190,11 @@ fun MobileApp(
             onOpen = { openChat(it.key) },
             onHistory = { route = Routes.HISTORY },
             onNewSession = { route = Routes.NEW_SESSION },
-            onRefresh = { scope.launch { RelayRepository.refresh() } },
+            onRefresh = { RelayRepository.refresh() },
+            onMarkRead = { agent ->
+                // The swipe marks the chat read without opening it: the turns up to now count as seen.
+                chatSeen.markRead(agent.key, agent.state_change_seq)
+            },
             onUpdate = { updateManager.download() },
             onRetryUpdate = {
                 if (update.info != null) updateManager.download() else updateManager.check(manual = true)

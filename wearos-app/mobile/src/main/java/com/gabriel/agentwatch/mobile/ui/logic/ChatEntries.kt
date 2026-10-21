@@ -113,6 +113,48 @@ internal const val PREVIEW_CHARS = 160
 fun isUnread(agent: AgentState, seenSeq: Long?): Boolean =
     seenSeq != null && agent.state_change_seq > seenSeq
 
+/** The list's filters, as the chips above it: a messaging app's filters, not the watch's sections. */
+enum class ChatFilter { ALL, NEEDS_YOU, WORKING, DONE }
+
+/** Whether a chat belongs in this filter. */
+fun ChatFilter.matches(agent: AgentState): Boolean = when (this) {
+    ChatFilter.ALL -> true
+    ChatFilter.NEEDS_YOU -> agent.needsAnswer()
+    ChatFilter.WORKING -> agent.status == "working"
+    ChatFilter.DONE -> agent.status == "done"
+}
+
+/**
+ * How many turns arrived in this chat since the user last opened it: the badge on the row.
+ *
+ * A messaging app counts messages, not states: a chat that is only working shows no badge, and one
+ * with three new replies shows three. A chat that was never opened shows none (the list primes it).
+ */
+fun unreadCount(agent: AgentState, history: List<HistoryItem>, seenAtMillis: Long?): Int {
+    if (seenAtMillis == null) return 0
+    val since = Instant.ofEpochMilli(seenAtMillis)
+    return history.count { item ->
+        item.key == agent.key &&
+            (parseInstant(item.completed_at) ?: parseInstant(item.asked_at ?: ""))?.isAfter(since) == true
+    }
+}
+
+/**
+ * Whether a chat matches the search: its name, the agent kind, its workspace or title, or the text
+ * of the last thing it said.
+ */
+fun matchesQuery(agent: AgentState, history: List<HistoryItem>, query: String): Boolean {
+    val q = query.trim()
+    if (q.isEmpty()) return true
+    val last = history.firstOrNull { it.key == agent.key }
+    return agent.label.contains(q, ignoreCase = true) ||
+        agent.agent.contains(q, ignoreCase = true) ||
+        (agent.workspace ?: "").contains(q, ignoreCase = true) ||
+        (agent.title ?: "").contains(q, ignoreCase = true) ||
+        (last?.response ?: "").contains(q, ignoreCase = true) ||
+        (last?.query ?: "").contains(q, ignoreCase = true)
+}
+
 /** The time shown at the end of a chat row: the hour today, the day this week, the date after that. */
 sealed interface ChatStamp {
     data class Today(val time: LocalTime) : ChatStamp

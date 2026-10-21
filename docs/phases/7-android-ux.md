@@ -65,7 +65,7 @@ The update banner stays a card at the top of **Chats** (it is a one-off, and Cha
 | Machine | The host chips stay, but they collapse into one chip ("Machine: All ▾") that opens a sheet, so the filter row stays one line |
 | Row | Avatar, name, preview (the prompt when one waits, else the last thing said), time, status dot. The **unread dot becomes a count badge**, WhatsApp-style |
 | Order | Most recent first, always. "Needs you" is a filter, and the count of chats waiting is shown on the Chats tab |
-| Swipe | Swipe right to mark read; long-press opens a selection mode (mark read, mute, open) |
+| Swipe | Swipe right to mark read (the row springs back; it is never dismissed). The long-press selection mode (mark read, mute, open) waits for the notifications slice: muting a chat needs the per-chat channels |
 | Empty | "No agents yet" plus a button that starts a session (WhatsApp's empty state is a call to action, not a dead end) |
 
 ## 4. The conversation
@@ -137,7 +137,7 @@ Each slice is one commit, one publish, one look on the device.
 |---|---|---|---|
 | 1 | **Toolchain** | `:mobile` to `compileSdk 37` / `targetSdk 36`, Compose BOM 2026.03.00 (Material 3 1.4.0, the expressive line), edge-to-edge insets, the suppress flag | No (except the insets) |
 | 2 | **Theme** | The phone's own light/dark palette, dynamic colour (on by default; the switch lands with the Settings screen), shapes, typography | Yes |
-| 3 | **Chats** | Search, filter chips, the machine sheet, unread counts, pull-to-refresh, swipe and long-press, the empty state | Yes |
+| 3 | **Chats** | Search, filter chips, the machine chip, unread counts, pull-to-refresh, the swipe to mark read, the empty state | Yes |
 | 4 | **Conversation** | Bubbles, times and ticks, the top bar, predictive back, the shared element, the agent's info lines | Yes |
 | 5 | **Composer** | The growing field, send/mic, the IME action, the send haptic | Yes |
 | 6 | **Approvals** | The card's look, the chosen-action feedback, the haptics | Yes |
