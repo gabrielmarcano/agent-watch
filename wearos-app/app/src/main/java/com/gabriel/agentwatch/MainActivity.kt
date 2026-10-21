@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -20,9 +21,12 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
 import androidx.navigation.NavType
@@ -56,6 +60,7 @@ import com.gabriel.agentwatch.ui.screens.PairingScreen
 import com.gabriel.agentwatch.ui.screens.ResponseReaderScreen
 import com.gabriel.agentwatch.ui.screens.SettingsScreen
 import com.gabriel.agentwatch.ui.theme.AgentWatchTheme
+import com.gabriel.agentwatch.update.UpdateManager
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 
@@ -174,6 +179,16 @@ private fun AgentWatchNavigation(
     onDeepLinkHandled: () -> Unit
 ) {
     val nav = rememberSwipeDismissableNavController()
+    val context = LocalContext.current
+    val updateManager = remember {
+        UpdateManager(context, app = "watch", currentVersionCode = BuildConfig.VERSION_CODE.toLong())
+    }
+    val update by updateManager.state.collectAsStateWithLifecycle()
+    DisposableEffect(updateManager) {
+        onDispose { updateManager.close() }
+    }
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { updateManager.refreshInstallPermission() }
+
     val authFlow = remember { RelayRepository.state.map { it.auth }.distinctUntilChanged() }
     val auth by authFlow.collectAsStateWithLifecycle(remember { RelayRepository.state.value.auth })
 
@@ -183,6 +198,9 @@ private fun AgentWatchNavigation(
         if (auth != AuthState.PAIRED && nav.currentDestination?.route != Routes.PAIRING) {
             nav.navigate(Routes.PAIRING) { popUpTo(nav.graph.id) { inclusive = true } }
         }
+    }
+    LaunchedEffect(auth) {
+        if (auth == AuthState.PAIRED) updateManager.check()
     }
     LaunchedEffect(deepLink, auth) {
         if (deepLink != null && auth == AuthState.PAIRED) {
@@ -216,9 +234,17 @@ private fun AgentWatchNavigation(
             val state by RelayRepository.state.collectAsStateWithLifecycle()
             AgentListScreen(
                 state = state,
+                update = update,
                 onAgentClick = { nav.navigate(Routes.agent(it)) },
                 onHistoryClick = { nav.navigate(Routes.history(null)) },
-                onSettingsClick = { nav.navigate(Routes.SETTINGS) }
+                onSettingsClick = { nav.navigate(Routes.SETTINGS) },
+                onUpdate = { updateManager.download() },
+                onRetryUpdate = {
+                    if (update.info != null) updateManager.download() else updateManager.check(manual = true)
+                },
+                onCancelUpdate = { updateManager.cancelDownload() },
+                onInstallUpdate = { updateManager.install() },
+                onDismissUpdate = { updateManager.dismiss() }
             )
         }
         composable(Routes.AGENT, arguments = agentArguments) { entry ->
@@ -300,7 +326,11 @@ private fun AgentWatchNavigation(
             }
         }
         composable(Routes.SETTINGS) {
-            SettingsScreen(onPairAgain = { nav.navigate(Routes.PAIRING) })
+            SettingsScreen(
+                update = update,
+                onPairAgain = { nav.navigate(Routes.PAIRING) },
+                onCheckForUpdates = { updateManager.check(manual = true) }
+            )
         }
     }
 }

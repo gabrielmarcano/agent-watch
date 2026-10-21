@@ -33,10 +33,19 @@ import com.gabriel.agentwatch.ui.components.transformedItem
 import com.gabriel.agentwatch.ui.logic.displayHost
 import com.gabriel.agentwatch.ui.theme.OnSurfaceVariant
 import com.gabriel.agentwatch.ui.theme.Red
+import com.gabriel.agentwatch.update.UpdatePhase
+import com.gabriel.agentwatch.update.UpdateState
 
-/** The pairing (relay and state), pair again, unpair, version. Unpairing flips `auth`, and the app shows pairing. */
+/**
+ * The pairing (relay and state), the update check, pair again, unpair, version. Unpairing flips
+ * `auth`, and the app shows pairing.
+ */
 @Composable
-fun SettingsScreen(onPairAgain: () -> Unit) {
+fun SettingsScreen(
+    update: UpdateState,
+    onPairAgain: () -> Unit,
+    onCheckForUpdates: () -> Unit
+) {
     val context = LocalContext.current
     val prefs = remember { Prefs(context) }
     var confirmUnpair by remember { mutableStateOf(false) }
@@ -56,6 +65,17 @@ fun SettingsScreen(onPairAgain: () -> Unit) {
                 icon = { ResIcon(R.drawable.ic_link, null, MaterialTheme.colorScheme.onSurface) },
                 secondaryLabel = { Text(displayHost(prefs.relayUrl), maxLines = 1, overflow = TextOverflow.Ellipsis) },
                 label = { Text(stringResource(R.string.pair_again)) }
+            )
+        }
+        item(key = "updates") {
+            FilledTonalButton(
+                onClick = onCheckForUpdates,
+                modifier = Modifier.fillMaxWidth().transformedHeight(this, spec),
+                transformation = SurfaceTransformation(spec),
+                enabled = update.phase !in UPDATE_CHECK_BUSY,
+                icon = { ResIcon(R.drawable.ic_sync, null, MaterialTheme.colorScheme.onSurface) },
+                secondaryLabel = { Text(updateStatus(update), maxLines = 2, overflow = TextOverflow.Ellipsis) },
+                label = { Text(stringResource(R.string.update_check)) }
             )
         }
         item(key = "unpair") {
@@ -91,4 +111,26 @@ fun SettingsScreen(onPairAgain: () -> Unit) {
         },
         title = { Text(stringResource(R.string.unpair_confirm_title)) }
     )
+}
+
+private val UPDATE_CHECK_BUSY = setOf(
+    UpdatePhase.CHECKING,
+    UpdatePhase.DOWNLOADING,
+    UpdatePhase.READY,
+    UpdatePhase.NEEDS_PERMISSION
+)
+
+@Composable
+private fun updateStatus(update: UpdateState): String {
+    val info = update.info
+    val version = info?.version_name?.takeIf { it.isNotBlank() } ?: info?.version_code?.toString().orEmpty()
+    return when (update.phase) {
+        UpdatePhase.CHECKING -> stringResource(R.string.update_checking)
+        UpdatePhase.UP_TO_DATE -> stringResource(R.string.update_up_to_date, version.ifBlank { BuildConfig.VERSION_NAME })
+        UpdatePhase.AVAILABLE -> stringResource(R.string.update_available, version)
+        UpdatePhase.DOWNLOADING -> stringResource(R.string.update_downloading, (update.progress * 100).toInt())
+        UpdatePhase.READY, UpdatePhase.NEEDS_PERMISSION -> stringResource(R.string.update_ready_short)
+        UpdatePhase.FAILED -> stringResource(R.string.update_failed)
+        else -> stringResource(R.string.version, BuildConfig.VERSION_NAME)
+    }
 }

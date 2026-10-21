@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Only the APKs UpdateManager downloads; see core/.../update/UpdateManager.kt. -->
+<paths>
+    <cache-path name="updates" path="updates/" />
+</paths>
