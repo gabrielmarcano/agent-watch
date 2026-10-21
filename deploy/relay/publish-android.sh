@@ -261,8 +261,18 @@ for app in $changed; do
 done
 
 # Keep the previous builds for a week for downloads that started just before
-# a publish; the relay never deletes anything itself.
-find "$dir" -maxdepth 1 -type f \( -name 'phone-*.apk' -o -name 'watch-*.apk' \) -mtime +7 -delete
+# a publish; the relay never deletes anything itself. The APK each app's
+# current metadata names is kept however old it is: it is still the build
+# clients download when that app had no update this time.
+current_apk() {
+	local file="$dir/$1.json"
+	[ -f "$file" ] || return 0
+	sed -n 's/.*"apk"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$file" | head -n 1
+}
+phone_apk="$(current_apk phone || true)"
+watch_apk="$(current_apk watch || true)"
+find "$dir" -maxdepth 1 -type f \( -name 'phone-*.apk' -o -name 'watch-*.apk' \) \
+	-mtime +7 ! -name "$phone_apk" ! -name "$watch_apk" -delete
 
 echo "published$changed to $dir"
 REMOTE
