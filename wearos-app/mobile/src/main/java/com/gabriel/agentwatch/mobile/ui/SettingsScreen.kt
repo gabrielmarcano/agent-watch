@@ -49,7 +49,7 @@ import com.gabriel.agentwatch.network.UiState
 @Composable
 fun SettingsScreen(
     state: UiState,
-    mutedChats: MutedChats,
+    chatStore: ChatStore,
     onCheckUpdates: () -> Unit,
     onForgetPhone: () -> Unit
 ) {
@@ -124,16 +124,34 @@ fun SettingsScreen(
             item {
                 SettingRow(
                     title = stringResource(R.string.settings_muted),
-                    subtitle = mutedChats.count().toString()
+                    subtitle = chatStore.mutedCount().toString()
                 )
             }
-            mutedChats.all().forEach { token ->
+            chatStore.muted().forEach { token ->
                 item(key = "muted-$token") {
                     SettingRow(
-                        title = mutedChats.label(token),
+                        title = chatStore.label(token),
                         trailing = {
-                            TextButton(onClick = { mutedChats.unmute(token) }) {
+                            TextButton(onClick = { chatStore.unmute(token) }) {
                                 Text(stringResource(R.string.settings_unmute))
+                            }
+                        }
+                    )
+                }
+            }
+            item {
+                SettingRow(
+                    title = stringResource(R.string.settings_hidden),
+                    subtitle = chatStore.hidden().size.toString()
+                )
+            }
+            chatStore.hidden().forEach { token ->
+                item(key = "hidden-$token") {
+                    SettingRow(
+                        title = chatStore.label(token),
+                        trailing = {
+                            TextButton(onClick = { chatStore.unhide(token) }) {
+                                Text(stringResource(R.string.settings_restore))
                             }
                         }
                     )

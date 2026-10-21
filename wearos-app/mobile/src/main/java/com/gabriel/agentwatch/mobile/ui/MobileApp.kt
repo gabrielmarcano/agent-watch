@@ -17,7 +17,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.filled.Computer
-import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Icon
@@ -70,16 +69,14 @@ import com.gabriel.agentwatch.update.UpdateManager
 private object Routes {
     const val CHATS = "chats"
     const val MACHINES = "machines"
-    const val HISTORY = "history"
     const val SETTINGS = "settings"
     const val CHAT = "chat"
-    const val TEXT = "text"
     const val NEW_SESSION = "new-session"
     const val STARTING = "starting"
 }
 
 /** The routes the bottom navigation shows. */
-private val TAB_ROUTES = listOf(Routes.CHATS, Routes.MACHINES, Routes.HISTORY, Routes.SETTINGS)
+private val TAB_ROUTES = listOf(Routes.CHATS, Routes.MACHINES, Routes.SETTINGS)
 
 @OptIn(ExperimentalAnimationApi::class)
 @Composable
@@ -102,28 +99,14 @@ fun MobileApp(
     var route by rememberSaveable { mutableStateOf(Routes.CHATS) }
     var routeHost by rememberSaveable { mutableStateOf("") }
     var routePane by rememberSaveable { mutableStateOf("") }
-    var textTitle by rememberSaveable { mutableStateOf("") }
-    var textBody by rememberSaveable { mutableStateOf("") }
-    var textSource by rememberSaveable { mutableStateOf("") }
-    var textQuery by rememberSaveable { mutableStateOf("") }
-    var backRoute by rememberSaveable { mutableStateOf(Routes.CHATS) }
     var startingHost by rememberSaveable { mutableStateOf("") }
     var startingPane by rememberSaveable { mutableStateOf("") }
     var startingLabel by rememberSaveable { mutableStateOf("") }
     var machineFilter by rememberSaveable { mutableStateOf<String?>(null) }
     var sessionHost by rememberSaveable { mutableStateOf("") }
     val chatSeen = remember(context) { ChatSeen(context) }
-    val mutedChats = remember(context) { MutedChats(context) }
+    val chatStore = remember(context) { ChatStore(context) }
     val prefs = remember(context) { Prefs(context) }
-
-    fun openText(title: String, body: String, source: String, query: String, from: String) {
-        textTitle = title
-        textBody = body
-        textSource = source
-        textQuery = query
-        backRoute = from
-        route = Routes.TEXT
-    }
 
     fun openChat(key: AgentKey) {
         // Opening a chat is reading its notification: drop it (and refresh the group summary).
@@ -138,11 +121,12 @@ fun MobileApp(
     // back a little, as a predictive back should.
     var backProgress by remember { mutableFloatStateOf(0f) }
     PredictiveBackHandler(enabled = route != Routes.CHATS) { progress ->
-        progress.collect { event ->
-            backProgress = event.progress
-            if (event.progress >= 1f) {
-                route = if (route == Routes.TEXT) backRoute else Routes.CHATS
-            }
+        try {
+            progress.collect { event -> backProgress = event.progress }
+            // The gesture completed: go back. (A cancelled gesture throws and leaves us here.)
+            route = Routes.CHATS
+        } finally {
+            backProgress = 0f
         }
     }
 
@@ -226,7 +210,7 @@ fun MobileApp(
                                 ChatScreen(
                                     agent = agent,
                                     hosts = state.hosts,
-                                    mutedChats = mutedChats,
+                                    chatStore = chatStore,
                                     notice = listStatus(state).notice,
                                     sharedScope = this@SharedTransitionLayout,
                                     visibilityScope = this,
@@ -250,23 +234,9 @@ fun MobileApp(
                             }
                         )
 
-                        Routes.HISTORY -> HistoryScreen(
-                            history = state.history,
-                            onBack = { route = Routes.CHATS },
-                            onOpen = { item ->
-                                openText(
-                                    item.label.ifBlank { item.agent },
-                                    item.response,
-                                    item.source,
-                                    item.query.orEmpty(),
-                                    Routes.HISTORY
-                                )
-                            }
-                        )
-
                         Routes.SETTINGS -> SettingsScreen(
                             state = state,
-                            mutedChats = mutedChats,
+                            chatStore = chatStore,
                             onCheckUpdates = { updateManager.check(manual = true) },
                             onForgetPhone = {
                                 // Forgetting the phone: the token goes, the link restarts and the app
@@ -275,14 +245,6 @@ fun MobileApp(
                                 RelayRepository.restart(context)
                                 route = Routes.CHATS
                             }
-                        )
-
-                        Routes.TEXT -> TextScreen(
-                            title = textTitle.ifBlank { null },
-                            text = textBody,
-                            source = textSource,
-                            query = textQuery.ifBlank { null },
-                            onBack = { route = backRoute }
                         )
 
                         Routes.NEW_SESSION -> NewSessionScreen(
@@ -312,7 +274,7 @@ fun MobileApp(
                             update = update,
                             hostFilter = machineFilter,
                             onHostFilter = { machineFilter = it },
-                            mutedChats = mutedChats,
+                            chatStore = chatStore,
                             sharedScope = this@SharedTransitionLayout,
                             visibilityScope = this,
                             onOpen = { openChat(it.key) },
@@ -384,12 +346,6 @@ private fun PhoneNavigationBar(current: String, waiting: Int, onSelect: (String)
             onClick = { onSelect(Routes.MACHINES) },
             icon = { Icon(Icons.Filled.Computer, contentDescription = null) },
             label = { Text(stringResource(R.string.tab_machines)) }
-        )
-        NavigationBarItem(
-            selected = current == Routes.HISTORY,
-            onClick = { onSelect(Routes.HISTORY) },
-            icon = { Icon(Icons.Filled.History, contentDescription = null) },
-            label = { Text(stringResource(R.string.tab_history)) }
         )
         NavigationBarItem(
             selected = current == Routes.SETTINGS,

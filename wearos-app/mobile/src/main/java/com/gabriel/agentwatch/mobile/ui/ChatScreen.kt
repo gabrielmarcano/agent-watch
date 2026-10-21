@@ -114,7 +114,7 @@ private val BUBBLE_MAX_WIDTH = 340.dp
 fun ChatScreen(
     agent: AgentState,
     hosts: List<HostInfo>,
-    mutedChats: MutedChats,
+    chatStore: ChatStore,
     notice: ListNotice? = null,
     sharedScope: SharedTransitionScope? = null,
     visibilityScope: AnimatedVisibilityScope? = null,
@@ -284,7 +284,7 @@ fun ChatScreen(
                             text = {
                                 Text(
                                     stringResource(
-                                        if (mutedChats.isMuted(agent.key.token)) {
+                                        if (chatStore.isMuted(agent.key.token)) {
                                             R.string.chat_unmute
                                         } else {
                                             R.string.chat_mute
@@ -295,10 +295,10 @@ fun ChatScreen(
                             onClick = {
                                 menuOpen = false
                                 val token = agent.key.token
-                                if (mutedChats.isMuted(token)) {
-                                    mutedChats.unmute(token)
+                                if (chatStore.isMuted(token)) {
+                                    chatStore.unmute(token)
                                 } else {
-                                    mutedChats.mute(token, agent.label.ifBlank { agent.agent })
+                                    chatStore.mute(token, agent.label.ifBlank { agent.agent })
                                 }
                             }
                         )
@@ -419,8 +419,18 @@ private fun Conversation(
             }
         }
     }
+    // The chat opens at the end, at once: the first jump is a scroll, not an animation (a long
+    // conversation would crawl down to the bottom). Later turns animate, like a messaging app.
+    var jumped by remember { mutableStateOf(false) }
     LaunchedEffect(itemCount) {
-        if (itemCount > 0 && stickToBottom) listState.animateScrollToItem(itemCount - 1)
+        if (itemCount > 0 && stickToBottom) {
+            if (jumped) {
+                listState.animateScrollToItem(itemCount - 1)
+            } else {
+                listState.scrollToItem(itemCount - 1)
+                jumped = true
+            }
+        }
     }
 
     LazyColumn(

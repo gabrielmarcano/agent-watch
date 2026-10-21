@@ -44,6 +44,10 @@
     <string name="chat_unread">Unread</string>
     <string name="chat_muted">Muted</string>
     <string name="chat_mute">Mute this chat</string>
+    <string name="chat_pin">Pin this chat</string>
+    <string name="chat_unpin">Unpin this chat</string>
+    <string name="chat_pinned">Pinned</string>
+    <string name="chat_hide">Hide this chat</string>
     <string name="chat_unmute">Unmute this chat</string>
     <string name="chat_unread_count">%1$d unread</string>
     <string name="chat_sent">Sent</string>
@@ -82,8 +86,8 @@
     <string name="machines_title">Machines</string>
     <string name="machines_empty">No machines yet</string>
     <string name="machines_online">Online</string>
-    <string name="machines_offline">Offline</string>
-    <string name="machines_herdr_stopped">herdr stopped</string>
+    <string name="machines_offline">Offline — its bridge is not connected</string>
+    <string name="machines_herdr_stopped">herdr is not running there</string>
     <string name="machines_agents">%1$d agents · %2$d waiting</string>
     <string name="machines_projects">Projects</string>
     <string name="machines_chats">Its chats</string>
@@ -104,6 +108,8 @@
     <string name="settings_notifications">Notifications</string>
     <string name="settings_muted">Muted chats</string>
     <string name="settings_unmute">Unmute</string>
+    <string name="settings_hidden">Hidden chats</string>
+    <string name="settings_restore">Restore</string>
     <string name="settings_data">Data</string>
     <string name="settings_check_updates">Check for updates</string>
     <string name="settings_version">Version %1$s</string>

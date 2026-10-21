@@ -10,6 +10,7 @@ import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.gestures.draggable
 import androidx.compose.foundation.gestures.rememberDraggableState
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -30,7 +31,11 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Done
+import androidx.compose.material.icons.filled.DoneAll
+import androidx.compose.material.icons.filled.NotificationsOff
+import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -43,6 +48,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
@@ -67,6 +73,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -114,7 +121,7 @@ fun ChatListScreen(
     update: UpdateState,
     hostFilter: String?,
     onHostFilter: (String?) -> Unit,
-    mutedChats: MutedChats,
+    chatStore: ChatStore,
     sharedScope: SharedTransitionScope? = null,
     visibilityScope: AnimatedVisibilityScope? = null,
     onOpen: (AgentState) -> Unit,
@@ -134,6 +141,8 @@ fun ChatListScreen(
     var query by rememberSaveable { mutableStateOf("") }
     var refreshing by remember { mutableStateOf(false) }
     var refreshError by remember { mutableStateOf<Throwable?>(null) }
+    // The chat whose options are open (WhatsApp's long press).
+    var sheetAgent by remember { mutableStateOf<AgentState?>(null) }
 
     // A host the relay no longer lists cannot stay selected.
     LaunchedEffect(state.hosts) {
@@ -143,10 +152,15 @@ fun ChatListScreen(
     LaunchedEffect(state.agents) { seen.prime(state.agents) }
 
     val onMachine = state.agents.filter { hostFilter == null || it.host == hostFilter }
-    val chats = onMachine
+    val shown = onMachine.filterNot { chatStore.isHidden(it.key.token) }
+    val chats = shown
         .filter { filter.matches(it) }
         .filter { matchesQuery(it, state.history, query) }
-        .sortedByDescending { it.lastActivity(state.history) }
+        // Pinned chats first, the way a messaging app keeps them, then the rest by recency.
+        .sortedWith(
+            compareByDescending<AgentState> { chatStore.isPinned(it.key.token) }
+                .thenByDescending { it.lastActivity(state.history) }
+        )
 
     val status = if (hostFilter == null) {
         listStatus(state)
@@ -224,9 +238,11 @@ fun ChatListScreen(
                                 hostName = hostNameFor(state.hosts, agent.host),
                                 unread = unreadCount(agent, state.history, seen.seenAt(agent.key)),
                                 changed = isUnread(agent, seen.seen(agent.key)),
-                                muted = mutedChats.isMuted(agent.key.token),
+                                muted = chatStore.isMuted(agent.key.token),
+                                pinned = chatStore.isPinned(agent.key.token),
                                 dimmed = status.dimmed,
                                 onClick = { onOpen(agent) },
+                                onLongClick = { sheetAgent = agent },
                                 onMarkRead = { onMarkRead(agent) },
                                 sharedScope = sharedScope,
                                 visibilityScope = visibilityScope
@@ -236,6 +252,92 @@ fun ChatListScreen(
                 }
             }
         }
+    }
+
+    sheetAgent?.let { agent ->
+        ChatOptionsSheet(
+            agent = agent,
+            chatStore = chatStore,
+            pinned = chatStore.isPinned(agent.key.token),
+            muted = chatStore.isMuted(agent.key.token),
+            onDismiss = { sheetAgent = null },
+            onMarkRead = {
+                onMarkRead(agent)
+                sheetAgent = null
+            }
+        )
+    }
+}
+
+/**
+ * The options a long press on a chat offers, WhatsApp-style: a sheet over the list with pin, mute,
+ * mark as read and hide.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ChatOptionsSheet(
+    agent: AgentState,
+    chatStore: ChatStore,
+    pinned: Boolean,
+    muted: Boolean,
+    onDismiss: () -> Unit,
+    onMarkRead: () -> Unit
+) {
+    val token = agent.key.token
+    val name = agent.label.ifBlank { agent.agent }
+    ModalBottomSheet(onDismissRequest = onDismiss) {
+        Column(Modifier.fillMaxWidth().padding(bottom = 24.dp)) {
+            Text(
+                text = name,
+                style = MaterialTheme.typography.titleMedium,
+                modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp)
+            )
+            SheetAction(
+                label = stringResource(if (pinned) R.string.chat_unpin else R.string.chat_pin),
+                icon = Icons.Filled.PushPin,
+                onClick = {
+                    if (pinned) chatStore.unpin(token) else chatStore.pin(token, name)
+                    onDismiss()
+                }
+            )
+            SheetAction(
+                label = stringResource(if (muted) R.string.chat_unmute else R.string.chat_mute),
+                icon = Icons.Filled.NotificationsOff,
+                onClick = {
+                    if (muted) chatStore.unmute(token) else chatStore.mute(token, name)
+                    onDismiss()
+                }
+            )
+            SheetAction(
+                label = stringResource(R.string.mark_read),
+                icon = Icons.Filled.DoneAll,
+                onClick = onMarkRead
+            )
+            SheetAction(
+                label = stringResource(R.string.chat_hide),
+                icon = Icons.Filled.Delete,
+                onClick = {
+                    chatStore.hide(token, name)
+                    onDismiss()
+                }
+            )
+        }
+    }
+}
+
+/** One option in the sheet: its icon and its name, like the ones a messaging app shows. */
+@Composable
+private fun SheetAction(label: String, icon: ImageVector, onClick: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(horizontal = 24.dp, vertical = 14.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.onSurface)
+        Spacer(Modifier.width(20.dp))
+        Text(label, style = MaterialTheme.typography.bodyLarge)
     }
 }
 
@@ -352,8 +454,10 @@ private fun ChatRow(
     unread: Int,
     changed: Boolean,
     muted: Boolean,
+    pinned: Boolean,
     dimmed: Boolean,
     onClick: () -> Unit,
+    onLongClick: () -> Unit,
     onMarkRead: () -> Unit,
     sharedScope: SharedTransitionScope? = null,
     visibilityScope: AnimatedVisibilityScope? = null
@@ -412,7 +516,7 @@ private fun ChatRow(
                         scope.launch { offset.animateTo(0f, spring(dampingRatio = Spring.DampingRatioNoBouncy)) }
                     }
                 )
-                .clickable(onClick = onClick)
+                .combinedClickable(onClick = onClick, onLongClick = onLongClick)
                 .padding(start = 16.dp, end = 16.dp, top = 10.dp, bottom = 10.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -428,6 +532,14 @@ private fun ChatRow(
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.weight(1f)
                     )
+                    if (pinned) {
+                        Icon(
+                            Icons.Filled.PushPin,
+                            contentDescription = stringResource(R.string.chat_pinned),
+                            modifier = Modifier.size(14.dp),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
                     Spacer(Modifier.width(8.dp))
                     Text(
                         text = time,
