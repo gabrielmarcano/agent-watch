@@ -63,11 +63,13 @@ class MobileNotificationActionReceiver : BroadcastReceiver() {
         Log.d(TAG, "Notification action $action for host ${agent.host} pane ${agent.paneId} (seq $expectedSeq)")
 
         if (MobileNotificationActions.requiresUnlock(action) && isLocked(context)) {
-            // No command: the prompt stays blocked and can be answered after unlocking.
+            // No command: the prompt stays blocked and can be answered after unlocking, so leave
+            // its chat notification in place.
             MobileNotifications.showFeedback(
                 context, agent,
                 context.getString(R.string.notification_unlock_to_approve),
-                isSuccess = false
+                isSuccess = false,
+                keepChat = true
             )
             return
         }
@@ -97,7 +99,8 @@ class MobileNotificationActionReceiver : BroadcastReceiver() {
             MobileNotifications.showFeedback(
                 context, agent,
                 context.getString(R.string.reply_empty),
-                isSuccess = false
+                isSuccess = false,
+                keepChat = true
             )
             return
         }

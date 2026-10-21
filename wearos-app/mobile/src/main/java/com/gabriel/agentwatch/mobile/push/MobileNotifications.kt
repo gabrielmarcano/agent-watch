@@ -40,6 +40,8 @@ object MobileNotifications {
     private const val GROUP = "com.gabriel.agentwatch.mobile.agent_chats"
     private const val SUMMARY_ID = 9998
     private const val DIGEST_ID = 9999
+    /** Feedback that must not replace a still-actionable chat (locked approval, empty reply). */
+    private const val KEEP_CHAT_FEEDBACK_ID = 9997
     private const val TAG = "Notifications"
 
     /** Notification extras that tag what a shown notification is (read back via `activeNotifications`). */
@@ -350,7 +352,9 @@ object MobileNotifications {
 
     /** The chat was opened in the app: its notification has been seen. */
     fun cancel(context: Context, agent: AgentKey) {
-        manager(context).cancel(idFor(agent))
+        val manager = manager(context)
+        manager.cancel(idFor(agent))
+        manager.cancel(KEEP_CHAT_FEEDBACK_ID)
         refreshSummary(context)
     }
 
@@ -363,13 +367,24 @@ object MobileNotifications {
                 if (kind == KIND_APPROVAL || kind == KIND_DONE) manager.cancel(sbn.id)
             }
             manager.cancel(SUMMARY_ID)
+            manager.cancel(KEEP_CHAT_FEEDBACK_ID)
         } catch (e: RuntimeException) {
             Log.w(TAG, "Could not clear the chats: ${e.javaClass.simpleName}")
         }
     }
 
-    /** Silent result of an action taken on a notification; replaces that chat's notification. */
-    fun showFeedback(context: Context, agent: AgentKey, message: String, isSuccess: Boolean) {
+    /**
+     * Silent result of an action taken on a notification. By default it replaces that chat's
+     * notification (the action consumed it); [keepChat] leaves the chat in place, for a refusal that
+     * did not consume the prompt (a locked phone, an empty reply) so it can be answered after unlocking.
+     */
+    fun showFeedback(
+        context: Context,
+        agent: AgentKey,
+        message: String,
+        isSuccess: Boolean,
+        keepChat: Boolean = false
+    ) {
         ensure(context)
         val open = openApp(context, agent)
         val builder = NotificationCompat.Builder(context, FEEDBACK)
@@ -391,7 +406,8 @@ object MobileNotifications {
                 open
             )
         }
-        manager(context).notify(idFor(agent), builder.build())
+        val id = if (keepChat) KEEP_CHAT_FEEDBACK_ID else idFor(agent)
+        manager(context).notify(id, builder.build())
         refreshSummary(context)
     }
 
