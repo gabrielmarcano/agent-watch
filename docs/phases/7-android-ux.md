@@ -138,14 +138,21 @@ Each slice is one commit, one publish, one look on the device.
 | 1 | **Toolchain** | `:mobile` to `compileSdk 37` / `targetSdk 36`, Compose BOM 2026.03.00 (Material 3 1.4.0, the expressive line), edge-to-edge insets, the suppress flag | No (except the insets) |
 | 2 | **Theme** | The phone's own light/dark palette, dynamic colour (on by default; the switch lands with the Settings screen), shapes, typography | Yes |
 | 3 | **Chats** | Search, filter chips, the machine chip, unread counts, pull-to-refresh, the swipe to mark read, the empty state | Yes |
-| 4 | **Conversation** | Bubbles, times and ticks, the top bar, predictive back, the shared element, the agent's info lines | Yes |
-| 5 | **Composer** | The growing field, send/mic, the IME action, the send haptic | Yes |
-| 6 | **Approvals** | The card's look, the chosen-action feedback, the haptics | Yes |
-| 7 | **Navigation and settings** | The bottom bar (Chats, Machines, History, Settings), the History move, the Settings screen | Yes |
-| 8 | **New session** | The three-step sheet | Yes |
-| 9 | **Machines** | The hosts the relay knows: their state, their chats, their projects, starting a session there | Yes |
-| 10 | **Notifications** | Per-chat, mute, the summary, the vibration patterns, the inline reply | Yes |
-| 11 | **States and polish** | The connectivity strip, the error snackbars, the accessibility labels, the font scale | Yes |
+| 4 | **Conversation** | The time inside the bubble, a tick on a sent message, the top bar with the agent's face, its real state and a menu (mark read, mute, details), the predictive back, the shared face that flies from the row into the chat | Yes |
+| 5 | **Composer** | The growing field, the IME action, the send haptic, a failure with a retry | Yes |
+| 6 | **Approvals** | The choice confirmed in the card, the haptics (confirm on Allow, reject on Deny) | Yes |
+| 7 | **Navigation and settings** | The bottom bar (Chats, Machines, History, Settings) with the waiting count on the Chats tab; the Settings screen (relay, device, forget, the theme switches, the muted chats, the update check, the connection) | Yes |
+| 8 | **New session** | Three steps: the machine, the agent, the folder | Yes |
+| 9 | **Machines** | The hosts the relay knows: their state, their agents, their projects, their chats, a session started there | Yes |
+| 10 | **Notifications** | A muted chat stays quiet, the approvals have their own channel (a short double pulse) and the replies a light tick | Yes |
+| 11 | **States and polish** | The connection strip in the chat, the avatar's status name for the screen reader, the refresh error | Yes |
+
+What the build left out, and why:
+
+- **The send button turning into a mic.** The app cannot ask the keyboard for its own voice input, so a mic button would be a decoration that does nothing: voice stays where it works, in the keyboard.
+- **The long-press selection mode.** The swipe marks a chat read; the mode waits for the mute work, which is in the notifications slice.
+- **The expressive motion scheme.** Still internal in Material 3 1.4.0: it comes with the AGP 9 / Compose 1.12 change, which touches the watch too.
+- **The new session is a full-screen wizard**, not a modal sheet: the sheet would hide the machine list it starts from, and the wizard keeps the three steps obvious.
 
 ## 12. Machines: the other herdr hosts
 
