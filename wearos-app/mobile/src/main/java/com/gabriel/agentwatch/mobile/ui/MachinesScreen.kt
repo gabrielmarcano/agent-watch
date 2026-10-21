@@ -53,9 +53,7 @@ fun MachinesScreen(
     onOpenChats: (String) -> Unit,
     onNewSession: (String) -> Unit
 ) {
-    Scaffold(
-        topBar = { TopAppBar(title = { Text(stringResource(R.string.machines_title)) }) }
-    ) { padding ->
+    Scaffold { padding ->
         if (state.hosts.isEmpty()) {
             Column(
                 modifier = Modifier.fillMaxSize().padding(padding).padding(24.dp),
@@ -74,6 +72,7 @@ fun MachinesScreen(
             contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
+            item(key = "title") { BigTitle(stringResource(R.string.machines_title)) }
             items(state.hosts, key = { it.id }) { host ->
                 MachineCard(
                     host = host,

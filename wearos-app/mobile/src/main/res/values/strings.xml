@@ -30,6 +30,7 @@
     <string name="host_all">All</string>
     <string name="filter_all">All</string>
     <string name="filter_machine">Machine: %1$s</string>
+    <string name="filter_machine_all">Filter by machine</string>
     <string name="search_chats">Search chats</string>
     <string name="search_clear">Clear the search</string>
     <string name="mark_read">Mark as read</string>
@@ -48,6 +49,8 @@
     <string name="chat_unpin">Unpin this chat</string>
     <string name="chat_pinned">Pinned</string>
     <string name="chat_hide">Hide this chat</string>
+    <string name="chat_archive">Archive this chat</string>
+    <string name="chat_mark_unread">Mark as unread</string>
     <string name="chat_unmute">Unmute this chat</string>
     <string name="chat_unread_count">%1$d unread</string>
     <string name="chat_sent">Sent</string>
@@ -108,7 +111,7 @@
     <string name="settings_notifications">Notifications</string>
     <string name="settings_muted">Muted chats</string>
     <string name="settings_unmute">Unmute</string>
-    <string name="settings_hidden">Hidden chats</string>
+    <string name="settings_hidden">Archived chats</string>
     <string name="settings_restore">Restore</string>
     <string name="settings_data">Data</string>
     <string name="settings_check_updates">Check for updates</string>
@@ -167,7 +170,7 @@
 
     <!-- Pairing -->
     <string name="pair_title">Pair this phone</string>
-    <string name="pair_intro">Run `agent-watch-bridge pair` on the machine running the bridge and type the 6-digit code.</string>
+    <string name="pair_intro">Run agent-watch-bridge pair on the machine running the bridge, then type the 6-digit code here.</string>
     <string name="session_expired">Session expired — pair again</string>
     <string name="relay_url">Relay URL</string>
     <string name="relay_url_missing">Not set</string>

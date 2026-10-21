@@ -57,14 +57,13 @@ fun SettingsScreen(
     val context = LocalContext.current
     val prefs = remember(context) { Prefs(context) }
     var confirmForget by remember { mutableStateOf(false) }
-    Scaffold(
-        topBar = { TopAppBar(title = { Text(stringResource(R.string.settings_title)) }) }
-    ) { padding ->
+    Scaffold { padding ->
         LazyColumn(
             modifier = Modifier.fillMaxSize().padding(padding),
             contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 32.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
+            item(key = "title") { BigTitle(stringResource(R.string.settings_title)) }
             item { SectionTitle(stringResource(R.string.settings_account)) }
             item {
                 SettingRow(

@@ -42,7 +42,8 @@ import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.TextField
+import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -233,6 +234,8 @@ fun ChatScreen(
     val itemCount = entries.size + if (info.isEmpty()) 0 else 1
 
     Scaffold(
+        // The canvas is a step below the surface, so the bubbles (the surface) stand out from it.
+        containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
         topBar = {
             TopAppBar(
                 title = {
@@ -252,7 +255,8 @@ fun ChatScreen(
                             )
                             Text(
                                 text = listOfNotNull(
-                                    stringResource(style.label).takeIf { it.isNotBlank() },
+                                    stringResource(style.label)
+                                        .takeIf { it.isNotBlank() && agent.status != "idle" && agent.status != "done" },
                                     hostName
                                 ).joinToString(" · "),
                                 style = MaterialTheme.typography.labelSmall,
@@ -407,29 +411,20 @@ private fun Conversation(
     onCancel: () -> Unit
 ) {
     val listState = rememberLazyListState()
-    var stickToBottom by remember { mutableStateOf(true) }
-
-    // Follow new messages only while the user is at the end, like a messaging app.
-    LaunchedEffect(listState) {
-        snapshotFlow { listState.isScrollInProgress }.collect { scrolling ->
-            if (scrolling) {
-                val layout = listState.layoutInfo
-                val last = layout.visibleItemsInfo.lastOrNull()?.index ?: -1
-                stickToBottom = last >= layout.totalItemsCount - 2
-            }
-        }
-    }
     // The chat opens at the end, at once: the first jump is a scroll, not an animation (a long
-    // conversation would crawl down to the bottom). Later turns animate, like a messaging app.
+    // conversation would crawl down to the bottom). After that, a new turn only scrolls into view
+    // when the owner is already at the end, like a messaging app.
     var jumped by remember { mutableStateOf(false) }
     LaunchedEffect(itemCount) {
-        if (itemCount > 0 && stickToBottom) {
-            if (jumped) {
-                listState.animateScrollToItem(itemCount - 1)
-            } else {
-                listState.scrollToItem(itemCount - 1)
-                jumped = true
-            }
+        if (itemCount == 0) return@LaunchedEffect
+        val layout = listState.layoutInfo
+        val last = layout.visibleItemsInfo.lastOrNull()?.index ?: -1
+        val atEnd = jumped && last >= layout.totalItemsCount - 2
+        if (!jumped || atEnd) {
+            // The offset scrolls past the item's start: the list clamps at its end, so the chat
+            // shows the newest lines even when the last message is long.
+            listState.scrollToItem(itemCount - 1, scrollOffset = 100_000)
+            jumped = true
         }
     }
 
@@ -523,12 +518,12 @@ private fun AnswerBubble(item: HistoryItem) {
         } else {
             SelectionContainer { MarkdownBlocks(remember(item.id) { readerBlocks(item.response, item.source) }) }
         }
-        Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                text = chatStampText(chatStamp(item.completed_at, Instant.now())),
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
+        // The time at the end of the bubble, with the source beside it: a messaging app's stamp.
+        Row(
+            modifier = Modifier.align(Alignment.End),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
             if (item.source == "screen") {
                 Text(
                     text = stringResource(R.string.chat_screen_source),
@@ -536,6 +531,11 @@ private fun AnswerBubble(item: HistoryItem) {
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
+            Text(
+                text = chatStampText(chatStamp(item.completed_at, Instant.now())),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
     }
 }
@@ -681,7 +681,7 @@ private fun Composer(
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.Bottom
             ) {
-                OutlinedTextField(
+                TextField(
                     value = draft,
                     onValueChange = onDraftChange,
                     modifier = Modifier.weight(1f),
@@ -695,7 +695,13 @@ private fun Composer(
                     maxLines = 5,
                     shape = RoundedCornerShape(24.dp),
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
-                    keyboardActions = KeyboardActions(onSend = { onSend() })
+                    keyboardActions = KeyboardActions(onSend = { onSend() }),
+                    colors = TextFieldDefaults.colors(
+                        focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+                        unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+                        focusedIndicatorColor = Color.Transparent,
+                        unfocusedIndicatorColor = Color.Transparent
+                    )
                 )
                 Spacer(Modifier.width(8.dp))
                 FilledIconButton(

@@ -21,19 +21,24 @@ import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyItemScope
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Computer
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Done
 import androidx.compose.material.icons.filled.DoneAll
+import androidx.compose.material.icons.filled.Archive
+import androidx.compose.material.icons.filled.MarkEmailUnread
 import androidx.compose.material.icons.filled.NotificationsOff
 import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.filled.Search
@@ -54,7 +59,8 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TextField
+import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -73,6 +79,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -128,6 +135,7 @@ fun ChatListScreen(
     onNewSession: () -> Unit,
     onRefresh: suspend () -> Unit,
     onMarkRead: (AgentState) -> Unit,
+    onMarkUnread: (AgentState) -> Unit,
     onUpdate: () -> Unit,
     onRetryUpdate: () -> Unit,
     onCancelUpdate: () -> Unit,
@@ -170,13 +178,8 @@ fun ChatListScreen(
     }
 
     Scaffold(
-        topBar = {
-            TopAppBar(
-                title = { Text(stringResource(R.string.chats_title)) }
-            )
-        },
         floatingActionButton = {
-            FloatingActionButton(onClick = onNewSession) {
+            FloatingActionButton(onClick = onNewSession, shape = CircleShape) {
                 Icon(Icons.Filled.Add, contentDescription = stringResource(R.string.new_session))
             }
         }
@@ -191,17 +194,6 @@ fun ChatListScreen(
                 onDismiss = onDismissUpdate
             )
             status.notice?.let { Notice(it) }
-            SearchField(query = query, onQueryChange = { query = it })
-            FilterRow(
-                filter = filter,
-                onFilter = { filter = it },
-                counts = ChatFilter.entries.associateWith { f ->
-                    onMachine.count { f.matches(it) }
-                },
-                hosts = state.hosts,
-                selectedHost = hostFilter,
-                onSelectHost = onHostFilter
-            )
             PullToRefreshBox(
                 isRefreshing = refreshing,
                 onRefresh = {
@@ -218,20 +210,42 @@ fun ChatListScreen(
                     }
                 }
             ) {
-                when {
-                    state.agents.isEmpty() -> EmptyList(
-                        text = stringResource(R.string.no_agents),
-                        action = stringResource(R.string.chat_empty_start),
-                        onAction = onNewSession
-                    )
-                    chats.isEmpty() && query.isNotBlank() -> EmptyList(stringResource(R.string.chat_empty_search))
-                    chats.isEmpty() && hostFilter != null -> EmptyList(stringResource(R.string.no_agents_host))
-                    chats.isEmpty() -> EmptyList(stringResource(R.string.chat_empty_filter))
-                    else -> LazyColumn(
-                        modifier = Modifier.fillMaxSize(),
-                        contentPadding = PaddingValues(bottom = 88.dp)
-                    ) {
-                        items(chats, key = { "chat-${it.key.token}" }) { agent ->
+                LazyColumn(
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(bottom = 88.dp)
+                ) {
+                    item(key = "title") { BigTitle(stringResource(R.string.chats_title)) }
+                    item(key = "search") {
+                        SearchField(query = query, onQueryChange = { query = it })
+                    }
+                    item(key = "filters") {
+                        FilterRow(
+                            filter = filter,
+                            onFilter = { filter = it },
+                            counts = ChatFilter.entries.associateWith { f ->
+                                onMachine.count { f.matches(it) }
+                            },
+                            hosts = state.hosts,
+                            selectedHost = hostFilter,
+                            onSelectHost = onHostFilter
+                        )
+                    }
+                    if (state.agents.isEmpty()) {
+                        item(key = "empty") {
+                            EmptyList(
+                                text = stringResource(R.string.no_agents),
+                                action = stringResource(R.string.chat_empty_start),
+                                onAction = onNewSession
+                            )
+                        }
+                    } else if (chats.isEmpty() && query.isNotBlank()) {
+                        item(key = "empty") { EmptyList(stringResource(R.string.chat_empty_search)) }
+                    } else if (chats.isEmpty() && hostFilter != null) {
+                        item(key = "empty") { EmptyList(stringResource(R.string.no_agents_host)) }
+                    } else if (chats.isEmpty()) {
+                        item(key = "empty") { EmptyList(stringResource(R.string.chat_empty_filter)) }
+                    }
+                    items(chats, key = { "chat-${it.key.token}" }) { agent ->
                             ChatRow(
                                 agent = agent,
                                 history = state.history,
@@ -244,10 +258,9 @@ fun ChatListScreen(
                                 onClick = { onOpen(agent) },
                                 onLongClick = { sheetAgent = agent },
                                 onMarkRead = { onMarkRead(agent) },
-                                sharedScope = sharedScope,
-                                visibilityScope = visibilityScope
-                            )
-                        }
+                        sharedScope = sharedScope,
+                        visibilityScope = visibilityScope
+                    )
                     }
                 }
             }
@@ -264,9 +277,29 @@ fun ChatListScreen(
             onMarkRead = {
                 onMarkRead(agent)
                 sheetAgent = null
+            },
+            onMarkUnread = {
+                onMarkUnread(agent)
+                sheetAgent = null
             }
         )
     }
+}
+
+/**
+ * The screen's title: a big line at the top, the way a messaging app draws it. It scrolls away
+ * with the list.
+ */
+@Composable
+fun BigTitle(text: String) {
+    Text(
+        text = text,
+        style = MaterialTheme.typography.headlineMedium.copy(fontWeight = FontWeight.SemiBold),
+        modifier = Modifier
+            .fillMaxWidth()
+            .statusBarsPadding()
+            .padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 4.dp)
+    )
 }
 
 /**
@@ -281,7 +314,8 @@ private fun ChatOptionsSheet(
     pinned: Boolean,
     muted: Boolean,
     onDismiss: () -> Unit,
-    onMarkRead: () -> Unit
+    onMarkRead: () -> Unit,
+    onMarkUnread: () -> Unit
 ) {
     val token = agent.key.token
     val name = agent.label.ifBlank { agent.agent }
@@ -314,8 +348,16 @@ private fun ChatOptionsSheet(
                 onClick = onMarkRead
             )
             SheetAction(
-                label = stringResource(R.string.chat_hide),
-                icon = Icons.Filled.Delete,
+                label = stringResource(R.string.chat_mark_unread),
+                icon = Icons.Filled.MarkEmailUnread,
+                onClick = {
+                    onMarkUnread()
+                    onDismiss()
+                }
+            )
+            SheetAction(
+                label = stringResource(R.string.chat_archive),
+                icon = Icons.Filled.Archive,
                 onClick = {
                     chatStore.hide(token, name)
                     onDismiss()
@@ -344,7 +386,7 @@ private fun SheetAction(label: String, icon: ImageVector, onClick: () -> Unit) {
 /** The search field, pinned above the list: it filters the chats by name, machine or last message. */
 @Composable
 private fun SearchField(query: String, onQueryChange: (String) -> Unit) {
-    OutlinedTextField(
+    TextField(
         value = query,
         onValueChange = onQueryChange,
         modifier = Modifier
@@ -360,7 +402,13 @@ private fun SearchField(query: String, onQueryChange: (String) -> Unit) {
             }
         },
         singleLine = true,
-        shape = RoundedCornerShape(24.dp)
+        shape = RoundedCornerShape(24.dp),
+        colors = TextFieldDefaults.colors(
+            focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+            unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+            focusedIndicatorColor = Color.Transparent,
+            unfocusedIndicatorColor = Color.Transparent
+        )
     )
 }
 
@@ -414,7 +462,14 @@ private fun MachineChip(hosts: List<HostInfo>, selected: String?, onSelect: (Str
         FilterChip(
             selected = selected != null,
             onClick = { open = true },
-            label = { Text(stringResource(R.string.filter_machine, name)) }
+            label = { Text(name) },
+            leadingIcon = {
+                Icon(
+                    Icons.Filled.Computer,
+                    contentDescription = stringResource(R.string.filter_machine_all),
+                    modifier = Modifier.size(18.dp)
+                )
+            }
         )
         DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
             DropdownMenuItem(
@@ -464,11 +519,7 @@ private fun ChatRow(
 ) {
     val style = statusStyle(agent.shownStatus())
     val background = backgroundLine(agent)
-    val statusLine = listOfNotNull(
-        stringResource(style.label).takeIf { it.isNotBlank() },
-        hostName,
-        background
-    ).joinToString(" · ")
+    val statusText = stringResource(style.label).takeIf { it.isNotBlank() }
     val preview = rowPreview(agent, history)
     val activity = agent.lastActivity(history).takeIf { it != Instant.EPOCH }
     val time = chatStampText(chatStamp(activity, Instant.now()))
@@ -532,6 +583,15 @@ private fun ChatRow(
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.weight(1f)
                     )
+                    if (muted) {
+                        Icon(
+                            Icons.Filled.NotificationsOff,
+                            contentDescription = stringResource(R.string.chat_muted),
+                            modifier = Modifier.size(14.dp),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Spacer(Modifier.width(4.dp))
+                    }
                     if (pinned) {
                         Icon(
                             Icons.Filled.PushPin,
@@ -565,21 +625,38 @@ private fun ChatRow(
                         UnreadBadge(unread)
                     }
                 }
-                Text(
-                    text = if (muted) {
-                        stringResource(R.string.chat_muted)
-                    } else {
-                        statusLine
-                    },
-                    style = MaterialTheme.typography.labelSmall,
-                    color = if (muted) {
-                        MaterialTheme.colorScheme.onSurfaceVariant
-                    } else {
-                        style.accent
-                    },
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
+                // The status line only when it says something: a working or waiting agent. A quiet
+                // chat is two lines, like a messenger's.
+                if (agent.status == "working" || agent.status == "blocked") {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    statusText?.let {
+                        Text(
+                            text = it,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = style.accent,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                    val rest = listOfNotNull(hostName, background)
+                    if (statusText != null && rest.isNotEmpty()) {
+                        Text(
+                            text = " · ",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    if (rest.isNotEmpty()) {
+                        Text(
+                            text = rest.joinToString(" · "),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                }
+                }
             }
         }
     }

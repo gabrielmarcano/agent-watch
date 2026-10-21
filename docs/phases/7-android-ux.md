@@ -146,6 +146,7 @@ Each slice is one commit, one publish, one look on the device.
 | 10 | **Notifications** | A muted chat stays quiet, the approvals have their own channel (a short double pulse) and the replies a light tick | Yes |
 | 11 | **States and polish** | The connection strip in the chat, the avatar's status name for the screen reader, the refresh error | Yes |
 | 12 | **The owner's first look (2026-10-21)** | The chat opens at the end at once, the global **history goes away** (every chat has its own), the back gesture works, the long press offers WhatsApp's options (pin, mute, mark as read, hide) and the pinned chats sit on top | Yes |
+| 13 | **The WhatsApp audit (2026-10-21)** | The screens were looked at on a running phone (an Android 14 image in an emulator, paired with the relay) and compared with WhatsApp's: the title is a big line at the top (no empty space), the search is a filled pill, the rows are two lines unless the agent is working, the bottom bar floats above the system bar with the selected tab on a pill, the chat's canvas is a step below the bubbles, the composer's field is a filled pill, and the inline code lost its box | Yes |
 
 What the build left out, and why:
 
@@ -156,6 +157,30 @@ What the build left out, and why:
 - **The long-press selection mode** (a multi-select with a bar of actions) is still not there: the sheet
   with the options is, and it is what the owner asked for. A multi-select comes later, if it is asked
   for again.
+
+## 14. What the WhatsApp audit changed (2026-10-21)
+
+The app was run in an emulator (an Android 14 image), paired with the relay, and looked at screen by
+screen next to WhatsApp's. What was wrong, and what it is now:
+
+- **The title left a hole.** The large top app bar put "Chats" in the middle of the screen with a
+  void above it, and the two nested scaffolds added the status bar inset twice. The title is now a
+  big line at the top of the list, and the outer scaffold leaves the insets to the screens.
+- **The bottom bar was under the system bar.** It now floats above it, rounded, with the selected tab
+  on a pill, the way WhatsApp's Android bar does since 2026.
+- **The bubbles vanished into the background.** With the system palette the chat's canvas and the
+  incoming bubble were the same colour. The canvas is now a step below the surface.
+- **The chat opened in the middle of the last message.** The jump to the end now scrolls past the
+  item's start (the list clamps at its end), and the "keep following the new turns" rule no longer
+  breaks on the first scroll.
+- **The rows were three lines tall.** The status line only shows when the agent is working or
+  waiting; a quiet chat is two lines, like WhatsApp's.
+- **The search and the composer were outlined boxes.** Both are filled pills now.
+- **The inline code had a grey box behind every word.** It is monospace and nothing else.
+- **The pairing screen showed Markdown backticks.** It says what to run, in plain words.
+
+What was left alone on purpose: the unread badge keeps the app's accent colour instead of WhatsApp's
+green, and the filter chips (a messaging app has none) stay, because an agent list needs "Needs you".
 
 ## 13. What the owner's first look changed (2026-10-21)
 

@@ -113,8 +113,7 @@ private fun MarkdownBlock(block: MdBlock) {
 }
 
 @Composable
-private fun codeSpanStyle(): SpanStyle =
-    SpanStyle(fontFamily = FontFamily.Monospace, background = MaterialTheme.colorScheme.surfaceVariant)
+private fun codeSpanStyle(): SpanStyle = SpanStyle(fontFamily = FontFamily.Monospace)
 
 @Composable
 private fun spansToAnnotated(spans: List<MdSpan>): AnnotatedString = buildAnnotatedString {

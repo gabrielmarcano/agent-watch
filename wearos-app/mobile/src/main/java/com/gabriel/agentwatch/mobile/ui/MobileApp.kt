@@ -10,19 +10,27 @@ import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Chat
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.filled.Computer
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.NavigationBar
-import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -35,6 +43,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
@@ -159,6 +168,9 @@ fun MobileApp(
     }
 
     Scaffold(
+        // The screens below handle their own insets (the chat list's title, the chat's bar); adding
+        // them here as well would push everything down twice.
+        contentWindowInsets = WindowInsets(0),
         bottomBar = {
             if (route in TAB_ROUTES) {
                 PhoneNavigationBar(
@@ -288,6 +300,9 @@ fun MobileApp(
                                 // count as seen.
                                 chatSeen.markRead(agent.key, agent.state_change_seq)
                             },
+                            onMarkUnread = { agent ->
+                                chatSeen.markUnread(agent.key)
+                            },
                             onUpdate = { updateManager.download() },
                             onRetryUpdate = {
                                 if (update.info != null) updateManager.download() else updateManager.check(manual = true)
@@ -327,31 +342,91 @@ private fun WaitingBadge(count: Int, modifier: Modifier = Modifier) {
 /** The bottom navigation: the four places the phone goes (docs/phases/7-android-ux.md § 2). */
 @Composable
 private fun PhoneNavigationBar(current: String, waiting: Int, onSelect: (String) -> Unit) {
-    NavigationBar {
-        NavigationBarItem(
-            selected = current == Routes.CHATS,
-            onClick = { onSelect(Routes.CHATS) },
-            icon = {
-                Box {
-                    Icon(Icons.AutoMirrored.Filled.Chat, contentDescription = null)
-                    if (waiting > 0) {
-                        WaitingBadge(waiting, Modifier.align(Alignment.TopEnd))
-                    }
-                }
+    // A floating, rounded bar with the selected tab on a pill: the bar WhatsApp's Android app
+    // uses now, and it keeps the content clear of the system bar.
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .navigationBarsPadding()
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+        shape = RoundedCornerShape(28.dp),
+        color = MaterialTheme.colorScheme.surfaceContainer,
+        tonalElevation = 3.dp,
+        shadowElevation = 8.dp
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            NavItem(
+                selected = current == Routes.CHATS,
+                icon = Icons.AutoMirrored.Filled.Chat,
+                label = stringResource(R.string.tab_chats),
+                badge = waiting,
+                onClick = { onSelect(Routes.CHATS) }
+            )
+            NavItem(
+                selected = current == Routes.MACHINES,
+                icon = Icons.Filled.Computer,
+                label = stringResource(R.string.tab_machines),
+                badge = 0,
+                onClick = { onSelect(Routes.MACHINES) }
+            )
+            NavItem(
+                selected = current == Routes.SETTINGS,
+                icon = Icons.Filled.Settings,
+                label = stringResource(R.string.tab_settings),
+                badge = 0,
+                onClick = { onSelect(Routes.SETTINGS) }
+            )
+        }
+    }
+}
+
+/** One tab of the floating bar: the icon on a pill when it is the current one, and its name. */
+@Composable
+private fun RowScope.NavItem(
+    selected: Boolean,
+    icon: ImageVector,
+    label: String,
+    badge: Int,
+    onClick: () -> Unit
+) {
+    Column(
+        modifier = Modifier.weight(1f).clickable(onClick = onClick),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Box(contentAlignment = Alignment.Center) {
+            if (selected) {
+                Box(
+                    Modifier
+                        .size(width = 56.dp, height = 30.dp)
+                        .background(MaterialTheme.colorScheme.primaryContainer, RoundedCornerShape(15.dp))
+                )
+            }
+            Icon(
+                icon,
+                contentDescription = null,
+                tint = if (selected) {
+                    MaterialTheme.colorScheme.onPrimaryContainer
+                } else {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                },
+                modifier = Modifier.size(22.dp)
+            )
+            if (badge > 0) {
+                WaitingBadge(badge, Modifier.align(Alignment.TopEnd))
+            }
+        }
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelSmall,
+            color = if (selected) {
+                MaterialTheme.colorScheme.onSurface
+            } else {
+                MaterialTheme.colorScheme.onSurfaceVariant
             },
-            label = { Text(stringResource(R.string.tab_chats)) }
-        )
-        NavigationBarItem(
-            selected = current == Routes.MACHINES,
-            onClick = { onSelect(Routes.MACHINES) },
-            icon = { Icon(Icons.Filled.Computer, contentDescription = null) },
-            label = { Text(stringResource(R.string.tab_machines)) }
-        )
-        NavigationBarItem(
-            selected = current == Routes.SETTINGS,
-            onClick = { onSelect(Routes.SETTINGS) },
-            icon = { Icon(Icons.Filled.Settings, contentDescription = null) },
-            label = { Text(stringResource(R.string.tab_settings)) }
+            maxLines = 1
         )
     }
 }
