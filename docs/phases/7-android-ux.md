@@ -28,8 +28,8 @@ What the phone compiles against today, and where it goes:
 | | Today | Target | Note |
 |---|---|---|---|
 | `compileSdk` (`:mobile`) | 36 | **37** | `platforms;android-37.0` is installable from the SDK manager; the watch module stays at 36 |
-| `targetSdk` (`:mobile`) | 34 | **36** | 35+ forces edge-to-edge, so every screen handles insets (today they do not) |
-| Compose BOM (`:mobile`) | 2025.09.00 | **2026.09.00** | Material 3 Expressive: the expressive motion scheme, shapes, `MaterialExpressiveTheme` |
+| `targetSdk` (`:mobile`) | 34 | **36** | 35+ draws the app behind the system bars, so every screen handles the insets (the composer already does; the bars get light icons on the phone's dark look) |
+| Compose BOM (`:mobile`) | 2025.09.00 | **2026.03.00** | Material 3 1.4.0 (the expressive line: the motion scheme, the shapes). The newest BOM (2026.09.00) ships Compose 1.12, which needs AGP 9.1; that comes with the AGP change, not before. Compose 1.10 also moved the Material icons out of material3: `:mobile` depends on `material-icons-core` now (the six icons it uses are in that set) |
 | AGP | 8.13.2 | 8.13.2, then maybe 9.x | AGP 8.13 warns about `compileSdk 37`; the warning is suppressed with `android.suppressUnsupportedCompileSdk=37` in `wearos-app/gradle.properties`. Moving to AGP 9.x is its own change, and only if the watch module still builds and behaves on the wrist |
 | `minSdk` | 30 | 30 | unchanged |
 
@@ -49,6 +49,7 @@ Bottom navigation, like WhatsApp's, with three destinations and one FAB:
 ```
 
 - **Chats** — the conversation list (the current home screen).
+- **Machines** — the hosts the relay knows, above all the owner's other machine (section 12).
 - **History** — the current global history screen, moved out of the top bar (it is a place you visit, not a button you remember).
 - **Settings** — new: relay, pairing, notifications, appearance, about.
 - **FAB → New session** — a three-step sheet, not a long form.
@@ -134,21 +135,38 @@ Each slice is one commit, one publish, one look on the device.
 
 | # | Slice | What it changes | Visible? |
 |---|---|---|---|
-| 1 | **Toolchain** | `:mobile` to `compileSdk 37` / `targetSdk 36`, Compose BOM 2026.09.00, edge-to-edge insets, the suppress flag | No (except the insets) |
+| 1 | **Toolchain** | `:mobile` to `compileSdk 37` / `targetSdk 36`, Compose BOM 2026.03.00 (Material 3 1.4.0, the expressive line), edge-to-edge insets, the suppress flag | No (except the insets) |
 | 2 | **Theme** | The phone's own light/dark palette, dynamic colour, shapes, typography, the expressive motion scheme | Yes |
 | 3 | **Chats** | Search, filter chips, the machine sheet, unread counts, pull-to-refresh, swipe and long-press, the empty state | Yes |
 | 4 | **Conversation** | Bubbles, times and ticks, the top bar, predictive back, the shared element, the agent's info lines | Yes |
 | 5 | **Composer** | The growing field, send/mic, the IME action, the send haptic | Yes |
 | 6 | **Approvals** | The card's look, the chosen-action feedback, the haptics | Yes |
-| 7 | **Navigation and settings** | The bottom bar, the History move, the Settings screen | Yes |
+| 7 | **Navigation and settings** | The bottom bar (Chats, Machines, History, Settings), the History move, the Settings screen | Yes |
 | 8 | **New session** | The three-step sheet | Yes |
-| 9 | **Notifications** | Per-chat, mute, the summary, the vibration patterns, the inline reply | Yes |
-| 10 | **States and polish** | The connectivity strip, the error snackbars, the accessibility labels, the font scale | Yes |
+| 9 | **Machines** | The hosts the relay knows: their state, their chats, their projects, starting a session there | Yes |
+| 10 | **Notifications** | Per-chat, mute, the summary, the vibration patterns, the inline reply | Yes |
+| 11 | **States and polish** | The connectivity strip, the error snackbars, the accessibility labels, the font scale | Yes |
 
-## 12. Checks
+## 12. Machines: the other herdr hosts
+
+The owner works on two machines: this Mac and an Ubuntu server ("home") that runs herdr too, with its own projects. The relay already knows every host ([`docs/reference/contracts.md`](../reference/contracts.md) §1.6): its id, its name, whether it is connected, and whether it reaches its herdr. The snapshot carries **each host's agents**, and a device can already start a session on any host: `GET /v1/hosts/{host}/sessions/options` gives the agent kinds and the roots that machine allows, `GET /v1/hosts/{host}/folders` browses them, and `POST /v1/hosts/{host}/sessions` starts one.
+
+What is missing is a place in the app to *look* at a machine:
+
+- A **Machines** tab: one card per host — its name, whether it is online, whether its herdr answers, how many agents it runs and how many are waiting for the owner.
+- Tapping a machine shows **its** chats (the list, filtered to that host) and **its projects**: the roots the bridge allows there, browsable, so a session starts on the "home" machine in one tap.
+- A machine that is offline, or whose herdr is stopped, says so and says what to check on that machine (its bridge, its herdr).
+
+What it does **not** do yet:
+
+- It does not show the remote machine's **live herdr workspaces** (the tabs and sessions herdr holds there): the relay knows the host's agents, not its workspace tree. Reporting the workspaces is a bridge → relay addition, a contract change through the `schema-sync` skill, and it is a later slice.
+- The prerequisite is phase 8 step 3: the "home" machine must be registered on the relay (`agent-watch-relay hosts add`) and run the bridge. Until then the app shows it as offline, which is the truth.
+
+## 13. Checks
 
 - The `:mobile` JVM tests and lint stay green (the CI line: `./gradlew :core:testDebugUnitTest :app:testDebugUnitTest :app:lintDebug :app:assembleDebug :mobile:testDebugUnitTest :mobile:lintDebug :mobile:assembleDebug`).
 - The watch app is untouched: same application id, same signing key, same behaviour on the wrist.
 - The relay's API and the contracts do not change (no `schema-sync`).
 - Each slice is checked on the owner's phone: the update card, the screen it touches, and the back gesture.
 - The notification rules keep their safety: approving needs the phone unlocked, and the watch must not show a duplicate.
+- **Android 16+ notification cooldown:** a user who dismisses several notifications in a day may see the app's notifications paused by the system. Check that the approvals still arrive on the owner's phone after the update to `targetSdk 36`.
