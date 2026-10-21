@@ -18,6 +18,7 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
@@ -84,6 +85,7 @@ fun ChatListScreen(
     state: UiState,
     onOpen: (AgentState) -> Unit,
     onHistory: () -> Unit,
+    onNewSession: () -> Unit,
     onRefresh: () -> Unit
 ) {
     val context = LocalContext.current
@@ -117,6 +119,9 @@ fun ChatListScreen(
             TopAppBar(
                 title = { Text(stringResource(R.string.chats_title)) },
                 actions = {
+                    IconButton(onClick = onNewSession) {
+                        Icon(Icons.Filled.Add, contentDescription = stringResource(R.string.new_session))
+                    }
                     IconButton(onClick = onRefresh) {
                         Icon(Icons.Filled.Refresh, contentDescription = stringResource(R.string.refresh))
                     }

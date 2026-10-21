@@ -4,6 +4,9 @@ import android.content.Context
 import android.util.Log
 import com.gabriel.agentwatch.data.Prefs
 import com.gabriel.agentwatch.model.AgentKey
+import com.gabriel.agentwatch.model.FolderListResponse
+import com.gabriel.agentwatch.model.SessionCreated
+import com.gabriel.agentwatch.model.SessionOptionsResponse
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -119,7 +122,7 @@ object RelayRepository {
         engine?.refresh()
     }
 
-    private fun notPaired(): Result<Unit> =
+    private fun <T> notPaired(): Result<T> =
         Result.failure(RelayError("not_paired", "Client not configured", 0))
 
     /** Commands go to [agent]'s host (contracts §2.1): pass the key of the `AgentState` shown. */
@@ -132,4 +135,16 @@ object RelayRepository {
 
     suspend fun prompt(agent: AgentKey, text: String, expectedSeq: Long): Result<Unit> =
         engine?.prompt(agent, text, expectedSeq) ?: notPaired()
+
+    /** What [host]'s bridge allows for new sessions: agent kinds and root folders (contracts §2.1). */
+    suspend fun sessionOptions(host: String): Result<SessionOptionsResponse> =
+        engine?.sessionOptions(host) ?: notPaired()
+
+    /** One folder listing on [host] for the folder picker; its roots when [path] is null. */
+    suspend fun folders(host: String, path: String? = null): Result<FolderListResponse> =
+        engine?.folders(host, path) ?: notPaired()
+
+    /** Starts a new agent session on [host] and refreshes the list on success. */
+    suspend fun createSession(host: String, kind: String, cwd: String, label: String? = null): Result<SessionCreated> =
+        engine?.createSession(host, kind, cwd, label) ?: notPaired()
 }

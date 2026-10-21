@@ -2,6 +2,7 @@ package com.gabriel.agentwatch.mobile.ui
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.rememberCoroutineScope
@@ -27,6 +28,8 @@ private object Routes {
     const val CHAT = "chat"
     const val HISTORY = "history"
     const val TEXT = "text"
+    const val NEW_SESSION = "new-session"
+    const val STARTING = "starting"
 }
 
 @Composable
@@ -42,6 +45,9 @@ fun MobileApp() {
     var textSource by rememberSaveable { mutableStateOf("") }
     var textQuery by rememberSaveable { mutableStateOf("") }
     var backRoute by rememberSaveable { mutableStateOf(Routes.CHATS) }
+    var startingHost by rememberSaveable { mutableStateOf("") }
+    var startingPane by rememberSaveable { mutableStateOf("") }
+    var startingLabel by rememberSaveable { mutableStateOf("") }
 
     fun openText(title: String, body: String, source: String, query: String, from: String) {
         textTitle = title
@@ -60,9 +66,7 @@ fun MobileApp() {
 
     BackHandler(enabled = route != Routes.CHATS) {
         route = if (route == Routes.TEXT) backRoute else Routes.CHATS
-    }
-
-    // Check the pairing first, at runtime: anything but PAIRED shows the pairing screen, never an
+    }    // Check the pairing first, at runtime: anything but PAIRED shows the pairing screen, never an
     // empty list or "device offline" (wearos-app/ARCHITECTURE.md §4).
     if (state.auth != AuthState.PAIRED) {
         PairingScreen(revoked = state.auth == AuthState.REVOKED) { route = Routes.CHATS }
@@ -112,10 +116,32 @@ fun MobileApp() {
             onBack = { route = backRoute }
         )
 
+        Routes.NEW_SESSION -> NewSessionScreen(
+            hosts = state.hosts,
+            onBack = { route = Routes.CHATS },
+            onCreated = { created ->
+                startingHost = created.host
+                startingPane = created.pane_id
+                startingLabel = created.label
+                route = Routes.STARTING
+            }
+        )
+
+        Routes.STARTING -> {
+            // The bridge starts the agent before answering, so the next list usually has it; open
+            // its chat the moment it does, instead of leaving the owner on a spinner.
+            val created = state.agents.findAgent(AgentKey(startingHost, startingPane))
+            LaunchedEffect(created?.key) {
+                if (created != null) openChat(created.key)
+            }
+            StartingSessionScreen(label = startingLabel, onBack = { route = Routes.CHATS })
+        }
+
         else -> ChatListScreen(
             state = state,
             onOpen = { openChat(it.key) },
             onHistory = { route = Routes.HISTORY },
+            onNewSession = { route = Routes.NEW_SESSION },
             onRefresh = { scope.launch { RelayRepository.refresh() } }
         )
     }

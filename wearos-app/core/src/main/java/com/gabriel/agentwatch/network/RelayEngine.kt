@@ -332,7 +332,7 @@ class RelayEngine(
         }
     }
 
-    private fun notPaired(): Result<Unit> =
+    private fun <T> notPaired(): Result<T> =
         Result.failure(RelayError("not_paired", "Client not configured", 0))
 
     /** Re-fetches after a success, and after an error that means our view is stale (see commandErrorFeedback). */
@@ -357,6 +357,32 @@ class RelayEngine(
     suspend fun prompt(agent: AgentKey, text: String, expectedSeq: Long): Result<Unit> {
         val currentClient = getClient() ?: return notPaired()
         return refreshAfter(currentClient.prompt(agent, text, expectedSeq))
+    }
+
+    /** What [host]'s bridge allows for new sessions (contracts §2.1). */
+    suspend fun sessionOptions(host: String): Result<SessionOptionsResponse> {
+        val currentClient = getClient() ?: return notPaired()
+        return currentClient.sessionOptions(host)
+    }
+
+    /** One folder listing on [host] for the picker: its roots when [path] is null. */
+    suspend fun folders(host: String, path: String? = null): Result<FolderListResponse> {
+        val currentClient = getClient() ?: return notPaired()
+        return currentClient.folders(host, path)
+    }
+
+    /**
+     * Starts a new agent session on [host]. The list is refreshed in the background on success, so
+     * the caller gets the new pane at once; the bridge's own refresh usually beats this anyway.
+     */
+    suspend fun createSession(host: String, kind: String, cwd: String, label: String? = null): Result<SessionCreated> {
+        val currentClient = getClient() ?: return notPaired()
+        val res = currentClient.createSession(host, kind, cwd, label)
+        if (res.isSuccess) {
+            val running = synchronized(lock) { scope }
+            if (running != null) running.launch { refresh() }
+        }
+        return res
     }
 }
 

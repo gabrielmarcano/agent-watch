@@ -89,9 +89,17 @@ class RelayClientTest {
     fun everyClientSharesOnePoolAndDispatcher() {
         val a = RelayHttpClients.shared
         assertSame(a.rest.connectionPool, a.command.connectionPool)
+        assertSame(a.rest.connectionPool, a.session.connectionPool)
         assertSame(a.rest.connectionPool, a.sse.connectionPool)
         assertSame(a.rest.dispatcher, a.command.dispatcher)
+        assertSame(a.rest.dispatcher, a.session.dispatcher)
         assertSame(a.rest.dispatcher, a.sse.dispatcher)
+    }
+
+    @Test
+    fun sessionCallTimeoutOutlastsTheRelaysSessionBudget() {
+        val callTimeout = RelayHttpClients.shared.session.callTimeoutMillis
+        assertTrue("session callTimeout must beat the relay's 40 s budget, was $callTimeout", callTimeout > 40_000)
     }
 
     @Test
@@ -232,5 +240,61 @@ class RelayClientTest {
         assertEquals("/v1/history?limit=20&host=box&pane_id=w1%3Ap1", server.takeRequest().path)
         assertEquals("/v1/history?limit=20&pane_id=w1%3Ap1", server.takeRequest().path)
         assertEquals("/v1/history?limit=20", server.takeRequest().path)
+    }
+
+    // ---- new sessions: host-scoped options, folders and creation (contracts §2.1)
+
+    @Test
+    fun sessionOptionsAndFoldersGoToTheHost() = runBlocking {
+        server.enqueue(MockResponse().setBody("""{"kinds":["claude"],"roots":["/Users/me/Code"]}"""))
+        server.enqueue(MockResponse().setBody("""{"path":"/Users/me/Code/a b","roots":["/Users/me/Code"],"entries":[]}"""))
+        server.enqueue(MockResponse().setBody("""{"path":"","roots":["/Users/me/Code"],"entries":[]}"""))
+        val client = RelayClient(baseUrl(), "tok")
+
+        val options = client.sessionOptions("box").getOrThrow()
+        assertEquals(listOf("claude"), options.kinds)
+        val listed = client.folders("box", "/Users/me/Code/a b").getOrThrow()
+        assertEquals("/Users/me/Code/a b", listed.path)
+        client.folders("box")
+
+        assertEquals("/v1/hosts/box/sessions/options", server.takeRequest().path)
+        assertEquals("/v1/hosts/box/folders?path=%2FUsers%2Fme%2FCode%2Fa+b", server.takeRequest().path)
+        assertEquals("/v1/hosts/box/folders", server.takeRequest().path)
+    }
+
+    @Test
+    fun createSessionPostsTheRequestAndReadsTheCreatedPane() = runBlocking {
+        server.enqueue(
+            MockResponse().setBody(
+                """{"host":"box","pane_id":"w2:p1","workspace_id":"w2","tab_id":"t1","kind":"claude","label":"agent-watch 2"}"""
+            )
+        )
+        val client = RelayClient(baseUrl(), "tok")
+
+        val created = client.createSession("box", "claude", "/Users/me/Code/agent-watch", "agent-watch 2").getOrThrow()
+
+        assertEquals("w2:p1", created.pane_id)
+        assertEquals("agent-watch 2", created.label)
+        val req = server.takeRequest()
+        assertEquals("POST", req.method)
+        assertEquals("/v1/hosts/box/sessions", req.path)
+        assertEquals("Bearer tok", req.getHeader("Authorization"))
+        assertEquals(
+            """{"kind":"claude","cwd":"/Users/me/Code/agent-watch","label":"agent-watch 2"}""",
+            req.body.readUtf8()
+        )
+    }
+
+    @Test
+    fun createSessionKeepsTheNotAllowedCode() = runBlocking {
+        server.enqueue(
+            MockResponse().setResponseCode(403)
+                .setBody("""{"error":{"code":"not_allowed","message":"folder is outside the configured session roots"}}""")
+        )
+
+        val err = RelayClient(baseUrl(), "tok").createSession("box", "claude", "/etc").exceptionOrNull() as RelayError
+
+        assertEquals("not_allowed", err.code)
+        assertEquals(403, err.httpStatus)
     }
 }

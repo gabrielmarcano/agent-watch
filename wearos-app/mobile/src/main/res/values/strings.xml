@@ -57,6 +57,26 @@
     <string name="send">Send</string>
     <string name="reply_empty">Empty reply — nothing sent</string>
 
+    <!-- New session: the device, agent kind and folder the bridge allows -->
+    <string name="new_session">New session</string>
+    <string name="session_folder">Folder</string>
+    <string name="session_folder_none">Choose a folder below</string>
+    <string name="session_name_hint">Name (optional): %1$s</string>
+    <string name="session_up">Up</string>
+    <string name="session_use">Use</string>
+    <string name="session_use_folder">Use this folder</string>
+    <string name="session_selected">Selected</string>
+    <string name="session_create">Start</string>
+    <string name="session_empty_folder">No subfolders</string>
+    <string name="session_no_hosts">No device is online</string>
+    <string name="session_not_configured">This device doesn\'t allow starting sessions from the phone. Set a root folder in its bridge config (agent-watch-bridge configure --session-root).</string>
+    <string name="session_err_not_allowed">That folder or agent isn\'t allowed on this device</string>
+    <string name="session_err_host_offline">Device offline</string>
+    <string name="session_err_herdr_offline">herdr stopped</string>
+    <string name="session_err_timeout">No answer from the device — the session may still be starting</string>
+    <string name="session_err_generic">Couldn\'t start the session</string>
+    <string name="starting_session_hint">The chat opens as soon as the device reports the agent.</string>
+
     <!-- Age -->
     <string name="age_now">now</string>
     <string name="age_minutes">%d min ago</string>

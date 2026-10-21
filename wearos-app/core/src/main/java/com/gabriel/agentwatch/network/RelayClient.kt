@@ -31,6 +31,11 @@ class RelayHttpClients private constructor(
     val rest: OkHttpClient,
     /** Commands and push registration: a hard cap on the whole call, so a notification action fits in `goAsync()`. */
     val command: OkHttpClient,
+    /**
+     * `POST /v1/hosts/{host}/sessions`: the bridge starts an agent, so it gets the session budget
+     * (bridge 35 s < relay 40 s < phone 45 s, contracts §2.4).
+     */
+    val session: OkHttpClient,
     /** `GET /v1/events`: its read timeout is the silence limit ([SSE_SILENCE_TIMEOUT_MS]). */
     val sse: OkHttpClient
 ) {
@@ -40,6 +45,8 @@ class RelayHttpClients private constructor(
         const val WRITE_TIMEOUT_MS = 10_000L
         const val REST_CALL_TIMEOUT_MS = 15_000L
         const val COMMAND_CALL_TIMEOUT_MS = 8_000L
+        /** Longer than the relay's 40 s session budget, so the relay is the layer that gives up (contracts §2.4). */
+        const val SESSION_CALL_TIMEOUT_MS = 45_000L
         /**
          * The relay writes an SSE keepalive every 15 s (contracts §2.3). A stream silent for three of them
          * is a dead (often half-open) socket: the read times out and the engine reconnects.
@@ -51,7 +58,8 @@ class RelayHttpClients private constructor(
         fun create(
             restCallTimeoutMs: Long = REST_CALL_TIMEOUT_MS,
             commandCallTimeoutMs: Long = COMMAND_CALL_TIMEOUT_MS,
-            sseSilenceTimeoutMs: Long = SSE_SILENCE_TIMEOUT_MS
+            sseSilenceTimeoutMs: Long = SSE_SILENCE_TIMEOUT_MS,
+            sessionCallTimeoutMs: Long = SESSION_CALL_TIMEOUT_MS
         ): RelayHttpClients {
             val base = OkHttpClient.Builder()
                 .connectTimeout(CONNECT_TIMEOUT_MS, TimeUnit.MILLISECONDS)
@@ -61,6 +69,7 @@ class RelayHttpClients private constructor(
             return RelayHttpClients(
                 rest = base.newBuilder().callTimeout(restCallTimeoutMs, TimeUnit.MILLISECONDS).build(),
                 command = base.newBuilder().callTimeout(commandCallTimeoutMs, TimeUnit.MILLISECONDS).build(),
+                session = base.newBuilder().callTimeout(sessionCallTimeoutMs, TimeUnit.MILLISECONDS).build(),
                 sse = base.newBuilder()
                     .connectTimeout(15, TimeUnit.SECONDS)
                     .readTimeout(sseSilenceTimeoutMs, TimeUnit.MILLISECONDS)
@@ -185,6 +194,38 @@ class RelayClient(
         val request = newRequestBuilder(path).get().build()
         val res = executeRequest(http.rest, request, HistoryResponse::class.java)
         return res.map { it.items }
+    }
+
+    /**
+     * `GET /v1/hosts/{host}/sessions/options` (contracts §2.1): which agent kinds and root folders the
+     * host's bridge allows for new sessions. Empty roots mean the host does not allow them.
+     */
+    suspend fun sessionOptions(host: String): Result<SessionOptionsResponse> {
+        val request = newRequestBuilder("/v1/hosts/${URLEncoder.encode(host, "UTF-8")}/sessions/options").get().build()
+        return executeRequest(http.rest, request, SessionOptionsResponse::class.java)
+    }
+
+    /**
+     * `GET /v1/hosts/{host}/folders` with an optional [path]: the configured roots when null, else that
+     * folder's subfolders, for the picker.
+     */
+    suspend fun folders(host: String, path: String? = null): Result<FolderListResponse> {
+        var url = "/v1/hosts/${URLEncoder.encode(host, "UTF-8")}/folders"
+        if (!path.isNullOrBlank()) {
+            url += "?path=${URLEncoder.encode(path, "UTF-8")}"
+        }
+        val request = newRequestBuilder(url).get().build()
+        return executeRequest(http.rest, request, FolderListResponse::class.java)
+    }
+
+    /**
+     * `POST /v1/hosts/{host}/sessions`: start [kind] in [cwd] there (contracts §2.1). Long: the bridge
+     * creates the workspace and waits for the agent, so it uses the session budget.
+     */
+    suspend fun createSession(host: String, kind: String, cwd: String, label: String? = null): Result<SessionCreated> {
+        val reqBody = gson.toJson(SessionCreateRequest(kind = kind, cwd = cwd, label = label)).toRequestBody(jsonMediaType)
+        val request = newRequestBuilder("/v1/hosts/${URLEncoder.encode(host, "UTF-8")}/sessions").post(reqBody).build()
+        return executeRequest(http.session, request, SessionCreated::class.java)
     }
 
     /**
