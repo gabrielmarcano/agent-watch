@@ -247,22 +247,17 @@ fun ChatScreen(
     val info = agentInfoLines(agent)
     val itemCount = entries.size + if (info.isEmpty()) 0 else 1
 
-    // The chat opens at the newest message, whatever the history was doing when the screen
-    // appeared: the list is reversed, so the first item is the bottom.
-    LaunchedEffect(agent.key) {
-        snapshotFlow { listState.layoutInfo.totalItemsCount }.first { it > 0 }
-        listState.scrollToItem(0)
-    }
-
     Scaffold(
         // The canvas is a step below the surface, so the bubbles (the surface) stand out from it.
         containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
         floatingActionButton = {
             // WhatsApp's arrow: it appears when the owner has scrolled up, and it takes them back
             // to the latest message.
-            if (listState.firstVisibleItemIndex != 0) {
+            if (listState.canScrollForward) {
                 SmallFloatingActionButton(
-                    onClick = { scope.launch { listState.animateScrollToItem(0) } }
+                    onClick = {
+                        scope.launch { listState.animateScrollToItem(listState.layoutInfo.totalItemsCount - 1) }
+                    }
                 ) {
                     Icon(
                         Icons.Filled.KeyboardArrowDown,
@@ -461,26 +456,43 @@ private fun Conversation(
     onOption: (PromptOption) -> Unit,
     onCancel: () -> Unit
 ) {
-    // The list is reversed: the newest turn is the first item, at the bottom of the screen, the way
-    // a messaging app draws a conversation. The chat therefore opens at the end without any scroll
-    // (a reversed list starts at its first item), and a long last message is read from its bottom
-    // because the list grows downwards from there.
+    // The turns are in the order they happened, so a new turn is *appended* at the end: the list
+    // grows downwards and the view stays where the owner is. (A reversed list would prepend the
+    // newest turn, and the list would then jump to the middle of the conversation.)
 
-    // A new turn appears at the bottom; when the owner is already there, they stay there.
+    // The chat opens at the newest message. The turns arrive after the screen does (the phone
+    // fetches the pane's history), so the jump waits for them: without that, the conversation
+    // opens at its first turn and the owner has to scroll down the whole way.
+    var opened by remember { mutableStateOf(false) }
+    LaunchedEffect(agent.key) {
+        snapshotFlow { listState.layoutInfo.totalItemsCount }.collect { total ->
+            if (total > 1 && !opened) {
+                opened = true
+                listState.scrollToItem(total - 1)
+            }
+        }
+    }
+
+    // A new turn appears at the bottom; when the owner is already there, they stay there. (The
+    // owner who scrolled up keeps their place.)
     LaunchedEffect(itemCount) {
-        if (listState.firstVisibleItemIndex == 0) listState.scrollToItem(0)
+        if (!opened || itemCount <= 0) return@LaunchedEffect
+        if (!listState.canScrollForward) listState.scrollToItem(itemCount - 1)
     }
 
     LazyColumn(
         state = listState,
         modifier = modifier,
-        reverseLayout = true,
         contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
         verticalArrangement = Arrangement.spacedBy(4.dp)
     ) {
-        // The list is reversed, so the newest turn comes first: the last one in the list is the
-        // oldest, and it is drawn at the top of the screen.
-        entries.reversed().forEach { entry ->
+        if (info.isNotEmpty()) {
+            item(key = "info") {
+                AgentInfo(info)
+                Spacer(Modifier.height(4.dp))
+            }
+        }
+        entries.forEach { entry ->
             item(key = entry.key()) {
                 when (entry) {
                     is ChatEntry.Day -> DaySeparator(entry.date)
@@ -514,14 +526,6 @@ private fun Conversation(
                         waiting = agent.waitingOnBackground() > 0
                     )
                 }
-            }
-        }
-        // The agent's own lines (where it runs) stay at the top of the conversation: in a reversed
-        // list that is the last item.
-        if (info.isNotEmpty()) {
-            item(key = "info") {
-                AgentInfo(info)
-                Spacer(Modifier.height(4.dp))
             }
         }
     }

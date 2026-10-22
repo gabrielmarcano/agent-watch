@@ -167,8 +167,10 @@ What the build left out, and why:
 - **The bottom bar** marks the current tab with a filled circle, on a translucent bar with a hairline
   border, the way WhatsApp's Android bar does since 2026.
 - **A long answer is a part with "Read more"** under it, and "Read less" to fold it back.
-- **The chat opens at the newest message** (the list is reversed) and a **down arrow** appears when
-  the owner has scrolled up, to take them back to the latest.
+- **The chat opens at the newest message**, and a **down arrow** appears when the owner has scrolled
+  up, to take them back to the latest. The turns arrive *after* the screen does (the phone fetches
+  the pane's history), so the jump waits for them; and the turns stay in the order they happened, so
+  a new one is appended at the end and the list never jumps under the owner.
 - **Tapping the agent's face** in the chat opens its sheet: where it runs, and the same options the
   long press offers (pin, mute, mark as read or unread, archive).
 
@@ -184,11 +186,11 @@ screen next to WhatsApp's. What was wrong, and what it is now:
   on a pill, the way WhatsApp's Android bar does since 2026.
 - **The bubbles vanished into the background.** With the system palette the chat's canvas and the
   incoming bubble were the same colour. The canvas is now a step below the surface.
-- **The chat opened in the middle of the last message**, or at its first message when the history was
-  already cached. Scrolling to the end by hand was never reliable. The conversation is now a
-  **reversed list** (the newest turn is the first item, at the bottom), the way every messaging app
-  draws it: the chat opens at the end without any scroll, a long last message is read from its
-  bottom, and a new turn appears at the bottom while the owner stays where they are.
+- **The chat opened in the middle of the last message**, or at its first message. Two causes, both
+  fixed: the turns arrive after the screen does, so the jump to the end has to wait for them; and a
+  *reversed* list (the newest turn first) makes the list prepend every new turn, which throws the
+  view into the middle. The turns now stay in the order they happened, so a new one is appended at
+  the end and the view stays where the owner is.
 - **The rows were three lines tall.** The status line only shows when the agent is working or
   waiting; a quiet chat is two lines, like WhatsApp's.
 - **The search and the composer were outlined boxes.** Both are filled pills now.
