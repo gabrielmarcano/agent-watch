@@ -315,3 +315,77 @@ func (c *Client) ListTabs(ctx context.Context) ([]TabInfo, error) {
 	}
 	return res.Tabs, nil
 }
+
+// ListPanes retrieves every pane of every workspace, with its cwd. The bridge
+// uses it to find the workspace that already serves a folder.
+func (c *Client) ListPanes(ctx context.Context) ([]PaneInfo, error) {
+	var res struct {
+		Type  string     `json:"type"`
+		Panes []PaneInfo `json:"panes"`
+	}
+	if err := c.callResult(ctx, "pane.list", nil, "pane_list", &res); err != nil {
+		return nil, err
+	}
+	return res.Panes, nil
+}
+
+// CreateWorkspace creates a workspace (its root tab and pane included) at cwd
+// without taking focus, and returns the three.
+func (c *Client) CreateWorkspace(ctx context.Context, cwd, label string) (WorkspaceInfo, TabInfo, PaneInfo, error) {
+	params := map[string]any{
+		"cwd":   cwd,
+		"label": label,
+		"focus": false,
+	}
+	var res struct {
+		Type      string        `json:"type"`
+		Workspace WorkspaceInfo `json:"workspace"`
+		Tab       TabInfo       `json:"tab"`
+		RootPane  PaneInfo      `json:"root_pane"`
+	}
+	if err := c.callResult(ctx, "workspace.create", params, "workspace_created", &res); err != nil {
+		return WorkspaceInfo{}, TabInfo{}, PaneInfo{}, err
+	}
+	return res.Workspace, res.Tab, res.RootPane, nil
+}
+
+// CreateTab creates a tab (its root pane included) in workspaceID at cwd
+// without taking focus.
+func (c *Client) CreateTab(ctx context.Context, workspaceID, cwd, label string) (TabInfo, PaneInfo, error) {
+	params := map[string]any{
+		"workspace_id": workspaceID,
+		"cwd":          cwd,
+		"label":        label,
+		"focus":        false,
+	}
+	var res struct {
+		Type     string   `json:"type"`
+		Tab      TabInfo  `json:"tab"`
+		RootPane PaneInfo `json:"root_pane"`
+	}
+	if err := c.callResult(ctx, "tab.create", params, "tab_created", &res); err != nil {
+		return TabInfo{}, PaneInfo{}, err
+	}
+	return res.Tab, res.RootPane, nil
+}
+
+// StartAgent starts kind in paneID and waits up to timeoutMS for it to become
+// interactive. It returns herdr's view of the started agent.
+func (c *Client) StartAgent(ctx context.Context, paneID, kind, name string, timeoutMS int) (AgentInfo, error) {
+	params := map[string]any{
+		"pane_id": paneID,
+		"kind":    kind,
+		"name":    name,
+	}
+	if timeoutMS > 0 {
+		params["timeout_ms"] = timeoutMS
+	}
+	var res struct {
+		Type  string    `json:"type"`
+		Agent AgentInfo `json:"agent"`
+	}
+	if err := c.callResult(ctx, "agent.start", params, "agent_started", &res); err != nil {
+		return AgentInfo{}, err
+	}
+	return res.Agent, nil
+}

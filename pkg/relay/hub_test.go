@@ -254,7 +254,7 @@ func TestHub_HistoryBroadcastOnlyWhenStored(t *testing.T) {
 	sub, ch := state.Subscribe()
 	defer state.Unsubscribe(sub)
 
-	// Relative to now: items older than 7 days are pruned on every add.
+	// Relative to now: items older than 30 days are pruned on every add.
 	base := time.Now().UTC().Add(-time.Hour)
 	at := func(d time.Duration) string { return base.Add(d).Format(time.RFC3339) }
 
@@ -265,7 +265,7 @@ func TestHub_HistoryBroadcastOnlyWhenStored(t *testing.T) {
 		t.Fatalf("events after an item and its duplicate = %v, want one history", got)
 	}
 
-	// Fill the 200-item cap with newer items, then send an older one: it is
+	// Fill the total cap with newer items, then send an older one: it is
 	// trimmed on arrival, so nobody should be told about it.
 	for i := 0; i < maxHistoryTotal; i++ {
 		store.AddHistory(model.HistoryItem{
@@ -308,6 +308,39 @@ func TestHub_NotifierGetsNewRepliesOnce(t *testing.T) {
 	hub.handleWireMessage(testHostConn("main"), model.HistoryItemMsg{Type: model.WireHistoryItem, Item: item}) // bridge resend
 	if fmt.Sprint(notifier.items) != "[h-1]" {
 		t.Fatalf("notified = %v, want [h-1]", notifier.items)
+	}
+}
+
+// A backfilled turn is stored and broadcast like any other, but it is not
+// news for push: an old reply must not fill a pending "done" push.
+func TestHub_BackfillStoredAndBroadcastButNotNotified(t *testing.T) {
+	store, err := NewStore(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	defer store.Close()
+	notifier := &historyNotifier{}
+	state := NewState()
+	hub := NewHub(NewAuthManager("valid-host-token", store, ClientIPPolicy{}), state, store, notifier)
+	sub, ch := state.Subscribe()
+	defer state.Unsubscribe(sub)
+
+	item := model.HistoryItem{ID: "h-old", PaneID: "w1:p1", Response: "old reply", CompletedAt: time.Now().UTC().Format(time.RFC3339)}
+	hub.handleWireMessage(testHostConn("main"), model.HistoryItemMsg{Type: model.WireHistoryItem, Item: item, Backfill: true})
+
+	if len(notifier.items) != 0 {
+		t.Fatalf("notified %v for a backfilled turn", notifier.items)
+	}
+	if got := store.GetHistory("main", "w1:p1", 10); len(got) != 1 || got[0].ID != "h-old" {
+		t.Fatalf("history = %+v, want the backfilled item", got)
+	}
+	select {
+	case ev := <-ch:
+		if ev.Name != "history" {
+			t.Errorf("event = %q, want history", ev.Name)
+		}
+	default:
+		t.Errorf("the backfilled item was not broadcast")
 	}
 }
 

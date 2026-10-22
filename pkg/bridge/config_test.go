@@ -72,6 +72,34 @@ func TestConfig_Validation(t *testing.T) {
 			wantErr: true,
 		},
 		{
+			name: "session roots must be absolute",
+			cfg: &Config{
+				RelayURL:     "wss://relay.example.com",
+				HostToken:    validToken,
+				SessionRoots: []string{"Code"},
+			},
+			wantErr: true,
+		},
+		{
+			name: "session kinds must not be blank",
+			cfg: &Config{
+				RelayURL:     "wss://relay.example.com",
+				HostToken:    validToken,
+				SessionKinds: []string{"claude", " "},
+			},
+			wantErr: true,
+		},
+		{
+			name: "valid session config",
+			cfg: &Config{
+				RelayURL:     "wss://relay.example.com",
+				HostToken:    validToken,
+				SessionRoots: []string{"/Users/me/Code"},
+				SessionKinds: []string{"claude", "opencode"},
+			},
+			wantErr: false,
+		},
+		{
 			name:    "nil config",
 			cfg:     nil,
 			wantErr: true,
@@ -98,6 +126,8 @@ func TestConfig_SaveAndLoad(t *testing.T) {
 		HostToken:        validToken,
 		HostName:         "test-host",
 		ClaudeConfigDirs: []string{"/custom/claude"},
+		SessionRoots:     []string{"/Users/me/Code", "/Users/me/Personal"},
+		SessionKinds:     []string{"claude", "agy"},
 	}
 
 	if err := SaveConfig(cfgPath, orig); err != nil {
@@ -124,6 +154,12 @@ func TestConfig_SaveAndLoad(t *testing.T) {
 	}
 	if len(loaded.ClaudeConfigDirs) != 1 || loaded.ClaudeConfigDirs[0] != "/custom/claude" {
 		t.Errorf("ClaudeConfigDirs mismatch: %v", loaded.ClaudeConfigDirs)
+	}
+	if len(loaded.SessionRoots) != 2 || loaded.SessionRoots[1] != "/Users/me/Personal" {
+		t.Errorf("SessionRoots mismatch: %v", loaded.SessionRoots)
+	}
+	if len(loaded.SessionKinds) != 2 || loaded.SessionKinds[0] != "claude" {
+		t.Errorf("SessionKinds mismatch: %v", loaded.SessionKinds)
 	}
 }
 

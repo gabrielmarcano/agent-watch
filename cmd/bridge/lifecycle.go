@@ -40,6 +40,10 @@ func (a *app) cmdConfigure(args []string) error {
 	configPath := fs.String("config", "", "Config file path")
 	var claudeDirs stringSlice
 	fs.Var(&claudeDirs, "claude-config-dir", "Claude config directory outside ~/.claude and ~/.claude-*, which are found without it (can be repeated)")
+	var sessionRoots stringSlice
+	fs.Var(&sessionRoots, "session-root", "Absolute folder where the phone may start new agent sessions (can be repeated; none: off)")
+	var sessionKinds stringSlice
+	fs.Var(&sessionKinds, "session-kind", "Agent kind the phone may start (can be repeated; none: claude, agy, opencode)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -56,6 +60,8 @@ func (a *app) cmdConfigure(args []string) error {
 		HostToken:        token,
 		HostName:         *hostName,
 		ClaudeConfigDirs: claudeDirs,
+		SessionRoots:     sessionRoots,
+		SessionKinds:     sessionKinds,
 	}
 	if err := bridge.ValidateConfig(cfg); err != nil {
 		return err
@@ -89,6 +95,12 @@ func (a *app) noteDropped(old, cur *bridge.Config) {
 	}
 	if len(old.ClaudeConfigDirs) > 0 && len(cur.ClaudeConfigDirs) == 0 {
 		fmt.Fprintf(a.stderr, "note: dropped claude_config_dirs %q from the previous config; pass --claude-config-dir once per directory to keep them\n", old.ClaudeConfigDirs)
+	}
+	if len(old.SessionRoots) > 0 && len(cur.SessionRoots) == 0 {
+		fmt.Fprintf(a.stderr, "note: dropped session_roots %q from the previous config; pass --session-root once per folder to keep them (the phone can no longer start sessions)\n", old.SessionRoots)
+	}
+	if len(old.SessionKinds) > 0 && len(cur.SessionKinds) == 0 {
+		fmt.Fprintf(a.stderr, "note: dropped session_kinds %q from the previous config; pass --session-kind once per kind to keep them (the defaults apply)\n", old.SessionKinds)
 	}
 }
 

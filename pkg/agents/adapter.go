@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/gabrielmarcano/agent-monitor/pkg/model"
 )
@@ -109,10 +110,22 @@ type Adapter interface {
 	ParsePrompt(screen string) (Prompt, bool)
 	CancelKeys() []string
 	PromptWhileWorking() bool
-	// LastTurn fills Query, Response and Source="transcript" only. ID, PaneID,
-	// Agent, Label and CompletedAt belong to the caller, which computes ID
-	// with model.HistoryID using ref.Value as the session value.
+	// LastTurn fills Query, Response, Source="transcript", and AskedAt and
+	// CompletedAt when the transcript records them. ID, PaneID, Agent and
+	// Label belong to the caller, which computes ID with model.HistoryID
+	// using ref.Value as the session value (CompletedAt is stamped when the
+	// transcript has no time).
 	LastTurn(ctx context.Context, ref SessionRef) (*model.HistoryItem, error)
+}
+
+// HistoryReader is implemented by adapters that can read finished turns from
+// a transcript beyond the last one, for the backfill the bridge publishes when
+// it first sees a pane (AGENTS.md §1.1). Items are newest first and only hold
+// turns with a query and an answer; AskedAt and CompletedAt are set when the
+// transcript records them. Same errors as LastTurn: ErrNoTranscript when there
+// is nothing to read, and ctx.Err() when the context is cancelled.
+type HistoryReader interface {
+	RecentTurns(ctx context.Context, ref SessionRef, max int) ([]model.HistoryItem, error)
 }
 
 // FocusGuard is implemented by adapters whose answer keys act on whichever
@@ -215,4 +228,27 @@ func UnknownPrompt(screen string) Prompt {
 		},
 		Keys: make(map[string][]string),
 	}
+}
+
+// transcriptTime normalizes a transcript timestamp (RFC 3339 with or without
+// fractional seconds) to the contracts' RFC 3339 UTC form. It returns "" when
+// the value does not parse: the field is optional, never an error.
+func transcriptTime(s string) string {
+	if s == "" {
+		return ""
+	}
+	t, err := time.Parse(time.RFC3339Nano, s)
+	if err != nil {
+		return ""
+	}
+	return t.UTC().Format(time.RFC3339)
+}
+
+// millisTime formats a Unix time in milliseconds (OpenCode's time_created) as
+// RFC 3339 UTC; "" for 0.
+func millisTime(ms int64) string {
+	if ms <= 0 {
+		return ""
+	}
+	return time.UnixMilli(ms).UTC().Format(time.RFC3339)
 }

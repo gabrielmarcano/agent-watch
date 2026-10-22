@@ -480,7 +480,7 @@ SECRET_PATTERNS = [
 CONTRACT_GO = re.compile(r"^pkg/model/(?!.*_test\.go$)[^/]+\.go$")
 CONTRACT_PEERS = {
     "docs/reference/contracts.md": re.compile(r"^docs/reference/contracts\.md$"),
-    "wearos-app model": re.compile(r"^wearos-app/app/src/main/java/com/gabriel/agentwatch/model/"),
+    "wearos-app model": re.compile(r"^wearos-app/core/src/main/java/com/gabriel/agentwatch/model/"),
     "watchos-app Models": re.compile(r"^watchos-app/AgentWatch/Models/"),
 }
 

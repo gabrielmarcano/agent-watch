@@ -44,18 +44,16 @@ import com.gabriel.agentwatch.ui.theme.OutlineVariant
 import com.gabriel.agentwatch.ui.theme.SurfaceLow
 import com.gabriel.agentwatch.util.MdBlock
 import com.gabriel.agentwatch.util.MdSpan
-import com.gabriel.agentwatch.util.parseMarkdown
-import com.gabriel.agentwatch.util.screenBlocks
+import com.gabriel.agentwatch.util.readerBlocks
 
 /**
  * One finished turn. A transcript answer is markdown, split into blocks so each is its own list item
- * and the round edges never clip a long answer; a `screen` capture is verbatim monospace.
+ * and the round edges never clip a long answer; a `screen` capture is verbatim monospace
+ * ([readerBlocks], the rule both clients share).
  */
 @Composable
 fun ResponseReaderScreen(item: HistoryItem) {
-    val blocks = remember(item.response, item.source) {
-        if (item.source == "transcript") parseMarkdown(item.response) else screenBlocks(item.response)
-    }
+    val blocks = remember(item.response, item.source) { readerBlocks(item.response, item.source) }
     ScreenList { spec ->
         item(key = "header") {
             Column(transformedItem(spec).padding(start = 18.dp, end = 18.dp, top = 6.dp, bottom = 4.dp), horizontalAlignment = Alignment.CenterHorizontally) {

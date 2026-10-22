@@ -144,9 +144,10 @@ func TestTranscriptBadJSON(t *testing.T) {
 	}
 }
 
-// LastTurn fills Query, Response and Source only. The bridge fills ID (the
-// contracts.md §1.4 hash, with SessionRef.Value as session_value), PaneID,
-// Agent, Label and CompletedAt.
+// LastTurn fills Query, Response, Source and the transcript's times. The
+// bridge fills ID (the contracts.md §1.4 hash, with SessionRef.Value as
+// session_value), PaneID, Agent and Label, and CompletedAt when the
+// transcript has no time.
 func TestLastTurnLeavesIDToCaller(t *testing.T) {
 	ctx := context.Background()
 	dump := loadOpenCodeDump(t, "session-multistep.json")
@@ -173,7 +174,7 @@ func TestLastTurnLeavesIDToCaller(t *testing.T) {
 		if err != nil {
 			t.Fatalf("%s: %v", c.name, err)
 		}
-		if item.ID != "" || item.PaneID != "" || item.Agent != "" || item.CompletedAt != "" {
+		if item.ID != "" || item.PaneID != "" || item.Agent != "" || item.Label != "" {
 			t.Errorf("%s: adapter filled caller fields: %+v", c.name, *item)
 		}
 		if item.Source != "transcript" || item.Response == "" {

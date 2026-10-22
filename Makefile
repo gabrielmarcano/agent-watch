@@ -1,5 +1,5 @@
 .PHONY: build bridge relay relay-linux bar bar-test restart test vet fmt check check-versions clean
-.PHONY: config configure-bridge deploy-relay watchos-config _need-bridge-env _need-deploy-env _need-watchos-env
+.PHONY: config configure-bridge deploy-relay publish-android watchos-config _need-bridge-env _need-deploy-env _need-watchos-env
 
 # ── Component versions: VERSIONS ──────────────────────────────────────────
 # The rules are in VERSIONS. A value given on the command line wins, e.g.
@@ -92,6 +92,12 @@ deploy-relay: _need-deploy-env
 
 _need-deploy-env:
 	@:$(call need-env)$(call need-key,AW_RELAY_SSH)
+
+# Build both Android release APKs and publish them to the relay's
+# AW_UPDATE_DIR (docs/GUIDE.md § Android updates; keystore.properties is the
+# owner's git-ignored release key).
+publish-android: _need-deploy-env
+	AW_ENV_FILE=$(AW_ENV_FILE) deploy/relay/publish-android.sh
 
 # Generate the git-ignored watchOS xcconfig (relay URL, bundle id):
 # docs/reference/contracts.md §7.

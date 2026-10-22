@@ -9,7 +9,7 @@ description: "Change a JSON contract (agent state, prompt, history, API bodies, 
 |---|---|---|
 | 1 | Source of truth | `docs/reference/contracts.md` |
 | 2 | Go | `pkg/model/{agent,api,wire}.go` + golden `pkg/model/testdata/agent_state.json` |
-| 3 | Kotlin | `wearos-app/app/src/main/java/com/gabriel/agentwatch/model/*.kt` |
+| 3 | Kotlin | `wearos-app/core/src/main/java/com/gabriel/agentwatch/model/*.kt` |
 | 4 | Swift | `watchos-app/AgentWatch/Models/*.swift` |
 
 ## Rules
@@ -25,7 +25,7 @@ description: "Change a JSON contract (agent state, prompt, history, API bodies, 
 5. **Update the Kotlin model.** Add `@Keep` if the class is new, and an assert for the new field in `ContractsTest` (why: `wearos-app/ARCHITECTURE.md` §6). Then run:
 
    ```bash
-   cd wearos-app && ./gradlew :app:testDebugUnitTest --tests '*ContractsTest*'
+   cd wearos-app && ./gradlew :core:testDebugUnitTest --tests '*ContractsTest*'
    ```
 
 6. **Update the Swift model.** Until Phase 6 the app is the legacy client (`docs/STATUS.md`), but the pre-commit hook still wants a staged change under `watchos-app/AgentWatch/Models/`: append the new field or type to the legacy models, as was done for `CancelRequest` and `PromptOption`. If the parity test target exists, run its tests (`.agents/rules/watchos.md` § Build).

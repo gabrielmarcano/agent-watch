@@ -134,7 +134,7 @@ class NotificationActionReceiver : BroadcastReceiver() {
         val openPending = NotificationIntents.openApp(context, agent)
 
         val builder = NotificationCompat.Builder(context, NotificationChannels.FEEDBACK)
-            .setSmallIcon(R.drawable.ic_agent)
+            .setSmallIcon(com.gabriel.agentwatch.core.R.drawable.ic_agent)
             .setContentTitle("Agent Watch")
             .setContentText(message)
             .setAutoCancel(true)
@@ -146,7 +146,7 @@ class NotificationActionReceiver : BroadcastReceiver() {
         if (isSuccess) {
             builder.setTimeoutAfter(SUCCESS_FEEDBACK_MS)
         } else {
-            builder.addAction(R.drawable.ic_agent, "Open", openPending)
+            builder.addAction(com.gabriel.agentwatch.core.R.drawable.ic_agent, "Open", openPending)
         }
 
         manager.notify(notifId, builder.build())

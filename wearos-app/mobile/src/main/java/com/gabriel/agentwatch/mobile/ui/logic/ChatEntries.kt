@@ -1,0 +1,237 @@
+package com.gabriel.agentwatch.mobile.ui.logic
+
+import com.gabriel.agentwatch.model.AgentState
+import com.gabriel.agentwatch.model.HistoryItem
+import com.gabriel.agentwatch.model.key
+import com.gabriel.agentwatch.util.MdBlock
+import com.gabriel.agentwatch.util.MarkdownFormatter
+import java.time.DayOfWeek
+import java.time.Instant
+import java.time.LocalDate
+import java.time.LocalTime
+import java.time.ZoneId
+import java.time.temporal.ChronoUnit
+
+/**
+ * One row of an agent's conversation, oldest first, as the chat screen renders it
+ * (`docs/STATUS.md` — the phone shows turns, not one "last reply").
+ */
+sealed interface ChatEntry {
+    /** A calendar day separator before the turns that follow it. */
+    data class Day(val date: LocalDate) : ChatEntry
+
+    /** One finished turn: the user's question and the agent's answer ([HistoryItem]). */
+    data class Turn(val item: HistoryItem) : ChatEntry
+
+    /** A message the phone sent that the relay has not published as a turn yet. */
+    data class Pending(val text: String) : ChatEntry
+
+    /** The prompt waiting for an answer: the last thing in the conversation. */
+    data object Prompt : ChatEntry
+
+    /** The agent is working and no prompt is waiting. */
+    data object Working : ChatEntry
+}
+
+/**
+ * Builds the conversation for [history] (newest first, as the store keeps it): oldest first, with a
+ * [ChatEntry.Day] separator whenever the calendar day changes, then any optimistic [pending] messages,
+ * then the prompt or the working indicator.
+ */
+fun chatEntries(
+    history: List<HistoryItem>,
+    hasPrompt: Boolean,
+    working: Boolean,
+    pending: List<String> = emptyList(),
+    zone: ZoneId = ZoneId.systemDefault()
+): List<ChatEntry> {
+    val entries = mutableListOf<ChatEntry>()
+    var lastDay: LocalDate? = null
+    history.asReversed().forEach { item ->
+        val day = turnDay(item, zone)
+        if (day != null && day != lastDay) {
+            entries += ChatEntry.Day(day)
+            lastDay = day
+        }
+        entries += ChatEntry.Turn(item)
+    }
+    pending.filter { it.isNotBlank() }.forEach { entries += ChatEntry.Pending(it) }
+    when {
+        hasPrompt -> entries += ChatEntry.Prompt
+        working -> entries += ChatEntry.Working
+    }
+    return entries
+}
+
+/** The calendar day a turn belongs to: when the user asked it, else when it finished; null when
+ *  neither time parses (a screen capture from a relay that predates `asked_at`). */
+fun turnDay(item: HistoryItem, zone: ZoneId = ZoneId.systemDefault()): LocalDate? =
+    parseInstant(item.asked_at ?: item.completed_at)?.atZone(zone)?.toLocalDate()
+
+/**
+ * When this agent last did anything: its newest turn's `completed_at`, else its own `updated_at`.
+ * The chat list sorts by this, newest first, like a messaging app.
+ */
+fun AgentState.lastActivity(history: List<HistoryItem>): Instant =
+    history.firstOrNull { it.key == key }?.let { parseInstant(it.completed_at) }
+        ?: parseInstant(updated_at)
+        ?: Instant.EPOCH
+
+/** A pending message is no longer pending once its turn arrives with the same query. */
+fun unmatchedPending(history: List<HistoryItem>, pending: List<String>): List<String> {
+    val seen = history.mapNotNull { it.query }.toSet()
+    return pending.filterNot { it in seen }
+}
+
+/**
+ * The chat needs the user: a prompt is waiting, or herdr reports `blocked` (a prompt the bridge has
+ * not published yet). These chats sit under "Needs you", above the rest, whatever their recency.
+ */
+fun AgentState.needsAnswer(): Boolean = prompt != null || status == "blocked"
+
+/**
+ * The one-line preview of an answer for the chat list: its first non-blank line, markdown markers
+ * removed, cut at [maxChars]. Null when there is no text at all.
+ */
+fun previewLine(item: HistoryItem, maxChars: Int = PREVIEW_CHARS): String? =
+    previewText(item.response, maxChars)
+
+/** [previewLine] for a text that has no [HistoryItem] yet (an optimistic message). */
+fun previewText(text: String, maxChars: Int = PREVIEW_CHARS): String? =
+    MarkdownFormatter.clean(text)
+        .lineSequence()
+        .map { it.trim() }
+        .firstOrNull { it.isNotBlank() }
+        ?.let { if (it.length <= maxChars) it else it.take(maxChars - 1).trimEnd() + "…" }
+
+internal const val PREVIEW_CHARS = 160
+
+/**
+ * Whether the chat has something new since the user last opened it. A sequence missing from [seenSeq]
+ * (an agent first sighted now) is not unread: it was primed by the list, and a fresh install must not
+ * mark every conversation unread.
+ */
+fun isUnread(agent: AgentState, seenSeq: Long?): Boolean =
+    seenSeq != null && agent.state_change_seq > seenSeq
+
+/** The list's filters, as the chips above it: a messaging app's filters, not the watch's sections. */
+enum class ChatFilter { ALL, NEEDS_YOU, WORKING, DONE }
+
+/** Whether a chat belongs in this filter. */
+fun ChatFilter.matches(agent: AgentState): Boolean = when (this) {
+    ChatFilter.ALL -> true
+    ChatFilter.NEEDS_YOU -> agent.needsAnswer()
+    ChatFilter.WORKING -> agent.status == "working"
+    ChatFilter.DONE -> agent.status == "done"
+}
+
+/**
+ * How many turns arrived in this chat since the user last opened it: the badge on the row.
+ *
+ * A messaging app counts messages, not states: a chat that is only working shows no badge, and one
+ * with three new replies shows three. A chat that was never opened shows none (the list primes it).
+ */
+fun unreadCount(agent: AgentState, history: List<HistoryItem>, seenAtMillis: Long?): Int {
+    if (seenAtMillis == null) return 0
+    val since = Instant.ofEpochMilli(seenAtMillis)
+    return history.count { item ->
+        item.key == agent.key &&
+            (parseInstant(item.completed_at) ?: parseInstant(item.asked_at ?: ""))?.isAfter(since) == true
+    }
+}
+
+/**
+ * The first blocks of a long answer, and whether more were left: a messaging app shows a long
+ * message as a part with a "Read more" under it.
+ */
+data class TruncatedBlocks(
+    val blocks: List<MdBlock>,
+    val truncated: Boolean
+)
+
+/**
+ * Keeps the blocks that fit in [limit] characters (at least the first one) and says whether the
+ * answer continues.
+ */
+fun truncateBlocks(blocks: List<MdBlock>, limit: Int = 240): TruncatedBlocks {
+    if (blocks.isEmpty()) return TruncatedBlocks(emptyList(), false)
+    var length = 0
+    val kept = mutableListOf<MdBlock>()
+    for (block in blocks) {
+        val size = blockLength(block)
+        if (kept.isNotEmpty() && length + size > limit) break
+        kept += block
+        length += size
+    }
+    return TruncatedBlocks(kept, kept.size < blocks.size)
+}
+
+/** How much room a block takes, in characters. */
+private fun blockLength(block: MdBlock): Int = when (block) {
+    is MdBlock.Heading -> block.spans.sumOf { it.text.length }
+    is MdBlock.Paragraph -> block.spans.sumOf { it.text.length }
+    is MdBlock.ListItem -> block.marker.length + block.spans.sumOf { it.text.length }
+    is MdBlock.Code -> block.text.length
+    is MdBlock.Record -> block.fields.sumOf { (header, spans) -> header.length + spans.sumOf { it.text.length } }
+    is MdBlock.Quote -> block.spans.sumOf { it.text.length }
+    MdBlock.Rule -> 0
+}
+
+/**
+ * Whether a chat matches the search: its name, the agent kind, its workspace or title, or the text
+ * of the last thing it said.
+ */
+fun matchesQuery(agent: AgentState, history: List<HistoryItem>, query: String): Boolean {
+    val q = query.trim()
+    if (q.isEmpty()) return true
+    val last = history.firstOrNull { it.key == agent.key }
+    return agent.label.contains(q, ignoreCase = true) ||
+        agent.agent.contains(q, ignoreCase = true) ||
+        (agent.workspace ?: "").contains(q, ignoreCase = true) ||
+        (agent.title ?: "").contains(q, ignoreCase = true) ||
+        (last?.response ?: "").contains(q, ignoreCase = true) ||
+        (last?.query ?: "").contains(q, ignoreCase = true)
+}
+
+/** The time shown at the end of a chat row: the hour today, the day this week, the date after that. */
+sealed interface ChatStamp {
+    data class Today(val time: LocalTime) : ChatStamp
+    data class ThisWeek(val day: DayOfWeek) : ChatStamp
+    data class Older(val date: LocalDate) : ChatStamp
+}
+
+/**
+ * The [ChatStamp] for an RFC 3339 [timestamp] at [now]: null when unreadable. A timestamp from tomorrow
+ * (the host's clock ahead of the phone's) counts as today, like `ageOf`.
+ */
+fun chatStamp(timestamp: String, now: Instant, zone: ZoneId = ZoneId.systemDefault()): ChatStamp? =
+    chatStamp(parseInstant(timestamp), now, zone)
+
+/** [chatStamp] for an [instant] already parsed; null for none (an agent that never reported a time). */
+fun chatStamp(instant: Instant?, now: Instant, zone: ZoneId = ZoneId.systemDefault()): ChatStamp? {
+    if (instant == null) return null
+    val at = instant.atZone(zone)
+    val today = now.atZone(zone).toLocalDate()
+    val days = ChronoUnit.DAYS.between(at.toLocalDate(), today)
+    return when {
+        days <= 0 -> ChatStamp.Today(at.toLocalTime())
+        days < 7 -> ChatStamp.ThisWeek(at.dayOfWeek)
+        else -> ChatStamp.Older(at.toLocalDate())
+    }
+}
+
+/** Whether a day separator reads "Today", "Yesterday" or a date. */
+sealed interface ChatDay {
+    data object Today : ChatDay
+    data object Yesterday : ChatDay
+    data class Older(val date: LocalDate) : ChatDay
+}
+
+fun chatDay(date: LocalDate, today: LocalDate): ChatDay = when (ChronoUnit.DAYS.between(date, today)) {
+    0L -> ChatDay.Today
+    1L -> ChatDay.Yesterday
+    else -> ChatDay.Older(date)
+}
+
+internal fun parseInstant(value: String): Instant? =
+    value.takeIf { it.isNotBlank() }?.let { runCatching { Instant.parse(it) }.getOrNull() }

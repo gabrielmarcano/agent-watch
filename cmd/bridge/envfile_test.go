@@ -176,6 +176,60 @@ func TestCLI_ConfigureFlagsOverrideEnvFile(t *testing.T) {
 	}
 }
 
+// configure --session-root/--session-kind are repeatable, and a later rewrite
+// without them drops them and says so: the phone would silently lose the
+// ability to start sessions.
+func TestCLI_ConfigureSessionRoots(t *testing.T) {
+	ta := newTestApp(t, "launchd")
+	cfgPath := filepath.Join(ta.home, "config.toml")
+	envPath := writeEnvFile(t, ta.home, "AW_RELAY_DOMAIN=relay.example.com\nAW_HOST_TOKEN="+testToken+"\n")
+
+	args := []string{
+		"--env-file", envPath, "--config", cfgPath,
+		"--session-root", "/Users/me/Code",
+		"--session-root", "/Users/me/Personal",
+		"--session-kind", "claude",
+		"--session-kind", "opencode",
+	}
+	if err := ta.cmdConfigure(args); err != nil {
+		t.Fatalf("configure --session-root: %v", err)
+	}
+	cfg, err := bridge.CheckConfig(cfgPath)
+	if err != nil {
+		t.Fatalf("written config: %v", err)
+	}
+	if len(cfg.SessionRoots) != 2 || cfg.SessionRoots[1] != "/Users/me/Personal" {
+		t.Errorf("session_roots = %v", cfg.SessionRoots)
+	}
+	if len(cfg.SessionKinds) != 2 || cfg.SessionKinds[1] != "opencode" {
+		t.Errorf("session_kinds = %v", cfg.SessionKinds)
+	}
+
+	// A relative root is refused and the previous file is left alone.
+	if err := ta.cmdConfigure([]string{"--env-file", envPath, "--config", cfgPath, "--session-root", "Code"}); err == nil || !strings.Contains(err.Error(), "absolute") {
+		t.Fatalf("configure with a relative root: err = %v, want an absolute-path error", err)
+	}
+	if cfg, err = bridge.CheckConfig(cfgPath); err != nil || len(cfg.SessionRoots) != 2 {
+		t.Fatalf("the refused configure rewrote the config: %+v, %v", cfg, err)
+	}
+
+	// Rewriting without the flags drops them, and the note names the flags.
+	ta.errOut.Reset()
+	if err := ta.cmdConfigure([]string{"--env-file", envPath, "--config", cfgPath}); err != nil {
+		t.Fatalf("configure without session flags: %v", err)
+	}
+	if cfg, err = bridge.CheckConfig(cfgPath); err != nil || len(cfg.SessionRoots) != 0 || len(cfg.SessionKinds) != 0 {
+		t.Fatalf("session settings survived the rewrite: %+v, %v", cfg, err)
+	}
+	note := ta.errOut.String()
+	if !strings.Contains(note, "session_roots") || !strings.Contains(note, "--session-root") {
+		t.Errorf("stderr = %q, want a note about the dropped session_roots", note)
+	}
+	if !strings.Contains(note, "session_kinds") || !strings.Contains(note, "--session-kind") {
+		t.Errorf("stderr = %q, want a note about the dropped session_kinds", note)
+	}
+}
+
 // Every refusal leaves the existing config alone and never echoes the token.
 func TestCLI_ConfigureEnvFileErrors(t *testing.T) {
 	for _, tc := range []struct {

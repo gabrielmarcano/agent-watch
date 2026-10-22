@@ -181,12 +181,15 @@ type HistoryItem struct {
     Query       string `json:"query,omitempty"`
     Response    string `json:"response"`
     Source      string `json:"source"` // "transcript" | "screen"
+    AskedAt     string `json:"asked_at,omitempty"`
     CompletedAt string `json:"completed_at"`
 }
 ```
 
 - **`id`** is the first 16 hex characters of `sha256(pane_id + "\n" + session_value + "\n" + query + "\n" + response)`. It is deterministic, so a resent item deduplicates on the relay, which keeps history per `(host, pane_id)`.
 - **`host`**: as in `AgentState` (§1.2), stamped by the relay.
+- **`asked_at`** is when the user sent the query, RFC 3339 UTC, as the agent's transcript records it. Omitted when the source cannot tell (a screen capture, or a relay that predates the field): clients then fall back to `completed_at` for where the turn sits in the conversation.
+- **`completed_at`** is when the turn finished, from the transcript when it records it (`turn_duration` in Claude, the response step's time elsewhere), else when the bridge captured it (a screen capture, a transcript without a timestamp).
 - **`response`** is truncated to 65 536 bytes (`model.MaxResponseBytes`; why that bound: its comment) on a UTF-8 boundary, with `\n\n…[truncated]` appended when cut.
 - **`source`:**
   - `"transcript"` means `response` is the agent's own markdown.
@@ -236,7 +239,7 @@ Base URL: `https://relay.<domain>`. All paths are prefixed with `/v1`.
 
 | Caller | Header |
 |---|---|
-| Watch (every endpoint except `POST /v1/pair` and `GET /v1/healthz`) | `Authorization: Bearer <device_token>` |
+| Watch or phone (every endpoint except `POST /v1/pair` and `GET /v1/healthz`) | `Authorization: Bearer <device_token>` |
 | Bridge (`/v1/host` WebSocket and `/v1/host/*`) | `Authorization: Bearer <host_token>` |
 
 Never accept a token in the query string.
@@ -256,10 +259,15 @@ Never accept a token in the query string.
 | `POST /v1/hosts/{host}/agents/{pane_id}/prompt` | device | `PromptRequest` | `200 CommandResponse` |
 | `POST /v1/hosts/{host}/agents/{pane_id}/answer` | device | `AnswerRequest` | `200 CommandResponse` |
 | `POST /v1/hosts/{host}/agents/{pane_id}/cancel` | device | `CancelRequest` | `200 CommandResponse` |
+| `GET /v1/hosts/{host}/sessions/options` | device | — | `200 SessionOptionsResponse` |
+| `GET /v1/hosts/{host}/folders?path=` | device | — | `200 FolderListResponse` |
+| `POST /v1/hosts/{host}/sessions` | device | `SessionCreateRequest` | `200 SessionCreated` |
 | `POST /v1/agents/{pane_id}/prompt` | device | `PromptRequest` | `200 CommandResponse` |
 | `POST /v1/agents/{pane_id}/answer` | device | `AnswerRequest` | `200 CommandResponse` |
 | `POST /v1/agents/{pane_id}/cancel` | device | `CancelRequest` | `200 CommandResponse` |
 | `POST /v1/push/register` | device | `PushRegisterRequest` | `200 CommandResponse` |
+| `GET /v1/updates/{app}` | device | — | `200 UpdateInfo` |
+| `GET /v1/updates/{app}/apk` | device | — | `200 application/vnd.android.package-archive` |
 | `GET /v1/healthz` | none | — | `200 {"ok":true}` |
 
 **Commands name the host.** A client that has `host` on the agent uses the `/v1/hosts/{host}/…` paths. The older `/v1/agents/{pane_id}/…` paths stay for clients that predate hosts: the relay sends the command to the one connected host whose agents include `pane_id`, and answers `409 host_required` when several connected hosts do. When no connected host does, it answers `host_offline` if an offline host's agents include it (an offline host's agents stay listed), `unknown_pane` otherwise.
@@ -269,9 +277,26 @@ Never accept a token in the query string.
 - `limit` defaults to 20, maximum 200. A missing, invalid or ≤ 0 value means 20.
 - Items are sorted newest first.
 
-**History retention** (`pkg/relay/store.go`): the relay keeps at most 20 items per pane (per `(host, pane_id)`) and 200 in total (the oldest go first), and, each time a history item arrives, drops every pane whose newest item is older than 7 days. So a request with `pane_id` never returns more than 20.
+**History retention** (`pkg/relay/store.go`): the relay keeps at most 100 items per pane (per `(host, pane_id)`) and 500 in total (the oldest go first), and, each time a history item arrives, drops every pane whose newest item is older than 30 days. So a request with `pane_id` never returns more than 100.
+
+**New sessions** (`POST /v1/hosts/{host}/sessions`, `GET …/sessions/options`, `GET …/folders`):
+
+- The bridge starts a session only for a `kind` in its `session_kinds` (§6) and a `cwd` inside one of its `session_roots`; otherwise it answers `not_allowed`, which the relay returns as `403 not_allowed`. With no `session_roots` configured, session creation is off on that host (`roots` is empty in the options).
+- One herdr workspace per folder: the bridge reuses the workspace that already has a pane in `cwd`, else creates one labelled with the folder's name. Each session gets its own tab and its own agent. The first session of a new workspace uses the tab and pane that workspace creation makes; later ones get a new tab. Nothing takes focus on the host (`focus: false`).
+- `label` names the tab and the agent; default: the folder's name. When that name is already used in the workspace, the bridge appends ` 2`, ` 3`, … and returns the name it used.
+- **Never retry a create that timed out:** the session may exist. The budgets nest from the inside out: bridge 35 s < relay 40 s < phone 45 s (a `timeout` means the bridge has already given up). Inside the bridge's 35 s, `agent.start` waits up to 25 s for the agent to become interactive.
+- `GET …/folders` without `path` lists the roots themselves (`path` is `""` and `entries` are the roots). A `path` must be equal to or under a root (symlinks resolved), else `not_allowed`. Only directories are listed, sorted by name, at most 500 (`truncated: true` when there are more); unreadable entries are skipped. `parent` is empty at a root.
+- These three endpoints need the host connected and its herdr reachable: `host_offline` / `herdr_offline`. They take the normal 7 s relay budget, except `POST …/sessions` (40 s).
 
 **Pairing limits** (`pkg/relay/auth.go`): a code lives 5 minutes and works once; at most 3 codes are active (a new one evicts the oldest). `POST /v1/pair` allows 5 attempts per client IP and 20 in total per 10 minutes, and counts every attempt it lets through, successful ones included; past that it answers `429 rate_limited`.
+
+**Android updates** (`GET /v1/updates/{app}` and `…/apk`):
+
+- `{app}` is the closed set `phone` or `watch`; any other value is `400 invalid_request`.
+- The metadata comes from `<AW_UPDATE_DIR>/<app>.json` (§5). With no file, or no such build, the relay answers `404 update_not_available`.
+- The APK response is the file that JSON names, with `Content-Type: application/vnd.android.package-archive`, `Content-Disposition: attachment` and `Cache-Control: no-store`. The relay checks that the file's size matches the metadata before serving it.
+- Clients compare `version_code` with their own `BuildConfig.VERSION_CODE`, download only when it is greater, verify `sha256` and `size`, and let Android verify the APK's signer. A different signer cannot install over the existing app.
+- Both endpoints use the normal device token in `Authorization`; the phone and the watch download their own app. No token appears in a URL.
 
 ### 2.2 Bodies
 
@@ -315,6 +340,41 @@ type PushRegisterRequest struct {
     Platform string `json:"platform"` // only "fcm" for now
     Token    string `json:"token"`
 }
+type SessionOptionsResponse struct {
+    Kinds []string `json:"kinds"` // agent kinds the bridge may start, in the owner's order
+    Roots []string `json:"roots"` // absolute roots, resolved; empty: session creation is off on this host
+}
+type FolderEntry struct {
+    Name string `json:"name"`
+    Path string `json:"path"`
+}
+type FolderListResponse struct {
+    Path      string        `json:"path"`             // resolved directory listed; "" when listing the roots
+    Parent    string        `json:"parent,omitempty"` // next folder up, when it is still inside a root
+    Roots     []string      `json:"roots"`
+    Entries   []FolderEntry `json:"entries"` // subdirectories by name; the roots when path is ""
+    Truncated bool          `json:"truncated,omitempty"`
+}
+type SessionCreateRequest struct {
+    Kind  string `json:"kind"`
+    Cwd   string `json:"cwd"`             // absolute; must be inside a configured root
+    Label string `json:"label,omitempty"` // tab and agent name; default: the folder's name
+}
+type SessionCreated struct {
+    Host        string `json:"host,omitempty"` // stamped by the relay
+    PaneID      string `json:"pane_id"`
+    WorkspaceID string `json:"workspace_id"`
+    TabID       string `json:"tab_id"`
+    Kind        string `json:"kind"`
+    Label       string `json:"label"` // the name actually used, possibly suffixed
+}
+type UpdateInfo struct {
+    App         string `json:"app"`          // "phone" | "watch"
+    VersionCode int    `json:"version_code"` // Android versionCode; strictly increases
+    VersionName string `json:"version_name"`
+    SHA256      string `json:"sha256"` // lowercase hex of the APK
+    Size        int64  `json:"size"`   // bytes
+}
 type CommandResponse struct {
     OK bool `json:"ok"` // always true on 200
 }
@@ -340,6 +400,18 @@ type ErrorBody struct {
 
 ```json
 { "expected_seq": 334, "fingerprint": "fd6ff7388739252d" }
+```
+
+**Example** (`GET /v1/updates/phone`):
+
+```json
+{
+  "app": "phone",
+  "version_code": 5,
+  "version_name": "0.4.0",
+  "sha256": "8f14e45fceea167a5a36dedd4bea2543f0f5d1c9ae4b5d6f8f9a0b1c2d3e4f50",
+  "size": 12345678
+}
 ```
 
 ### 2.3 Server-Sent Events (`GET /v1/events`)
@@ -384,6 +456,7 @@ Every non-200 response of the endpoints in §2.1 carries an `ErrorResponse`. A p
 | `invalid_request` | 400 | Malformed body or bad parameter |
 | `unauthorized` | 401 | Missing or unknown token |
 | `unknown_pane` | 404 | Pane is not in the relay's list (for that host, or an unknown host); or herdr's list no longer has it, or it has no agent (bridge) |
+| `update_not_available` | 404 | No published Android build for that app, or its metadata or APK is missing or incomplete |
 | `host_required` | 409 | A command on `/v1/agents/{pane_id}/…` for a `pane_id` that several connected hosts have: use `/v1/hosts/{host}/agents/{pane_id}/…` |
 | `stale_state` | 409 | `expected_seq` no longer matches; also `answer`/`cancel` to an agent that is not `blocked`, or a repeated command |
 | `prompt_changed` | 409 | Fingerprint mismatch; the menu is no longer on the screen; a cancel without `fingerprint` for which the bridge published no prompt; or, for OpenCode, the focus on the host is not on the button the keys assume (the `message` says to answer on the Mac; nothing was pressed) |
@@ -391,14 +464,15 @@ Every non-200 response of the endpoints in §2.1 carries an `ErrorResponse`. A p
 | `agent_blocked` | 409 | Prompt sent while `blocked`, or while a menu is open on the pane although herdr reports another status, or herdr refused the prompt as blocked |
 | `agent_state_unknown` | 409 | Prompt sent while the agent's state does not accept prompts (e.g. `unknown`) |
 | `unknown_option` | 409 | `option_id` is not in the current prompt |
+| `not_allowed` | 403 | New session refused by the host's configuration: kind not in `session_kinds`, `cwd` outside `session_roots`, or no roots configured; also a folder outside the roots for the picker |
 | `pair_code_invalid` | 403 | Wrong or expired code |
 | `rate_limited` | 429 | Too many attempts |
 | `host_offline` | 503 | The agent's host is not connected, or its bridge disconnected (or was replaced) before answering a command |
 | `herdr_offline` | 503 | Bridge connected, herdr unreachable |
-| `timeout` | 504 | The relay's 7 s budget ran out (one budget for sending the command and waiting for `command_result`), or the bridge's own 6 s budget did (e.g. waiting behind another command on the same pane). Timeouts nest from the inside out, bridge 6 s < relay 7 s < watch 8 s, so a `timeout` means the bridge has already given up |
+| `timeout` | 504 | The relay's 7 s budget ran out (one budget for sending the command and waiting for `command_result`), or the bridge's own 6 s budget did (e.g. waiting behind another command on the same pane). Timeouts nest from the inside out, bridge 6 s < relay 7 s < watch 8 s, so a `timeout` means the bridge has already given up. `session.create` uses longer budgets of the same shape: bridge 35 s < relay 40 s < phone 45 s |
 | `internal` | 500 | Bug, or herdr failed `agent.prompt` / `agent.send_keys` for an unclassified reason (the text or keys may have reached the pane) |
 
-What the Wear OS app shows for each code: `commandErrorFeedback` in `wearos-app/app/src/main/java/com/gabriel/agentwatch/approval/CommandFeedback.kt`.
+What the Wear OS app shows for each code: `commandErrorFeedback` in `wearos-app/core/src/main/java/com/gabriel/agentwatch/approval/CommandFeedback.kt`.
 
 ---
 
@@ -448,18 +522,23 @@ type AgentRemovedMsg struct {
     PaneID string `json:"pane_id"`
 }
 type HistoryItemMsg struct {
-    Type string      `json:"type"` // "history_item"
-    Item HistoryItem `json:"item"`
+    Type     string      `json:"type"` // "history_item"
+    Item     HistoryItem `json:"item"`
+    Backfill bool        `json:"backfill,omitempty"` // an older turn read at startup
 }
 type CommandMsg struct {
     Type        string `json:"type"`       // "command"
     RequestID   string `json:"request_id"` // random 16 hex chars
-    Action      string `json:"action"`     // "prompt" | "answer" | "cancel"
-    PaneID      string `json:"pane_id"`
-    ExpectedSeq uint64 `json:"expected_seq"`
+    Action      string `json:"action"`     // "prompt" | "answer" | "cancel" | "session.create" | "session.options" | "folders.list"
+    PaneID      string `json:"pane_id,omitempty"`
+    ExpectedSeq uint64 `json:"expected_seq,omitempty"`
     Text        string `json:"text,omitempty"`        // prompt
     OptionID    string `json:"option_id,omitempty"`   // answer
     Fingerprint string `json:"fingerprint,omitempty"` // answer; cancel when the watch sent one
+    Kind        string `json:"kind,omitempty"`        // session.create
+    Cwd         string `json:"cwd,omitempty"`         // session.create
+    Label       string `json:"label,omitempty"`       // session.create
+    Path        string `json:"path,omitempty"`        // folders.list
 }
 type CommandResultMsg struct {
     Type      string `json:"type"` // "command_result"
@@ -467,14 +546,20 @@ type CommandResultMsg struct {
     OK        bool   `json:"ok"`
     ErrorCode string `json:"error_code,omitempty"` // codes from §2.4
     Message   string `json:"message,omitempty"`
+    Session *SessionCreated        `json:"session,omitempty"` // session.create
+    Options *SessionOptionsResponse `json:"options,omitempty"` // session.options
+    Folders *FolderListResponse     `json:"folders,omitempty"` // folders.list
 }
 type ResyncMsg struct {
     Type string `json:"type"` // "resync"
 }
 ```
 
-**Sequence on connect:**
+**Pane commands and host requests:** `prompt`, `answer` and `cancel` name a pane; the bridge re-lists, re-reads and re-validates before acting (§4, `.agents/rules/herdr-integration.md`). `session.options`, `folders.list` and `session.create` are host-level: no `pane_id`, no `expected_seq`, and their result carries the payload in `options`, `folders` or `session`. They share the request ids, the per-host budget and the duplicate-request guard. The bridge serialises `session.create` calls on one host, so two creates cannot race for the same workspace.
 
+**Backfilled turns:** when the bridge first sees a pane, or a new `agent_session` in it, it reads the last finished turns from the transcript (`agents.md` §1) and sends them oldest first with `backfill: true`. The relay stores and broadcasts them like any other `history_item`, but never uses one as the reply of a pending `done` push (§4.3). A turn the live capture also sends carries the same `id`, so the relay drops one.
+
+**Sequence on connect:**
 1. The bridge sends `hello`.
 2. The bridge sends `snapshot`.
 3. From then on, it sends `agent_update`, `agent_removed`, `history_item` and `herdr_status` as things change.
@@ -498,9 +583,11 @@ On a `resync` the bridge sends `hello` and `snapshot` again (the current relay n
 
 ## 4. Push payloads (`pkg/push`)
 
-### 4.1 FCM (Wear OS) — data-only message
+### 4.1 FCM (Wear OS and the Android phone) — data-only message
 
-All values are strings (FCM data maps allow only strings). No `notification` block: the app builds the notification itself.
+All values are strings (FCM data maps allow only strings). No `notification` block: the clients build the notification themselves.
+
+Both Android clients parse these fields locally (`:core`'s `PushMessages`, `wearos-app/core`). The phone app (`:mobile`) shows one conversation per `(host, pane_id)` as a `MessagingStyle` notification, grouped under a summary, and sets `setLocalOnly(true)` so Android never mirrors a chat to the watch. Its approving actions (`ALLOW`, and a question's `ANSWER`) are behind the device lock: `setAuthenticationRequired(true)` and a keyguard check in the receiver refuse them while locked; `DENY`, `CANCEL` and `PROMPT` stay available. A `resolved` dismisses the phone's approval too.
 
 | Key | Example | Notes |
 |---|---|---|
@@ -613,6 +700,7 @@ The relay reads them from `/etc/agent-watch-relay/env` (systemd `EnvironmentFile
 | `AW_HOST_ID` | no | `main` | The id (§1.6) of `AW_HOST_TOKEN`'s host, which is not in `store.json`; also the host of the history a version 1 `store.json` held. A registered host with the same id stops startup |
 | `AW_HOST_NAME` | no | `AW_HOST_ID` | The name clients show for that host (§1.6): at most 64 characters, no control characters |
 | `AW_DATA_DIR` | no | `/var/lib/agent-watch-relay` | Holds `store.json`, `relay.lock` and `admin.sock` (see below) |
+| `AW_UPDATE_DIR` | no | `<AW_DATA_DIR>/updates` | Directory the relay reads published Android builds from (`GET /v1/updates/…`, §2.1). It only reads it; `make publish-android` writes it (`deploy/relay/README.md`). Must be readable by the relay user |
 | `AW_FCM_CREDENTIALS` | no | — | Path to the Firebase service-account JSON. FCM is disabled if unset |
 | `AW_NTFY_URL` | no | — | e.g. `https://ntfy.sh`. ntfy is disabled if unset |
 | `AW_NTFY_TOPIC` | with ntfy | — | Random, unguessable topic name |
@@ -640,6 +728,14 @@ The relay reads them from `/etc/agent-watch-relay/env` (systemd `EnvironmentFile
 | `store.json` | Hosts (id, name, token hash, created and last-seen times), devices (device-token hashes only, plus each device's FCM push token) and history (per host and pane, keyed `<host>/<pane_id>`). `0600`, owned by the service user. **Version 2.** A version 1 file (a relay before hosts) is migrated when the relay or the CLI opens it, its history going to `AW_HOST_ID`, except a key that already starts with a valid `<host>/` (herdr pane ids contain no `/`), which keeps its host (a file saved by a rolled-back relay; a pane that ends up with both keys gets their items merged); a newer version, or a malformed host or history key, stops startup |
 | `relay.lock` | Exclusive `flock` held by the running relay for its whole life. A second relay on the same directory refuses to start |
 | `admin.sock` | Local admin API, a `0600` Unix socket that exists only while the relay runs. Never exposed over TCP |
+
+**Android update directory** (`AW_UPDATE_DIR`, default `<AW_DATA_DIR>/updates`; not part of `store.json`): one metadata file and one APK per app. The metadata is a local file, not an API body; the relay turns it into `UpdateInfo` (§2.2), leaving out `apk`:
+
+```json
+{"app":"phone","version_code":5,"version_name":"0.4.0","sha256":"…lowercase hex…","size":12345678,"apk":"phone-5.apk"}
+```
+
+`apk` must be a bare file name in the same directory (no `/`), beginning `<app>-` and ending `.apk`; the relay refuses anything else. The relay reads the metadata on every request, so publishing needs no restart. Old APKs are kept for a short grace period by the publish script; the relay never deletes anything.
 
 **Admin API on `admin.sock`** (`pkg/relay/admin.go`; used by `agent-watch-relay devices` and `agent-watch-relay hosts`, whose behaviour is in `deploy/relay/README.md` § Devices and § Hosts):
 
@@ -669,7 +765,13 @@ host_token = "…64 hex chars…"
 host_name  = ""                          # empty → os.Hostname()
 claude_config_dirs = []                  # extra Claude profiles; which ones are found without it: agents.md §3.2
 push_presence = true                     # written only when on: "Only Notify When Away"
+session_roots = ["/Users/me/Code", "…"]  # where the phone may start new sessions; empty (default): off
+session_kinds = ["claude", "agy", "opencode"] # kinds it may start; empty: those three
 ```
+
+- **`session_roots`** must be absolute. Each is resolved through symlinks when used; a session's `cwd` must be equal to or under one of them, and the folder picker cannot leave them. A root that does not exist is skipped (it comes back when the path exists).
+- **`session_kinds`** defaults to `claude`, `agy`, `opencode` when omitted or empty. Any herdr agent id works (`herdr agent start --help` lists them), but the bridge starts only what is listed here.
+- `configure` rewrites the whole file: pass `--session-root` and `--session-kind` again to keep them; it prints a `note:` when they would be dropped.
 
 ### 6.1 `status.json` (written by `agent-watch-bridge run`)
 
@@ -756,7 +858,7 @@ One file at the repo root holds everything a deployment needs. `agent-watch.env.
 | `AW_HOST_TOKEN` | bridge `configure --env-file`, `deploy.sh --sync-env` | 64 hex chars shared by the relay (§5) and the bridge (§6). `make config` fills it when empty and never prints it. On a machine whose host was registered with `hosts add`, it holds that host's token, and `AW_HOST_ID` that host's id: `deploy.sh --sync-env` refuses a file whose `AW_HOST_ID` (default `main`) is not the relay's |
 | `AW_RELAY_SSH` | `make deploy-relay` / `deploy.sh` without a target | SSH target of the VPS (root) |
 | `AW_RELAY_SSH_OPTS` | same | Extra `ssh`/`scp` options, word-split (`-i <key> -o Port=<n>`). `SSH_OPTS` in the environment overrides it |
-| `AW_HOST_ID`, `AW_HOST_NAME`, `AW_LISTEN`, `AW_TRUSTED_PROXIES`, `AW_CLIENT_IP_HEADER`, `AW_PUSH_RESOLVED`, `AW_PUSH_PRESENCE_IDLE`, `AW_FCM_CREDENTIALS`, `AW_NTFY_URL`, `AW_NTFY_TOPIC`, `AW_NTFY_TOKEN` | `deploy.sh --sync-env` only | Relay variables (§5). Commented out in the example; `AW_FCM_CREDENTIALS` is a path **on the server** |
+| `AW_HOST_ID`, `AW_HOST_NAME`, `AW_LISTEN`, `AW_TRUSTED_PROXIES`, `AW_CLIENT_IP_HEADER`, `AW_PUSH_RESOLVED`, `AW_PUSH_PRESENCE_IDLE`, `AW_UPDATE_DIR`, `AW_FCM_CREDENTIALS`, `AW_NTFY_URL`, `AW_NTFY_TOPIC`, `AW_NTFY_TOKEN` | `deploy.sh --sync-env` only | Relay variables (§5). Commented out in the example; `AW_FCM_CREDENTIALS` is a path **on the server** |
 | `AW_WATCHOS_BUNDLE_ID` | `make watchos-config` | Bundle id for the Phase 6 watchOS project. Empty: the project's own |
 
 How `deploy.sh --sync-env` copies the relay keys to the server: `deploy/relay/README.md` § `--sync-env`.

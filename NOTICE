@@ -6,7 +6,7 @@ This product is licensed under the Apache License, Version 2.0 (see LICENSE).
 Third-party material
 --------------------
 
-The agent marks in wearos-app/app/src/main/res/drawable/ic_agent_*.xml (all but
+The agent marks in wearos-app/core/src/main/res/drawable/ic_agent_*.xml (all but
 ic_agent.xml) are from lobe-icons
 (https://github.com/lobehub/lobe-icons/tree/master/packages/static-svg/icons,
 revision 82e641b4fece9d1028a127149af9ded00df5ac0c); each file names its source.

@@ -103,3 +103,47 @@ struct HostInfo: Codable {
     var online: Bool
     var herdr_online: Bool
 }
+
+// New-session and folder-picker contracts (contracts.md §2.2); the legacy client does not use them
+// yet (Phase 6). Properties stay snake_case like the other contract models in this file.
+struct SessionOptionsResponse: Codable {
+    var kinds: [String]
+    var roots: [String]
+}
+
+struct FolderEntry: Codable {
+    var name: String
+    var path: String
+}
+
+struct FolderListResponse: Codable {
+    var path: String
+    var parent: String?
+    var roots: [String]
+    var entries: [FolderEntry]
+    var truncated: Bool?
+}
+
+struct SessionCreateRequest: Codable {
+    var kind: String
+    var cwd: String
+    var label: String?
+}
+
+struct SessionCreated: Codable {
+    var host: String?
+    var pane_id: String
+    var workspace_id: String
+    var tab_id: String
+    var kind: String
+    var label: String
+}
+
+// /v1 UpdateInfo (contracts.md §2.2); the legacy client does not use the Android updater (Phase 6).
+struct UpdateInfo: Codable, Sendable {
+    var app: String
+    var version_code: Int
+    var version_name: String
+    var sha256: String
+    var size: Int64
+}

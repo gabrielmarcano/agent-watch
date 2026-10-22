@@ -28,6 +28,9 @@ const (
 	// watch's 8 s call timeout: inner layers give up first, so a timeout
 	// reported to the watch means the bridge has already stopped.
 	commandTimeout = 7 * time.Second
+	// sessionTimeout does the same for session.create, between the bridge's
+	// 35 s and the phone's 45 s (contracts.md §2.4).
+	sessionTimeout = 40 * time.Second
 	pingInterval   = 30 * time.Second
 	pingTimeout    = 10 * time.Second
 )
@@ -149,6 +152,7 @@ type Hub struct {
 	pending        map[string]pendingCommand
 	helloTimeout   time.Duration
 	commandTimeout time.Duration
+	sessionTimeout time.Duration
 	pingInterval   time.Duration
 	pingTimeout    time.Duration
 	afterPing      func(err error) // test hook, see setAfterPing
@@ -172,6 +176,7 @@ func NewHub(auth *AuthManager, state *State, store *Store, notifier Notifier) *H
 		pending:        make(map[string]pendingCommand),
 		helloTimeout:   helloTimeout,
 		commandTimeout: commandTimeout,
+		sessionTimeout: sessionTimeout,
 		pingInterval:   pingInterval,
 		pingTimeout:    pingTimeout,
 	}
@@ -183,6 +188,14 @@ func (h *Hub) SetCommandTimeout(d time.Duration) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.commandTimeout = d
+}
+
+// SetSessionTimeout overrides the 40-second budget for session.create
+// (useful for tests).
+func (h *Hub) SetSessionTimeout(d time.Duration) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.sessionTimeout = d
 }
 
 // SetPingInterval overrides how often the host is pinged (30 s) and how long
@@ -463,7 +476,11 @@ func (h *Hub) handleWireMessage(host *hostConnection, msg any) {
 		// Duplicates (the bridge resends after a reconnect) are not news.
 		if h.store.AddHistory(m.Item) {
 			h.state.BroadcastHistory(m.Item)
-			h.notifier.OnHistoryItem(m.Item)
+			if !m.Backfill {
+				// An older turn read at startup must not fill a pending
+				// "done" push with a reply that is not the turn's own.
+				h.notifier.OnHistoryItem(m.Item)
+			}
 		}
 	case model.HerdrStatusMsg:
 		h.state.SetHost(id, true, m.HerdrOnline)
@@ -515,6 +532,9 @@ func (h *Hub) Command(ctx context.Context, hostID string, cmd model.CommandMsg) 
 	h.mu.Lock()
 	host := h.conns[hostID]
 	budget := h.commandTimeout
+	if cmd.Action == model.ActionSessionCreate {
+		budget = h.sessionTimeout
+	}
 	if host == nil {
 		h.mu.Unlock()
 		return commandFailure("", model.ErrHostOffline, "host offline"), nil

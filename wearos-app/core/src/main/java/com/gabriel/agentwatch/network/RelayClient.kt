@@ -1,0 +1,460 @@
+package com.gabriel.agentwatch.network
+
+import com.gabriel.agentwatch.model.*
+import com.google.gson.Gson
+import kotlinx.coroutines.suspendCancellableCoroutine
+import okhttp3.*
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.RequestBody.Companion.toRequestBody
+import okhttp3.sse.EventSource
+import okhttp3.sse.EventSourceListener
+import okhttp3.sse.EventSources
+import java.io.File
+import java.io.IOException
+import java.io.InterruptedIOException
+import java.net.SocketTimeoutException
+import java.net.URLEncoder
+import java.security.MessageDigest
+import java.util.concurrent.TimeUnit
+import kotlin.coroutines.resume
+
+class RelayError(
+    val code: String,
+    override val message: String,
+    val httpStatus: Int
+) : Exception("[$code] $message (HTTP $httpStatus)")
+
+/**
+ * The OkHttp clients every [RelayClient] uses. All of them derive from one base client, so the whole
+ * process shares a single connection pool and dispatcher, however many [RelayClient]s exist.
+ */
+class RelayHttpClients private constructor(
+    /** `GET /v1/agents` and `/v1/history`. */
+    val rest: OkHttpClient,
+    /** Commands and push registration: a hard cap on the whole call, so a notification action fits in `goAsync()`. */
+    val command: OkHttpClient,
+    /**
+     * `POST /v1/hosts/{host}/sessions`: the bridge starts an agent, so it gets the session budget
+     * (bridge 35 s < relay 40 s < phone 45 s, contracts §2.4).
+     */
+    val session: OkHttpClient,
+    /** `GET /v1/events`: its read timeout is the silence limit ([SSE_SILENCE_TIMEOUT_MS]). */
+    val sse: OkHttpClient,
+    /** `GET /v1/updates/{app}/apk`: no whole-call cap; a slow mobile download may take minutes. */
+    val download: OkHttpClient
+) {
+    companion object {
+        const val CONNECT_TIMEOUT_MS = 10_000L
+        const val READ_TIMEOUT_MS = 15_000L
+        const val WRITE_TIMEOUT_MS = 10_000L
+        const val REST_CALL_TIMEOUT_MS = 15_000L
+        const val COMMAND_CALL_TIMEOUT_MS = 8_000L
+        /** Longer than the relay's 40 s session budget, so the relay is the layer that gives up (contracts §2.4). */
+        const val SESSION_CALL_TIMEOUT_MS = 45_000L
+        /**
+         * The relay writes an SSE keepalive every 15 s (contracts §2.3). A stream silent for three of them
+         * is a dead (often half-open) socket: the read times out and the engine reconnects.
+         */
+        const val SSE_SILENCE_TIMEOUT_MS = 45_000L
+        /**
+         * An update download has no whole-call cap; this read timeout only catches a stalled socket.
+         * A wear download can pause between packets, so it is longer than the REST one.
+         */
+        const val DOWNLOAD_READ_TIMEOUT_MS = 30_000L
+
+        val shared: RelayHttpClients by lazy { create() }
+
+        fun create(
+            restCallTimeoutMs: Long = REST_CALL_TIMEOUT_MS,
+            commandCallTimeoutMs: Long = COMMAND_CALL_TIMEOUT_MS,
+            sseSilenceTimeoutMs: Long = SSE_SILENCE_TIMEOUT_MS,
+            sessionCallTimeoutMs: Long = SESSION_CALL_TIMEOUT_MS,
+            downloadReadTimeoutMs: Long = DOWNLOAD_READ_TIMEOUT_MS
+        ): RelayHttpClients {
+            val base = OkHttpClient.Builder()
+                .connectTimeout(CONNECT_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+                .readTimeout(READ_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+                .writeTimeout(WRITE_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+                .build()
+            return RelayHttpClients(
+                rest = base.newBuilder().callTimeout(restCallTimeoutMs, TimeUnit.MILLISECONDS).build(),
+                command = base.newBuilder().callTimeout(commandCallTimeoutMs, TimeUnit.MILLISECONDS).build(),
+                session = base.newBuilder().callTimeout(sessionCallTimeoutMs, TimeUnit.MILLISECONDS).build(),
+                sse = base.newBuilder()
+                    .connectTimeout(15, TimeUnit.SECONDS)
+                    .readTimeout(sseSilenceTimeoutMs, TimeUnit.MILLISECONDS)
+                    .retryOnConnectionFailure(true)
+                    .build(),
+                download = base.newBuilder()
+                    .callTimeout(0, TimeUnit.MILLISECONDS)
+                    .readTimeout(downloadReadTimeoutMs, TimeUnit.MILLISECONDS)
+                    .build()
+            )
+        }
+    }
+}
+
+/**
+ * Stateless client for the relay's `/v1` API (contracts §2). Cheap to create: the HTTP machinery
+ * lives in [RelayHttpClients.shared].
+ *
+ * Every suspending call is cancellable: cancelling the coroutine (or a `withTimeout` around it)
+ * cancels the OkHttp call at once, and the caller sees the `CancellationException`, never a failure.
+ *
+ * Any 401 (REST or SSE) is reported with the rejected [token] to [onUnauthorized], or, for clients
+ * built without one, to the process-wide [unauthorizedListener] (the repository), which revokes the
+ * pairing only if that token is still the stored one.
+ */
+class RelayClient(
+    val baseUrl: String,
+    internal val token: String? = null,
+    private val http: RelayHttpClients = RelayHttpClients.shared,
+    private val onUnauthorized: ((token: String) -> Unit)? = null
+) {
+    private val gson = Gson()
+    private val jsonMediaType = "application/json; charset=utf-8".toMediaType()
+
+    private fun cleanBaseUrl(): String {
+        return baseUrl.trim().trimEnd('/')
+    }
+
+    private fun newRequestBuilder(path: String): Request.Builder {
+        val url = if (path.startsWith("http://") || path.startsWith("https://")) path else "${cleanBaseUrl()}$path"
+        val builder = Request.Builder().url(url)
+        if (!token.isNullOrBlank()) {
+            builder.header("Authorization", "Bearer $token")
+        }
+        return builder
+    }
+
+    private fun parseError(response: Response, bodyStr: String?): RelayError {
+        val status = response.code
+        if (!bodyStr.isNullOrBlank()) {
+            try {
+                val errResp = gson.fromJson(bodyStr, ErrorResponse::class.java)
+                if (errResp != null && errResp.error.code.isNotBlank()) {
+                    return RelayError(errResp.error.code, errResp.error.message, status)
+                }
+            } catch (_: Exception) {}
+        }
+        return RelayError("http_$status", response.message.ifBlank { "HTTP Error $status" }, status)
+    }
+
+    private fun <T> decode(response: Response, classOfT: Class<T>): Result<T> {
+        val bodyStr = response.body?.string()
+        if (!response.isSuccessful) {
+            return Result.failure(parseError(response, bodyStr))
+        }
+        if (classOfT == Unit::class.java) {
+            @Suppress("UNCHECKED_CAST")
+            return Result.success(Unit as T)
+        }
+        if (bodyStr.isNullOrBlank()) {
+            return Result.failure(RelayError("empty_response", "Empty response from relay", response.code))
+        }
+        return Result.success(gson.fromJson(bodyStr, classOfT))
+    }
+
+    /**
+     * Runs [request] asynchronously. Cancelling the coroutine cancels the call; the continuation is
+     * then already cancelled, so OkHttp's late "Canceled" failure is dropped.
+     */
+    private suspend fun <T> executeRequest(
+        client: OkHttpClient,
+        request: Request,
+        classOfT: Class<T>
+    ): Result<T> = suspendCancellableCoroutine { cont ->
+        val call = client.newCall(request)
+        cont.invokeOnCancellation { call.cancel() }
+        call.enqueue(object : Callback {
+            override fun onFailure(call: Call, e: IOException) {
+                cont.resume(Result.failure(asTimeout(e)))
+            }
+
+            override fun onResponse(call: Call, response: Response) {
+                val result = try {
+                    response.use { decode(it, classOfT) }
+                } catch (e: IOException) {
+                    Result.failure(asTimeout(e))
+                } catch (e: RuntimeException) { // malformed JSON (JsonSyntaxException)
+                    Result.failure(e)
+                }
+                if (response.code == 401) reportUnauthorized()
+                cont.resume(result)
+            }
+        })
+    }
+
+    suspend fun pair(code: String, deviceName: String): Result<PairResponse> {
+        val reqBody = gson.toJson(PairRequest(code = code.trim(), device_name = deviceName)).toRequestBody(jsonMediaType)
+        val request = newRequestBuilder("/v1/pair").post(reqBody).build()
+        return executeRequest(http.command, request, PairResponse::class.java)
+    }
+
+    suspend fun agents(): Result<AgentsSnapshot> {
+        val request = newRequestBuilder("/v1/agents").get().build()
+        return executeRequest(http.rest, request, AgentsSnapshot::class.java)
+    }
+
+    /** `GET /v1/updates/{app}`: [app] is `phone` or `watch` (contracts §2.1). */
+    suspend fun updateInfo(app: String): Result<UpdateInfo> {
+        val request = newRequestBuilder("/v1/updates/${URLEncoder.encode(app, "UTF-8")}").get().build()
+        return executeRequest(http.rest, request, UpdateInfo::class.java)
+    }
+
+    /**
+     * `GET /v1/updates/{app}/apk`: downloads the build [info] describes into [dest], checking its exact
+     * size and SHA-256 before the file is visible. [onProgress] runs on OkHttp's thread, at most every
+     * 256 KiB and once at the end, with bytes read and the expected total. A failed or cancelled
+     * download leaves no partial file behind.
+     */
+    suspend fun downloadUpdate(
+        app: String,
+        info: UpdateInfo,
+        dest: File,
+        onProgress: (bytes: Long, total: Long) -> Unit = { _, _ -> }
+    ): Result<File> {
+        if (info.size <= 0 || info.size > MAX_UPDATE_BYTES) {
+            return Result.failure(
+                RelayError("bad_update", "The relay returned an invalid update size (${info.size} bytes)", 0)
+            )
+        }
+        if (!SHA256_RE.matches(info.sha256)) {
+            return Result.failure(
+                RelayError("bad_update", "The relay returned an invalid update checksum", 0)
+            )
+        }
+        val parent = dest.parentFile
+        if (parent == null || (!parent.isDirectory && !parent.mkdirs())) {
+            return Result.failure(IOException("cannot create the update directory"))
+        }
+
+        val part = File(parent, dest.name + ".part")
+        part.delete()
+        val request = newRequestBuilder("/v1/updates/${URLEncoder.encode(app, "UTF-8")}/apk").get().build()
+        val call = http.download.newCall(request)
+
+        return suspendCancellableCoroutine { cont ->
+            cont.invokeOnCancellation {
+                call.cancel()
+                part.delete()
+            }
+            call.enqueue(object : Callback {
+                override fun onFailure(call: Call, e: IOException) {
+                    part.delete()
+                    if (cont.isActive) cont.resume(Result.failure(asTimeout(e)))
+                }
+
+                override fun onResponse(call: Call, response: Response) {
+                    response.use { resp ->
+                        if (!resp.isSuccessful) {
+                            val err = parseError(resp, resp.body?.string())
+                            if (resp.code == 401) reportUnauthorized()
+                            if (cont.isActive) cont.resume(Result.failure(err))
+                            return
+                        }
+                        try {
+                            val body = resp.body ?: throw IOException("the relay sent an empty update")
+                            val digest = MessageDigest.getInstance("SHA-256")
+                            var read = 0L
+                            var lastReport = 0L
+                            body.byteStream().use { input ->
+                                part.outputStream().use { output ->
+                                    val buffer = ByteArray(64 * 1024)
+                                    while (true) {
+                                        if (!cont.isActive) throw IOException("download cancelled")
+                                        val n = input.read(buffer)
+                                        if (n < 0) break
+                                        read += n
+                                        if (read > MAX_UPDATE_BYTES) {
+                                            throw IOException("the update is larger than $MAX_UPDATE_BYTES bytes")
+                                        }
+                                        output.write(buffer, 0, n)
+                                        digest.update(buffer, 0, n)
+                                        if (read - lastReport >= 256 * 1024 || read == info.size) {
+                                            onProgress(read, info.size)
+                                            lastReport = read
+                                        }
+                                    }
+                                }
+                            }
+                            onProgress(read, info.size)
+                            if (!cont.isActive) {
+                                part.delete()
+                                return
+                            }
+                            if (read != info.size) {
+                                throw RelayError(
+                                    "bad_download",
+                                    "Downloaded $read bytes, expected ${info.size}",
+                                    0
+                                )
+                            }
+                            val sha = digest.digest().joinToString("") { "%02x".format(it.toInt() and 0xff) }
+                            if (!sha.equals(info.sha256, ignoreCase = true)) {
+                                throw RelayError(
+                                    "bad_download",
+                                    "The downloaded update failed its checksum; try again",
+                                    0
+                                )
+                            }
+
+                            if (dest.exists() && !dest.delete()) {
+                                throw IOException("cannot replace ${dest.name}")
+                            }
+                            if (!part.renameTo(dest)) {
+                                part.copyTo(dest, overwrite = true)
+                                part.delete()
+                            }
+                            if (cont.isActive) cont.resume(Result.success(dest))
+                        } catch (e: Exception) {
+                            part.delete()
+                            if (cont.isActive) {
+                                cont.resume(Result.failure(if (e is IOException) asTimeout(e) else e))
+                            }
+                        }
+                    }
+                }
+            })
+        }
+    }
+
+    /** `GET /v1/history`: every pane's, or one agent's ([agent]; its host is sent when it has one, contracts §2.1). */
+    suspend fun history(agent: AgentKey? = null, limit: Int = 20): Result<List<HistoryItem>> {
+        var path = "/v1/history?limit=$limit"
+        if (agent != null && agent.host.isNotBlank()) {
+            path += "&host=${URLEncoder.encode(agent.host, "UTF-8")}"
+        }
+        if (agent != null && agent.paneId.isNotBlank()) {
+            path += "&pane_id=${URLEncoder.encode(agent.paneId, "UTF-8")}"
+        }
+        val request = newRequestBuilder(path).get().build()
+        val res = executeRequest(http.rest, request, HistoryResponse::class.java)
+        return res.map { it.items }
+    }
+
+    /**
+     * `GET /v1/hosts/{host}/sessions/options` (contracts §2.1): which agent kinds and root folders the
+     * host's bridge allows for new sessions. Empty roots mean the host does not allow them.
+     */
+    suspend fun sessionOptions(host: String): Result<SessionOptionsResponse> {
+        val request = newRequestBuilder("/v1/hosts/${URLEncoder.encode(host, "UTF-8")}/sessions/options").get().build()
+        return executeRequest(http.rest, request, SessionOptionsResponse::class.java)
+    }
+
+    /**
+     * `GET /v1/hosts/{host}/folders` with an optional [path]: the configured roots when null, else that
+     * folder's subfolders, for the picker.
+     */
+    suspend fun folders(host: String, path: String? = null): Result<FolderListResponse> {
+        var url = "/v1/hosts/${URLEncoder.encode(host, "UTF-8")}/folders"
+        if (!path.isNullOrBlank()) {
+            url += "?path=${URLEncoder.encode(path, "UTF-8")}"
+        }
+        val request = newRequestBuilder(url).get().build()
+        return executeRequest(http.rest, request, FolderListResponse::class.java)
+    }
+
+    /**
+     * `POST /v1/hosts/{host}/sessions`: start [kind] in [cwd] there (contracts §2.1). Long: the bridge
+     * creates the workspace and waits for the agent, so it uses the session budget.
+     */
+    suspend fun createSession(host: String, kind: String, cwd: String, label: String? = null): Result<SessionCreated> {
+        val reqBody = gson.toJson(SessionCreateRequest(kind = kind, cwd = cwd, label = label)).toRequestBody(jsonMediaType)
+        val request = newRequestBuilder("/v1/hosts/${URLEncoder.encode(host, "UTF-8")}/sessions").post(reqBody).build()
+        return executeRequest(http.session, request, SessionCreated::class.java)
+    }
+
+    /**
+     * The path of a command to [agent] (contracts §2.1): `/v1/hosts/{host}/agents/{pane_id}/…` when the
+     * agent has a host, else the older `/v1/agents/{pane_id}/…` of a relay that predates hosts.
+     */
+    internal fun commandPath(agent: AgentKey, command: String): String {
+        val pane = URLEncoder.encode(agent.paneId, "UTF-8")
+        return if (agent.host.isBlank()) {
+            "/v1/agents/$pane/$command"
+        } else {
+            "/v1/hosts/${URLEncoder.encode(agent.host, "UTF-8")}/agents/$pane/$command"
+        }
+    }
+
+    suspend fun prompt(agent: AgentKey, text: String, expectedSeq: Long): Result<Unit> {
+        val reqBody = gson.toJson(PromptRequest(text = text, expected_seq = expectedSeq)).toRequestBody(jsonMediaType)
+        val request = newRequestBuilder(commandPath(agent, "prompt")).post(reqBody).build()
+        return executeRequest(http.command, request, Unit::class.java)
+    }
+
+    suspend fun answer(agent: AgentKey, optionId: String, expectedSeq: Long, fingerprint: String): Result<Unit> {
+        val reqBody = gson.toJson(AnswerRequest(option_id = optionId, expected_seq = expectedSeq, fingerprint = fingerprint)).toRequestBody(jsonMediaType)
+        val request = newRequestBuilder(commandPath(agent, "answer")).post(reqBody).build()
+        return executeRequest(http.command, request, Unit::class.java)
+    }
+
+    /**
+     * `POST …/cancel` ([commandPath]). [fingerprint] is the prompt's fingerprint when the cancel targets a
+     * visible prompt, so the bridge refuses it if the menu changed; null (omitted from the JSON) otherwise.
+     */
+    suspend fun cancel(agent: AgentKey, expectedSeq: Long, fingerprint: String? = null): Result<Unit> {
+        val reqBody = gson.toJson(CancelRequest(expected_seq = expectedSeq, fingerprint = fingerprint)).toRequestBody(jsonMediaType)
+        val request = newRequestBuilder(commandPath(agent, "cancel")).post(reqBody).build()
+        return executeRequest(http.command, request, Unit::class.java)
+    }
+
+    suspend fun registerPush(fcmToken: String): Result<Unit> {
+        val reqBody = gson.toJson(PushRegisterRequest(platform = "fcm", token = fcmToken)).toRequestBody(jsonMediaType)
+        val request = newRequestBuilder("/v1/push/register").post(reqBody).build()
+        return executeRequest(http.command, request, Unit::class.java)
+    }
+
+    /** `GET /v1/events`. A 401 is reported to the unauthorized handler before [listener] sees the failure. */
+    fun events(listener: EventSourceListener): EventSource {
+        val request = newRequestBuilder("/v1/events")
+            .header("Accept", "text/event-stream")
+            .get()
+            .build()
+        val reporting = object : EventSourceListener() {
+            override fun onOpen(eventSource: EventSource, response: Response) = listener.onOpen(eventSource, response)
+            override fun onEvent(eventSource: EventSource, id: String?, type: String?, data: String) =
+                listener.onEvent(eventSource, id, type, data)
+            override fun onClosed(eventSource: EventSource) = listener.onClosed(eventSource)
+            override fun onFailure(eventSource: EventSource, t: Throwable?, response: Response?) {
+                if (response?.code == 401) reportUnauthorized()
+                listener.onFailure(eventSource, t, response)
+            }
+        }
+        return EventSources.createFactory(http.sse).newEventSource(request, reporting)
+    }
+
+    /** The relay rejected [token] (HTTP 401, `unauthorized`): tell whoever owns the pairing. */
+    private fun reportUnauthorized() {
+        val rejected = token
+        if (rejected.isNullOrBlank()) return // e.g. /v1/pair: no token, nothing was revoked
+        (onUnauthorized ?: unauthorizedListener)?.invoke(rejected)
+    }
+
+    companion object {
+        /** A sanity cap on an update APK; a phone or watch build is far below it. */
+        const val MAX_UPDATE_BYTES = 100L * 1024 * 1024
+
+        private val SHA256_RE = Regex("^[0-9a-fA-F]{64}$")
+
+        /**
+         * Receives 401s from clients built without an [onUnauthorized] handler (tile, complication,
+         * QuickDictate). Set by [RelayRepository.init]; null until then.
+         */
+        @Volatile
+        var unauthorizedListener: ((token: String) -> Unit)? = null
+
+        /**
+         * OkHttp's `callTimeout` fails with a bare `InterruptedIOException("timeout")`. Report it as a
+         * [SocketTimeoutException] so `commandErrorFeedback` shows "Relay timed out" (the command may
+         * still have run) instead of "Can't reach the relay".
+         */
+        private fun asTimeout(e: IOException): IOException =
+            if (e is InterruptedIOException && e !is SocketTimeoutException) {
+                SocketTimeoutException(e.message ?: "timeout").also { it.initCause(e) }
+            } else {
+                e
+            }
+    }
+}

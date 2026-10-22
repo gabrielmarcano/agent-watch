@@ -45,17 +45,36 @@ func (e *Engine) HandleRelayMessage(msg any) {
 }
 
 // startCommand starts the command's clock now, on arrival, and runs it in its
-// own goroutine.
+// own goroutine. Host-level actions get their own longer (session) or shorter
+// (folder) budgets.
 func (e *Engine) startCommand(cmd model.CommandMsg) {
-	timeout := e.CommandTimeout
-	if timeout <= 0 {
-		timeout = commandTimeout
-	}
+	timeout := e.commandBudget(cmd.Action)
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	go func() {
 		defer cancel()
 		e.executeCommand(ctx, cmd)
 	}()
+}
+
+// commandBudget is the time a command may take, counted from its arrival.
+func (e *Engine) commandBudget(action string) time.Duration {
+	switch action {
+	case model.ActionSessionCreate:
+		if e.SessionTimeout > 0 {
+			return e.SessionTimeout
+		}
+		return defaultSessionTimeout
+	case model.ActionSessionOptions, model.ActionFoldersList:
+		if e.FolderTimeout > 0 {
+			return e.FolderTimeout
+		}
+		return defaultFolderTimeout
+	default:
+		if e.CommandTimeout > 0 {
+			return e.CommandTimeout
+		}
+		return commandTimeout
+	}
 }
 
 // herdrErrorCode maps a failed herdr call to a contract error code. fallback
@@ -83,6 +102,12 @@ func promptClaim(text string) string {
 }
 
 func (e *Engine) executeCommand(ctx context.Context, cmd model.CommandMsg) {
+	switch cmd.Action {
+	case model.ActionSessionCreate, model.ActionSessionOptions, model.ActionFoldersList:
+		e.executeHostCommand(ctx, cmd)
+		return
+	}
+
 	reply := func(ok bool, code, errMsg, agentName string) {
 		textLen := utf8.RuneCountInString(cmd.Text)
 		if e.Logger != nil {

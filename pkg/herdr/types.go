@@ -59,6 +59,15 @@ type TabInfo struct {
 	PaneCount   int    `json:"pane_count"`
 }
 
+// PaneInfo is herdr's view of a pane, with the fields the bridge reads.
+type PaneInfo struct {
+	PaneID      string  `json:"pane_id"`
+	WorkspaceID string  `json:"workspace_id"`
+	TabID       string  `json:"tab_id"`
+	Label       *string `json:"label"`
+	CWD         *string `json:"cwd"`
+}
+
 // Pong is the response payload from herdr's "ping" method.
 type Pong struct {
 	Version  string `json:"version"`

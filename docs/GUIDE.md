@@ -80,6 +80,7 @@ On the machine that runs herdr:
    ```
    - Optional settings go in `ARGS`, e.g. `make configure-bridge ARGS="--host-name my-mac"`; pass them again on every run. What `configure` writes, where, and its flags: [`contracts.md` §6](reference/contracts.md).
    - `--claude-config-dir` is only for Claude profiles the bridge does not find on its own ([`agents.md` §3.2](reference/agents.md)).
+   - To let the phone start new agent sessions on this machine, name the folders and agent kinds it may use (repeatable; no root means the feature is off): `make configure-bridge ARGS="--session-root ~/Code --session-kind claude --session-kind opencode"`. What the policy does: [`contracts.md` §2.1](reference/contracts.md).
    - Without the file: `./bin/agent-watch-bridge configure --relay-url wss://relay.<domain> --host-token <64-hex-token>` (the token then shows in `ps`).
 4. Start the bridge service (a LaunchAgent on macOS, a `systemd --user` unit on Linux):
    ```bash
@@ -87,6 +88,7 @@ On the machine that runs herdr:
    # or: ./bin/agent-watch-bridge start
    ```
    Already installed? After `make configure-bridge`, apply the new config with `make restart`.
+   On Linux, a `systemd --user` unit stops when you log out unless lingering is on: `loginctl enable-linger` (a server you only reach over SSH needs it).
 5. Verify the bridge:
    ```bash
    ./bin/agent-watch-bridge status
@@ -123,7 +125,7 @@ Agent Watch is a herdr plugin, listed on [herdr.dev/plugins](https://herdr.dev/p
    herdr plugin uninstall herdr-agent-watch
    ```
 
-The relay (step 1), the watch app (step 3) and pairing (step 4) are unchanged. The relay deploy (`make deploy-relay`) still needs a checkout of this repository, or a relay binary from a [release](#versions-and-releases).
+The relay (step 1), the watch app (step 4) and pairing (step 5) are unchanged. The relay deploy (`make deploy-relay`) still needs a checkout of this repository, or a relay binary from a [release](#versions-and-releases).
 
 ### Another Machine (several hosts)
 
@@ -133,11 +135,33 @@ Each machine with herdr runs its own bridge, with **its own host token**; the wa
 
 1. On the VPS, register the machine and copy the token it prints once: `sudo agent-watch-relay hosts add <id> --name "<name>"` ([`deploy/relay/README.md` § Hosts](../deploy/relay/README.md#hosts-one-per-machine)).
 2. On that machine, clone the repo, create its `agent-watch.env` with `make config`, replace its `AW_HOST_TOKEN` with that token, and set `AW_HOST_ID=<id>`. Deploy and sync the relay only from the first machine: `make deploy-relay ARGS=--sync-env` refuses another machine's file, which would hand the relay its token.
-3. Install and start its bridge as in [step 2](#2-install-and-configure-the-host-bridge). Linux runs it as a `systemd --user` unit.
+3. Install and start its bridge as in [step 2](#2-install-and-configure-the-host-bridge). Linux runs it as a `systemd --user` unit. Without Go on that machine, put a [release](#versions-and-releases)'s bridge for it in the checkout's `bin/` instead of `make bridge`; `herdr plugin link` and the plugin actions work the same.
 
-The first machine's token, `AW_HOST_TOKEN` in the relay's env file, keeps working as the host `AW_HOST_ID` (default `main`).
+The first machine's token, `AW_HOST_TOKEN` in the relay's env file, keeps working as the host `AW_HOST_ID` (default `main`). The phone lists every machine too (one filter, not pages), and can start a session on any of them whose bridge is `0.9.0` and has session roots (below).
 
-### 3. Build and Install the Wear OS App
+### 3. Build and Install the Android Phone App
+
+The phone is its own relay client, with its own device token: pairing it does not touch the watch, and `agent-watch-relay devices revoke <id>` cuts only the phone. New sessions need relay `0.9.0` and bridge `0.9.0`.
+
+1. **Build** with the JDK from [Requirements](#requirements):
+   ```bash
+   cd wearos-app
+   export JAVA_HOME="/Applications/Android Studio.app/Contents/jbr/Contents/Home"
+   ./gradlew :mobile:assembleDebug
+   ```
+   **Push (optional):** in the same Firebase project as the watch, add another Android app with the package name `com.gabriel.agentwatch.mobile`, download its `google-services.json` to `wearos-app/mobile/`, and build again. It is git-ignored; never commit it. Without that file the app builds and works, it just has no notifications. The relay's FCM service account ([step 4](#4-build-and-install-the-wear-os-app), item 5) sends to both apps.
+2. **Install** it on the phone with the phone connected over USB: `./gradlew :mobile:installDebug` (or `adb install -r mobile/build/outputs/apk/debug/mobile-debug.apk`). For updates that install without USB later, install a release-signed build once instead ([Android updates](#android-updates-phone-and-watch)); a debug build cannot be replaced by the release-signed APK.
+3. **Pair:** `./bin/agent-watch-bridge pair`, then enter the relay URL (prefilled from `agent-watch.env` at build time) and the code. The phone keeps its device token in its private app storage (backup off); the relay stores only its hash.
+4. **Allow it to start agents** (bridge `0.9.0`): on each machine, name the folders and agent kinds the phone may use, then apply the config:
+   ```bash
+   make configure-bridge ARGS="--session-root ~/Code --session-root ~/Documents --session-kind claude --session-kind opencode"
+   make restart
+   ```
+   With no `--session-root`, that machine starts no sessions and the phone says so. The folder browser cannot leave the roots, and a folder or kind outside them is refused (`not_allowed`, [`contracts.md` §2.1](reference/contracts.md)). The first session in a folder creates one herdr workspace for it; each session gets its own tab and agent, and nothing takes focus on that machine.
+
+What the app does today: agents as chats, one list filterable by machine, "Needs you" first, unread dots; a chat shows the agent's turns as a conversation with the approval menu inline, typed replies, and the history reader; "+" starts a session on a chosen machine, agent kind and folder, then opens its chat as soon as herdr reports it. With `mobile/google-services.json` in place it also posts local notifications, one chat per agent, grouped like a messaging app: tapping one opens that chat, and replies and approvals can be sent from the notification. Notifications stay on the phone (Android does not mirror them to the watch); Allow and a question's answer need the phone unlocked, while Deny, Cancel and a reply do not. A newer published build appears as an update card at the top of the chat list ([Android updates](#android-updates-phone-and-watch)). No settings screen yet: [STATUS](STATUS.md). Release builds use the key in `wearos-app/keystore.properties` when it exists; without it they are debug-signed, and `make publish-android` refuses to publish them.
+
+### 4. Build and Install the Wear OS App
 
 1. **Firebase:** create a Firebase project, add an Android app with the package name `com.gabriel.agentwatch` (the app's id; the `google-services.json` must match it), and download its `google-services.json` to `wearos-app/app/`. It is git-ignored; never commit it. The build fails without it.
 2. **Build** with the JDK from [Requirements](#requirements):
@@ -150,14 +174,69 @@ The first machine's token, `AW_HOST_TOKEN` in the relay's env file, keeps workin
 3. **Connect the watch over wireless debugging.** The Pixel Watch has no USB data connection, so `adb` goes over Wi-Fi (watch and computer on the same network):
    - on the watch: Settings → Developer options → **Wireless debugging** → **Pair new device**;
    - on the computer: `adb pair <ip>:<pair-port> <code>`, then `adb connect <ip>:<port>` (the connect port is shown on the Wireless debugging screen and changes after a reboot).
-4. **Install:** `./gradlew :app:installDebug`.
+4. **Install:** `./gradlew :app:installDebug`. For updates that install from the watch later, install a release-signed build once instead ([Android updates](#android-updates-phone-and-watch)); a debug build cannot be replaced by the release-signed APK.
 5. **Push on the relay:** copy the Firebase **service-account** JSON to the VPS only, as [`deploy/relay/README.md` § First-time setup](../deploy/relay/README.md#first-time-setup-once-per-vps) says, set `AW_FCM_CREDENTIALS` to its server path in `agent-watch.env`, and run `make deploy-relay ARGS=--sync-env`. Without it the relay runs with push disabled.
 
 **watchOS** ([status](STATUS.md)): `make watchos-config` writes the git-ignored `watchos-app/Config.generated.xcconfig` ([`contracts.md` §7](reference/contracts.md)).
 
-The release build (`assembleRelease`, R8 on) is signed with the debug key: fine for your own watch, not for distribution.
+The release build (`assembleRelease`, R8 on) uses the key in `wearos-app/keystore.properties` when it exists; without it, it is debug-signed, which is fine for a throwaway build but cannot be updated by a published APK. See [Android updates](#android-updates-phone-and-watch).
 
-### 4. Pair Your Smartwatch
+### Android updates (phone and watch)
+
+The relay serves the latest APK of each Android app, so later versions install from the phone or the watch without USB or the same Wi-Fi. Android still asks you to confirm each install, and the first one asks you to allow Agent Watch as an install source; that permission is once per app.
+
+**1. Create the release key once.** Every published build must use the same key: Android refuses an APK signed by another key, and the only fix is uninstalling the app (losing its pairing and local state). In `wearos-app/`:
+
+```bash
+keytool -genkeypair -v -keystore agent-watch-release.jks \
+  -alias agent-watch -keyalg RSA -keysize 4096 -validity 10000
+chmod 600 agent-watch-release.jks
+```
+
+Create `wearos-app/keystore.properties` next to it (git-ignored; keep both backed up somewhere safe). Values are bare, without quotes; `storeFile` is relative to `wearos-app/`, or absolute:
+
+```
+storeFile=agent-watch-release.jks
+storePassword=<the keystore password>
+keyAlias=agent-watch
+keyPassword=<the key password>
+```
+
+Both apps use this key. Without the file, release builds fall back to the debug key so tests still run; `make publish-android` refuses a debug-signed APK.
+
+**2. Install a release-signed build once.** A debug-signed app cannot be replaced by a release-signed one. Build and install the release APKs on each device:
+
+```bash
+cd wearos-app
+export JAVA_HOME="/Applications/Android Studio.app/Contents/jbr/Contents/Home"
+./gradlew :mobile:assembleRelease :app:assembleRelease
+
+# Phone, over USB:
+adb install -r mobile/build/outputs/apk/release/mobile-release.apk
+
+# Watch, over the wireless adb from step 4:
+adb install -r app/build/outputs/apk/release/app-release.apk
+```
+
+If a debug-signed build is already installed, uninstall it first (`adb uninstall com.gabriel.agentwatch.mobile` on the phone, `adb uninstall com.gabriel.agentwatch` on the watch) and pair again. The owner's watch `1.3.1` needs that one-time step to leave the debug key.
+
+**3. Bump the versions and publish.** Increase `MOBILE_VERSION_CODE` and/or `WEAROS_VERSION_CODE` in [`VERSIONS`](../VERSIONS) (a published code can never go down), commit the version change, then from a clean tree:
+
+```bash
+make publish-android
+```
+
+It builds both release APKs, checks that each one is release-signed, and publishes only the apps whose `version_code` increased: `<app>-<code>.apk` and `<app>.json` in the relay's `AW_UPDATE_DIR` (default `/var/lib/agent-watch-relay/updates`; [`deploy/relay/README.md`](../deploy/relay/README.md) § Android updates). The relay reads the metadata on every request, so no restart is needed. It needs root over SSH (it chowns the files to the relay's `agentwatch` user) and `AW_RELAY_SSH` in `agent-watch.env`, like `make deploy-relay`.
+
+To publish one app only — the other is neither built nor touched on the relay — run the script with `--phone` or `--watch` (it needs the same environment as the make target):
+
+```bash
+AW_ENV_FILE=agent-watch.env deploy/relay/publish-android.sh --phone
+```
+
+**4. Update from the device.** The phone checks when it starts and after pairing; the watch checks on start and from Settings → **Check for updates**. A newer build shows an update card: **Update** downloads it (the card shows progress and can be cancelled), verifies its size and SHA-256, then **Install** opens Android's installer. If Android asks to allow installs from Agent Watch, accept it; the card then offers **Install** again. The watch installer is not verified on a device yet: if a watch has no way to allow installs or no installer, update that watch over `adb` (and report it in [STATUS](STATUS.md)).
+
+### 5. Pair Your Smartwatch
 
 1. Get a short-lived pairing code:
    ```bash
@@ -170,7 +249,7 @@ The release build (`assembleRelease`, R8 on) is signed with the debug key: fine 
 
 **Only Notify When Away** (off by default; macOS only for now): turn it on in the menu bar app, or with `agent-watch-bridge presence on`. While you use the computer (input in the last 10 minutes by default, screen unlocked), the watch does not buzz; a prompt still waiting when you leave is pushed then. While it is on, the bridge sends your relay the input idle time and screen-lock state every 15 s. Rules and the relay setting: [`contracts.md` §4.3](reference/contracts.md).
 
-### 5. Optional: macOS Menu Bar App
+### 6. Optional: macOS Menu Bar App
 
 `make bar && open "bin/Agent Watch.app"`: a menu bar companion for the bridge. What it shows and does: [`macos-bar/README.md`](../macos-bar/README.md).
 
@@ -181,6 +260,7 @@ The release build (`assembleRelease`, R8 on) is signed with the debug key: fine 
 | `make config` | Create `agent-watch.env` and its host token ([step 0](#0-create-your-configuration-file)) |
 | `make configure-bridge` | Rewrite the bridge's `config.toml` from `agent-watch.env`; then `make restart` |
 | `make deploy-relay [ARGS=--sync-env]` | Build and deploy the relay to `AW_RELAY_SSH`; `--sync-env` also updates the server's env file from `agent-watch.env` |
+| `make publish-android` | Build, sign and publish both Android APKs to the relay ([Android updates](#android-updates-phone-and-watch)) |
 | `make restart` | Rebuild `bin/agent-watch-bridge` and restart the installed service without rewriting its definition |
 | `./bin/agent-watch-bridge restart` | Restart only (also a plugin action) |
 | `./bin/agent-watch-bridge start` | Install or rewrite the service definition; keeps the installed values unless a flag or herdr's environment gives new ones |
@@ -207,7 +287,7 @@ The [release workflow](../.github/workflows/release.yml) publishes a GitHub rele
 - `Agent Watch.app` (universal) as a zip (`AgentWatchBar_<version>_macos_universal.zip`);
 - `SHA256SUMS`, and notes with each component's version and the commits since the previous tag.
 
-The Wear OS app is not attached: it needs your own `google-services.json` and signing key, so build it from source ([step 3](#3-build-and-install-the-wear-os-app)).
+The Android apps (Wear OS and phone) are not attached: they need your own `google-services.json` and signing key, so build them from source (steps [3](#3-build-and-install-the-android-phone-app) and [4](#4-build-and-install-the-wear-os-app)). To update installed copies without USB, publish them to the relay ([Android updates](#android-updates-phone-and-watch)).
 
 **Installing from a release** instead of building:
 - Check the download with `shasum -a 256 -c SHA256SUMS --ignore-missing`.
@@ -221,7 +301,7 @@ GitHub Actions, sized for the free plan (macOS minutes count ten times, so macOS
 | Workflow | Runner | When | What |
 |---|---|---|---|
 | [`ci.yml`](../.github/workflows/ci.yml) | Linux | every push to `main` and pull request | `gofmt`, `go vet`, `go test -race`, static cross-builds; guard and `agent-watch.env` tool tests |
-| [`wearos.yml`](../.github/workflows/wearos.yml) | Linux | changes under `wearos-app/` or `VERSIONS` | unit tests, lint and a debug build (with a placeholder `google-services.json`) |
+| [`wearos.yml`](../.github/workflows/wearos.yml) | Linux | changes under `wearos-app/` or `VERSIONS` | unit tests, lint and debug builds of both Android clients — the Wear OS app and the phone app — with a placeholder `google-services.json` |
 | [`macos-bar.yml`](../.github/workflows/macos-bar.yml) | macOS | changes to the menu bar, the bridge CLI or `VERSIONS` | `make bar-test` and `make bar` |
 | [`release.yml`](../.github/workflows/release.yml) | Linux + macOS | changes to released components on `main` (or by hand, as a dry run without publishing) | the release above |
 
@@ -252,6 +332,7 @@ How each agent's menus, keys and history work: [`docs/reference/agents.md`](refe
   3. The prompt fingerprint matches what is parsed on the screen now (for `cancel` too).
 - **Once only:** a repeated request, a second answer to the same prompt, or the same dictated text sent twice is refused, so a double tap never types twice.
 - **No typing into menus:** dictation is refused while a menu is on screen, whatever herdr reports.
+- **Approving from the phone needs an unlock:** notification actions that grant something (Allow, or a question's answer) are refused while the phone is locked; Deny, Cancel and a reply stay available. The phone's notifications are built locally, marked local-only, and never mirrored to the watch.
 - **Sanitized logs:** The relay and bridge logs never print prompt contents, transcript text, or authentication tokens.
 - **One secret file on the host:** `agent-watch.env` is `0600` and git-ignored, and the guards refuse to commit it. `make config` generates the token without printing it; `configure --env-file` and `deploy.sh --sync-env` read it from the file (never from argv) and print key names only.
 
@@ -263,7 +344,7 @@ How each agent's menus, keys and history work: [`docs/reference/agents.md`](refe
 - **OpenCode approvals need the default focus.** If someone moves the focus in OpenCode's dialog at the computer (arrow keys or mouse hover), the watch's Allow is refused with nothing pressed: answer at the computer. Deny always works. Why: [`agents.md` §5.1](reference/agents.md).
 - **OpenCode 2's history cards come from the screen** (plain text, only what fits on it) when herdr's OpenCode integration is older than v13: OpenCode 2 never loads its TUI plugin, so herdr has no session to read and the bridge cannot read the transcript. **Workaround:** `herdr integration install opencode` (`herdr integration status` must say `current`), then restart OpenCode in each pane. Why: [`agents.md` §5.2](reference/agents.md#52-transcript-sqlite).
 - **The watchOS app is not on the relay API yet** ([status](STATUS.md)).
-- **An approval answered at the computer can stay in the watch's notifications** until the app next sees the live state (e.g. when you open it). The `resolved` push that withdraws them is off by default (`AW_PUSH_RESOLVED`). The current app handles it; whether the relay has it on yet is in [STATUS](STATUS.md).
+- **An approval answered at the computer can stay in the watch's or phone's notifications** until the app next sees the live state (e.g. when you open it). The `resolved` push that withdraws them is off by default (`AW_PUSH_RESOLVED`). The current apps handle it; whether the relay has it on yet is in [STATUS](STATUS.md).
 
 ---
 
