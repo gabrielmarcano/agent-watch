@@ -11,6 +11,7 @@ import androidx.compose.foundation.gestures.draggable
 import androidx.compose.foundation.gestures.rememberDraggableState
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -20,6 +21,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.size
@@ -96,6 +98,7 @@ import com.gabriel.agentwatch.mobile.ui.logic.previewLine
 import com.gabriel.agentwatch.mobile.ui.logic.previewText
 import com.gabriel.agentwatch.mobile.ui.logic.unmatchedPending
 import com.gabriel.agentwatch.mobile.ui.logic.unreadCount
+import com.gabriel.agentwatch.mobile.ui.theme.LocalIsDarkTheme
 import com.gabriel.agentwatch.mobile.ui.theme.statusStyle
 import com.gabriel.agentwatch.mobile.ui.theme.warningAccent
 import com.gabriel.agentwatch.model.AgentState
@@ -171,9 +174,23 @@ fun ChatListScreen(
         listStatus(state, host?.online ?: false, host?.herdr_online ?: false, onMachine.isNotEmpty())
     }
 
+    val hapticView = rememberHapticView()
+    val fabInteraction = remember { MutableInteractionSource() }
+
     Scaffold(
         floatingActionButton = {
-            FloatingActionButton(onClick = onNewSession, shape = CircleShape) {
+            // WhatsApp's rounded-square squircle FAB (16.dp radius), with tactile press squish.
+            FloatingActionButton(
+                onClick = {
+                    MobileHaptics.send(hapticView)
+                    onNewSession()
+                },
+                interactionSource = fabInteraction,
+                shape = RoundedCornerShape(16.dp),
+                containerColor = MaterialTheme.colorScheme.primary,
+                contentColor = MaterialTheme.colorScheme.onPrimary,
+                modifier = Modifier.pressScale(fabInteraction)
+            ) {
                 Icon(Icons.Filled.Add, contentDescription = stringResource(R.string.new_session))
             }
         }
@@ -183,6 +200,7 @@ fun ChatListScreen(
             PullToRefreshBox(
                 isRefreshing = refreshing,
                 onRefresh = {
+                    MobileHaptics.tick(hapticView)
                     scope.launch {
                         refreshing = true
                         try {
@@ -207,13 +225,19 @@ fun ChatListScreen(
                     item(key = "filters") {
                         FilterRow(
                             filter = filter,
-                            onFilter = { filter = it },
+                            onFilter = {
+                                MobileHaptics.tick(hapticView)
+                                filter = it
+                            },
                             counts = ChatFilter.entries.associateWith { f ->
                                 onMachine.count { f.matches(it) }
                             },
                             hosts = state.hosts,
                             selectedHost = hostFilter,
-                            onSelectHost = onHostFilter
+                            onSelectHost = {
+                                MobileHaptics.tick(hapticView)
+                                onHostFilter(it)
+                            }
                         )
                     }
                     if (state.agents.isEmpty()) {
@@ -241,8 +265,14 @@ fun ChatListScreen(
                                 muted = chatStore.isMuted(agent.key.token),
                                 pinned = chatStore.isPinned(agent.key.token),
                                 dimmed = status.dimmed,
-                                onClick = { onOpen(agent) },
-                                onLongClick = { sheetAgent = agent },
+                                onClick = {
+                                    MobileHaptics.tick(hapticView)
+                                    onOpen(agent)
+                                },
+                                onLongClick = {
+                                    MobileHaptics.longPress(hapticView)
+                                    sheetAgent = agent
+                                },
                                 onMarkRead = { onMarkRead(agent) },
                         sharedScope = sharedScope,
                         visibilityScope = visibilityScope
@@ -273,18 +303,20 @@ fun ChatListScreen(
 }
 
 /**
- * The screen's title: a big line at the top, the way a messaging app draws it. It scrolls away
- * with the list.
+ * The screen's title: a big line at the top, the way WhatsApp draws it (accent in light mode,
+ * pure white on dark mode). It scrolls away with the list.
  */
 @Composable
 fun BigTitle(text: String) {
+    val dark = LocalIsDarkTheme.current
     Text(
         text = text,
-        style = MaterialTheme.typography.headlineMedium.copy(fontWeight = FontWeight.SemiBold),
+        style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold),
+        color = if (dark) MaterialTheme.colorScheme.onBackground else MaterialTheme.colorScheme.primary,
         modifier = Modifier
             .fillMaxWidth()
             .statusBarsPadding()
-            .padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 4.dp)
+            .padding(start = 16.dp, end = 16.dp, top = 6.dp, bottom = 2.dp)
     )
 }
 
@@ -297,9 +329,17 @@ private fun SearchField(query: String, onQueryChange: (String) -> Unit) {
         onValueChange = onQueryChange,
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 4.dp),
-        placeholder = { Text(stringResource(R.string.search_chats)) },
-        leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
+            .padding(horizontal = 16.dp, vertical = 4.dp)
+            .heightIn(min = 48.dp),
+        placeholder = { Text(stringResource(R.string.search_chats), style = MaterialTheme.typography.bodyMedium) },
+        leadingIcon = {
+            Icon(
+                Icons.Filled.Search,
+                contentDescription = null,
+                modifier = Modifier.size(20.dp),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        },
         trailingIcon = {
             if (query.isNotEmpty()) {
                 IconButton(onClick = { onQueryChange("") }) {
@@ -307,18 +347,19 @@ private fun SearchField(query: String, onQueryChange: (String) -> Unit) {
                 }
             }
         },
+        textStyle = MaterialTheme.typography.bodyMedium,
         singleLine = true,
-        shape = RoundedCornerShape(24.dp),
+        shape = RoundedCornerShape(50),
         colors = TextFieldDefaults.colors(
-            focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
-            unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+            focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+            unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
             focusedIndicatorColor = Color.Transparent,
             unfocusedIndicatorColor = Color.Transparent
         )
     )
 }
 
-/** The filters (All, Needs you, Working, Done) and the machine, in one scrolling row. */
+/** The filters (All, Needs you, Working, Done) and the machine, in one scrolling row of stadium pills. */
 @Composable
 private fun FilterRow(
     filter: ChatFilter,
@@ -334,9 +375,13 @@ private fun FilterRow(
     ) {
         items(ChatFilter.entries.toList(), key = { it.name }) { f ->
             val count = counts[f] ?: 0
+            val interaction = remember { MutableInteractionSource() }
             FilterChip(
                 selected = filter == f,
                 onClick = { onFilter(f) },
+                interactionSource = interaction,
+                shape = RoundedCornerShape(50),
+                modifier = Modifier.pressScale(interaction, pressedScale = 0.94f),
                 label = {
                     Text(
                         text = when (f) {
@@ -344,7 +389,8 @@ private fun FilterRow(
                             ChatFilter.NEEDS_YOU -> stringResource(R.string.section_needs_you)
                             ChatFilter.WORKING -> stringResource(R.string.status_working)
                             ChatFilter.DONE -> stringResource(R.string.status_done)
-                        } + if (f == ChatFilter.NEEDS_YOU && count > 0) " · $count" else ""
+                        } + if (f == ChatFilter.NEEDS_YOU && count > 0) " $count" else "",
+                        fontWeight = if (filter == f) FontWeight.SemiBold else FontWeight.Medium
                     )
                 }
             )
@@ -361,6 +407,7 @@ private fun FilterRow(
 @Composable
 private fun MachineChip(hosts: List<HostInfo>, selected: String?, onSelect: (String?) -> Unit) {
     var open by remember { mutableStateOf(false) }
+    val interaction = remember { MutableInteractionSource() }
     val name = hosts.firstOrNull { it.id == selected }?.name?.ifBlank { null }
         ?: hosts.firstOrNull { it.id == selected }?.id
         ?: stringResource(R.string.filter_all)
@@ -368,12 +415,15 @@ private fun MachineChip(hosts: List<HostInfo>, selected: String?, onSelect: (Str
         FilterChip(
             selected = selected != null,
             onClick = { open = true },
-            label = { Text(name) },
+            interactionSource = interaction,
+            shape = RoundedCornerShape(50),
+            modifier = Modifier.pressScale(interaction, pressedScale = 0.94f),
+            label = { Text(name, fontWeight = if (selected != null) FontWeight.SemiBold else FontWeight.Medium) },
             leadingIcon = {
                 Icon(
                     Icons.Filled.Computer,
                     contentDescription = stringResource(R.string.filter_machine_all),
-                    modifier = Modifier.size(18.dp)
+                    modifier = Modifier.size(16.dp)
                 )
             }
         )
@@ -432,10 +482,19 @@ private fun ChatRow(
 
     // A swipe to the right marks the chat read; the row springs back, it is never dismissed.
     val scope = rememberCoroutineScope()
+    val hapticView = rememberHapticView()
     val offset = remember { Animatable(0f) }
     val threshold = with(LocalDensity.current) { 96.dp.toPx() }
+    var crossedThreshold by remember { mutableStateOf(false) }
     val dragState = rememberDraggableState { delta ->
-        scope.launch { offset.snapTo((offset.value + delta).coerceIn(0f, threshold * 2f)) }
+        val next = (offset.value + delta).coerceIn(0f, threshold * 2f)
+        if (!crossedThreshold && next >= threshold) {
+            crossedThreshold = true
+            MobileHaptics.gestureThreshold(hapticView)
+        } else if (crossedThreshold && next < threshold) {
+            crossedThreshold = false
+        }
+        scope.launch { offset.snapTo(next) }
     }
 
     Box {

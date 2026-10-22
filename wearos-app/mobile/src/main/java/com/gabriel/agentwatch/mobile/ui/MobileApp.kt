@@ -12,6 +12,7 @@ import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -19,10 +20,12 @@ import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.foundation.shape.CircleShape
@@ -53,6 +56,7 @@ import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
@@ -378,24 +382,24 @@ private fun PhoneNavigationBar(
     compact: Boolean,
     onSelect: (String) -> Unit
 ) {
-    // A floating, rounded bar with the selected tab on a filled circle: the bar WhatsApp's Android
-    // app uses now, shrinking into a compact pill on scroll down.
+    // A floating, rounded bar with the selected tab on a soft tinted horizontal pill: matches
+    // WhatsApp Android 2.26's floating bottom bar, shrinking into a compact pill on scroll down.
     Surface(
         modifier = Modifier
             .fillMaxWidth()
             .navigationBarsPadding()
-            .padding(horizontal = if (compact) 36.dp else 10.dp, vertical = 8.dp),
-        shape = RoundedCornerShape(30.dp),
+            .padding(horizontal = if (compact) 36.dp else 12.dp, vertical = 8.dp),
+        shape = RoundedCornerShape(32.dp),
         color = MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.96f),
         tonalElevation = 3.dp,
         shadowElevation = 10.dp,
         border = androidx.compose.foundation.BorderStroke(
             1.dp,
-            MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f)
+            MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
         )
     ) {
         Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp),
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             NavItem(
@@ -429,7 +433,7 @@ private fun PhoneNavigationBar(
     }
 }
 
-/** One tab of the floating bar: the icon on a circle when it is the current one, and its name. */
+/** One tab of the floating bar: the icon on a soft horizontal pill when selected, and its bold name. */
 @Composable
 private fun RowScope.NavItem(
     selected: Boolean,
@@ -440,24 +444,39 @@ private fun RowScope.NavItem(
     compact: Boolean,
     onClick: () -> Unit
 ) {
+    val hapticView = rememberHapticView()
+    val interaction = remember { MutableInteractionSource() }
     Column(
-        modifier = Modifier.weight(1f).clickable(onClick = onClick),
+        modifier = Modifier
+            .weight(1f)
+            .pressScale(interaction, pressedScale = 0.92f)
+            .clickable(
+                interactionSource = interaction,
+                indication = null,
+                onClick = {
+                    if (!selected) MobileHaptics.tick(hapticView)
+                    onClick()
+                }
+            ),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Box(contentAlignment = Alignment.Center) {
+        Box(
+            modifier = Modifier.width(56.dp).height(30.dp),
+            contentAlignment = Alignment.Center
+        ) {
             if (selected) {
-                // The selected tab sits on a filled circle, the way WhatsApp marks it.
+                // WhatsApp 2.26's soft horizontal tinted pill behind the active tab icon.
                 Box(
                     Modifier
-                        .size(38.dp)
-                        .background(MaterialTheme.colorScheme.primary, CircleShape)
+                        .fillMaxSize()
+                        .background(MaterialTheme.colorScheme.primaryContainer, RoundedCornerShape(50))
                 )
             }
             Icon(
                 icon,
                 contentDescription = label,
                 tint = if (selected) {
-                    MaterialTheme.colorScheme.onPrimary
+                    MaterialTheme.colorScheme.onPrimaryContainer
                 } else {
                     MaterialTheme.colorScheme.onSurfaceVariant
                 },
@@ -477,13 +496,16 @@ private fun RowScope.NavItem(
         AnimatedVisibility(visible = !compact) {
             Text(
                 text = label,
-                style = MaterialTheme.typography.labelSmall,
+                style = MaterialTheme.typography.labelSmall.copy(
+                    fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium
+                ),
                 color = if (selected) {
                     MaterialTheme.colorScheme.onSurface
                 } else {
                     MaterialTheme.colorScheme.onSurfaceVariant
                 },
-                maxLines = 1
+                maxLines = 1,
+                modifier = Modifier.padding(top = 2.dp)
             )
         }
     }

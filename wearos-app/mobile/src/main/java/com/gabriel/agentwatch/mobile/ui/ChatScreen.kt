@@ -11,6 +11,7 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.ime
@@ -169,7 +170,7 @@ fun ChatScreen(
     var chosen by remember { mutableStateOf<String?>(null) }
     var menuOpen by remember { mutableStateOf(false) }
     var detailsOpen by remember { mutableStateOf(false) }
-    val haptics = LocalHapticFeedback.current
+    val hapticView = rememberHapticView()
 
     val prompt = agent.prompt
     val locked = busy || isAwaitingUpdate(agent, sent)
@@ -211,9 +212,7 @@ fun ChatScreen(
 
     fun answer(option: PromptOption, waiting: PendingPrompt) {
         val seq = agent.state_change_seq
-        haptics.performHapticFeedback(
-            if (option.role == "deny") HapticFeedbackType.Reject else HapticFeedbackType.Confirm
-        )
+        if (option.role == "deny") MobileHaptics.reject(hapticView) else MobileHaptics.confirm(hapticView)
         run(
             block = { RelayRepository.answer(agent.key, option.id, seq, waiting.fingerprint) },
             report = { answerError = it }
@@ -225,7 +224,7 @@ fun ChatScreen(
 
     fun cancelPrompt(waiting: PendingPrompt) {
         val seq = agent.state_change_seq
-        haptics.performHapticFeedback(HapticFeedbackType.Reject)
+        MobileHaptics.reject(hapticView)
         run(
             block = { RelayRepository.cancel(agent.key, seq, waiting.fingerprint) },
             report = { answerError = it }
@@ -242,7 +241,7 @@ fun ChatScreen(
             sendError = emptyReply
             return
         }
-        haptics.performHapticFeedback(HapticFeedbackType.KeyboardTap)
+        MobileHaptics.send(hapticView)
         run(
             block = { RelayRepository.prompt(agent.key, text, agent.state_change_seq) },
             report = { sendError = it }
@@ -275,12 +274,15 @@ fun ChatScreen(
                 enter = scaleIn() + fadeIn(),
                 exit = scaleOut() + fadeOut()
             ) {
-                Box {
+                val latestInteraction = remember { MutableInteractionSource() }
+                Box(modifier = Modifier.pressScale(latestInteraction, 0.88f)) {
                     Surface(
                         onClick = {
+                            MobileHaptics.tick(hapticView)
                             unseenWhileUp = 0
                             scope.launch { listState.animateScrollToItem(listState.layoutInfo.totalItemsCount - 1) }
                         },
+                        interactionSource = latestInteraction,
                         modifier = Modifier.size(40.dp),
                         shape = CircleShape,
                         color = MaterialTheme.colorScheme.surfaceContainerHigh,
@@ -318,16 +320,25 @@ fun ChatScreen(
         topBar = {
             TopAppBar(
                 title = {
+                    val profileInteraction = remember { MutableInteractionSource() }
                     Row(
                         modifier = Modifier
+                            .offset(x = (-8).dp)
+                            .pressScale(profileInteraction, 0.96f)
                             .clip(RoundedCornerShape(8.dp))
-                            .clickable { detailsOpen = true }
+                            .clickable(
+                                interactionSource = profileInteraction,
+                                indication = null
+                            ) {
+                                MobileHaptics.tick(hapticView)
+                                detailsOpen = true
+                            }
                             .padding(vertical = 4.dp, horizontal = 4.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         AgentAvatar(
                             agent,
-                            size = 34.dp,
+                            size = 36.dp,
                             modifier = sharedFace(agent.key.token, sharedScope, visibilityScope)
                         )
                         Spacer(Modifier.width(10.dp))
@@ -637,29 +648,49 @@ private fun TurnRow(item: HistoryItem) {
 
 @Composable
 private fun QueryBubble(text: String, askedAt: String?) {
+    val stamp = chatStampText(chatStamp(askedAt.orEmpty(), Instant.now()))
+    val compact = text.length <= 28 && !text.contains('\n')
     Bubble(mine = true, container = MaterialTheme.colorScheme.primaryContainer) {
-        Text(text, style = MaterialTheme.typography.bodyLarge)
-        val stamp = chatStampText(chatStamp(askedAt.orEmpty(), Instant.now()))
-        Row(
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.align(Alignment.End)
-        ) {
-            if (stamp.isNotEmpty()) {
-                Text(
-                    text = stamp,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f)
-                )
+        if (compact) {
+            Row(
+                verticalAlignment = Alignment.Bottom,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Text(text, style = MaterialTheme.typography.bodyLarge)
+                QueryStamp(stamp, read = true)
             }
-            // The turn arrived in history: the agent processed it (WhatsApp's read double-tick).
-            Icon(
-                Icons.Filled.DoneAll,
-                contentDescription = stringResource(R.string.chat_sent),
-                modifier = Modifier.size(15.dp),
-                tint = MaterialTheme.colorScheme.primary
+        } else {
+            Text(text, style = MaterialTheme.typography.bodyLarge)
+            Box(Modifier.align(Alignment.End)) {
+                QueryStamp(stamp, read = true)
+            }
+        }
+    }
+}
+
+@Composable
+private fun QueryStamp(stamp: String, read: Boolean) {
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(3.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        if (stamp.isNotEmpty()) {
+            Text(
+                text = stamp,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f)
             )
         }
+        Icon(
+            if (read) Icons.Filled.DoneAll else Icons.Filled.Check,
+            contentDescription = stringResource(R.string.chat_sent),
+            modifier = Modifier.size(15.dp),
+            tint = if (read) {
+                MaterialTheme.colorScheme.primary
+            } else {
+                MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f)
+            }
+        )
     }
 }
 
@@ -718,25 +749,22 @@ private fun AnswerBubble(item: HistoryItem) {
 
 @Composable
 private fun SentBubble(text: String) {
+    val stamp = chatStampText(chatStamp(Instant.now(), Instant.now()))
+    val compact = text.length <= 28 && !text.contains('\n')
     Bubble(mine = true, container = MaterialTheme.colorScheme.primaryContainer) {
-        Text(text, style = MaterialTheme.typography.bodyLarge)
-        Row(
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.align(Alignment.End)
-        ) {
-            Text(
-                text = chatStampText(chatStamp(Instant.now(), Instant.now())),
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f)
-            )
-            // Single gray tick: sent to the relay, waiting for the turn to complete.
-            Icon(
-                Icons.Filled.Check,
-                contentDescription = stringResource(R.string.chat_sent),
-                modifier = Modifier.size(15.dp),
-                tint = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f)
-            )
+        if (compact) {
+            Row(
+                verticalAlignment = Alignment.Bottom,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Text(text, style = MaterialTheme.typography.bodyLarge)
+                QueryStamp(stamp, read = false)
+            }
+        } else {
+            Text(text, style = MaterialTheme.typography.bodyLarge)
+            Box(Modifier.align(Alignment.End)) {
+                QueryStamp(stamp, read = false)
+            }
         }
     }
 }
@@ -882,7 +910,7 @@ private fun Composer(
             verticalAlignment = Alignment.Bottom
         ) {
             Surface(
-                modifier = Modifier.weight(1f),
+                modifier = Modifier.weight(1f).defaultMinSize(minHeight = 48.dp),
                 shape = RoundedCornerShape(26.dp),
                 color = MaterialTheme.colorScheme.surface,
                 shadowElevation = 2.dp
@@ -912,10 +940,14 @@ private fun Composer(
                 )
             }
             Spacer(Modifier.width(6.dp))
+            val sendInteraction = remember { MutableInteractionSource() }
             FilledIconButton(
                 onClick = onSend,
                 enabled = !busy && !waiting && draft.isNotBlank(),
-                modifier = Modifier.size(48.dp)
+                interactionSource = sendInteraction,
+                modifier = Modifier
+                    .size(48.dp)
+                    .pressScale(sendInteraction, 0.86f)
             ) {
                 Icon(
                     Icons.AutoMirrored.Filled.Send,

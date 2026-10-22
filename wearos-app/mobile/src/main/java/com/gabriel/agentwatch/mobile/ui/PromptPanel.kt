@@ -2,6 +2,7 @@ package com.gabriel.agentwatch.mobile.ui
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -20,6 +21,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -106,19 +108,32 @@ private fun PermissionActions(
     val allow = buttons.allow
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         // The positive action sits on the right, and only "allow_once" ever fills it.
+        val denyInteraction = remember { MutableInteractionSource() }
         if (deny != null) {
             OutlinedButton(
                 onClick = { onOption(deny) },
                 enabled = !locked,
-                modifier = Modifier.weight(1f)
+                interactionSource = denyInteraction,
+                modifier = Modifier.weight(1f).pressScale(denyInteraction, 0.94f)
             ) { Text(deny.label.ifBlank { stringResource(R.string.deny) }) }
         } else {
-            OutlinedButton(onClick = onCancel, enabled = !locked, modifier = Modifier.weight(1f)) {
+            OutlinedButton(
+                onClick = onCancel,
+                enabled = !locked,
+                interactionSource = denyInteraction,
+                modifier = Modifier.weight(1f).pressScale(denyInteraction, 0.94f)
+            ) {
                 Text(stringResource(R.string.cancel_prompt))
             }
         }
         allow?.let {
-            Button(onClick = { onOption(it) }, enabled = !locked, modifier = Modifier.weight(1f)) {
+            val allowInteraction = remember { MutableInteractionSource() }
+            Button(
+                onClick = { onOption(it) },
+                enabled = !locked,
+                interactionSource = allowInteraction,
+                modifier = Modifier.weight(1f).pressScale(allowInteraction, 0.94f)
+            ) {
                 Text(it.label.ifBlank { stringResource(R.string.allow) })
             }
         }
@@ -132,10 +147,12 @@ private fun PermissionActions(
             style = MaterialTheme.typography.labelMedium
         )
         more.forEach { option ->
+            val optInteraction = remember(option.id) { MutableInteractionSource() }
             FilledTonalButton(
                 onClick = { onOption(option) },
                 enabled = !locked,
-                modifier = Modifier.fillMaxWidth()
+                interactionSource = optInteraction,
+                modifier = Modifier.fillMaxWidth().pressScale(optInteraction, 0.96f)
             ) {
                 Column(horizontalAlignment = Alignment.Start, modifier = Modifier.fillMaxWidth()) {
                     Text(option.label)
@@ -152,6 +169,7 @@ private fun PermissionActions(
 private fun QuestionActions(prompt: PendingPrompt, locked: Boolean, onOption: (PromptOption) -> Unit) {
     // A question's options are its answers; Cancel is never offered for one.
     prompt.options.forEach { option ->
+        val optInteraction = remember(option.id) { MutableInteractionSource() }
         val content: @Composable () -> Unit = {
             Column(horizontalAlignment = Alignment.Start, modifier = Modifier.fillMaxWidth()) {
                 Text(option.label)
@@ -164,13 +182,15 @@ private fun QuestionActions(prompt: PendingPrompt, locked: Boolean, onOption: (P
             OutlinedButton(
                 onClick = { onOption(option) },
                 enabled = !locked,
-                modifier = Modifier.fillMaxWidth()
+                interactionSource = optInteraction,
+                modifier = Modifier.fillMaxWidth().pressScale(optInteraction, 0.96f)
             ) { content() }
         } else {
             FilledTonalButton(
                 onClick = { onOption(option) },
                 enabled = !locked,
-                modifier = Modifier.fillMaxWidth()
+                interactionSource = optInteraction,
+                modifier = Modifier.fillMaxWidth().pressScale(optInteraction, 0.96f)
             ) { content() }
         }
     }
@@ -199,5 +219,11 @@ private fun UnknownPromptActions(prompt: PendingPrompt, locked: Boolean, onCance
         color = MaterialTheme.colorScheme.onSurfaceVariant,
         style = MaterialTheme.typography.bodySmall
     )
-    OutlinedButton(onClick = onCancel, enabled = !locked) { Text(stringResource(R.string.cancel_prompt)) }
+    val cancelInteraction = remember { MutableInteractionSource() }
+    OutlinedButton(
+        onClick = onCancel,
+        enabled = !locked,
+        interactionSource = cancelInteraction,
+        modifier = Modifier.pressScale(cancelInteraction, 0.94f)
+    ) { Text(stringResource(R.string.cancel_prompt)) }
 }
