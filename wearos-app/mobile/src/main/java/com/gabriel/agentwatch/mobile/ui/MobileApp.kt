@@ -2,6 +2,7 @@ package com.gabriel.agentwatch.mobile.ui
 
 import androidx.activity.compose.PredictiveBackHandler
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.ExperimentalAnimationApi
 import androidx.compose.animation.SharedTransitionLayout
 import androidx.compose.animation.fadeIn
@@ -28,7 +29,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.filled.Computer
 import androidx.compose.material.icons.filled.Settings
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -46,7 +46,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
@@ -66,6 +70,7 @@ import com.gabriel.agentwatch.network.AuthState
 import com.gabriel.agentwatch.network.RelayRepository
 import com.gabriel.agentwatch.ui.logic.listStatus
 import com.gabriel.agentwatch.update.UpdateManager
+import com.gabriel.agentwatch.update.UpdatePhase
 
 /**
  * The app's screens: a bottom navigation with the four places the phone goes (chats, machines,
@@ -168,6 +173,26 @@ fun MobileApp(
         MobileNotifications.dismissStale(context, AgentsUpdate.All(state.agents))
     }
 
+    // WhatsApp's dynamic shrinking floating bar: scrolling down the list compacts the bottom bar
+    // (hiding labels), scrolling up expands it again.
+    var barCompact by remember { mutableStateOf(false) }
+    LaunchedEffect(route) { barCompact = false }
+    val barScroll = remember {
+        object : NestedScrollConnection {
+            override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
+                if (source == NestedScrollSource.UserInput) {
+                    if (available.y < -12f) barCompact = true
+                    else if (available.y > 12f) barCompact = false
+                }
+                return Offset.Zero
+            }
+        }
+    }
+
+    val hasUpdate = update.phase == UpdatePhase.AVAILABLE ||
+        update.phase == UpdatePhase.READY ||
+        update.phase == UpdatePhase.NEEDS_PERMISSION
+
     Scaffold(
         // The screens below handle their own insets (the chat list's title, the chat's bar); adding
         // them here as well would push everything down twice.
@@ -177,6 +202,8 @@ fun MobileApp(
                 PhoneNavigationBar(
                     current = route,
                     waiting = state.agents.count { it.needsAnswer() },
+                    hasUpdate = hasUpdate,
+                    compact = barCompact,
                     onSelect = { route = it }
                 )
             }
@@ -186,6 +213,7 @@ fun MobileApp(
             Modifier
                 .fillMaxSize()
                 .padding(padding)
+                .nestedScroll(barScroll)
                 .graphicsLayer {
                     val back = backProgress.coerceIn(0f, 1f)
                     alpha = 1f - 0.25f * back
@@ -341,16 +369,22 @@ private fun WaitingBadge(count: Int, modifier: Modifier = Modifier) {
     }
 }
 
-/** The bottom navigation: the four places the phone goes (docs/phases/7-android-ux.md § 2). */
+/** The bottom navigation: the three places the phone goes (docs/phases/7-android-ux.md § 2). */
 @Composable
-private fun PhoneNavigationBar(current: String, waiting: Int, onSelect: (String) -> Unit) {
-    // A floating, rounded bar with the selected tab on a pill: the bar WhatsApp's Android app
-    // uses now, and it keeps the content clear of the system bar.
+private fun PhoneNavigationBar(
+    current: String,
+    waiting: Int,
+    hasUpdate: Boolean,
+    compact: Boolean,
+    onSelect: (String) -> Unit
+) {
+    // A floating, rounded bar with the selected tab on a filled circle: the bar WhatsApp's Android
+    // app uses now, shrinking into a compact pill on scroll down.
     Surface(
         modifier = Modifier
             .fillMaxWidth()
             .navigationBarsPadding()
-            .padding(horizontal = 10.dp, vertical = 8.dp),
+            .padding(horizontal = if (compact) 36.dp else 10.dp, vertical = 8.dp),
         shape = RoundedCornerShape(30.dp),
         color = MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.96f),
         tonalElevation = 3.dp,
@@ -369,6 +403,8 @@ private fun PhoneNavigationBar(current: String, waiting: Int, onSelect: (String)
                 icon = Icons.AutoMirrored.Filled.Chat,
                 label = stringResource(R.string.tab_chats),
                 badge = waiting,
+                dot = false,
+                compact = compact,
                 onClick = { onSelect(Routes.CHATS) }
             )
             NavItem(
@@ -376,6 +412,8 @@ private fun PhoneNavigationBar(current: String, waiting: Int, onSelect: (String)
                 icon = Icons.Filled.Computer,
                 label = stringResource(R.string.tab_machines),
                 badge = 0,
+                dot = false,
+                compact = compact,
                 onClick = { onSelect(Routes.MACHINES) }
             )
             NavItem(
@@ -383,19 +421,23 @@ private fun PhoneNavigationBar(current: String, waiting: Int, onSelect: (String)
                 icon = Icons.Filled.Settings,
                 label = stringResource(R.string.tab_settings),
                 badge = 0,
+                dot = hasUpdate,
+                compact = compact,
                 onClick = { onSelect(Routes.SETTINGS) }
             )
         }
     }
 }
 
-/** One tab of the floating bar: the icon on a pill when it is the current one, and its name. */
+/** One tab of the floating bar: the icon on a circle when it is the current one, and its name. */
 @Composable
 private fun RowScope.NavItem(
     selected: Boolean,
     icon: ImageVector,
     label: String,
     badge: Int,
+    dot: Boolean,
+    compact: Boolean,
     onClick: () -> Unit
 ) {
     Column(
@@ -413,7 +455,7 @@ private fun RowScope.NavItem(
             }
             Icon(
                 icon,
-                contentDescription = null,
+                contentDescription = label,
                 tint = if (selected) {
                     MaterialTheme.colorScheme.onPrimary
                 } else {
@@ -423,17 +465,26 @@ private fun RowScope.NavItem(
             )
             if (badge > 0) {
                 WaitingBadge(badge, Modifier.align(Alignment.TopEnd))
+            } else if (dot) {
+                Box(
+                    Modifier
+                        .align(Alignment.TopEnd)
+                        .size(10.dp)
+                        .background(MaterialTheme.colorScheme.primary, CircleShape)
+                )
             }
         }
-        Text(
-            text = label,
-            style = MaterialTheme.typography.labelSmall,
-            color = if (selected) {
-                MaterialTheme.colorScheme.onSurface
-            } else {
-                MaterialTheme.colorScheme.onSurfaceVariant
-            },
-            maxLines = 1
-        )
+        AnimatedVisibility(visible = !compact) {
+            Text(
+                text = label,
+                style = MaterialTheme.typography.labelSmall,
+                color = if (selected) {
+                    MaterialTheme.colorScheme.onSurface
+                } else {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                },
+                maxLines = 1
+            )
+        }
     }
 }

@@ -14,10 +14,11 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Archive
-import androidx.compose.material.icons.filled.Chat
 import androidx.compose.material.icons.filled.Computer
 import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.Notifications
@@ -32,6 +33,7 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -82,7 +84,7 @@ fun SettingsScreen(
     Scaffold { padding ->
         LazyColumn(
             modifier = Modifier.fillMaxSize().padding(padding),
-            contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 32.dp)
+            contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 88.dp)
         ) {
             item(key = "title") { BigTitle(stringResource(R.string.settings_title)) }
 
@@ -101,136 +103,134 @@ fun SettingsScreen(
                 update.phase == com.gabriel.agentwatch.update.UpdatePhase.UP_TO_DATE
             ) {
                 item(key = "check") {
-                    SettingsRow(
-                        icon = Icons.Filled.SystemUpdate,
-                        title = stringResource(R.string.settings_check_updates),
-                        subtitle = stringResource(R.string.settings_version, com.gabriel.agentwatch.mobile.BuildConfig.VERSION_NAME),
-                        onClick = onCheckUpdates
-                    )
+                    SettingsCard {
+                        SettingsRow(
+                            icon = Icons.Filled.SystemUpdate,
+                            title = stringResource(R.string.settings_check_updates),
+                            subtitle = stringResource(R.string.settings_version, com.gabriel.agentwatch.mobile.BuildConfig.VERSION_NAME),
+                            onClick = onCheckUpdates
+                        )
+                    }
                 }
             }
 
             item { SectionTitle(stringResource(R.string.settings_account)) }
             item {
-                SettingsRow(
-                    icon = Icons.Filled.Wifi,
-                    title = stringResource(R.string.settings_relay),
-                    subtitle = prefs.relayUrl
-                )
-            }
-            item {
-                SettingsRow(
-                    icon = Icons.Filled.PhoneAndroid,
-                    title = stringResource(R.string.settings_device),
-                    subtitle = prefs.deviceId.orEmpty()
-                )
-            }
-            item {
-                SettingsRow(
-                    icon = Icons.Filled.Computer,
-                    title = stringResource(R.string.settings_machines),
-                    subtitle = stringResource(R.string.settings_machines_hint, state.hosts.size)
-                )
+                SettingsCard {
+                    SettingsRow(
+                        icon = Icons.Filled.Wifi,
+                        title = stringResource(R.string.settings_relay),
+                        subtitle = prefs.relayUrl
+                    )
+                    SettingsRow(
+                        icon = Icons.Filled.PhoneAndroid,
+                        title = stringResource(R.string.settings_device),
+                        subtitle = prefs.deviceId.orEmpty()
+                    )
+                    SettingsRow(
+                        icon = Icons.Filled.Computer,
+                        title = stringResource(R.string.settings_machines),
+                        subtitle = stringResource(R.string.settings_machines_hint, state.hosts.size)
+                    )
+                }
             }
 
             item { SectionTitle(stringResource(R.string.settings_appearance)) }
             item {
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    FilterChip(
-                        selected = themePrefs.themeMode == ThemePrefs.MODE_SYSTEM,
-                        onClick = { themePrefs.themeMode = ThemePrefs.MODE_SYSTEM },
-                        label = { Text(stringResource(R.string.settings_theme_system)) }
-                    )
-                    FilterChip(
-                        selected = themePrefs.themeMode == ThemePrefs.MODE_LIGHT,
-                        onClick = { themePrefs.themeMode = ThemePrefs.MODE_LIGHT },
-                        label = { Text(stringResource(R.string.settings_theme_light)) }
-                    )
-                    FilterChip(
-                        selected = themePrefs.themeMode == ThemePrefs.MODE_DARK,
-                        onClick = { themePrefs.themeMode = ThemePrefs.MODE_DARK },
-                        label = { Text(stringResource(R.string.settings_theme_dark)) }
-                    )
-                }
-            }
-            item {
-                SettingsRow(
-                    icon = Icons.Filled.DarkMode,
-                    title = stringResource(R.string.settings_dynamic_color),
-                    subtitle = stringResource(R.string.settings_dynamic_color_hint),
-                    trailing = {
-                        Switch(
-                            checked = themePrefs.dynamicColor,
-                            onCheckedChange = { themePrefs.dynamicColor = it }
+                SettingsCard {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        FilterChip(
+                            selected = themePrefs.themeMode == ThemePrefs.MODE_SYSTEM,
+                            onClick = { themePrefs.themeMode = ThemePrefs.MODE_SYSTEM },
+                            label = { Text(stringResource(R.string.settings_theme_system)) }
+                        )
+                        FilterChip(
+                            selected = themePrefs.themeMode == ThemePrefs.MODE_LIGHT,
+                            onClick = { themePrefs.themeMode = ThemePrefs.MODE_LIGHT },
+                            label = { Text(stringResource(R.string.settings_theme_light)) }
+                        )
+                        FilterChip(
+                            selected = themePrefs.themeMode == ThemePrefs.MODE_DARK,
+                            onClick = { themePrefs.themeMode = ThemePrefs.MODE_DARK },
+                            label = { Text(stringResource(R.string.settings_theme_dark)) }
                         )
                     }
-                )
+                    SettingsRow(
+                        icon = Icons.Filled.DarkMode,
+                        title = stringResource(R.string.settings_dynamic_color),
+                        subtitle = stringResource(R.string.settings_dynamic_color_hint),
+                        trailing = {
+                            Switch(
+                                checked = themePrefs.dynamicColor,
+                                onCheckedChange = { themePrefs.dynamicColor = it }
+                            )
+                        }
+                    )
+                }
             }
 
             item { SectionTitle(stringResource(R.string.settings_notifications)) }
             item {
-                SettingsRow(
-                    icon = Icons.Filled.Notifications,
-                    title = stringResource(R.string.settings_muted),
-                    subtitle = chatStore.mutedCount().toString()
-                )
-            }
-            chatStore.muted().forEach { token ->
-                item(key = "muted-$token") {
+                val muted = chatStore.muted()
+                val hidden = chatStore.hidden()
+                SettingsCard {
                     SettingsRow(
-                        icon = Icons.Filled.NotificationsOff,
-                        title = chatStore.label(token),
-                        trailing = {
-                            TextButton(onClick = { chatStore.unmute(token) }) {
-                                Text(stringResource(R.string.settings_unmute))
-                            }
-                        }
+                        icon = Icons.Filled.Notifications,
+                        title = stringResource(R.string.settings_muted),
+                        subtitle = chatStore.mutedCount().toString()
                     )
-                }
-            }
-            item {
-                SettingsRow(
-                    icon = Icons.Filled.Archive,
-                    title = stringResource(R.string.settings_hidden),
-                    subtitle = chatStore.hidden().size.toString()
-                )
-            }
-            chatStore.hidden().forEach { token ->
-                item(key = "hidden-$token") {
+                    muted.forEach { token ->
+                        SettingsRow(
+                            icon = Icons.Filled.NotificationsOff,
+                            title = chatStore.label(token),
+                            trailing = {
+                                TextButton(onClick = { chatStore.unmute(token) }) {
+                                    Text(stringResource(R.string.settings_unmute))
+                                }
+                            }
+                        )
+                    }
                     SettingsRow(
-                        icon = Icons.Filled.Chat,
-                        title = chatStore.label(token),
-                        trailing = {
-                            TextButton(onClick = { chatStore.unhide(token) }) {
-                                Text(stringResource(R.string.settings_restore))
-                            }
-                        }
+                        icon = Icons.Filled.Archive,
+                        title = stringResource(R.string.settings_hidden),
+                        subtitle = hidden.size.toString()
                     )
+                    hidden.forEach { token ->
+                        SettingsRow(
+                            icon = Icons.AutoMirrored.Filled.Chat,
+                            title = chatStore.label(token),
+                            trailing = {
+                                TextButton(onClick = { chatStore.unhide(token) }) {
+                                    Text(stringResource(R.string.settings_restore))
+                                }
+                            }
+                        )
+                    }
                 }
             }
 
             item { SectionTitle(stringResource(R.string.settings_data)) }
             item {
-                SettingsRow(
-                    icon = Icons.Filled.Storage,
-                    title = stringResource(R.string.settings_connection),
-                    subtitle = if (state.stale) {
-                        stringResource(R.string.notice_connecting)
-                    } else {
-                        stringResource(R.string.settings_connected)
-                    }
-                )
-            }
-            item {
-                SettingsRow(
-                    icon = Icons.Filled.Person,
-                    title = stringResource(R.string.settings_forget),
-                    subtitle = stringResource(R.string.settings_forget_hint),
-                    onClick = { confirmForget = true }
-                )
+                SettingsCard {
+                    SettingsRow(
+                        icon = Icons.Filled.Storage,
+                        title = stringResource(R.string.settings_connection),
+                        subtitle = if (state.stale) {
+                            stringResource(R.string.notice_connecting)
+                        } else {
+                            stringResource(R.string.settings_connected)
+                        }
+                    )
+                    SettingsRow(
+                        icon = Icons.Filled.Person,
+                        title = stringResource(R.string.settings_forget),
+                        subtitle = stringResource(R.string.settings_forget_hint),
+                        onClick = { confirmForget = true }
+                    )
+                }
             }
         }
     }
@@ -262,8 +262,20 @@ fun SectionTitle(text: String) {
         text = text,
         style = MaterialTheme.typography.titleSmall,
         color = MaterialTheme.colorScheme.primary,
-        modifier = Modifier.padding(start = 16.dp, top = 18.dp, end = 16.dp, bottom = 4.dp)
+        modifier = Modifier.padding(start = 24.dp, top = 16.dp, end = 16.dp, bottom = 6.dp)
     )
+}
+
+/** A rounded surface container grouping related settings rows. */
+@Composable
+private fun SettingsCard(content: @Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit) {
+    Surface(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 2.dp),
+        shape = RoundedCornerShape(20.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerLow
+    ) {
+        Column(modifier = Modifier.padding(vertical = 4.dp), content = content)
+    }
 }
 
 /** A settings row: an icon, the name, a hint under it, and a chevron when it opens something. */

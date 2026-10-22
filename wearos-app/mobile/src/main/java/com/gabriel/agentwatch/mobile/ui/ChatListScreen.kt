@@ -474,43 +474,32 @@ private fun ChatRow(
                     }
                 )
                 .combinedClickable(onClick = onClick, onLongClick = onLongClick)
-                .padding(start = 16.dp, end = 16.dp, top = 10.dp, bottom = 10.dp),
+                .padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            AgentAvatar(agent, modifier = sharedFace(agent.key.token, sharedScope, visibilityScope))
+            AgentAvatar(
+                agent,
+                size = 50.dp,
+                modifier = sharedFace(agent.key.token, sharedScope, visibilityScope)
+                    .clickable(onClick = onLongClick)
+            )
             Spacer(Modifier.width(14.dp))
-            Column(Modifier.weight(1f)) {
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
                         text = agent.label.ifBlank { agent.agent },
                         style = MaterialTheme.typography.titleMedium,
-                        fontWeight = if (unread > 0) FontWeight.Bold else FontWeight.Normal,
+                        fontWeight = if (unread > 0 || changed) FontWeight.SemiBold else FontWeight.Normal,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.weight(1f)
                     )
-                    if (muted) {
-                        Icon(
-                            Icons.Filled.NotificationsOff,
-                            contentDescription = stringResource(R.string.chat_muted),
-                            modifier = Modifier.size(14.dp),
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Spacer(Modifier.width(4.dp))
-                    }
-                    if (pinned) {
-                        Icon(
-                            Icons.Filled.PushPin,
-                            contentDescription = stringResource(R.string.chat_pinned),
-                            modifier = Modifier.size(14.dp),
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
                     Spacer(Modifier.width(8.dp))
                     Text(
                         text = time,
                         style = MaterialTheme.typography.labelSmall,
-                        color = if (changed) {
+                        fontWeight = if (unread > 0 || changed) FontWeight.SemiBold else FontWeight.Normal,
+                        color = if (unread > 0 || changed) {
                             MaterialTheme.colorScheme.primary
                         } else {
                             MaterialTheme.colorScheme.onSurfaceVariant
@@ -518,16 +507,51 @@ private fun ChatRow(
                     )
                 }
                 Row(verticalAlignment = Alignment.CenterVertically) {
+                    val pendingSent = ChatOutbox.pending(agent.key).let { sent ->
+                        unmatchedPending(history, sent).lastOrNull()
+                    }
+                    if (agent.prompt == null && pendingSent != null) {
+                        Icon(
+                            Icons.Filled.Done,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Spacer(Modifier.width(4.dp))
+                    }
                     Text(
                         text = preview,
                         style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        fontWeight = if (unread > 0) FontWeight.Medium else FontWeight.Normal,
+                        color = if (unread > 0) {
+                            MaterialTheme.colorScheme.onSurface
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        },
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.weight(1f)
                     )
+                    if (muted) {
+                        Spacer(Modifier.width(6.dp))
+                        Icon(
+                            Icons.Filled.NotificationsOff,
+                            contentDescription = stringResource(R.string.chat_muted),
+                            modifier = Modifier.size(16.dp),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    if (pinned) {
+                        Spacer(Modifier.width(6.dp))
+                        Icon(
+                            Icons.Filled.PushPin,
+                            contentDescription = stringResource(R.string.chat_pinned),
+                            modifier = Modifier.size(16.dp),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
                     if (unread > 0) {
-                        Spacer(Modifier.width(8.dp))
+                        Spacer(Modifier.width(6.dp))
                         UnreadBadge(unread)
                     }
                 }
@@ -566,10 +590,6 @@ private fun ChatRow(
             }
         }
     }
-    HorizontalDivider(
-        modifier = Modifier.padding(start = 78.dp, end = 16.dp),
-        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
-    )
 }
 
 /** The badge with the number of unread turns, a messaging app's count instead of a dot. */
