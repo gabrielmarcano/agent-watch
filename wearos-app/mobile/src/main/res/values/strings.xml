@@ -74,6 +74,8 @@
     <string name="chat_details">Agent details</string>
     <string name="chat_read_more">Read more</string>
     <string name="chat_read_less">Read less</string>
+    <string name="chat_copy">Copy</string>
+    <string name="chat_copied">Copied</string>
     <string name="chat_latest">Go to the latest</string>
     <string name="chat_details_none">Nothing more to show</string>
     <string name="prompt_chosen">Chosen: %1$s</string>

@@ -1,6 +1,11 @@
 package com.gabriel.agentwatch.mobile.ui
 
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -11,12 +16,28 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
@@ -29,6 +50,7 @@ import androidx.compose.ui.unit.dp
 import com.gabriel.agentwatch.mobile.R
 import com.gabriel.agentwatch.util.MdBlock
 import com.gabriel.agentwatch.util.MdSpan
+import kotlinx.coroutines.delay
 
 /**
  * One answer, as the blocks `:core` produced ([com.gabriel.agentwatch.util.readerBlocks]): markdown
@@ -70,14 +92,7 @@ private fun MarkdownBlock(block: MdBlock) {
             Spacer(Modifier.width(8.dp))
             Text(spansToAnnotated(block.spans), style = body)
         }
-        is MdBlock.Code -> Text(
-            text = block.text,
-            modifier = Modifier
-                .fillMaxWidth()
-                .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(8.dp))
-                .padding(horizontal = 12.dp, vertical = 8.dp),
-            style = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace),
-        )
+        is MdBlock.Code -> CodeBlock(block.text)
         is MdBlock.Quote -> Row(Modifier.height(IntrinsicSize.Min)) {
             Box(Modifier.width(3.dp).fillMaxHeight().background(MaterialTheme.colorScheme.outlineVariant))
             Spacer(Modifier.width(10.dp))
@@ -108,6 +123,67 @@ private fun MarkdownBlock(block: MdBlock) {
                     )
                 }
             }
+        }
+    }
+}
+
+/** A fenced code block: horizontal scroll so lines never wrap, and a one-tap copy button. */
+@Composable
+private fun CodeBlock(text: String) {
+    val context = LocalContext.current
+    val haptics = LocalHapticFeedback.current
+    var copied by remember(text) { mutableStateOf(false) }
+
+    LaunchedEffect(copied) {
+        if (copied) {
+            delay(1800)
+            copied = false
+        }
+    }
+
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(10.dp))
+            .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.6f))
+                .clickable {
+                    val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+                    cm?.setPrimaryClip(ClipData.newPlainText("code", text))
+                    haptics.performHapticFeedback(HapticFeedbackType.KeyboardTap)
+                    copied = true
+                }
+                .padding(horizontal = 12.dp, vertical = 5.dp),
+            horizontalArrangement = Arrangement.End,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                imageVector = if (copied) Icons.Filled.Check else Icons.Filled.ContentCopy,
+                contentDescription = null,
+                modifier = Modifier.size(13.dp),
+                tint = if (copied) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(Modifier.width(5.dp))
+            Text(
+                text = stringResource(if (copied) R.string.chat_copied else R.string.chat_copy),
+                style = MaterialTheme.typography.labelSmall,
+                color = if (copied) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState())
+                .padding(horizontal = 12.dp, vertical = 8.dp)
+        ) {
+            Text(
+                text = text,
+                style = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace)
+            )
         }
     }
 }

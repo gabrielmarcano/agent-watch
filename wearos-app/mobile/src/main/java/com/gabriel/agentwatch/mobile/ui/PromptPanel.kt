@@ -1,23 +1,36 @@
 package com.gabriel.agentwatch.mobile.ui
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.gabriel.agentwatch.approval.morePermissionOptions
 import com.gabriel.agentwatch.approval.permissionButtons
 import com.gabriel.agentwatch.mobile.R
+import com.gabriel.agentwatch.mobile.ui.theme.warningAccent
 import com.gabriel.agentwatch.model.PendingPrompt
 import com.gabriel.agentwatch.model.PromptOption
 import com.gabriel.agentwatch.ui.logic.tailPreview
@@ -37,23 +50,41 @@ fun PromptPanel(
     onOption: (PromptOption) -> Unit,
     onCancel: () -> Unit
 ) {
+    val accent = warningAccent()
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text(
-            text = stringResource(
-                when (prompt.kind) {
-                    "permission" -> R.string.prompt_permission
-                    "question" -> R.string.prompt_question
-                    else -> R.string.prompt_unknown
-                }
-            ),
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            style = MaterialTheme.typography.labelLarge
-        )
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                Modifier
+                    .size(8.dp)
+                    .background(accent, CircleShape)
+            )
+            Spacer(Modifier.width(6.dp))
+            Text(
+                text = stringResource(
+                    when (prompt.kind) {
+                        "permission" -> R.string.prompt_permission
+                        "question" -> R.string.prompt_question
+                        else -> R.string.prompt_unknown
+                    }
+                ),
+                color = accent,
+                style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold)
+            )
+        }
         if (prompt.title.isNotBlank()) {
             Text(prompt.title, style = MaterialTheme.typography.titleMedium)
         }
         prompt.detail?.takeIf { it.isNotBlank() }?.let {
-            Text(it, fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall)
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+                    .horizontalScroll(rememberScrollState())
+                    .padding(horizontal = 10.dp, vertical = 6.dp)
+            ) {
+                Text(it, fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall)
+            }
         }
         when (prompt.kind) {
             "permission" -> PermissionActions(prompt, locked, onOption, onCancel)
@@ -101,15 +132,15 @@ private fun PermissionActions(
             style = MaterialTheme.typography.labelMedium
         )
         more.forEach { option ->
-            OutlinedButton(
+            FilledTonalButton(
                 onClick = { onOption(option) },
                 enabled = !locked,
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Column(horizontalAlignment = Alignment.Start) {
+                Column(horizontalAlignment = Alignment.Start, modifier = Modifier.fillMaxWidth()) {
                     Text(option.label)
                     option.description?.takeIf { it.isNotBlank() }?.let {
-                        Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.8f))
                     }
                 }
             }
@@ -122,7 +153,7 @@ private fun QuestionActions(prompt: PendingPrompt, locked: Boolean, onOption: (P
     // A question's options are its answers; Cancel is never offered for one.
     prompt.options.forEach { option ->
         val content: @Composable () -> Unit = {
-            Column(horizontalAlignment = Alignment.Start) {
+            Column(horizontalAlignment = Alignment.Start, modifier = Modifier.fillMaxWidth()) {
                 Text(option.label)
                 option.description?.takeIf { it.isNotBlank() }?.let {
                     Text(it, style = MaterialTheme.typography.bodySmall)
@@ -136,7 +167,7 @@ private fun QuestionActions(prompt: PendingPrompt, locked: Boolean, onOption: (P
                 modifier = Modifier.fillMaxWidth()
             ) { content() }
         } else {
-            Button(
+            FilledTonalButton(
                 onClick = { onOption(option) },
                 enabled = !locked,
                 modifier = Modifier.fillMaxWidth()
@@ -148,12 +179,20 @@ private fun QuestionActions(prompt: PendingPrompt, locked: Boolean, onOption: (P
 @Composable
 private fun UnknownPromptActions(prompt: PendingPrompt, locked: Boolean, onCancel: () -> Unit) {
     prompt.raw_tail?.takeIf { it.isNotBlank() }?.let {
-        Text(
-            text = tailPreview(it, SCREEN_TAIL_LINES).text,
-            fontFamily = FontFamily.Monospace,
-            style = MaterialTheme.typography.bodySmall,
-            modifier = Modifier.padding(vertical = 4.dp)
-        )
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(8.dp))
+                .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+                .horizontalScroll(rememberScrollState())
+                .padding(horizontal = 10.dp, vertical = 6.dp)
+        ) {
+            Text(
+                text = tailPreview(it, SCREEN_TAIL_LINES).text,
+                fontFamily = FontFamily.Monospace,
+                style = MaterialTheme.typography.bodySmall
+            )
+        }
     }
     Text(
         stringResource(R.string.answer_on_device),

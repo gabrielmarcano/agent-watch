@@ -1,8 +1,15 @@
 package com.gabriel.agentwatch.mobile.ui
 
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.AnimatedVisibilityScope
 import androidx.compose.animation.SharedTransitionScope
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.WindowInsets
@@ -16,9 +23,11 @@ import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -27,6 +36,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.selection.SelectionContainer
@@ -35,6 +45,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.DoneAll
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.AlertDialog
@@ -251,35 +262,73 @@ fun ChatScreen(
     }
     val info = agentInfoLines(agent)
     val itemCount = entries.size + if (info.isEmpty()) 0 else 1
+    var unseenWhileUp by remember { mutableStateOf(0) }
 
     Scaffold(
         // The canvas is a step below the surface, so the bubbles (the surface) stand out from it.
         containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
         floatingActionButton = {
-            // WhatsApp's arrow: it appears when the owner has scrolled up, and it takes them back
-            // to the latest message.
-            if (listState.canScrollForward) {
-                SmallFloatingActionButton(
-                    onClick = {
-                        scope.launch { listState.animateScrollToItem(listState.layoutInfo.totalItemsCount - 1) }
+            // WhatsApp's floating down-chevron pill: it appears when the owner has scrolled up,
+            // carries a count badge if new turns arrived while up, and takes them to the latest.
+            AnimatedVisibility(
+                visible = listState.canScrollForward,
+                enter = scaleIn() + fadeIn(),
+                exit = scaleOut() + fadeOut()
+            ) {
+                Box {
+                    Surface(
+                        onClick = {
+                            unseenWhileUp = 0
+                            scope.launch { listState.animateScrollToItem(listState.layoutInfo.totalItemsCount - 1) }
+                        },
+                        modifier = Modifier.size(40.dp),
+                        shape = CircleShape,
+                        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                        shadowElevation = 4.dp,
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                Icons.Filled.KeyboardArrowDown,
+                                contentDescription = stringResource(R.string.chat_latest),
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
                     }
-                ) {
-                    Icon(
-                        Icons.Filled.KeyboardArrowDown,
-                        contentDescription = stringResource(R.string.chat_latest)
-                    )
+                    if (unseenWhileUp > 0) {
+                        Box(
+                            modifier = Modifier
+                                .align(Alignment.TopEnd)
+                                .offset(x = 4.dp, y = (-4).dp)
+                                .defaultMinSize(minWidth = 18.dp, minHeight = 18.dp)
+                                .background(MaterialTheme.colorScheme.primary, CircleShape)
+                                .padding(horizontal = 4.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = if (unseenWhileUp > 99) "99+" else unseenWhileUp.toString(),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onPrimary
+                            )
+                        }
+                    }
                 }
             }
         },
         topBar = {
             TopAppBar(
                 title = {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
+                    Row(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(8.dp))
+                            .clickable { detailsOpen = true }
+                            .padding(vertical = 4.dp, horizontal = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
                         AgentAvatar(
                             agent,
-                            size = 32.dp,
+                            size = 34.dp,
                             modifier = sharedFace(agent.key.token, sharedScope, visibilityScope)
-                                .clickable { detailsOpen = true }
                         )
                         Spacer(Modifier.width(10.dp))
                         Column {
@@ -296,7 +345,11 @@ fun ChatScreen(
                                     hostName
                                 ).joinToString(" · "),
                                 style = MaterialTheme.typography.labelSmall,
-                                color = style.accent,
+                                color = if (agent.status == "idle" || agent.status == "done") {
+                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                } else {
+                                    style.accent
+                                },
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
                             )
@@ -382,6 +435,7 @@ fun ChatScreen(
                 answerError = answerError,
                 itemCount = itemCount,
                 modifier = Modifier.fillMaxSize(),
+                onUnseenChange = { unseenWhileUp = it },
                 onOption = { option ->
                     if (option.needsConfirmation()) confirmAlways = option
                     else prompt?.let { answer(option, it) }
@@ -458,6 +512,7 @@ private fun Conversation(
     answerError: String?,
     itemCount: Int,
     modifier: Modifier,
+    onUnseenChange: (Int) -> Unit,
     onOption: (PromptOption) -> Unit,
     onCancel: () -> Unit
 ) {
@@ -468,6 +523,8 @@ private fun Conversation(
     // Whether the owner has scrolled up to read the past. Only their own gesture sets it: the
     // app's scrolls and the history arriving are not theirs.
     var ownerScrolledUp by remember { mutableStateOf(false) }
+    var lastCount by remember { mutableStateOf(itemCount) }
+    var unseen by remember { mutableStateOf(0) }
     val userScroll = remember {
         object : NestedScrollConnection {
             override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
@@ -479,7 +536,11 @@ private fun Conversation(
     // Back at the newest message, the owner follows the conversation again.
     LaunchedEffect(listState) {
         snapshotFlow { listState.isScrollInProgress }.collect { scrolling ->
-            if (!scrolling && !listState.canScrollForward) ownerScrolledUp = false
+            if (!scrolling && !listState.canScrollForward) {
+                ownerScrolledUp = false
+                unseen = 0
+                onUnseenChange(0)
+            }
         }
     }
 
@@ -489,14 +550,24 @@ private fun Conversation(
     // in the middle, and the owner has to scroll down the whole way.
     LaunchedEffect(itemCount) {
         if (itemCount <= 0) return@LaunchedEffect
-        if (!ownerScrolledUp) listState.scrollToItem(itemCount - 1)
+        if (!ownerScrolledUp) {
+            listState.scrollToItem(itemCount - 1)
+            unseen = 0
+            onUnseenChange(0)
+        } else if (itemCount > lastCount) {
+            unseen += (itemCount - lastCount)
+            onUnseenChange(unseen)
+        }
+        lastCount = itemCount
     }
+
+    val warning = statusStyle("blocked")
 
     LazyColumn(
         state = listState,
         modifier = modifier.nestedScroll(userScroll),
         contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
-        verticalArrangement = Arrangement.spacedBy(4.dp)
+        verticalArrangement = Arrangement.spacedBy(6.dp)
     ) {
         if (info.isNotEmpty()) {
             item(key = "info") {
@@ -511,7 +582,11 @@ private fun Conversation(
                     is ChatEntry.Turn -> TurnRow(entry.item)
                     is ChatEntry.Pending -> SentBubble(entry.text)
                     ChatEntry.Prompt -> prompt?.let { waiting ->
-                        Bubble(mine = false, container = MaterialTheme.colorScheme.surfaceVariant) {
+                        Bubble(
+                            mine = false,
+                            container = MaterialTheme.colorScheme.surface,
+                            borderColor = warning.accent.copy(alpha = 0.55f)
+                        ) {
                             PromptPanel(
                                 prompt = waiting,
                                 locked = locked,
@@ -565,12 +640,24 @@ private fun QueryBubble(text: String, askedAt: String?) {
     Bubble(mine = true, container = MaterialTheme.colorScheme.primaryContainer) {
         Text(text, style = MaterialTheme.typography.bodyLarge)
         val stamp = chatStampText(chatStamp(askedAt.orEmpty(), Instant.now()))
-        if (stamp.isNotEmpty()) {
-            Text(
-                text = stamp,
-                modifier = Modifier.align(Alignment.End),
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.align(Alignment.End)
+        ) {
+            if (stamp.isNotEmpty()) {
+                Text(
+                    text = stamp,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f)
+                )
+            }
+            // The turn arrived in history: the agent processed it (WhatsApp's read double-tick).
+            Icon(
+                Icons.Filled.DoneAll,
+                contentDescription = stringResource(R.string.chat_sent),
+                modifier = Modifier.size(15.dp),
+                tint = MaterialTheme.colorScheme.primary
             )
         }
     }
@@ -639,15 +726,16 @@ private fun SentBubble(text: String) {
             modifier = Modifier.align(Alignment.End)
         ) {
             Text(
-                text = stringResource(R.string.chat_sent),
+                text = chatStampText(chatStamp(Instant.now(), Instant.now())),
                 style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
+                color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f)
             )
+            // Single gray tick: sent to the relay, waiting for the turn to complete.
             Icon(
                 Icons.Filled.Check,
                 contentDescription = stringResource(R.string.chat_sent),
-                modifier = Modifier.size(14.dp),
-                tint = MaterialTheme.colorScheme.onSurfaceVariant
+                modifier = Modifier.size(15.dp),
+                tint = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f)
             )
         }
     }
@@ -669,29 +757,40 @@ private fun WorkingBubble(waiting: Boolean) {
 @Composable
 private fun DaySeparator(date: LocalDate) {
     Box(Modifier.fillMaxWidth().padding(vertical = 8.dp), contentAlignment = Alignment.Center) {
-        Text(
-            text = chatDayText(chatDay(date, LocalDate.now())),
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier
-                .background(MaterialTheme.colorScheme.surface, RoundedCornerShape(50))
-                .padding(horizontal = 10.dp, vertical = 3.dp)
-        )
+        Surface(
+            shape = RoundedCornerShape(50),
+            color = MaterialTheme.colorScheme.surface,
+            shadowElevation = 1.dp
+        ) {
+            Text(
+                text = chatDayText(chatDay(date, LocalDate.now())),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)
+            )
+        }
     }
 }
 
 @Composable
 private fun AgentInfo(lines: List<String>) {
-    Column(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
-        verticalArrangement = Arrangement.spacedBy(2.dp)
-    ) {
-        lines.forEach {
-            Text(
-                it,
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
+    Box(Modifier.fillMaxWidth().padding(vertical = 4.dp), contentAlignment = Alignment.Center) {
+        Column(
+            modifier = Modifier
+                .widthIn(max = BUBBLE_MAX_WIDTH)
+                .clip(RoundedCornerShape(12.dp))
+                .background(MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.75f))
+                .padding(horizontal = 14.dp, vertical = 8.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(2.dp)
+        ) {
+            lines.forEach {
+                Text(
+                    it,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
         }
     }
 }
@@ -709,29 +808,35 @@ private fun agentInfoLines(agent: AgentState): List<String> = buildList {
 private fun Bubble(
     mine: Boolean,
     container: Color,
+    borderColor: Color? = null,
     content: @Composable ColumnScope.() -> Unit
 ) {
     Box(
         modifier = Modifier.fillMaxWidth(),
         contentAlignment = if (mine) Alignment.CenterEnd else Alignment.CenterStart
     ) {
+        val shape = bubbleShape(mine)
         Column(
             modifier = Modifier
                 .widthIn(max = BUBBLE_MAX_WIDTH)
-                .clip(bubbleShape(mine))
+                .clip(shape)
                 .background(container)
+                .then(
+                    if (borderColor != null) Modifier.border(1.5.dp, borderColor, shape) else Modifier
+                )
                 .padding(horizontal = 12.dp, vertical = 8.dp),
-            verticalArrangement = Arrangement.spacedBy(4.dp),
+            verticalArrangement = Arrangement.spacedBy(3.dp),
             content = content
         )
     }
 }
 
+// WhatsApp's modern tail-free rounded rectangle geometry.
 private fun bubbleShape(mine: Boolean) = RoundedCornerShape(
-    topStart = 16.dp,
-    topEnd = 16.dp,
-    bottomStart = if (mine) 16.dp else 4.dp,
-    bottomEnd = if (mine) 4.dp else 16.dp
+    topStart = 18.dp,
+    topEnd = 18.dp,
+    bottomStart = 18.dp,
+    bottomEnd = 18.dp
 )
 
 @Composable
@@ -743,43 +848,49 @@ private fun Composer(
     error: String?,
     onSend: () -> Unit
 ) {
-    Surface(color = MaterialTheme.colorScheme.surface, shadowElevation = 8.dp) {
-        // Only the navigation bar: the window already shrinks for the keyboard, and padding for
-        // the keyboard as well would leave a gap between the field and the keys.
-        Column(
-            Modifier
-                .fillMaxWidth()
-                .windowInsetsPadding(WindowInsets.navigationBars)
-        ) {
-            error?.let {
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp, top = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Icon(
-                        Icons.Filled.Warning,
-                        contentDescription = null,
-                        modifier = Modifier.size(16.dp),
-                        tint = MaterialTheme.colorScheme.error
-                    )
-                    Spacer(Modifier.width(6.dp))
-                    Text(
-                        text = it,
-                        color = MaterialTheme.colorScheme.error,
-                        style = MaterialTheme.typography.bodySmall,
-                        modifier = Modifier.weight(1f)
-                    )
-                    TextButton(onClick = onSend) { Text(stringResource(R.string.update_retry)) }
-                }
-            }
+    // WhatsApp's floating composer bar: no heavy full-bleed white box, just the rounded pill field
+    // and the circular send button floating cleanly over the conversation canvas.
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .background(MaterialTheme.colorScheme.surfaceContainerLow)
+            .windowInsetsPadding(WindowInsets.navigationBars)
+    ) {
+        error?.let {
             Row(
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp),
-                verticalAlignment = Alignment.Bottom
+                modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp, top = 4.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    Icons.Filled.Warning,
+                    contentDescription = null,
+                    modifier = Modifier.size(16.dp),
+                    tint = MaterialTheme.colorScheme.error
+                )
+                Spacer(Modifier.width(6.dp))
+                Text(
+                    text = it,
+                    color = MaterialTheme.colorScheme.error,
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.weight(1f)
+                )
+                TextButton(onClick = onSend) { Text(stringResource(R.string.update_retry)) }
+            }
+        }
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(start = 8.dp, end = 8.dp, top = 4.dp, bottom = 8.dp),
+            verticalAlignment = Alignment.Bottom
+        ) {
+            Surface(
+                modifier = Modifier.weight(1f),
+                shape = RoundedCornerShape(26.dp),
+                color = MaterialTheme.colorScheme.surface,
+                shadowElevation = 2.dp
             ) {
                 TextField(
                     value = draft,
                     onValueChange = onDraftChange,
-                    modifier = Modifier.weight(1f),
+                    modifier = Modifier.fillMaxWidth(),
                     placeholder = {
                         Text(
                             stringResource(
@@ -788,28 +899,28 @@ private fun Composer(
                         )
                     },
                     maxLines = 5,
-                    shape = RoundedCornerShape(24.dp),
+                    shape = RoundedCornerShape(26.dp),
                     // The keyboard's enter key is a newline, like a messaging app's: the send button
                     // sends.
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Default),
                     colors = TextFieldDefaults.colors(
-                        focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
-                        unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+                        focusedContainerColor = Color.Transparent,
+                        unfocusedContainerColor = Color.Transparent,
                         focusedIndicatorColor = Color.Transparent,
                         unfocusedIndicatorColor = Color.Transparent
                     )
                 )
-                Spacer(Modifier.width(8.dp))
-                FilledIconButton(
-                    onClick = onSend,
-                    enabled = !busy && !waiting && draft.isNotBlank(),
-                    modifier = Modifier.size(48.dp)
-                ) {
-                    Icon(
-                        Icons.AutoMirrored.Filled.Send,
-                        contentDescription = stringResource(R.string.send)
-                    )
-                }
+            }
+            Spacer(Modifier.width(6.dp))
+            FilledIconButton(
+                onClick = onSend,
+                enabled = !busy && !waiting && draft.isNotBlank(),
+                modifier = Modifier.size(48.dp)
+            ) {
+                Icon(
+                    Icons.AutoMirrored.Filled.Send,
+                    contentDescription = stringResource(R.string.send)
+                )
             }
         }
     }
