@@ -158,6 +158,20 @@ What the build left out, and why:
   with the options is, and it is what the owner asked for. A multi-select comes later, if it is asked
   for again.
 
+## 16. Notes for later (2026-10-21)
+
+- **The chat's history: the logic to revisit.** The turns arrive in two waves (the live snapshot and
+  the page the phone fetches) and they are *older* than what is on screen, so the list grows upwards
+  and the view has to stay pinned to the newest. The rule now: the view follows the newest turn
+  unless the owner has scrolled up *with their own finger* (the app's scrolls and the history
+  arriving are not theirs). The owner's idea, worth revisiting when the relay keeps more than 100
+  turns per pane: send the last N turns and answers first, and fetch the rest when the owner scrolls
+  up — the endpoint already returns the newest first with a limit (max 200), so it is a paging
+  change, not a new API.
+- **Voice input and attachments (later).** The voice comes from the keyboard's own mic: the app
+  cannot open it, so a mic button of our own would be a decoration. Attachments need the relay to
+  carry files, which is a contract change (`schema-sync`) and a decision about size and storage.
+
 ## 15. What the second pass changed (2026-10-21)
 
 - **The update moved to the settings.** The card with the new build, the check and the install are
@@ -173,6 +187,9 @@ What the build left out, and why:
   a new one is appended at the end and the list never jumps under the owner.
 - **Tapping the agent's face** in the chat opens its sheet: where it runs, and the same options the
   long press offers (pin, mute, mark as read or unread, archive).
+- **The keyboard no longer leaves a gap.** The window already shrinks for the keyboard, so the
+  composer only pads for the navigation bar; the keyboard's enter key is a **newline** now (the send
+  button sends), like a messaging app's.
 
 ## 14. What the WhatsApp audit changed (2026-10-21)
 

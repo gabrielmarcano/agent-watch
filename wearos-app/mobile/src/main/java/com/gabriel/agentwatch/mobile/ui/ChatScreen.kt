@@ -5,18 +5,20 @@ import androidx.compose.animation.SharedTransitionScope
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.ime
+import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.union
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.imePadding
-import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -26,7 +28,6 @@ import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
@@ -74,6 +75,10 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -460,29 +465,36 @@ private fun Conversation(
     // grows downwards and the view stays where the owner is. (A reversed list would prepend the
     // newest turn, and the list would then jump to the middle of the conversation.)
 
-    // The chat opens at the newest message. The turns arrive after the screen does (the phone
-    // fetches the pane's history), so the jump waits for them: without that, the conversation
-    // opens at its first turn and the owner has to scroll down the whole way.
-    var opened by remember { mutableStateOf(false) }
-    LaunchedEffect(agent.key) {
-        snapshotFlow { listState.layoutInfo.totalItemsCount }.collect { total ->
-            if (total > 1 && !opened) {
-                opened = true
-                listState.scrollToItem(total - 1)
+    // Whether the owner has scrolled up to read the past. Only their own gesture sets it: the
+    // app's scrolls and the history arriving are not theirs.
+    var ownerScrolledUp by remember { mutableStateOf(false) }
+    val userScroll = remember {
+        object : NestedScrollConnection {
+            override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
+                if (source == NestedScrollSource.UserInput) ownerScrolledUp = true
+                return Offset.Zero
             }
         }
     }
+    // Back at the newest message, the owner follows the conversation again.
+    LaunchedEffect(listState) {
+        snapshotFlow { listState.isScrollInProgress }.collect { scrolling ->
+            if (!scrolling && !listState.canScrollForward) ownerScrolledUp = false
+        }
+    }
 
-    // A new turn appears at the bottom; when the owner is already there, they stay there. (The
-    // owner who scrolled up keeps their place.)
+    // The chat opens at the newest message, and a new turn keeps it there. The turns arrive after
+    // the screen does (the phone fetches the pane's history) and they arrive in two waves, so the
+    // jump follows the count of turns: without that, the conversation opens at its first turn, or
+    // in the middle, and the owner has to scroll down the whole way.
     LaunchedEffect(itemCount) {
-        if (!opened || itemCount <= 0) return@LaunchedEffect
-        if (!listState.canScrollForward) listState.scrollToItem(itemCount - 1)
+        if (itemCount <= 0) return@LaunchedEffect
+        if (!ownerScrolledUp) listState.scrollToItem(itemCount - 1)
     }
 
     LazyColumn(
         state = listState,
-        modifier = modifier,
+        modifier = modifier.nestedScroll(userScroll),
         contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
         verticalArrangement = Arrangement.spacedBy(4.dp)
     ) {
@@ -732,7 +744,13 @@ private fun Composer(
     onSend: () -> Unit
 ) {
     Surface(color = MaterialTheme.colorScheme.surface, shadowElevation = 8.dp) {
-        Column(Modifier.fillMaxWidth().imePadding().navigationBarsPadding()) {
+        // Only the navigation bar: the window already shrinks for the keyboard, and padding for
+        // the keyboard as well would leave a gap between the field and the keys.
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .windowInsetsPadding(WindowInsets.navigationBars)
+        ) {
             error?.let {
                 Row(
                     modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp, top = 4.dp),
@@ -771,8 +789,9 @@ private fun Composer(
                     },
                     maxLines = 5,
                     shape = RoundedCornerShape(24.dp),
-                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
-                    keyboardActions = KeyboardActions(onSend = { onSend() }),
+                    // The keyboard's enter key is a newline, like a messaging app's: the send button
+                    // sends.
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Default),
                     colors = TextFieldDefaults.colors(
                         focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
                         unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
