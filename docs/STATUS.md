@@ -91,12 +91,12 @@ Two isolated runs of herdr 0.9.3: on macOS (own `HOME` and socket) and in a Linu
 - `start`, `restart` and `stop` were tested only on Linux: on the owner's Mac they would act on his own LaunchAgent (its label is fixed).
 
 ### Bridge architecture deepening (2026-10-22)
-Five deepening slices for `cmd/bridge`, `pkg/bridge`, `pkg/agents` and `pkg/relayclient`, specified in [`phases/bridge-architecture.md`](phases/bridge-architecture.md) (with parallelism rules and verification steps):
-- **Slice 1 (unclaimed):** collapse the agent turn & task observation pipeline in `pkg/agents` and `pkg/bridge/engine.go` (fold the 5 optional interfaces into `Adapter`, move title sanitization into `pkg/agents`, and eliminate duplicate Claude transcript tail reads per tick).
-- **Slice 2 (unclaimed):** deepen the bridge daemon lifecycle and `Engine` seam (`Engine.Run(ctx)` owns callback wiring and background loops; tests drive `Engine` through `herdrtest.Server` and `httptest.Server` instead of mutating private fields).
-- **Slice 3 (unclaimed):** extract a self-contained `commandGuard` in `pkg/bridge/cmdguard.go` (decouple replay/concurrency state from `Engine.mu` and fix the missing `releasePrompt` rollback when `SendKeys` fails with `herdr.ErrUnavailable`).
-- **Slice 4 (unclaimed):** unify configuration, path resolution, atomic file writes and `LocalStatus` assembly in `pkg/bridge`.
-- **Slice 5 (unclaimed):** deepen `pkg/relayclient` to own all host-to-relay communication (`HostStatus`, `RequestPairCode`, URL normalization) and an internal clock seam.
+Claimed by Antigravity (2026-10-22). Five deepening slices for `cmd/bridge`, `pkg/bridge`, `pkg/agents` and `pkg/relayclient`, specified in [`phases/bridge-architecture.md`](phases/bridge-architecture.md) (with parallelism rules and verification steps):
+- **Slice 1 (claimed by Antigravity, 2026-10-22):** collapse the agent turn & task observation pipeline in `pkg/agents` and `pkg/bridge/engine.go` (fold the 5 optional interfaces into `Adapter`, move title sanitization into `pkg/agents`, and eliminate duplicate Claude transcript tail reads per tick).
+- **Slice 2 (claimed by Antigravity, 2026-10-22):** deepen the bridge daemon lifecycle and `Engine` seam (`Engine.Run(ctx)` owns callback wiring and background loops; tests drive `Engine` through `herdrtest.Server` and `httptest.Server` instead of mutating private fields).
+- **Slice 3 (claimed by Antigravity, 2026-10-22):** extract a self-contained `commandGuard` in `pkg/bridge/cmdguard.go` (decouple replay/concurrency state from `Engine.mu` and fix the missing `releasePrompt` rollback when `SendKeys` fails with `herdr.ErrUnavailable`).
+- **Slice 4 (claimed by Antigravity, 2026-10-22):** unify configuration, path resolution, atomic file writes and `LocalStatus` assembly in `pkg/bridge`.
+- **Slice 5 (claimed by Antigravity, 2026-10-22):** deepen `pkg/relayclient` to own all host-to-relay communication (`HostStatus`, `RequestPairCode`, URL normalization) and an internal clock seam.
 
 ### Code debt (for later)
 
