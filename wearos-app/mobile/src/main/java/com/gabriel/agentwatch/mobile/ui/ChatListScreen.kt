@@ -108,6 +108,8 @@ import com.gabriel.agentwatch.model.hostNameFor
 import com.gabriel.agentwatch.model.key
 import com.gabriel.agentwatch.network.UiState
 import com.gabriel.agentwatch.ui.logic.ListNotice
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.gabriel.agentwatch.mobile.MobileApplication
 import com.gabriel.agentwatch.update.UpdatePhase
 import com.gabriel.agentwatch.update.UpdateState
 import com.gabriel.agentwatch.ui.logic.listStatus
@@ -130,7 +132,8 @@ fun ChatListScreen(
     state: UiState,
     hostFilter: String?,
     onHostFilter: (String?) -> Unit,
-    chatStore: ChatStore,
+    chatStore: ChatStore? = null,
+    chatState: MobileChatState? = null,
     sharedScope: SharedTransitionScope? = null,
     visibilityScope: AnimatedVisibilityScope? = null,
     onOpen: (AgentState) -> Unit,
@@ -140,8 +143,9 @@ fun ChatListScreen(
     onMarkUnread: (AgentState) -> Unit
 ) {
     val context = LocalContext.current
+    val actualChatState = chatState ?: remember(context) { MobileApplication.chatState(context) }
     val scope = rememberCoroutineScope()
-    val seen = remember(context) { ChatSeen(context) }
+    val chatSnapshot by actualChatState.state.collectAsStateWithLifecycle()
     var filter by rememberSaveable { mutableStateOf(ChatFilter.ALL) }
     var query by rememberSaveable { mutableStateOf("") }
     var refreshing by remember { mutableStateOf(false) }
@@ -154,16 +158,16 @@ fun ChatListScreen(
         if (hostFilter != null && state.hosts.none { it.id == hostFilter }) onHostFilter(null)
     }
     // Agents the phone lists for the first time start read; later turns count until the chat is read.
-    LaunchedEffect(state.agents) { seen.prime(state.agents) }
+    LaunchedEffect(state.agents) { actualChatState.prime(state.agents) }
 
     val onMachine = state.agents.filter { hostFilter == null || it.host == hostFilter }
-    val shown = onMachine.filterNot { chatStore.isHidden(it.key.token) }
+    val shown = onMachine.filterNot { chatSnapshot.isHidden(it.key) }
     val chats = shown
         .filter { filter.matches(it) }
         .filter { matchesQuery(it, state.history, query) }
         // Pinned chats first, the way a messaging app keeps them, then the rest by recency.
         .sortedWith(
-            compareByDescending<AgentState> { chatStore.isPinned(it.key.token) }
+            compareByDescending<AgentState> { chatSnapshot.isPinned(it.key) }
                 .thenByDescending { it.lastActivity(state.history) }
         )
 
@@ -260,10 +264,11 @@ fun ChatListScreen(
                                 agent = agent,
                                 history = state.history,
                                 hostName = hostNameFor(state.hosts, agent.host),
-                                unread = unreadCount(agent, state.history, seen.seenAt(agent.key)),
-                                changed = isUnread(agent, seen.seen(agent.key)),
-                                muted = chatStore.isMuted(agent.key.token),
-                                pinned = chatStore.isPinned(agent.key.token),
+                                chatSnapshot = chatSnapshot,
+                                unread = unreadCount(agent, state.history, chatSnapshot.seenAt(agent.key)),
+                                changed = isUnread(agent, chatSnapshot.seenSeq(agent.key).takeIf { it >= 0 }),
+                                muted = chatSnapshot.isMuted(agent.key),
+                                pinned = chatSnapshot.isPinned(agent.key),
                                 dimmed = status.dimmed,
                                 onClick = {
                                     MobileHaptics.tick(hapticView)
@@ -287,8 +292,9 @@ fun ChatListScreen(
         ChatOptionsSheet(
             agent = agent,
             chatStore = chatStore,
-            pinned = chatStore.isPinned(agent.key.token),
-            muted = chatStore.isMuted(agent.key.token),
+            chatState = actualChatState,
+            pinned = chatSnapshot.isPinned(agent.key),
+            muted = chatSnapshot.isMuted(agent.key),
             onDismiss = { sheetAgent = null },
             onMarkRead = {
                 onMarkRead(agent)
@@ -462,6 +468,7 @@ private fun ChatRow(
     agent: AgentState,
     history: List<HistoryItem>,
     hostName: String?,
+    chatSnapshot: ChatStateSnapshot = ChatStateSnapshot(),
     unread: Int,
     changed: Boolean,
     muted: Boolean,
@@ -476,7 +483,7 @@ private fun ChatRow(
     val style = statusStyle(agent.shownStatus())
     val background = backgroundLine(agent)
     val statusText = stringResource(style.label).takeIf { it.isNotBlank() }
-    val preview = rowPreview(agent, history)
+    val preview = rowPreview(agent, history, chatSnapshot)
     val activity = agent.lastActivity(history).takeIf { it != Instant.EPOCH }
     val time = chatStampText(chatStamp(activity, Instant.now()))
 
@@ -566,9 +573,7 @@ private fun ChatRow(
                     )
                 }
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    val pendingSent = ChatOutbox.pending(agent.key).let { sent ->
-                        unmatchedPending(history, sent).lastOrNull()
-                    }
+                    val pendingSent = chatSnapshot.pendingFor(agent.key, history).lastOrNull()?.text
                     if (agent.prompt == null && pendingSent != null) {
                         Icon(
                             Icons.Filled.Done,
@@ -673,15 +678,13 @@ private fun UnreadBadge(count: Int) {
 
 /** The row's second line: the prompt when one waits, else the last thing said, else what the agent is doing. */
 @Composable
-private fun rowPreview(agent: AgentState, history: List<HistoryItem>): String {
+private fun rowPreview(agent: AgentState, history: List<HistoryItem>, chatSnapshot: ChatStateSnapshot = ChatStateSnapshot()): String {
     val prompt = agent.prompt
     if (prompt != null) {
         return prompt.title.ifBlank { stringResource(R.string.chat_waiting_answer) }
     }
-    ChatOutbox.pending(agent.key).let { sent ->
-        unmatchedPending(history, sent).lastOrNull()?.let { text ->
-            previewText(text)?.let { return it }
-        }
+    chatSnapshot.pendingFor(agent.key, history).lastOrNull()?.let { msg ->
+        previewText(msg.text)?.let { return it }
     }
     val last = history.firstOrNull { it.key == agent.key }
     if (last != null) {

@@ -116,6 +116,8 @@ import com.gabriel.agentwatch.model.hostNameFor
 import com.gabriel.agentwatch.model.key
 import com.gabriel.agentwatch.network.RelayRepository
 import com.gabriel.agentwatch.ui.logic.ListNotice
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.gabriel.agentwatch.mobile.MobileApplication
 import com.gabriel.agentwatch.ui.logic.shownStatus
 import com.gabriel.agentwatch.ui.logic.waitingOnBackground
 import com.gabriel.agentwatch.util.readerBlocks
@@ -144,8 +146,9 @@ private const val SHORT_TEXT = 400
 fun ChatScreen(
     agent: AgentState,
     hosts: List<HostInfo>,
-    chatStore: ChatStore,
-    seen: ChatSeen,
+    chatStore: ChatStore? = null,
+    seen: ChatSeen? = null,
+    chatState: MobileChatState? = null,
     notice: ListNotice? = null,
     sharedScope: SharedTransitionScope? = null,
     visibilityScope: AnimatedVisibilityScope? = null,
@@ -153,12 +156,13 @@ fun ChatScreen(
     onMarkRead: () -> Unit = {}
 ) {
     val context = LocalContext.current
-    val seen = remember(context) { ChatSeen(context) }
+    val actualChatState = chatState ?: remember(context) { MobileApplication.chatState(context) }
+    val chatSnapshot by actualChatState.state.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
     val history = rememberPaneHistory(agent.key)
     val listState = rememberLazyListState()
-    val pending = ChatOutbox.pending(agent.key)
-    val openPending = remember(history, pending) { unmatchedPending(history, pending) }
+    val pending = chatSnapshot.pendingFor(agent.key, history)
+    val openPending = remember(pending) { pending.map { it.text } }
 
     var busy by remember { mutableStateOf(false) }
     var answerError by remember { mutableStateOf<String?>(null) }
@@ -180,10 +184,10 @@ fun ChatScreen(
     val hostName = hostNameFor(hosts, agent.host)
 
     // Opening the chat (and every change while it is open) is reading it.
-    LaunchedEffect(agent.key, agent.state_change_seq) { seen.markSeen(agent.key, agent.state_change_seq) }
+    LaunchedEffect(agent.key, agent.state_change_seq) { actualChatState.markSeen(agent, history) }
     // A message stops being "sent" once its turn arrives.
-    LaunchedEffect(history, pending) {
-        ChatOutbox.retain(agent.key, unmatchedPending(history, ChatOutbox.pending(agent.key)))
+    LaunchedEffect(history) {
+        actualChatState.reconcileOutbox(agent.key, history)
     }
     // An error belongs to the prompt it was about.
     LaunchedEffect(prompt?.fingerprint) { answerError = null }
@@ -246,7 +250,7 @@ fun ChatScreen(
             block = { RelayRepository.prompt(agent.key, text, agent.state_change_seq) },
             report = { sendError = it }
         ) {
-            ChatOutbox.add(agent.key, text)
+            actualChatState.addOutbox(agent.key, text)
             draft = ""
         }
     }
@@ -388,7 +392,7 @@ fun ChatScreen(
                             text = {
                                 Text(
                                     stringResource(
-                                        if (chatStore.isMuted(agent.key.token)) {
+                                        if (chatSnapshot.isMuted(agent.key)) {
                                             R.string.chat_unmute
                                         } else {
                                             R.string.chat_mute
@@ -399,10 +403,10 @@ fun ChatScreen(
                             onClick = {
                                 menuOpen = false
                                 val token = agent.key.token
-                                if (chatStore.isMuted(token)) {
-                                    chatStore.unmute(token)
+                                if (chatSnapshot.isMuted(agent.key)) {
+                                    actualChatState.unmute(token)
                                 } else {
-                                    chatStore.mute(token, agent.label.ifBlank { agent.agent })
+                                    actualChatState.mute(token, agent.label.ifBlank { agent.agent })
                                 }
                             }
                         )
@@ -477,15 +481,17 @@ fun ChatScreen(
                 ChatOptionsSheet(
                     agent = agent,
                     chatStore = chatStore,
-                    pinned = chatStore.isPinned(agent.key.token),
-                    muted = chatStore.isMuted(agent.key.token),
+                    chatState = actualChatState,
+                    pinned = chatSnapshot.isPinned(agent.key),
+                    muted = chatSnapshot.isMuted(agent.key),
                     onDismiss = { detailsOpen = false },
                     onMarkRead = {
-                        seen.markRead(agent.key, agent.state_change_seq)
+                        actualChatState.markRead(agent.key, agent.state_change_seq)
+                        onMarkRead()
                         detailsOpen = false
                     },
                     onMarkUnread = {
-                        seen.markUnread(agent.key)
+                        actualChatState.markUnread(agent.key)
                         detailsOpen = false
                     }
                 )

@@ -31,6 +31,7 @@ import androidx.compose.ui.unit.dp
 import com.gabriel.agentwatch.data.Prefs
 import com.gabriel.agentwatch.mobile.BuildConfig
 import com.gabriel.agentwatch.mobile.R
+import com.gabriel.agentwatch.mobile.MobileApplication
 import com.gabriel.agentwatch.mobile.ui.logic.cleanPairCode
 import com.gabriel.agentwatch.mobile.ui.logic.pairCodeComplete
 import com.gabriel.agentwatch.mobile.ui.logic.pairDeviceName
@@ -74,7 +75,8 @@ fun PairingScreen(revoked: Boolean, onPaired: () -> Unit) {
                     prefs.relayUrl = url
                     prefs.deviceId = resp.device_id
                     prefs.deviceToken = resp.device_token
-                    // A new pairing shows none of the old one's optimistic messages.
+                    // A new pairing shows none of the old one's optimistic messages or chat flags.
+                    MobileApplication.chatState(context).clearAll()
                     ChatOutbox.clear()
                     // A full restart with the new pairing: closes the old stream, drops its data.
                     RelayRepository.restart(context)

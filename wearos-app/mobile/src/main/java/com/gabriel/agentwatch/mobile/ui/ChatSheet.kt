@@ -23,8 +23,10 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import com.gabriel.agentwatch.mobile.MobileApplication
 import com.gabriel.agentwatch.mobile.R
 import com.gabriel.agentwatch.model.AgentState
 import com.gabriel.agentwatch.model.key
@@ -37,13 +39,16 @@ import com.gabriel.agentwatch.model.key
 @Composable
 fun ChatOptionsSheet(
     agent: AgentState,
-    chatStore: ChatStore,
+    chatStore: ChatStore? = null,
+    chatState: MobileChatState? = null,
     pinned: Boolean,
     muted: Boolean,
     onDismiss: () -> Unit,
     onMarkRead: () -> Unit,
     onMarkUnread: () -> Unit
 ) {
+    val context = LocalContext.current
+    val actualChatState = chatState ?: MobileApplication.chatState(context)
     val token = agent.key.token
     val name = agent.label.ifBlank { agent.agent }
     ModalBottomSheet(onDismissRequest = onDismiss) {
@@ -57,7 +62,7 @@ fun ChatOptionsSheet(
                 label = stringResource(if (pinned) R.string.chat_unpin else R.string.chat_pin),
                 icon = Icons.Filled.PushPin,
                 onClick = {
-                    if (pinned) chatStore.unpin(token) else chatStore.pin(token, name)
+                    if (pinned) actualChatState.unpin(token) else actualChatState.pin(token, name)
                     onDismiss()
                 }
             )
@@ -65,7 +70,7 @@ fun ChatOptionsSheet(
                 label = stringResource(if (muted) R.string.chat_unmute else R.string.chat_mute),
                 icon = Icons.Filled.NotificationsOff,
                 onClick = {
-                    if (muted) chatStore.unmute(token) else chatStore.mute(token, name)
+                    if (muted) actualChatState.unmute(token) else actualChatState.mute(token, name)
                     onDismiss()
                 }
             )
@@ -86,7 +91,7 @@ fun ChatOptionsSheet(
                 label = stringResource(R.string.chat_archive),
                 icon = Icons.Filled.Archive,
                 onClick = {
-                    chatStore.hide(token, name)
+                    actualChatState.hide(token, name)
                     onDismiss()
                 }
             )

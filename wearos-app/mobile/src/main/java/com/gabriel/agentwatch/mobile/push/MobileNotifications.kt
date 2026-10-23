@@ -96,9 +96,9 @@ object MobileNotifications {
         )
     }
 
-    /** A chat the owner muted posts no notification (the phone's own, local one). */
+    /** A chat the owner muted or hid posts no notification (the phone's own, local one). */
     private fun muted(context: Context, agent: AgentKey): Boolean =
-        com.gabriel.agentwatch.mobile.ui.ChatStore(context).isMuted(agent.token)
+        com.gabriel.agentwatch.mobile.MobileApplication.chatState(context).shouldSuppressPush(agent)
 
     /** One chat per `(host, pane)`: a new push for it replaces the old notification. */
     fun idFor(agent: AgentKey): Int = agent.token.hashCode() and 0x7FFFFFFF

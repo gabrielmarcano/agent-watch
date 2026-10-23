@@ -1,31 +1,40 @@
 package com.gabriel.agentwatch.mobile.ui
 
 import androidx.compose.runtime.mutableStateMapOf
+import com.gabriel.agentwatch.mobile.MobileApplication
 import com.gabriel.agentwatch.model.AgentKey
 
 /**
- * Messages typed in a chat that the relay has not published as a turn yet, so the conversation shows
- * them at once (the phone's optimistic "sent" bubbles). One process-wide store, keyed by agent: the
- * chat screen clears each message once its turn arrives with the same query.
- *
- * Nothing here is authoritative: a restart loses it and the relay's history is what remains.
+ * Messages typed in a chat that the relay has not published as a turn yet.
+ * Thin compatibility facade over [MobileChatState].
  */
 object ChatOutbox {
-    private val sent = mutableStateMapOf<String, List<String>>()
+    private val fallbackSent = mutableStateMapOf<String, List<String>>()
 
-    fun pending(key: AgentKey): List<String> = sent[key.token].orEmpty()
+    private fun state(): MobileChatState? =
+        runCatching { MobileApplication.get().chatState }.getOrNull()
 
-    /** The relay accepted [text] for [key]; show it until the turn arrives. */
+    fun pending(key: AgentKey): List<String> {
+        val msgs = state()?.state?.value?.outbox?.get(key.token)
+        return msgs?.map { it.text } ?: fallbackSent[key.token].orEmpty()
+    }
+
     fun add(key: AgentKey, text: String) {
         if (text.isBlank()) return
-        sent[key.token] = pending(key) + text
+        val chatState = state()
+        if (chatState != null) {
+            chatState.addOutbox(key, text)
+        } else {
+            fallbackSent[key.token] = pending(key) + text
+        }
     }
 
-    /** Keep only [texts] (the messages still without a turn); a chat with none is forgotten. */
     fun retain(key: AgentKey, texts: List<String>) {
-        if (texts.isEmpty()) sent.remove(key.token) else sent[key.token] = texts
+        fallbackSent.remove(key.token)
     }
 
-    /** A new pairing: none of the old devices' pending messages belong to it. */
-    fun clear() = sent.clear()
+    fun clear() {
+        fallbackSent.clear()
+        state()?.clearAll()
+    }
 }

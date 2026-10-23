@@ -63,6 +63,7 @@ import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.gabriel.agentwatch.data.Prefs
 import com.gabriel.agentwatch.mobile.BuildConfig
+import com.gabriel.agentwatch.mobile.MobileApplication
 import com.gabriel.agentwatch.mobile.R
 import com.gabriel.agentwatch.mobile.push.MobileNotifications
 import com.gabriel.agentwatch.mobile.ui.logic.needsAnswer
@@ -123,6 +124,7 @@ fun MobileApp(
     var startingLabel by rememberSaveable { mutableStateOf("") }
     var machineFilter by rememberSaveable { mutableStateOf<String?>(null) }
     var sessionHost by rememberSaveable { mutableStateOf("") }
+    val chatState = remember(context) { MobileApplication.chatState(context) }
     val chatSeen = remember(context) { ChatSeen(context) }
     val chatStore = remember(context) { ChatStore(context) }
     val prefs = remember(context) { Prefs(context) }
@@ -257,12 +259,13 @@ fun MobileApp(
                                     hosts = state.hosts,
                                     chatStore = chatStore,
                                     seen = chatSeen,
+                                    chatState = chatState,
                                     notice = listStatus(state).notice,
                                     sharedScope = this@SharedTransitionLayout,
                                     visibilityScope = this,
                                     onBack = { route = Routes.CHATS },
                                     onMarkRead = {
-                                        chatSeen.markRead(agent.key, agent.state_change_seq)
+                                        chatState.markRead(agent.key, agent.state_change_seq)
                                     }
                                 )
                             }
@@ -284,6 +287,7 @@ fun MobileApp(
                             state = state,
                             update = update,
                             chatStore = chatStore,
+                            chatState = chatState,
                             onUpdate = { updateManager.download() },
                             onRetryUpdate = {
                                 if (update.info != null) updateManager.download() else updateManager.check(manual = true)
@@ -296,6 +300,7 @@ fun MobileApp(
                                 // Forgetting the phone: the token goes, the link restarts and the app
                                 // asks for a new pairing code (the watch's rule).
                                 prefs.clearAuth()
+                                chatState.clearAll()
                                 RelayRepository.restart(context)
                                 route = Routes.CHATS
                             }
@@ -328,6 +333,7 @@ fun MobileApp(
                             hostFilter = machineFilter,
                             onHostFilter = { machineFilter = it },
                             chatStore = chatStore,
+                            chatState = chatState,
                             sharedScope = this@SharedTransitionLayout,
                             visibilityScope = this,
                             onOpen = { openChat(it.key) },
@@ -339,10 +345,10 @@ fun MobileApp(
                             onMarkRead = { agent ->
                                 // The swipe marks the chat read without opening it: the turns up to now
                                 // count as seen.
-                                chatSeen.markRead(agent.key, agent.state_change_seq)
+                                chatState.markRead(agent.key, agent.state_change_seq)
                             },
                             onMarkUnread = { agent ->
-                                chatSeen.markUnread(agent.key)
+                                chatState.markUnread(agent.key)
                             }
                         )
                     }

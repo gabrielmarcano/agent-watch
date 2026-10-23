@@ -48,6 +48,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.gabriel.agentwatch.mobile.MobileApplication
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.gabriel.agentwatch.data.Prefs
@@ -67,7 +69,8 @@ import com.gabriel.agentwatch.update.UpdateState
 fun SettingsScreen(
     state: UiState,
     update: UpdateState,
-    chatStore: ChatStore,
+    chatStore: ChatStore? = null,
+    chatState: MobileChatState? = null,
     onUpdate: () -> Unit,
     onRetryUpdate: () -> Unit,
     onCancelUpdate: () -> Unit,
@@ -79,6 +82,8 @@ fun SettingsScreen(
     val themePrefs = LocalThemePrefs.current
     val context = LocalContext.current
     val prefs = remember(context) { Prefs(context) }
+    val actualChatState = chatState ?: remember(context) { MobileApplication.chatState(context) }
+    val chatSnapshot by actualChatState.state.collectAsStateWithLifecycle()
     var confirmForget by remember { mutableStateOf(false) }
 
     Scaffold { padding ->
@@ -174,20 +179,20 @@ fun SettingsScreen(
 
             item { SectionTitle(stringResource(R.string.settings_notifications)) }
             item {
-                val muted = chatStore.muted()
-                val hidden = chatStore.hidden()
+                val muted = chatSnapshot.muted.toList().sorted()
+                val hidden = chatSnapshot.hidden.toList().sorted()
                 SettingsCard {
                     SettingsRow(
                         icon = Icons.Filled.Notifications,
                         title = stringResource(R.string.settings_muted),
-                        subtitle = chatStore.mutedCount().toString()
+                        subtitle = muted.size.toString()
                     )
                     muted.forEach { token ->
                         SettingsRow(
                             icon = Icons.Filled.NotificationsOff,
-                            title = chatStore.label(token),
+                            title = chatSnapshot.label(token),
                             trailing = {
-                                TextButton(onClick = { chatStore.unmute(token) }) {
+                                TextButton(onClick = { actualChatState.unmute(token) }) {
                                     Text(stringResource(R.string.settings_unmute))
                                 }
                             }
@@ -201,9 +206,9 @@ fun SettingsScreen(
                     hidden.forEach { token ->
                         SettingsRow(
                             icon = Icons.AutoMirrored.Filled.Chat,
-                            title = chatStore.label(token),
+                            title = chatSnapshot.label(token),
                             trailing = {
-                                TextButton(onClick = { chatStore.unhide(token) }) {
+                                TextButton(onClick = { actualChatState.unhide(token) }) {
                                     Text(stringResource(R.string.settings_restore))
                                 }
                             }
