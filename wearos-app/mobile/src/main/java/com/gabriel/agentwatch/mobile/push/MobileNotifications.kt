@@ -17,10 +17,15 @@ import com.gabriel.agentwatch.mobile.R
 import com.gabriel.agentwatch.model.AgentKey
 import com.gabriel.agentwatch.network.AgentsUpdate
 import com.gabriel.agentwatch.network.NotificationButton
+import com.gabriel.agentwatch.network.NotificationConstants
 import com.gabriel.agentwatch.network.PushMessage
 import com.gabriel.agentwatch.network.ShownApproval
 import com.gabriel.agentwatch.network.approvalsToDismiss
 import com.gabriel.agentwatch.network.blockedButtons
+import com.gabriel.agentwatch.network.cancelAllNotifications
+import com.gabriel.agentwatch.network.dismissResolved
+import com.gabriel.agentwatch.network.dismissStaleApprovals
+import com.gabriel.agentwatch.network.notificationIdFor
 import com.gabriel.agentwatch.network.shouldDismissOnResolved
 import com.gabriel.agentwatch.ui.logic.agentBrand
 import com.gabriel.agentwatch.util.MarkdownFormatter
@@ -46,15 +51,15 @@ object MobileNotifications {
     private const val TAG = "Notifications"
 
     /** Notification extras that tag what a shown notification is (read back via `activeNotifications`). */
-    const val EXTRA_KIND = "aw_kind"
-    const val EXTRA_PANE = "aw_pane"
-    const val EXTRA_HOST = "aw_host"
-    const val EXTRA_SEQ = "aw_seq"
-    const val EXTRA_LABEL = "aw_label"
-    const val KIND_APPROVAL = "approval"
-    const val KIND_DONE = "done"
+    const val EXTRA_KIND = NotificationConstants.EXTRA_KIND
+    const val EXTRA_PANE = NotificationConstants.EXTRA_PANE
+    const val EXTRA_HOST = NotificationConstants.EXTRA_HOST
+    const val EXTRA_SEQ = NotificationConstants.EXTRA_SEQ
+    const val EXTRA_LABEL = NotificationConstants.EXTRA_LABEL
+    const val KIND_APPROVAL = NotificationConstants.KIND_APPROVAL
+    const val KIND_DONE = NotificationConstants.KIND_DONE
     const val KIND_DIGEST = "digest"
-    const val KIND_FEEDBACK = "feedback"
+    const val KIND_FEEDBACK = NotificationConstants.KIND_FEEDBACK
 
     /** How long a success feedback notification stays before the system removes it. */
     private const val SUCCESS_FEEDBACK_MS = 3_000L
@@ -101,7 +106,7 @@ object MobileNotifications {
         com.gabriel.agentwatch.mobile.MobileApplication.chatState(context).shouldSuppressPush(agent)
 
     /** One chat per `(host, pane)`: a new push for it replaces the old notification. */
-    fun idFor(agent: AgentKey): Int = agent.token.hashCode() and 0x7FFFFFFF
+    fun idFor(agent: AgentKey): Int = notificationIdFor(agent)
 
     /** The agent an intent names (its extras); null without a pane. A missing host is "" (pre-hosts intents). */
     fun agentOf(intent: Intent?): AgentKey? {
@@ -354,29 +359,22 @@ object MobileNotifications {
 
     /** A data-only `resolved` push: dismiss a shown approval for the pane, unless it is newer. */
     fun onResolved(context: Context, message: PushMessage.Resolved) {
-        try {
-            val manager = manager(context)
-            val approval = shown(manager).firstOrNull { it.key == message.key }
-            if (shouldDismissOnResolved(approval, message.seq)) {
-                manager.cancel(approval!!.notificationId)
-                refreshSummary(context)
-            }
-        } catch (e: RuntimeException) {
-            Log.w(TAG, "Could not dismiss a resolved approval: ${e.javaClass.simpleName}")
+        if (dismissResolved(context, message)) {
+            refreshSummary(context)
         }
     }
 
     /** Approval notifications made obsolete by what the app just learned from SSE. */
     fun dismissStale(context: Context, update: AgentsUpdate) {
-        try {
-            val manager = manager(context)
-            val obsolete = approvalsToDismiss(shown(manager), update)
-            if (obsolete.isEmpty()) return
-            obsolete.forEach(manager::cancel)
+        val dismissed = dismissStaleApprovals(context, update)
+        if (dismissed.isNotEmpty()) {
             refreshSummary(context)
-        } catch (e: RuntimeException) {
-            Log.w(TAG, "Could not dismiss stale approvals: ${e.javaClass.simpleName}")
         }
+    }
+
+    /** Cancels all active notifications posted by this application. */
+    fun cancelAll(context: Context) {
+        cancelAllNotifications(context)
     }
 
     /** The chat was opened in the app: its notification has been seen. */

@@ -51,6 +51,7 @@ class RelayEngineAuthTest {
     private fun assertRevoked() {
         val s = awaitValue(state, what = "revoked") { it.auth == AuthState.REVOKED }
         assertNull("token cleared", credentials.deviceToken)
+        assertEquals(1, credentials.cleared)
         assertTrue("no agents from a pairing we lost", s.agents.isEmpty())
         assertTrue(s.stale)
         assertEquals(false, s.hostOnline) // the UI must gate on auth, not show "Mac is offline"

@@ -72,11 +72,10 @@ fun PairingScreen(revoked: Boolean, onPaired: () -> Unit) {
             val deviceName = pairDeviceName(Build.MANUFACTURER, Build.MODEL)
             RelayClient(baseUrl = url).pair(code = code, deviceName = deviceName).fold(
                 onSuccess = { resp ->
+                    RelayRepository.clearPairing(context)
                     prefs.relayUrl = url
                     prefs.deviceId = resp.device_id
                     prefs.deviceToken = resp.device_token
-                    // A new pairing shows none of the old one's optimistic messages or chat flags.
-                    MobileApplication.chatState(context).clearAll()
                     ChatOutbox.clear()
                     // A full restart with the new pairing: closes the old stream, drops its data.
                     RelayRepository.restart(context)

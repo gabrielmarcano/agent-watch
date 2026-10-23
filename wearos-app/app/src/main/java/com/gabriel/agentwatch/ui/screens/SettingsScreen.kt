@@ -105,7 +105,7 @@ fun SettingsScreen(
         confirmButton = {
             AlertDialogDefaults.ConfirmButton(onClick = {
                 confirmUnpair = false
-                prefs.clearAuth()
+                RelayRepository.clearPairing(context)
                 RelayRepository.restart(context)
             })
         },

@@ -174,10 +174,6 @@ fun MobileApp(
             openChat(deepLink)
         }
     }
-    // The relay may report an answered prompt while the app is open: drop its stale approval.
-    LaunchedEffect(state.agents) {
-        MobileNotifications.dismissStale(context, AgentsUpdate.All(state.agents))
-    }
 
     // WhatsApp's dynamic shrinking floating bar: scrolling down the list compacts the bottom bar
     // (hiding labels), scrolling up expands it again.
@@ -299,8 +295,7 @@ fun MobileApp(
                             onForgetPhone = {
                                 // Forgetting the phone: the token goes, the link restarts and the app
                                 // asks for a new pairing code (the watch's rule).
-                                prefs.clearAuth()
-                                chatState.clearAll()
+                                RelayRepository.clearPairing(context)
                                 RelayRepository.restart(context)
                                 route = Routes.CHATS
                             }

@@ -28,6 +28,10 @@ class AgentWatchApp : Application() {
             // Complication and tile: refresh when what they show changes (throttled).
             override fun onState(context: Context, state: UiState, pinned: AgentKey?) =
                 SurfaceUpdates.onState(context, state, pinned)
+
+            // Auth cleared or revoked (401): drop active notifications.
+            override fun onAuthCleared(context: Context) =
+                ApprovalNotifications.cancelAll(context)
         }
     }
 }

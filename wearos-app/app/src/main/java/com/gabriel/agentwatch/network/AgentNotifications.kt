@@ -18,22 +18,22 @@ enum class NotificationAction(val path: String) {
 
 object AgentNotifications {
     /** Fixed id for digest pushes (they have no pane). */
-    const val DIGEST_ID = 9999
+    const val DIGEST_ID = NotificationConstants.DIGEST_ID
 
     /** Notification extras that tag what a shown notification is (read back via `activeNotifications`). */
-    const val EXTRA_KIND = "aw_kind"
-    const val EXTRA_PANE = "aw_pane"
-    const val EXTRA_HOST = "aw_host"
-    const val EXTRA_SEQ = "aw_seq"
-    const val KIND_APPROVAL = "approval"
-    const val KIND_DONE = "done"
-    const val KIND_FEEDBACK = "feedback"
+    const val EXTRA_KIND = NotificationConstants.EXTRA_KIND
+    const val EXTRA_PANE = NotificationConstants.EXTRA_PANE
+    const val EXTRA_HOST = NotificationConstants.EXTRA_HOST
+    const val EXTRA_SEQ = NotificationConstants.EXTRA_SEQ
+    const val KIND_APPROVAL = NotificationConstants.KIND_APPROVAL
+    const val KIND_DONE = NotificationConstants.KIND_DONE
+    const val KIND_FEEDBACK = NotificationConstants.KIND_FEEDBACK
 
     /**
      * One notification per agent, (host, pane): a new push for it replaces the old one. Without a host
      * (an older relay) the id is the pane's, as before hosts.
      */
-    fun idFor(agent: AgentKey): Int = agent.token.hashCode() and 0x7FFFFFFF
+    fun idFor(agent: AgentKey): Int = notificationIdFor(agent)
 
     /**
      * The data URI put on every notification intent. PendingIntents are equal when action, data, class

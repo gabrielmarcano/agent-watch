@@ -18,17 +18,22 @@ import kotlinx.coroutines.launch
 import java.io.File
 
 /** [RelayCredentials] backed by the app's [Prefs]. */
-private class PrefsCredentials(private val prefs: Prefs) : RelayCredentials {
+private class PrefsCredentials(
+    private val appContext: Context,
+    private val prefs: Prefs,
+    private val getObservers: () -> RelayObservers
+) : RelayCredentials {
     override val relayUrl: String get() = prefs.relayUrl
     override val deviceToken: String? get() = prefs.deviceToken
-    override fun clearAuth() = prefs.clearAuth()
+    override fun clearAuth() {
+        prefs.clearAuth()
+        getObservers().onAuthCleared(appContext)
+    }
 }
 
 /**
  * The platform callbacks a client installs on [RelayRepository]. They carry the side effects the
- * engine triggers but does not own; `:core` stays free of any client's UI. The Wear OS app installs
- * the surface refresh ([SurfaceUpdates]) and approval-notification dismissal; the phone app, which
- * shows nothing outside its own screen, installs none ([NONE]).
+ * engine triggers but does not own; `:core` stays free of any client's UI.
  */
 interface RelayObservers {
     /** The agent list changed: dismiss approvals that no longer match, refresh tiles and complications. */
@@ -37,8 +42,11 @@ interface RelayObservers {
     /** Every state change; carries the pinned target so an observer can resolve its label. */
     fun onState(context: Context, state: UiState, pinned: AgentKey?) {}
 
+    /** Invoked whenever auth credentials have been cleared (401 revocation, forget pairing, or new pairing). */
+    fun onAuthCleared(context: Context) {}
+
     companion object {
-        /** What a client that owns no surface (the phone app) installs. */
+        /** What a client that owns no surface installs. */
         val NONE: RelayObservers = object : RelayObservers {}
     }
 }
@@ -74,7 +82,7 @@ object RelayRepository {
         val prefs = Prefs(appContext)
         val newEngine = RelayEngine(
             state = _state,
-            credentials = PrefsCredentials(prefs),
+            credentials = PrefsCredentials(appContext, prefs) { observers },
             hooks = object : RelayEngineHooks {
                 // Reachable relay + accepted token: the moment to (re)send a pending FCM registration,
                 // including right after pairing (PairingScreen restarts the engine).
@@ -101,6 +109,14 @@ object RelayRepository {
      * Kept for `PairingScreen` (`resetClient()` then `start()` is a full restart); new code calls [restart].
      */
     fun resetClient() {
+        engine?.resetClient()
+    }
+
+    /** Clears the stored credentials, stops the stream, drops client data and notifies observers. */
+    fun clearPairing(context: Context) {
+        val appContext = context.applicationContext
+        Prefs(appContext).clearAuth()
+        observers.onAuthCleared(appContext)
         engine?.resetClient()
     }
 
