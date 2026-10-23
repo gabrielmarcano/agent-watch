@@ -31,7 +31,7 @@ class MobileMessagingService : FirebaseMessagingService() {
         val prefs = Prefs(this)
         when (message) {
             is PushMessage.Resolved -> {
-                message.seq?.let { prefs.resolvedSeqs = prefs.resolvedSeqs.record(message.key, it) }
+                message.seq?.let { prefs.recordResolvedSeq(message.key, it) }
                 MobileNotifications.onResolved(this, message)
             }
             is PushMessage.Blocked -> {

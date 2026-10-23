@@ -1,45 +1,44 @@
 package com.gabriel.agentwatch.data
 
 import android.content.Context
-import android.content.SharedPreferences
 import com.gabriel.agentwatch.model.AgentKey
 import com.gabriel.agentwatch.network.ResolvedSeqs
 
-class Prefs(context: Context) : FcmRegistrationStore {
-    private val prefs: SharedPreferences = context.getSharedPreferences("AgentWatchPrefs", Context.MODE_PRIVATE)
+class Prefs(private val store: KeyValueStore) : FcmRegistrationStore {
+    constructor(context: Context) : this(
+        SharedPrefsKeyValueStore(context.getSharedPreferences("AgentWatchPrefs", Context.MODE_PRIVATE))
+    )
 
     init {
         // Purge legacy fields if present. `fcm_registered_token` was written even when registration
         // failed; the pairing-bound `fcm_registration` record replaces it.
-        if (prefs.contains("local_ip") || prefs.contains("tailscale_ip") || prefs.contains("fcm_registered_token")) {
-            prefs.edit()
-                .remove("local_ip")
-                .remove("tailscale_ip")
-                .remove("fcm_registered_token")
-                .apply()
+        if (store.contains("local_ip") || store.contains("tailscale_ip") || store.contains("fcm_registered_token")) {
+            store.remove("local_ip")
+            store.remove("tailscale_ip")
+            store.remove("fcm_registered_token")
         }
     }
 
     override var relayUrl: String
-        get() = prefs.getString("relay_url", "") ?: ""
-        set(value) = prefs.edit().putString("relay_url", value.trim()).apply()
+        get() = store.getString("relay_url", "") ?: ""
+        set(value) = store.putString("relay_url", value.trim())
 
     override var deviceToken: String?
-        get() = prefs.getString("device_token", null)
-        set(value) = prefs.edit().putString("device_token", value).apply()
+        get() = store.getString("device_token", null)
+        set(value) = store.putString("device_token", value)
 
     var deviceId: String?
-        get() = prefs.getString("device_id", null)
-        set(value) = prefs.edit().putString("device_id", value).apply()
+        get() = store.getString("device_id", null)
+        set(value) = store.putString("device_id", value)
 
     override var fcmToken: String?
-        get() = prefs.getString("fcm_token", null)
-        set(value) = prefs.edit().putString("fcm_token", value).apply()
+        get() = store.getString("fcm_token", null)
+        set(value) = store.putString("fcm_token", value)
 
     /** Written by [com.gabriel.agentwatch.network.FcmRegistrar] only after the relay accepted the token. */
     override var fcmRegistration: FcmRegistrationRecord?
-        get() = FcmRegistrationRecord.decode(prefs.getString("fcm_registration", null))
-        set(value) = prefs.edit().putString("fcm_registration", value?.encode()).apply()
+        get() = FcmRegistrationRecord.decode(store.getString("fcm_registration", null))
+        set(value) = store.putString("fcm_registration", value?.encode())
 
     /**
      * The FCM token the relay has accepted for the **current** pairing, or null.
@@ -60,27 +59,47 @@ class Prefs(context: Context) : FcmRegistrationStore {
      * still finds its pane while only one host has it.
      */
     var pinnedTarget: AgentKey?
-        get() = prefs.getString("pinned_pane_id", null)?.takeIf { it.isNotBlank() }
-            ?.let { AgentKey(prefs.getString("pinned_host", null).orEmpty(), it) }
-        set(value) = prefs.edit()
-            .putString("pinned_pane_id", value?.paneId)
-            .putString("pinned_host", value?.host)
-            .apply()
+        get() = store.getString("pinned_pane_id", null)?.takeIf { it.isNotBlank() }
+            ?.let { AgentKey(store.getString("pinned_host", null).orEmpty(), it) }
+        set(value) {
+            store.putString("pinned_pane_id", value?.paneId)
+            store.putString("pinned_host", value?.host)
+        }
 
     /** Last `resolved` push seq per agent (contracts §4.1): late `blocked` pushes at or below it are stale. */
     var resolvedSeqs: ResolvedSeqs
-        get() = ResolvedSeqs.decode(prefs.getString("resolved_seqs", null))
-        set(value) = prefs.edit().putString("resolved_seqs", value.encode()).apply()
+        get() = synchronized(resolvedLock) {
+            ResolvedSeqs.decode(store.getString("resolved_seqs", null))
+        }
+        set(value) = synchronized(resolvedLock) {
+            store.putString("resolved_seqs", value.encode())
+        }
+
+    /**
+     * Atomically records [seq] for [agent] into stored `resolved_seqs`, ensuring concurrent
+     * callers (e.g. FCM push handler and UI / broadcast receivers) do not clobber each other.
+     * Returns the updated [ResolvedSeqs].
+     */
+    fun recordResolvedSeq(agent: AgentKey, seq: Long): ResolvedSeqs = synchronized(resolvedLock) {
+        val current = ResolvedSeqs.decode(store.getString("resolved_seqs", null))
+        val updated = current.record(agent, seq)
+        store.putString("resolved_seqs", updated.encode())
+        updated
+    }
 
     val isPaired: Boolean
         get() = !relayUrl.isBlank() && !deviceToken.isNullOrBlank()
 
     fun clearAuth() {
-        prefs.edit()
-            .remove("device_token")
-            .remove("device_id")
-            .remove("fcm_registration")
-            .remove("resolved_seqs")
-            .apply()
+        synchronized(resolvedLock) {
+            store.remove("device_token")
+            store.remove("device_id")
+            store.remove("fcm_registration")
+            store.remove("resolved_seqs")
+        }
+    }
+
+    companion object {
+        private val resolvedLock = Any()
     }
 }

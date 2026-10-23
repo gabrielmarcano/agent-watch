@@ -33,8 +33,7 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
         when (message) {
             is PushMessage.Resolved -> {
                 message.seq?.let { seq ->
-                    val prefs = Prefs(this)
-                    prefs.resolvedSeqs = prefs.resolvedSeqs.record(message.key, seq)
+                    Prefs(this).recordResolvedSeq(message.key, seq)
                 }
                 ApprovalNotifications.onResolved(this, message)
             }

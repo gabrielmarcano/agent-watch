@@ -96,7 +96,7 @@ Claimed by Antigravity (2026-10-23). Five deepening slices for `wearos-app/core/
 - **Slice 2:** deepen per-pane history caching/merging and post-command refresh behind `RelayEngine` (`UiState.paneHistory` + `loadPaneHistory`, eliminating two-wave scroll jumps on chat re-entry and duplicate `refresh()` calls in `ChatScreen`).
 - **Slice 3:** share notification identity and dismissal in `:core`, wire `RelayObservers` (including `onAuthCleared` for HTTP `401`, Forget Pairing, and fresh pairing) in `MobileApplication`, and decouple `UpdateManager` behind an injectable `UpdateController` port seam for JVM testing.
 - **Slice 4:** introduce client-neutral `RelayErrorKind` in `:core` (including `not_allowed`), cache per-host `SessionOptions` in `RelayEngine`, deepen `NewSession.kt` with `NewSessionController`, and delete dead `HostChips` / `KindChips` composables in `NewSessionScreen.kt`.
-- **Slice 5 (claimed by Antigravity, 2026-10-23):** introduce a shared `KeyValueStore` seam (`SharedPrefsKeyValueStore` + `InMemoryKeyValueStore`) in `:core` and make `Prefs.recordResolvedSeq(agent, seq)` atomic across concurrent FCM and UI threads.
+- **Slice 5 (done 2026-10-23):** introduce a shared `KeyValueStore` seam (`SharedPrefsKeyValueStore` + `InMemoryKeyValueStore`) in `:core` and make `Prefs.recordResolvedSeq(agent, seq)` atomic across concurrent FCM and UI threads.
 
 ### Code debt (for later)
 

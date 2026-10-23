@@ -7,22 +7,27 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
+import com.gabriel.agentwatch.data.KeyValueStore
+import com.gabriel.agentwatch.data.SharedPrefsKeyValueStore
 
 /**
  * The phone's own theme settings: the system palette (dynamic colour, Android 12+) and light or dark.
  * The theme reads them; the Settings screen writes them.
  */
-class ThemePrefs(context: Context) {
-    private val prefs = context.getSharedPreferences("AgentWatchPhoneTheme", Context.MODE_PRIVATE)
-    private val dynamic = mutableStateOf(prefs.getBoolean(KEY_DYNAMIC, true))
-    private val mode = mutableStateOf(prefs.getString(KEY_MODE, MODE_SYSTEM) ?: MODE_SYSTEM)
+class ThemePrefs(private val store: KeyValueStore) {
+    constructor(context: Context) : this(
+        SharedPrefsKeyValueStore(context.getSharedPreferences("AgentWatchPhoneTheme", Context.MODE_PRIVATE))
+    )
+
+    private val dynamic = mutableStateOf(store.getBoolean(KEY_DYNAMIC, true))
+    private val mode = mutableStateOf(store.getString(KEY_MODE, MODE_SYSTEM) ?: MODE_SYSTEM)
 
     /** The system palette (the wallpaper's colours) instead of ours. */
     var dynamicColor: Boolean
         get() = dynamic.value
         set(value) {
             dynamic.value = value
-            prefs.edit().putBoolean(KEY_DYNAMIC, value).apply()
+            store.putBoolean(KEY_DYNAMIC, value)
         }
 
     /** `system`, `light` or `dark`. */
@@ -30,7 +35,7 @@ class ThemePrefs(context: Context) {
         get() = mode.value
         set(value) {
             mode.value = value
-            prefs.edit().putString(KEY_MODE, value).apply()
+            store.putString(KEY_MODE, value)
         }
 
     companion object {
