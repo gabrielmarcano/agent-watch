@@ -30,11 +30,28 @@ Rules for every AI agent working in this repository: Claude Code, Antigravity, O
 | Repo layout | §2 |
 | Rules per area, with their build and test commands | `.agents/rules/*.md` (§4) |
 | Procedures | `.agents/skills/*/SKILL.md`: `capture-fixture` (capture and audit agent CLIs; the checklist after a herdr upgrade), `add-agent-adapter`, `schema-sync`, `herdr-probe`, `wearos-deploy`, `relay-deploy` |
+| Agent skills configuration | [`docs/agents/`](docs/agents/) |
 | Reporting a vulnerability | [`SECURITY.md`](SECURITY.md) |
 
 **To start work:** claim it in `docs/STATUS.md` when its workflow line asks for a claim (not every fix needs one), then read the phase's guide or the rule and skill for the area.
 
 > ⚠️ **The herdr on the development Mac runs the owner's real agent sessions.** Before any herdr command, read `.agents/rules/herdr-integration.md` § Safety.
+
+---
+
+## Agent skills
+
+### Issue tracker
+
+Issues and specs live in GitHub Issues (`gh` CLI). See [`docs/agents/issue-tracker.md`](docs/agents/issue-tracker.md).
+
+### Triage labels
+
+Canonical 5-role triage vocabulary. See [`docs/agents/triage-labels.md`](docs/agents/triage-labels.md).
+
+### Domain docs
+
+Single-context layout (`GLOSSARY.md` + `docs/adr/`). See [`docs/agents/domain.md`](docs/agents/domain.md).
 
 ---
 
