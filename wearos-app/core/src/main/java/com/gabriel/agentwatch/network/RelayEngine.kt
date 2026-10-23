@@ -290,7 +290,16 @@ class RelayEngine(
                 }
                 "history" -> {
                     val item = gson.fromJson(data, HistoryItem::class.java)
-                    state.update { it.copy(history = mergeHistory(it.history, listOf(item))) }
+                    state.update { current ->
+                        val newHistory = mergeHistory(current.history, listOf(item))
+                        val currentPane = current.paneHistory[item.key]
+                        val newPaneHistory = if (currentPane != null) {
+                            current.paneHistory + (item.key to mergeHistory(currentPane, listOf(item)))
+                        } else {
+                            current.paneHistory
+                        }
+                        current.copy(history = newHistory, paneHistory = newPaneHistory)
+                    }
                 }
             }
         } catch (e: Exception) {
@@ -328,6 +337,21 @@ class RelayEngine(
             synchronized(lock) {
                 if (epoch != pairingEpoch) return@onSuccess
                 state.update { it.copy(history = mergeHistory(it.history, items)) }
+            }
+        }
+    }
+
+    suspend fun loadPaneHistory(agent: AgentKey, limit: Int = 50): Result<List<HistoryItem>> {
+        val (currentClient, epoch) = synchronized(lock) { (clientLocked() ?: return notPaired()) to pairingEpoch }
+        val result = currentClient.history(agent, limit)
+        return result.onSuccess { items ->
+            synchronized(lock) {
+                if (epoch != pairingEpoch) return@onSuccess
+                state.update { current ->
+                    val existing = current.paneHistory[agent].orEmpty()
+                    val merged = mergeHistory(existing, items)
+                    current.copy(paneHistory = current.paneHistory + (agent to merged))
+                }
             }
         }
     }

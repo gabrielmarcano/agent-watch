@@ -1,8 +1,11 @@
 package com.gabriel.agentwatch.network
 
+import com.gabriel.agentwatch.data.mergeHistory
+import com.gabriel.agentwatch.model.AgentKey
 import com.gabriel.agentwatch.model.AgentState
 import com.gabriel.agentwatch.model.HistoryItem
 import com.gabriel.agentwatch.model.HostInfo
+import com.gabriel.agentwatch.model.key
 
 sealed class Connection {
     object Connecting : Connection()
@@ -26,6 +29,7 @@ data class UiState(
     val herdrOnline: Boolean = false,
     val agents: List<AgentState> = emptyList(),
     val history: List<HistoryItem> = emptyList(),
+    val paneHistory: Map<AgentKey, List<HistoryItem>> = emptyMap(),
     /**
      * True while [agents] and the host flags are not backed by a live stream: before the first SSE
      * `snapshot`, after the stream closed, failed or went silent (no keepalive for 45 s) while it
@@ -39,4 +43,11 @@ data class UiState(
      * relay that predates hosts. [hostOnline] and [herdrOnline] are then the aggregates (§1.5).
      */
     val hosts: List<HostInfo> = emptyList()
-)
+) {
+    /**
+     * The history items relevant to [agent], merging the global history items for this agent with
+     * any per-pane history fetched via [RelayEngine.loadPaneHistory].
+     */
+    fun historyFor(agent: AgentKey): List<HistoryItem> =
+        mergeHistory(history.filter { it.key == agent }, paneHistory[agent].orEmpty())
+}

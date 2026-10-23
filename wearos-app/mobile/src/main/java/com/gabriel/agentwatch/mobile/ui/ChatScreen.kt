@@ -207,7 +207,6 @@ fun ChatScreen(
                 onFailure = { throwable ->
                     val feedback = commandErrorFeedback(throwable)
                     report(feedback.message)
-                    if (feedback.refresh) scope.launch { RelayRepository.refresh() }
                 }
             )
             busy = false

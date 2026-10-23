@@ -5,6 +5,7 @@ import android.util.Log
 import com.gabriel.agentwatch.data.Prefs
 import com.gabriel.agentwatch.model.AgentKey
 import com.gabriel.agentwatch.model.FolderListResponse
+import com.gabriel.agentwatch.model.HistoryItem
 import com.gabriel.agentwatch.model.SessionCreated
 import com.gabriel.agentwatch.model.SessionOptionsResponse
 import com.gabriel.agentwatch.model.UpdateInfo
@@ -139,6 +140,10 @@ object RelayRepository {
     suspend fun refresh() {
         engine?.refresh()
     }
+
+    /** Fetches per-pane history and merges it into [UiState.paneHistory]. */
+    suspend fun loadPaneHistory(agent: AgentKey, limit: Int = 50): Result<List<HistoryItem>> =
+        engine?.loadPaneHistory(agent, limit) ?: notPaired()
 
     private fun <T> notPaired(): Result<T> =
         Result.failure(RelayError("not_paired", "Client not configured", 0))

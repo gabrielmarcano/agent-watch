@@ -89,7 +89,7 @@ class FakeRelay : Closeable {
 
             val out = socket.getOutputStream()
             val basePath = path.substringBefore('?')
-            val override = responses[basePath]
+            val override = responses[path] ?: responses[basePath]
             when {
                 override != null -> respond(socket, override.first, override.second)
                 basePath == "/v1/events" && eventsStatus == 200 -> {
@@ -103,7 +103,7 @@ class FakeRelay : Closeable {
                 basePath == "/v1/agents" -> respond(socket, 200, gson.toJson(agents))
                 basePath == "/v1/history" -> respond(socket, 200, historyJson)
                 else -> {
-                    val (status, json) = responses[basePath] ?: (200 to """{"ok":true}""")
+                    val (status, json) = responses[path] ?: responses[basePath] ?: (200 to """{"ok":true}""")
                     respond(socket, status, json)
                 }
             }

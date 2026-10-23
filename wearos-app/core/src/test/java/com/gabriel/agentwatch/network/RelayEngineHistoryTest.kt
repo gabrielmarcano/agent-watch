@@ -1,10 +1,13 @@
 package com.gabriel.agentwatch.network
 
+import com.gabriel.agentwatch.model.AgentKey
 import com.gabriel.agentwatch.model.AgentState
 import com.gabriel.agentwatch.model.AgentsSnapshot
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 
@@ -67,5 +70,69 @@ class RelayEngineHistoryTest {
         Thread.sleep(200)
 
         assertEquals(2, historyRequests())
+    }
+
+    @Test
+    fun loadPaneHistoryPopulatesHistoryForAgentAndSurvivesGlobalRefresh() = runBlocking {
+        engine.start()
+        awaitValue(state, what = "live snapshot") { it.connection == Connection.Live }
+
+        val p1 = item("p1", "2026-10-05T10:10:00Z")
+        val p2 = item("p2", "2026-10-05T10:12:00Z")
+        relay.responses["/v1/history?limit=50&pane_id=A"] = 200 to """{"items":[$p2,$p1]}"""
+
+        val agentKey = AgentKey("", "A")
+        val res = engine.loadPaneHistory(agentKey, 50)
+        assertTrue(res.isSuccess)
+
+        val hist = state.value.historyFor(agentKey)
+        assertEquals(listOf("p2", "p1", "h1"), hist.map { it.id })
+
+        // Subsequent global refresh does not overwrite paneHistory
+        val g1 = item("g1", "2026-10-05T10:20:00Z")
+        relay.historyJson = """{"items":[$g1]}"""
+        engine.refresh()
+        awaitValue(state, what = "global refresh") { s -> s.history.any { it.id == "g1" } }
+
+        val histAfter = state.value.historyFor(agentKey)
+        assertTrue("p2 retained", histAfter.any { it.id == "p2" })
+        assertTrue("p1 retained", histAfter.any { it.id == "p1" })
+        assertTrue("g1 included", histAfter.any { it.id == "g1" })
+
+        // Live SSE history event merges without duplicates
+        relay.send("event: history\ndata: $p2\n\n")
+        Thread.sleep(100)
+        val histAfterEvent = state.value.historyFor(agentKey)
+        assertEquals(histAfter.size, histAfterEvent.size)
+
+        // 401 onUnauthorized clears paneHistory
+        engine.onUnauthorized("tok")
+        assertTrue("paneHistory cleared", state.value.paneHistory.isEmpty())
+        assertTrue("history cleared", state.value.history.isEmpty())
+        assertTrue("historyFor empty", state.value.historyFor(agentKey).isEmpty())
+    }
+
+    @Test
+    fun failingCommandWithStaleStateTriggersExactlyOneRefresh() = runBlocking {
+        engine.start()
+        awaitValue(state, what = "live snapshot") { it.connection == Connection.Live }
+
+        val initialAgentRequests = relay.requests.count { it.path.substringBefore('?') == "/v1/agents" }
+        val initialHistoryRequests = historyRequests()
+
+        val staleError = 409 to """{"error":{"code":"prompt_changed","message":"prompt sequence changed"}}"""
+        relay.responses["/v1/agents/A/answer"] = staleError
+
+        val res = engine.answer(AgentKey("", "A"), "opt-1", 1, "fp")
+        assertTrue(res.isFailure)
+
+        // RefreshAfter triggers refresh(): exactly one agents fetch and one history fetch
+        awaitTrue(what = "refreshed after stale command") {
+            relay.requests.count { it.path.substringBefore('?') == "/v1/agents" } == initialAgentRequests + 1 &&
+                historyRequests() == initialHistoryRequests + 1
+        }
+        Thread.sleep(200)
+        assertEquals(initialAgentRequests + 1, relay.requests.count { it.path.substringBefore('?') == "/v1/agents" })
+        assertEquals(initialHistoryRequests + 1, historyRequests())
     }
 }
