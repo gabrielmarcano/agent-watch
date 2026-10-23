@@ -25,7 +25,9 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -153,18 +155,325 @@ type adminErrorBody struct {
 	Error string `json:"error"`
 }
 
+// ServiceEnvFile is the relay service's environment file (systemd's
+// EnvironmentFile, /etc/agent-watch-relay/env). Tests override it.
+var ServiceEnvFile = "/etc/agent-watch-relay/env"
+
+// ServiceEnv returns an environment variable as the relay service sees it:
+// the process's own value when set, else the service's env file (/etc/agent-watch-relay/env),
+// which a sudo command does not load. An unreadable or missing file counts as empty.
+func ServiceEnv(key string) string {
+	if v, ok := os.LookupEnv(key); ok {
+		return v
+	}
+	data, err := os.ReadFile(ServiceEnvFile)
+	if err != nil {
+		return ""
+	}
+	value := ""
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(line, ";") {
+			continue
+		}
+		k, v, ok := strings.Cut(line, "=")
+		if !ok || strings.TrimSpace(k) != key {
+			continue
+		}
+		v = strings.TrimSpace(v)
+		if len(v) >= 2 && (v[0] == '"' || v[0] == '\'') && v[len(v)-1] == v[0] {
+			v = v[1 : len(v)-1]
+		}
+		value = v // systemd: the last assignment wins
+	}
+	return value
+}
+
+// EnvHostConfig describes the bootstrap host configured in the environment.
+type EnvHostConfig struct {
+	ID    string
+	Name  string
+	Token string
+}
+
+// LoadEnvHost reads the bootstrap host configuration from getenv.
+// Returns nil if AW_HOST_TOKEN is not set.
+func LoadEnvHost(getenv func(string) string) (*EnvHostConfig, error) {
+	if getenv == nil {
+		getenv = ServiceEnv
+	}
+	token := strings.TrimSpace(getenv("AW_HOST_TOKEN"))
+	if token == "" {
+		return nil, nil
+	}
+	id := strings.TrimSpace(getenv("AW_HOST_ID"))
+	if id == "" {
+		id = DefaultHostID
+	}
+	if !ValidHostID(id) {
+		return nil, fmt.Errorf("AW_HOST_ID %q: %w", id, ErrInvalidHostID)
+	}
+	name, err := NormalizeHostName(id, getenv("AW_HOST_NAME"))
+	if err != nil {
+		return nil, fmt.Errorf("AW_HOST_NAME: %w", err)
+	}
+	return &EnvHostConfig{
+		ID:    id,
+		Name:  name,
+		Token: token,
+	}, nil
+}
+
+// Admin manages devices and hosts against a Store, optionally bound to an
+// envHost (from AW_HOST_TOKEN) and live callbacks when attached to a running Server.
+type Admin struct {
+	store          *Store
+	envHost        *HostAdminInfo // nil if AW_HOST_TOKEN unset or shadowed by stored host
+	isOnline       func(hostID string) bool
+	onAdd          func(h Host)
+	onRevoke       func(hostID string)
+	onRevokeDevice func(tokenHash string)
+}
+
+// NewAdmin creates an Admin over store and an optional envCfg.
+// If a stored host already holds the same token hash as AW_HOST_TOKEN,
+// AW_HOST_TOKEN is shadowed and ignored (matching NewServer).
+func NewAdmin(store *Store, envCfg *EnvHostConfig) *Admin {
+	var envHost *HostAdminInfo
+	if envCfg != nil && envCfg.Token != "" {
+		shadowed := false
+		if store != nil {
+			if _, ok := store.FindHostByTokenHash(Sha256Hex(envCfg.Token)); ok {
+				shadowed = true
+			}
+		}
+		if !shadowed {
+			envHost = &HostAdminInfo{
+				ID:   envCfg.ID,
+				Name: envCfg.Name,
+				Env:  true,
+			}
+		}
+	}
+	return &Admin{
+		store:   store,
+		envHost: envHost,
+	}
+}
+
+func newServerAdmin(store *Store, state *State, auth *AuthManager, hub *Hub) *Admin {
+	adm := &Admin{
+		store: store,
+		isOnline: func(hostID string) bool {
+			if state == nil {
+				return false
+			}
+			return state.HostOnline(hostID)
+		},
+		onAdd: func(h Host) {
+			if state != nil {
+				state.AddHost(h.ID, h.Name)
+			}
+			slog.Info("host registered", "host", h.ID)
+		},
+		onRevoke: func(hostID string) {
+			var connected bool
+			if hub != nil {
+				connected = hub.RevokeHost(hostID)
+			}
+			if state != nil {
+				state.RemoveHost(hostID)
+			}
+			slog.Info("host revoked", "host", hostID, "was_connected", connected)
+		},
+		onRevokeDevice: func(tokenHash string) {
+			var closed int
+			if auth != nil {
+				closed = auth.CloseDeviceSessions(tokenHash)
+			}
+			slog.Info("device revoked", "closed_requests", closed)
+		},
+	}
+	if auth != nil {
+		if legacy, ok := auth.LegacyHost(); ok {
+			adm.envHost = &HostAdminInfo{
+				ID:   legacy.ID,
+				Name: legacy.Name,
+				Env:  true,
+			}
+		}
+	}
+	return adm
+}
+
+func (a *Admin) ListDevices(ctx context.Context) ([]DeviceInfo, error) {
+	if a.store == nil {
+		return []DeviceInfo{}, nil
+	}
+	return deviceInfos(a.store.ListDevices()), nil
+}
+
+func (a *Admin) RevokeDevice(ctx context.Context, id string) error {
+	if a.store == nil {
+		return ErrDeviceNotFound
+	}
+	dev, ok := a.store.RevokeDevice(id)
+	if !ok {
+		return ErrDeviceNotFound
+	}
+	if a.onRevokeDevice != nil {
+		a.onRevokeDevice(dev.TokenHash)
+	}
+	return a.store.Flush()
+}
+
+func (a *Admin) ListHosts(ctx context.Context) ([]HostAdminInfo, error) {
+	var out []HostAdminInfo
+	if a.envHost != nil {
+		online := false
+		if a.isOnline != nil {
+			online = a.isOnline(a.envHost.ID)
+		}
+		out = append(out, HostAdminInfo{
+			ID:     a.envHost.ID,
+			Name:   a.envHost.Name,
+			Online: online,
+			Env:    true,
+		})
+	}
+	if a.store != nil {
+		for _, h := range a.store.ListHosts() {
+			online := false
+			if a.isOnline != nil {
+				online = a.isOnline(h.ID)
+			}
+			out = append(out, HostAdminInfo{
+				ID:        h.ID,
+				Name:      h.Name,
+				CreatedAt: h.CreatedAt,
+				LastSeen:  h.LastSeen,
+				Online:    online,
+			})
+		}
+	}
+	sort.Slice(out, func(i, j int) bool {
+		return out[i].ID < out[j].ID
+	})
+	if out == nil {
+		out = []HostAdminInfo{}
+	}
+	return out, nil
+}
+
+func (a *Admin) AddHost(ctx context.Context, id, name, tokenHash string) (HostAdminInfo, error) {
+	if !ValidHostID(id) {
+		return HostAdminInfo{}, ErrInvalidHostID
+	}
+	var err error
+	if name, err = NormalizeHostName(id, name); err != nil {
+		return HostAdminInfo{}, err
+	}
+	if tokenHash == "" {
+		return HostAdminInfo{}, errEmptyTokenHash
+	}
+	if a.envHost != nil && a.envHost.ID == id {
+		return HostAdminInfo{}, ErrHostIsEnv
+	}
+	if a.store == nil {
+		return HostAdminInfo{}, errors.New("no store configured")
+	}
+	h, err := a.store.AddHost(id, name, tokenHash)
+	if err != nil {
+		return HostAdminInfo{}, err
+	}
+	if a.onAdd != nil {
+		a.onAdd(h)
+	}
+	if err := a.store.Flush(); err != nil {
+		return HostAdminInfo{}, fmt.Errorf("saving store: %w", err)
+	}
+	return HostAdminInfo{
+		ID:        h.ID,
+		Name:      h.Name,
+		CreatedAt: h.CreatedAt,
+		LastSeen:  h.LastSeen,
+	}, nil
+}
+
+func (a *Admin) RevokeHost(ctx context.Context, id string) error {
+	if a.envHost != nil && a.envHost.ID == id {
+		return ErrHostIsEnv
+	}
+	if a.store == nil {
+		return ErrHostNotFound
+	}
+	_, ok := a.store.RevokeHost(id)
+	if !ok {
+		return ErrHostNotFound
+	}
+	if a.onRevoke != nil {
+		a.onRevoke(id)
+	}
+	if err := a.store.Flush(); err != nil {
+		return fmt.Errorf("saving store: %w", err)
+	}
+	return nil
+}
+
+// AdminClient is the interface for administering devices and hosts, implemented
+// both by offline *Admin and by the online admin socket client.
+type AdminClient interface {
+	ListDevices(ctx context.Context) ([]DeviceInfo, error)
+	RevokeDevice(ctx context.Context, id string) error
+	ListHosts(ctx context.Context) ([]HostAdminInfo, error)
+	AddHost(ctx context.Context, id, name, tokenHash string) (HostAdminInfo, error)
+	RevokeHost(ctx context.Context, id string) error
+}
+
+type socketAdminClient struct {
+	client *http.Client
+}
+
+func (c *socketAdminClient) ListDevices(ctx context.Context) ([]DeviceInfo, error) {
+	var out []DeviceInfo
+	err := adminCall(ctx, c.client, http.MethodGet, "/devices", nil, &out, ErrDeviceNotFound)
+	return out, err
+}
+
+func (c *socketAdminClient) RevokeDevice(ctx context.Context, id string) error {
+	return adminCall(ctx, c.client, http.MethodDelete, "/devices/"+url.PathEscape(id), nil, nil, ErrDeviceNotFound)
+}
+
+func (c *socketAdminClient) ListHosts(ctx context.Context) ([]HostAdminInfo, error) {
+	var out []HostAdminInfo
+	err := adminCall(ctx, c.client, http.MethodGet, "/hosts", nil, &out, ErrHostNotFound)
+	return out, err
+}
+
+func (c *socketAdminClient) AddHost(ctx context.Context, id, name, tokenHash string) (HostAdminInfo, error) {
+	req := addHostRequest{ID: id, Name: name, TokenHash: tokenHash}
+	var info HostAdminInfo
+	err := adminCall(ctx, c.client, http.MethodPost, "/hosts", req, &info, ErrHostNotFound)
+	return info, err
+}
+
+func (c *socketAdminClient) RevokeHost(ctx context.Context, id string) error {
+	return adminCall(ctx, c.client, http.MethodDelete, "/hosts/"+url.PathEscape(id), nil, nil, ErrHostNotFound)
+}
+
 // adminHandler serves the admin API. It is only ever mounted on the Unix
 // socket, never on the public listener.
 func (s *Server) adminHandler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /devices", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, http.StatusOK, deviceInfos(s.store.ListDevices()))
+		devs, _ := s.admin.ListDevices(r.Context())
+		writeJSON(w, http.StatusOK, devs)
 	})
 	mux.HandleFunc("DELETE /devices/{id}", func(w http.ResponseWriter, r *http.Request) {
-		found, err := s.RevokeDevice(r.PathValue("id"))
+		err := s.admin.RevokeDevice(r.Context(), r.PathValue("id"))
 		switch {
-		case !found:
-			writeJSON(w, http.StatusNotFound, adminErrorBody{Error: ErrDeviceNotFound.Error()})
+		case errors.Is(err, ErrDeviceNotFound):
+			writeJSON(w, http.StatusNotFound, adminErrorBody{Error: err.Error()})
 		case err != nil:
 			writeJSON(w, http.StatusInternalServerError, adminErrorBody{Error: err.Error()})
 		default:
@@ -172,7 +481,8 @@ func (s *Server) adminHandler() http.Handler {
 		}
 	})
 	mux.HandleFunc("GET /hosts", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, http.StatusOK, s.hostInfos())
+		hosts, _ := s.admin.ListHosts(r.Context())
+		writeJSON(w, http.StatusOK, hosts)
 	})
 	mux.HandleFunc("POST /hosts", func(w http.ResponseWriter, r *http.Request) {
 		r.Body = http.MaxBytesReader(w, r.Body, 16<<10)
@@ -181,7 +491,7 @@ func (s *Server) adminHandler() http.Handler {
 			writeJSON(w, http.StatusBadRequest, adminErrorBody{Error: "malformed request body"})
 			return
 		}
-		h, err := s.AddHost(req.ID, req.Name, req.TokenHash)
+		h, err := s.admin.AddHost(r.Context(), req.ID, req.Name, req.TokenHash)
 		switch {
 		case errors.Is(err, ErrHostExists), errors.Is(err, ErrHostIsEnv):
 			writeJSON(w, http.StatusConflict, adminErrorBody{Error: err.Error()})
@@ -190,16 +500,16 @@ func (s *Server) adminHandler() http.Handler {
 		case err != nil:
 			writeJSON(w, http.StatusInternalServerError, adminErrorBody{Error: err.Error()})
 		default:
-			writeJSON(w, http.StatusCreated, HostAdminInfo{ID: h.ID, Name: h.Name, CreatedAt: h.CreatedAt, LastSeen: h.LastSeen})
+			writeJSON(w, http.StatusCreated, h)
 		}
 	})
 	mux.HandleFunc("DELETE /hosts/{id}", func(w http.ResponseWriter, r *http.Request) {
-		found, err := s.RevokeHost(r.PathValue("id"))
+		err := s.admin.RevokeHost(r.Context(), r.PathValue("id"))
 		switch {
 		case errors.Is(err, ErrHostIsEnv):
 			writeJSON(w, http.StatusConflict, adminErrorBody{Error: err.Error()})
-		case !found:
-			writeJSON(w, http.StatusNotFound, adminErrorBody{Error: ErrHostNotFound.Error()})
+		case errors.Is(err, ErrHostNotFound):
+			writeJSON(w, http.StatusNotFound, adminErrorBody{Error: err.Error()})
 		case err != nil:
 			writeJSON(w, http.StatusInternalServerError, adminErrorBody{Error: err.Error()})
 		default:
@@ -212,36 +522,15 @@ func (s *Server) adminHandler() http.Handler {
 // hostInfos lists AW_HOST_TOKEN's host (if set) and the registered hosts,
 // with whether each is connected.
 func (s *Server) hostInfos() []HostAdminInfo {
-	var out []HostAdminInfo
-	if legacy, ok := s.auth.LegacyHost(); ok {
-		out = append(out, HostAdminInfo{ID: legacy.ID, Name: legacy.Name, Online: s.state.HostOnline(legacy.ID), Env: true})
-	}
-	for _, h := range s.store.ListHosts() {
-		out = append(out, HostAdminInfo{ID: h.ID, Name: h.Name, CreatedAt: h.CreatedAt, LastSeen: h.LastSeen, Online: s.state.HostOnline(h.ID)})
-	}
-	if out == nil {
-		out = []HostAdminInfo{}
-	}
-	return out
+	hosts, _ := s.admin.ListHosts(context.Background())
+	return hosts
 }
 
 // AddHost registers a host in the running relay: its token (by hash) works
 // from now on, watches see it in the host list (offline until its bridge
 // connects), and the store is flushed at once.
-func (s *Server) AddHost(id, name, tokenHash string) (Host, error) {
-	if legacy, ok := s.auth.LegacyHost(); ok && legacy.ID == id {
-		return Host{}, ErrHostIsEnv
-	}
-	h, err := s.store.AddHost(id, name, tokenHash)
-	if err != nil {
-		return Host{}, err
-	}
-	s.state.AddHost(h.ID, h.Name)
-	slog.Info("host registered", "host", h.ID)
-	if err := s.store.Flush(); err != nil {
-		return h, fmt.Errorf("host registered in the running relay, but saving the store failed: %w", err)
-	}
-	return h, nil
+func (s *Server) AddHost(id, name, tokenHash string) (HostAdminInfo, error) {
+	return s.admin.AddHost(context.Background(), id, name, tokenHash)
 }
 
 // RevokeHost removes a registered host from the running relay: its token is
@@ -250,19 +539,12 @@ func (s *Server) AddHost(id, name, tokenHash string) (Host, error) {
 // store is flushed at once. Its history stays until it ages out. found is
 // false when no registered host has that id.
 func (s *Server) RevokeHost(id string) (found bool, err error) {
-	if legacy, ok := s.auth.LegacyHost(); ok && legacy.ID == id {
-		return false, ErrHostIsEnv
-	}
-	if _, ok := s.store.RevokeHost(id); !ok {
+	err = s.admin.RevokeHost(context.Background(), id)
+	if errors.Is(err, ErrHostNotFound) {
 		return false, nil
 	}
-	// The token is gone from the store first: a handshake that races with
-	// this drop re-checks its token once registered (Hub.ServeHost).
-	connected := s.hub.RevokeHost(id)
-	s.state.RemoveHost(id)
-	slog.Info("host revoked", "host", id, "was_connected", connected)
-	if err := s.store.Flush(); err != nil {
-		return true, fmt.Errorf("host revoked in the running relay, but saving the store failed: %w", err)
+	if err != nil {
+		return false, err
 	}
 	return true, nil
 }
@@ -272,14 +554,12 @@ func (s *Server) RevokeHost(id string) (found bool, err error) {
 // cancelled, and the store is flushed at once so the removal survives a crash.
 // found is false when no device has that id.
 func (s *Server) RevokeDevice(deviceID string) (found bool, err error) {
-	dev, ok := s.store.RevokeDevice(deviceID)
-	if !ok {
+	err = s.admin.RevokeDevice(context.Background(), deviceID)
+	if errors.Is(err, ErrDeviceNotFound) {
 		return false, nil
 	}
-	closed := s.auth.CloseDeviceSessions(dev.TokenHash)
-	slog.Info("device revoked", "device_id", deviceID, "closed_requests", closed)
-	if err := s.store.Flush(); err != nil {
-		return true, fmt.Errorf("device revoked in the running relay, but saving the store failed: %w", err)
+	if err != nil {
+		return false, err
 	}
 	return true, nil
 }
@@ -288,15 +568,11 @@ func (s *Server) RevokeDevice(deviceID string) (found bool, err error) {
 // dataDir, asking the running relay when there is one.
 func AdminListDevices(ctx context.Context, dataDir string) ([]DeviceInfo, error) {
 	var out []DeviceInfo
-	_, err := withRelayOrStore(ctx, dataDir,
-		func(st *Store) error {
-			out = deviceInfos(st.ListDevices())
-			return nil
-		},
-		func(c *http.Client) error {
-			out = nil
-			return adminCall(ctx, c, http.MethodGet, "/devices", nil, &out, ErrDeviceNotFound)
-		})
+	_, err := WithAdminTarget(ctx, dataDir, func(adm AdminClient, _ bool) error {
+		var err error
+		out, err = adm.ListDevices(ctx)
+		return err
+	})
 	if errors.Is(err, errNoDataDir) {
 		return nil, nil
 	}
@@ -307,38 +583,25 @@ func AdminListDevices(ctx context.Context, dataDir string) ([]DeviceInfo, error)
 // running relay performs it (viaRelay is true); otherwise store.json is edited
 // under the data-dir lock. It returns ErrDeviceNotFound for an unknown id.
 func AdminRevokeDevice(ctx context.Context, dataDir, deviceID string) (viaRelay bool, err error) {
-	viaRelay, err = withRelayOrStore(ctx, dataDir,
-		func(st *Store) error {
-			if _, ok := st.RevokeDevice(deviceID); !ok {
-				return ErrDeviceNotFound
-			}
-			return nil
-		},
-		func(c *http.Client) error {
-			return adminCall(ctx, c, http.MethodDelete, "/devices/"+url.PathEscape(deviceID), nil, nil, ErrDeviceNotFound)
-		})
+	viaRelay, err = WithAdminTarget(ctx, dataDir, func(adm AdminClient, _ bool) error {
+		return adm.RevokeDevice(ctx, deviceID)
+	})
 	if errors.Is(err, errNoDataDir) {
 		return false, ErrDeviceNotFound
 	}
 	return viaRelay, err
 }
 
-// AdminListHosts lists the hosts of the relay whose data dir is dataDir. A
-// running relay also reports AW_HOST_TOKEN's host and which hosts are online;
-// without one, only the hosts in store.json are listed.
+// AdminListHosts lists the hosts of the relay whose data dir is dataDir. Both
+// online and offline, it includes AW_HOST_TOKEN's host (when set) with Env: true,
+// and reports online flags when the relay is running.
 func AdminListHosts(ctx context.Context, dataDir string) ([]HostAdminInfo, error) {
 	var out []HostAdminInfo
-	_, err := withRelayOrStore(ctx, dataDir,
-		func(st *Store) error {
-			for _, h := range st.ListHosts() {
-				out = append(out, HostAdminInfo{ID: h.ID, Name: h.Name, CreatedAt: h.CreatedAt, LastSeen: h.LastSeen})
-			}
-			return nil
-		},
-		func(c *http.Client) error {
-			out = nil
-			return adminCall(ctx, c, http.MethodGet, "/hosts", nil, &out, ErrHostNotFound)
-		})
+	_, err := WithAdminTarget(ctx, dataDir, func(adm AdminClient, _ bool) error {
+		var err error
+		out, err = adm.ListHosts(ctx)
+		return err
+	})
 	if errors.Is(err, errNoDataDir) {
 		return nil, nil
 	}
@@ -350,11 +613,8 @@ func AdminListHosts(ctx context.Context, dataDir string) ([]HostAdminInfo, error
 // dataDir the running relay registers it (viaRelay is true); otherwise
 // store.json is edited under the data-dir lock (the data dir is created if
 // needed). It returns ErrHostExists for an id already registered, and
-// ErrHostIsEnv for the host of AW_HOST_TOKEN: the running relay knows it, and
-// a stopped one is described by envHostID, AW_HOST_TOKEN's host id when it is
-// set (EnvHost), "" when it is not. Registering that id would stop the relay
-// from starting.
-func AdminAddHost(ctx context.Context, dataDir, id, name, envHostID string) (info HostAdminInfo, token string, viaRelay bool, err error) {
+// ErrHostIsEnv for the host of AW_HOST_TOKEN (configured in the environment).
+func AdminAddHost(ctx context.Context, dataDir, id, name string) (info HostAdminInfo, token string, viaRelay bool, err error) {
 	if !ValidHostID(id) {
 		return HostAdminInfo{}, "", false, ErrInvalidHostID
 	}
@@ -368,19 +628,11 @@ func AdminAddHost(ctx context.Context, dataDir, id, name, envHostID string) (inf
 	if err := os.MkdirAll(dataDir, 0700); err != nil {
 		return HostAdminInfo{}, "", false, fmt.Errorf("create data dir %s: %w", dataDir, err)
 	}
-	req := addHostRequest{ID: id, Name: name, TokenHash: Sha256Hex(token)}
-	viaRelay, err = withRelayOrStore(ctx, dataDir,
-		func(st *Store) error {
-			if envHostID != "" && req.ID == envHostID {
-				return ErrHostIsEnv
-			}
-			h, err := st.AddHost(req.ID, req.Name, req.TokenHash)
-			info = HostAdminInfo{ID: h.ID, Name: h.Name, CreatedAt: h.CreatedAt}
-			return err
-		},
-		func(c *http.Client) error {
-			return adminCall(ctx, c, http.MethodPost, "/hosts", req, &info, ErrHostNotFound)
-		})
+	tokenHash := Sha256Hex(token)
+	viaRelay, err = WithAdminTarget(ctx, dataDir, func(adm AdminClient, _ bool) error {
+		info, err = adm.AddHost(ctx, id, name, tokenHash)
+		return err
+	})
 	if err != nil {
 		return HostAdminInfo{}, "", viaRelay, err
 	}
@@ -390,27 +642,20 @@ func AdminAddHost(ctx context.Context, dataDir, id, name, envHostID string) (inf
 // AdminRevokeHost revokes a registered host. When a relay is running on
 // dataDir the running relay performs it and closes the host's connection
 // (viaRelay is true); otherwise store.json is edited under the data-dir lock.
-// It returns ErrHostNotFound for an unknown id.
+// It returns ErrHostNotFound for an unknown id, and ErrHostIsEnv for AW_HOST_TOKEN's host.
 func AdminRevokeHost(ctx context.Context, dataDir, id string) (viaRelay bool, err error) {
-	viaRelay, err = withRelayOrStore(ctx, dataDir,
-		func(st *Store) error {
-			if _, ok := st.RevokeHost(id); !ok {
-				return ErrHostNotFound
-			}
-			return nil
-		},
-		func(c *http.Client) error {
-			return adminCall(ctx, c, http.MethodDelete, "/hosts/"+url.PathEscape(id), nil, nil, ErrHostNotFound)
-		})
+	viaRelay, err = WithAdminTarget(ctx, dataDir, func(adm AdminClient, _ bool) error {
+		return adm.RevokeHost(ctx, id)
+	})
 	if errors.Is(err, errNoDataDir) {
 		return false, ErrHostNotFound
 	}
 	return viaRelay, err
 }
 
-// withRelayOrStore runs online against the running relay, or offline against
-// the on-disk store when no relay holds the data-dir lock.
-func withRelayOrStore(ctx context.Context, dataDir string, offline func(*Store) error, online func(*http.Client) error) (viaRelay bool, err error) {
+// WithAdminTarget runs fn against the running relay's admin socket (viaRelay: true),
+// or offline against the on-disk store and env host (viaRelay: false).
+func WithAdminTarget(ctx context.Context, dataDir string, fn func(adm AdminClient, viaRelay bool) error) (viaRelay bool, err error) {
 	if _, err := os.Stat(dataDir); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return false, errNoDataDir
@@ -425,13 +670,15 @@ func withRelayOrStore(ctx context.Context, dataDir string, offline func(*Store) 
 	for {
 		lock, err := lockDataDir(dataDir)
 		if err == nil {
-			return false, runOffline(dataDir, lock, offline)
+			return false, runOfflineAdmin(dataDir, lock, func(adm AdminClient) error {
+				return fn(adm, false)
+			})
 		}
 		if !errors.Is(err, ErrRelayRunning) {
 			return false, err
 		}
 
-		err = online(client)
+		err = fn(&socketAdminClient{client: client}, true)
 		if !isDialError(err) {
 			return true, err
 		}
@@ -448,11 +695,9 @@ func withRelayOrStore(ctx context.Context, dataDir string, offline func(*Store) 
 	}
 }
 
-func runOffline(dataDir string, lock *dataDirLock, fn func(*Store) error) error {
+func runOfflineAdmin(dataDir string, lock *dataDirLock, fn func(AdminClient) error) error {
 	defer lock.release()
-	// A version 1 store is migrated on open: its history goes to the host of
-	// AW_HOST_TOKEN, so the CLI needs the service's AW_HOST_ID (default main).
-	legacyHostID := os.Getenv("AW_HOST_ID")
+	legacyHostID := ServiceEnv("AW_HOST_ID")
 	if legacyHostID == "" {
 		legacyHostID = DefaultHostID
 	}
@@ -460,11 +705,15 @@ func runOffline(dataDir string, lock *dataDirLock, fn func(*Store) error) error 
 	if err != nil {
 		return fmt.Errorf("read store from %s: %w", dataDir, err)
 	}
-	opErr := fn(store)
-	if err := store.Close(); err != nil && opErr == nil {
-		opErr = fmt.Errorf("save store: %w", err)
+	defer store.Close()
+
+	envCfg, err := LoadEnvHost(ServiceEnv)
+	if err != nil {
+		return fmt.Errorf("the relay's environment: %w", err)
 	}
-	return opErr
+
+	admin := NewAdmin(store, envCfg)
+	return fn(admin)
 }
 
 func adminClient(dataDir string) *http.Client {

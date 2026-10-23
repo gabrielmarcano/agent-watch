@@ -536,9 +536,9 @@ func setServiceEnvFile(t *testing.T, content string) {
 			t.Fatal(err)
 		}
 	}
-	old := serviceEnvFile
-	serviceEnvFile = path
-	t.Cleanup(func() { serviceEnvFile = old })
+	old := relay.ServiceEnvFile
+	relay.ServiceEnvFile = path
+	t.Cleanup(func() { relay.ServiceEnvFile = old })
 }
 
 // unsetEnv removes key from the environment for the test.
