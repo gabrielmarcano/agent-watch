@@ -382,11 +382,17 @@ func (h *Hub) ServeHost(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// RevokeHost drops a revoked host's connection, if any: its in-flight
-// commands fail with host_offline and nothing it sent after this point
-// changes the state. The notifier forgets the host, connected or not. It
-// reports whether the host was connected.
-func (h *Hub) RevokeHost(id string) bool {
+// RevokeHost removes a registered host from the store, drops its connection if
+// any, notifies the push dispatcher, and removes the host from state.
+// It reports whether the host was found, whether it was currently connected,
+// and any error saving the store.
+func (h *Hub) RevokeHost(id string) (found bool, wasConnected bool, err error) {
+	if h.store != nil {
+		if _, ok := h.store.RevokeHost(id); !ok {
+			return false, false, nil
+		}
+	}
+
 	h.mu.Lock()
 	host := h.conns[id]
 	delete(h.conns, id)
@@ -396,8 +402,18 @@ func (h *Hub) RevokeHost(id string) bool {
 		host.retire()
 		go func() { _ = host.conn.Close(wsCloseCodeRevoked, "host revoked") }()
 	}
-	h.notifier.OnHostRevoked(id)
-	return host != nil
+	if h.notifier != nil {
+		h.notifier.OnHostRevoked(id)
+	}
+	if h.state != nil {
+		h.state.RemoveHost(id)
+	}
+	if h.store != nil {
+		if err := h.store.Flush(); err != nil {
+			return true, host != nil, fmt.Errorf("saving store: %w", err)
+		}
+	}
+	return true, host != nil, nil
 }
 
 // Shutdown stops accepting hosts, drops the connected ones (watches see them go

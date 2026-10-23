@@ -849,7 +849,7 @@ func TestHub_ReplaceIsNotOffline(t *testing.T) {
 func TestHub_RevokeReportsHostRevoked(t *testing.T) {
 	n := &presenceNotifier{}
 	h := NewHub(nil, NewState(), nil, n)
-	if h.RevokeHost("linux") {
+	if _, wasConnected, _ := h.RevokeHost("linux"); wasConnected {
 		t.Fatal("RevokeHost reported an unconnected host as connected")
 	}
 	n.mu.Lock()

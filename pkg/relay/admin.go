@@ -231,7 +231,7 @@ type Admin struct {
 	envHost        *HostAdminInfo // nil if AW_HOST_TOKEN unset or shadowed by stored host
 	isOnline       func(hostID string) bool
 	onAdd          func(h Host)
-	onRevoke       func(hostID string)
+	revokeHost     func(hostID string) (found bool, err error)
 	onRevokeDevice func(tokenHash string)
 }
 
@@ -276,15 +276,15 @@ func newServerAdmin(store *Store, state *State, auth *AuthManager, hub *Hub) *Ad
 			}
 			slog.Info("host registered", "host", h.ID)
 		},
-		onRevoke: func(hostID string) {
-			var connected bool
-			if hub != nil {
-				connected = hub.RevokeHost(hostID)
+		revokeHost: func(hostID string) (bool, error) {
+			if hub == nil {
+				return false, nil
 			}
-			if state != nil {
-				state.RemoveHost(hostID)
+			found, wasConnected, err := hub.RevokeHost(hostID)
+			if found {
+				slog.Info("host revoked", "host", hostID, "was_connected", wasConnected)
 			}
-			slog.Info("host revoked", "host", hostID, "was_connected", connected)
+			return found, err
 		},
 		onRevokeDevice: func(tokenHash string) {
 			var closed int
@@ -404,15 +404,22 @@ func (a *Admin) RevokeHost(ctx context.Context, id string) error {
 	if a.envHost != nil && a.envHost.ID == id {
 		return ErrHostIsEnv
 	}
+	if a.revokeHost != nil {
+		found, err := a.revokeHost(id)
+		if err != nil {
+			return err
+		}
+		if !found {
+			return ErrHostNotFound
+		}
+		return nil
+	}
 	if a.store == nil {
 		return ErrHostNotFound
 	}
 	_, ok := a.store.RevokeHost(id)
 	if !ok {
 		return ErrHostNotFound
-	}
-	if a.onRevoke != nil {
-		a.onRevoke(id)
 	}
 	if err := a.store.Flush(); err != nil {
 		return fmt.Errorf("saving store: %w", err)

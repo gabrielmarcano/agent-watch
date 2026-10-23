@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -705,5 +706,69 @@ func TestServer_PushNamesTheHost(t *testing.T) {
 		}
 	case <-ctx.Done():
 		t.Fatal("no push")
+	}
+}
+
+// TestMultiHost_RevokeHostRacingHandshake verifies that a racing host WebSocket
+// handshake cannot survive concurrent host revocation.
+func TestMultiHost_RevokeHostRacingHandshake(t *testing.T) {
+	server, ts := setupTestServerWith(t, func(c *Config) { c.HostName = "Mac" })
+	racingToken, _ := GenerateDeviceToken()
+	if _, err := server.AddHost("racing", "Racing Host", Sha256Hex(racingToken)); err != nil {
+		t.Fatalf("AddHost: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	wsURL := strings.Replace(ts.URL, "http://", "ws://", 1) + "/v1/host"
+	var wg sync.WaitGroup
+
+	// Multiple concurrent dial attempts while RevokeHost runs
+	dialCount := 10
+	startBarrier := make(chan struct{})
+	for i := 0; i < dialCount; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-startBarrier
+			conn, resp, err := websocket.Dial(ctx, wsURL, &websocket.DialOptions{
+				HTTPHeader: http.Header{"Authorization": []string{"Bearer " + racingToken}},
+			})
+			if err == nil {
+				// Handshake was accepted before revocation closed it.
+				// It must either be closed with wsCloseCodeRevoked or closed soon.
+				hello, _ := json.Marshal(model.HelloMsg{Type: model.WireHello, Host: "racing", HerdrOnline: true})
+				_ = conn.Write(ctx, websocket.MessageText, hello)
+				_, _, _ = conn.Read(ctx)
+				_ = conn.Close(websocket.StatusNormalClosure, "")
+			} else if resp != nil && resp.StatusCode != http.StatusUnauthorized {
+				t.Errorf("handshake status = %d, want 401", resp.StatusCode)
+			}
+		}()
+	}
+
+	// Revoke host concurrently with dials
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		<-startBarrier
+		time.Sleep(2 * time.Millisecond) // stagger slightly to race with dials
+		_, _ = server.RevokeHost("racing")
+	}()
+
+	close(startBarrier)
+	wg.Wait()
+
+	// After revocation, no connection may survive and all new dials must 401.
+	if server.State().HostOnline("racing") {
+		t.Fatal("host is still online in state after revocation")
+	}
+
+	_, resp, err := websocket.Dial(ctx, wsURL, &websocket.DialOptions{
+		HTTPHeader: http.Header{"Authorization": []string{"Bearer " + racingToken}},
+	})
+	if err == nil || resp == nil || resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("post-revocation handshake = %v, %v; want 401", resp, err)
 	}
 }
