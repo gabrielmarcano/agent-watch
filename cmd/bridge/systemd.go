@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+
+	"github.com/gabrielmarcano/agent-monitor/pkg/bridge"
 )
 
 const systemdUnit = "agent-watch-bridge"
@@ -164,7 +166,7 @@ func (m *systemdManager) Install(ctx context.Context, spec ServiceSpec) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
-	if err := writeFileAtomic(path, []byte(rendered), 0o644); err != nil {
+	if err := bridge.WriteFileAtomic(path, []byte(rendered), 0o644, 0o755); err != nil {
 		return fmt.Errorf("write unit %s: %w", path, err)
 	}
 	for _, args := range [][]string{

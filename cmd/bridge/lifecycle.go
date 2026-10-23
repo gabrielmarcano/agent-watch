@@ -48,60 +48,32 @@ func (a *app) cmdConfigure(args []string) error {
 		return err
 	}
 
-	url, token := *relayURL, *hostToken
-	if *envFile != "" {
-		var err error
-		if url, token, err = a.relayFromEnvFile(*envFile, url, token); err != nil {
-			return err
-		}
-	}
-	cfg := &bridge.Config{
-		RelayURL:         bridge.NormalizeRelayURL(url),
-		HostToken:        token,
+	r := a.resolveForStart(ServiceSpec{ConfigPath: *configPath})
+	target := r.spec.ConfigPath
+
+	_, notes, warn, err := bridge.UpdateConfig(target, bridge.ConfigureOptions{
+		RelayURL:         *relayURL,
+		HostToken:        *hostToken,
+		EnvFile:          *envFile,
 		HostName:         *hostName,
 		ClaudeConfigDirs: claudeDirs,
 		SessionRoots:     sessionRoots,
 		SessionKinds:     sessionKinds,
-	}
-	if err := bridge.ValidateConfig(cfg); err != nil {
+	})
+	if err != nil {
 		return err
 	}
-
-	r := a.resolveForStart(ServiceSpec{ConfigPath: *configPath})
-	target := r.spec.ConfigPath
-	old, _ := bridge.LoadConfig(target) // to say what the rewrite drops, and keep push_presence
-	if old != nil {
-		cfg.PushPresence = old.PushPresence // a preference, not a configure flag
-	}
-	if err := bridge.SaveConfig(target, cfg); err != nil {
-		return err
+	if warn != "" {
+		fmt.Fprintln(a.stderr, warn)
 	}
 	fmt.Fprintln(a.stdout, target)
-	a.noteDropped(old, cfg)
+	for _, note := range notes {
+		fmt.Fprintln(a.stderr, note)
+	}
 	if r.installed != nil && absPath(r.installed.ConfigPath) == target {
 		fmt.Fprintln(a.stderr, "The bridge service uses this config: run `agent-watch-bridge restart` to apply it.")
 	}
 	return nil
-}
-
-// noteDropped says which optional settings of the previous config a
-// configure call did not give again: it rewrites the whole file.
-func (a *app) noteDropped(old, cur *bridge.Config) {
-	if old == nil {
-		return
-	}
-	if old.HostName != "" && cur.HostName == "" {
-		fmt.Fprintf(a.stderr, "note: dropped host_name %q from the previous config; pass --host-name to keep it\n", old.HostName)
-	}
-	if len(old.ClaudeConfigDirs) > 0 && len(cur.ClaudeConfigDirs) == 0 {
-		fmt.Fprintf(a.stderr, "note: dropped claude_config_dirs %q from the previous config; pass --claude-config-dir once per directory to keep them\n", old.ClaudeConfigDirs)
-	}
-	if len(old.SessionRoots) > 0 && len(cur.SessionRoots) == 0 {
-		fmt.Fprintf(a.stderr, "note: dropped session_roots %q from the previous config; pass --session-root once per folder to keep them (the phone can no longer start sessions)\n", old.SessionRoots)
-	}
-	if len(old.SessionKinds) > 0 && len(cur.SessionKinds) == 0 {
-		fmt.Fprintf(a.stderr, "note: dropped session_kinds %q from the previous config; pass --session-kind once per kind to keep them (the defaults apply)\n", old.SessionKinds)
-	}
 }
 
 func (a *app) specFlags(fs *flag.FlagSet) *ServiceSpec {

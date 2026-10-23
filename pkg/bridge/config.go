@@ -56,30 +56,70 @@ type StatusFile struct {
 	UpdatedAt    string `json:"updated_at"`
 }
 
+// PluginID is herdr's identifier for the agent-watch bridge plugin.
+const PluginID = "herdr-agent-watch"
+
+// DefaultConfigPathFor computes the config path given an optional home directory
+// and an environment lookup function.
+func DefaultConfigPathFor(home string, getenv func(string) string) string {
+	if getenv != nil {
+		if p := getenv("HERDR_PLUGIN_CONFIG_DIR"); p != "" {
+			return filepath.Join(p, "config.toml")
+		}
+	}
+	if home == "" {
+		home, _ = os.UserHomeDir()
+	}
+	if home != "" {
+		return filepath.Join(home, ".config", "herdr", "plugins", "config", PluginID, "config.toml")
+	}
+	return "config.toml"
+}
+
+// DefaultStateDirFor computes the state directory given an optional home directory
+// and an environment lookup function.
+func DefaultStateDirFor(home string, getenv func(string) string) string {
+	if getenv != nil {
+		if p := getenv("HERDR_PLUGIN_STATE_DIR"); p != "" {
+			return p
+		}
+	}
+	if home == "" {
+		home, _ = os.UserHomeDir()
+	}
+	if home != "" {
+		return filepath.Join(home, ".local", "state", "agent-watch")
+	}
+	return "."
+}
+
+// DefaultSocketPathFor computes the herdr socket path given an optional home directory
+// and an environment lookup function.
+func DefaultSocketPathFor(home string, getenv func(string) string) string {
+	if getenv != nil {
+		if p := getenv("HERDR_SOCKET_PATH"); p != "" {
+			return p
+		}
+	}
+	if home == "" {
+		home, _ = os.UserHomeDir()
+	}
+	if home != "" {
+		return filepath.Join(home, ".config", "herdr", "herdr.sock")
+	}
+	return "herdr.sock"
+}
+
 // DefaultConfigPath returns the config file path according to herdr conventions:
 // $HERDR_PLUGIN_CONFIG_DIR/config.toml, or ~/.config/herdr/plugins/config/herdr-agent-watch/config.toml.
 func DefaultConfigPath() string {
-	if p := os.Getenv("HERDR_PLUGIN_CONFIG_DIR"); p != "" {
-		return filepath.Join(p, "config.toml")
-	}
-	home, err := os.UserHomeDir()
-	if err == nil {
-		return filepath.Join(home, ".config", "herdr", "plugins", "config", "herdr-agent-watch", "config.toml")
-	}
-	return "config.toml"
+	return DefaultConfigPathFor("", os.Getenv)
 }
 
 // DefaultStateDir returns the directory where status.json should be written:
 // $HERDR_PLUGIN_STATE_DIR, or ~/.local/state/agent-watch.
 func DefaultStateDir() string {
-	if p := os.Getenv("HERDR_PLUGIN_STATE_DIR"); p != "" {
-		return p
-	}
-	home, err := os.UserHomeDir()
-	if err == nil {
-		return filepath.Join(home, ".local", "state", "agent-watch")
-	}
-	return "."
+	return DefaultStateDirFor("", os.Getenv)
 }
 
 // ValidateConfig checks that RelayURL and HostToken meet security and protocol requirements.
@@ -163,44 +203,54 @@ func CheckConfig(path string) (*Config, error) {
 	return &cfg, nil
 }
 
+// WriteFileAtomic writes data to path atomically by creating a temp file in
+// the destination directory, writing the contents, setting perm, and renaming.
+// If dirPerm is non-zero, the parent directory is created if it does not exist.
+func WriteFileAtomic(path string, data []byte, perm os.FileMode, dirPerm os.FileMode) error {
+	dir := filepath.Dir(path)
+	if dirPerm != 0 {
+		if err := os.MkdirAll(dir, dirPerm); err != nil {
+			return fmt.Errorf("create dir %s: %w", dir, err)
+		}
+		if err := os.Chmod(dir, dirPerm); err != nil {
+			return fmt.Errorf("chmod dir %s: %w", dir, err)
+		}
+	}
+	tmp, err := os.CreateTemp(dir, "."+filepath.Base(path)+".*")
+	if err != nil {
+		return fmt.Errorf("create temp file in %s: %w", dir, err)
+	}
+	name := tmp.Name()
+	defer os.Remove(name)
+
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		return fmt.Errorf("write %s: %w", path, err)
+	}
+	if err := tmp.Chmod(perm); err != nil {
+		tmp.Close()
+		return fmt.Errorf("chmod %s: %w", path, err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("close %s: %w", path, err)
+	}
+	if err := os.Rename(name, path); err != nil {
+		return fmt.Errorf("rename %s: %w", path, err)
+	}
+	return nil
+}
+
 // SaveConfig writes a Config to path with mode 0600 in a directory with mode
 // 0700. Both modes are enforced even when the file or directory already
 // exists (os.WriteFile and os.MkdirAll only apply a mode on creation). The
 // write is atomic: a temp file in the same directory, then a rename.
 func SaveConfig(path string, cfg *Config) error {
-	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return fmt.Errorf("create config dir %s: %w", dir, err)
-	}
-	if err := os.Chmod(dir, 0o700); err != nil {
-		return fmt.Errorf("chmod config dir %s: %w", dir, err)
-	}
-
 	var buf strings.Builder
 	enc := toml.NewEncoder(&buf)
 	if err := enc.Encode(cfg); err != nil {
 		return fmt.Errorf("encode config: %w", err)
 	}
-
-	tmp, err := os.CreateTemp(dir, ".config.toml.*") // created 0600
-	if err != nil {
-		return fmt.Errorf("write config %s: %w", path, err)
-	}
-	tmpName := tmp.Name()
-	defer os.Remove(tmpName) // no-op after a successful rename
-
-	if err := tmp.Chmod(0o600); err != nil {
-		tmp.Close()
-		return fmt.Errorf("chmod config %s: %w", tmpName, err)
-	}
-	if _, err := tmp.WriteString(buf.String()); err != nil {
-		tmp.Close()
-		return fmt.Errorf("write config %s: %w", path, err)
-	}
-	if err := tmp.Close(); err != nil {
-		return fmt.Errorf("write config %s: %w", path, err)
-	}
-	if err := os.Rename(tmpName, path); err != nil {
+	if err := WriteFileAtomic(path, []byte(buf.String()), 0o600, 0o700); err != nil {
 		return fmt.Errorf("write config %s: %w", path, err)
 	}
 	return nil
@@ -251,21 +301,9 @@ func WriteStatus(path string, s StatusFile) error {
 		return fmt.Errorf("encode status: %w", err)
 	}
 
-	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return fmt.Errorf("create state dir %s: %w", dir, err)
+	if err := WriteFileAtomic(path, data, 0o644, 0o700); err != nil {
+		return fmt.Errorf("write status %s: %w", path, err)
 	}
-
-	tmp := fmt.Sprintf("%s.tmp.%d", path, os.Getpid())
-	if err := os.WriteFile(tmp, data, 0o644); err != nil {
-		return fmt.Errorf("write tmp status: %w", err)
-	}
-
-	if err := os.Rename(tmp, path); err != nil {
-		_ = os.Remove(tmp)
-		return fmt.Errorf("rename status: %w", err)
-	}
-
 	return nil
 }
 

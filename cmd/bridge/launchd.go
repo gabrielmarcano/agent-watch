@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/gabrielmarcano/agent-monitor/deploy/launchd"
+	"github.com/gabrielmarcano/agent-monitor/pkg/bridge"
 )
 
 const launchdLabel = "com.gabrielmarcano.agent-watch-bridge"
@@ -112,7 +113,7 @@ func (m *launchdManager) Install(ctx context.Context, spec ServiceSpec) error {
 	if err := os.MkdirAll(filepath.Dir(spec.LogPath), 0o755); err != nil {
 		return fmt.Errorf("mkdir %s: %w", filepath.Dir(spec.LogPath), err)
 	}
-	if err := writeFileAtomic(path, []byte(rendered), 0o644); err != nil {
+	if err := bridge.WriteFileAtomic(path, []byte(rendered), 0o644, 0o755); err != nil {
 		return fmt.Errorf("write plist %s: %w", path, err)
 	}
 

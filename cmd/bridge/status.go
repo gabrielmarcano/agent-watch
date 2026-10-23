@@ -3,12 +3,9 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
-	"io/fs"
 	"net/http"
-	"net/url"
 	"path/filepath"
 	"strings"
 	"time"
@@ -22,45 +19,24 @@ import (
 func (a *app) localStatus() bridge.LocalStatus {
 	r := a.resolveForRead(ServiceSpec{})
 	statusPath := filepath.Join(r.spec.StateDir, "status.json")
-	ls := bridge.LocalStatus{
-		Installed:      r.installed != nil || r.installErr != nil,
-		Service:        a.svc.Kind(),
-		DefinitionPath: a.svc.DefinitionPath(),
-		Binary:         r.spec.Binary,
-		ConfigPath:     r.spec.ConfigPath,
-		StateDir:       r.spec.StateDir,
-		StatusPath:     statusPath,
-		LogPath:        a.svc.LogHint(r.spec),
-		Version:        fullVersion,
-	}
+	var defErr string
 	if r.installErr != nil {
-		ls.DefinitionError = r.installErr.Error()
+		defErr = r.installErr.Error()
 	}
-
-	if cfg, err := bridge.CheckConfig(r.spec.ConfigPath); err != nil {
-		ls.ConfigError = err.Error()
-	} else {
-		ls.Configured = true
-		ls.PushPresence = cfg.PushPresence
-		if u, err := url.Parse(cfg.RelayURL); err == nil {
-			ls.RelayHost = u.Host
-		}
-	}
-
-	var stp *bridge.StatusFile
-	st, err := bridge.ReadStatus(statusPath)
-	switch {
-	case err == nil:
-		stp = &st
-	case !errors.Is(err, fs.ErrNotExist):
-		ls.LastError = err.Error()
-	}
-	lastErr := ls.LastError
-	ls.ApplyStatusFile(stp, a.now(), a.pidAlive)
-	if stp == nil && lastErr != "" {
-		ls.LastError = lastErr
-	}
-	return ls
+	return bridge.EvaluateLocalStatus(bridge.LocalStatusParams{
+		Installed:       r.installed != nil || r.installErr != nil,
+		Service:         a.svc.Kind(),
+		DefinitionPath:  a.svc.DefinitionPath(),
+		DefinitionError: defErr,
+		Binary:          r.spec.Binary,
+		ConfigPath:      r.spec.ConfigPath,
+		StateDir:        r.spec.StateDir,
+		StatusPath:      statusPath,
+		LogPath:         a.svc.LogHint(r.spec),
+		Version:         fullVersion,
+		Now:             a.now(),
+		PIDAlive:        a.pidAlive,
+	})
 }
 
 // cmdStatus prints the bridge's health.
