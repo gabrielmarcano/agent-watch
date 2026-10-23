@@ -4,13 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
-	"net/http"
 	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/gabrielmarcano/agent-monitor/pkg/bridge"
+	"github.com/gabrielmarcano/agent-monitor/pkg/relayclient"
 )
 
 // localStatus assembles the bridge's health from local files only: the
@@ -161,28 +160,11 @@ func (a *app) relayStatus(configPath string) (json.RawMessage, string) {
 	if err != nil {
 		return nil, err.Error()
 	}
-	base, err := bridge.HTTPSBase(cfg.RelayURL)
-	if err != nil {
-		return nil, err.Error()
-	}
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, base+"/v1/host/status", nil)
+	body, err := relayclient.HostStatus(ctx, a.http, cfg.RelayURL, cfg.HostToken)
 	if err != nil {
 		return nil, err.Error()
 	}
-	req.Header.Set("Authorization", "Bearer "+cfg.HostToken)
-	resp, err := a.http.Do(req)
-	if err != nil {
-		return nil, "could not reach the relay: " + err.Error()
-	}
-	defer resp.Body.Close()
-	body, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Sprintf("relay answered HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
-	}
-	if !json.Valid(body) {
-		return nil, "relay answered invalid JSON"
-	}
-	return json.RawMessage(body), ""
+	return body, ""
 }

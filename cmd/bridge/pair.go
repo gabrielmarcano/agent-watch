@@ -3,16 +3,15 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
-	"strings"
 	"time"
 
 	"github.com/gabrielmarcano/agent-monitor/pkg/bridge"
 	"github.com/gabrielmarcano/agent-monitor/pkg/herdr"
-	"github.com/gabrielmarcano/agent-monitor/pkg/model"
+	"github.com/gabrielmarcano/agent-monitor/pkg/relayclient"
 )
 
 // pairOutput is what `pair --json` prints (the menu bar reads it).
@@ -38,40 +37,19 @@ func (a *app) cmdPair(args []string) error {
 	if err != nil {
 		return err
 	}
-	base, err := bridge.HTTPSBase(cfg.RelayURL)
-	if err != nil {
-		return err
-	}
-
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, base+"/v1/host/pair-code", nil)
+
+	pc, err := relayclient.RequestPairCode(ctx, a.http, cfg.RelayURL, cfg.HostToken)
 	if err != nil {
+		var httpErr *relayclient.HTTPError
+		if errors.As(err, &httpErr) {
+			if httpErr.StatusCode == http.StatusUnauthorized || httpErr.StatusCode == http.StatusForbidden {
+				return fmt.Errorf("the relay rejected the host token (HTTP %d, %s); check host_token in %s", httpErr.StatusCode, httpErr.Detail, r.spec.ConfigPath)
+			}
+			return fmt.Errorf("the relay refused the pairing request (HTTP %d): %s", httpErr.StatusCode, httpErr.Detail)
+		}
 		return err
-	}
-	req.Header.Set("Authorization", "Bearer "+cfg.HostToken)
-	resp, err := a.http.Do(req)
-	if err != nil {
-		return fmt.Errorf("request a pairing code from %s: %w", base, err)
-	}
-	defer resp.Body.Close()
-	body, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
-
-	if resp.StatusCode != http.StatusOK {
-		var er model.ErrorResponse
-		detail := strings.TrimSpace(string(body))
-		if json.Unmarshal(body, &er) == nil && er.Error.Code != "" {
-			detail = er.Error.Code + ": " + er.Error.Message
-		}
-		if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
-			return fmt.Errorf("the relay rejected the host token (HTTP %d, %s); check host_token in %s", resp.StatusCode, detail, r.spec.ConfigPath)
-		}
-		return fmt.Errorf("the relay refused the pairing request (HTTP %d): %s", resp.StatusCode, detail)
-	}
-
-	var pc model.PairCodeResponse
-	if err := json.Unmarshal(body, &pc); err != nil || pc.Code == "" {
-		return fmt.Errorf("decode the relay's pairing code: %v", err)
 	}
 
 	out := pairOutput{Code: pc.Code, ExpiresAt: pc.ExpiresAt}

@@ -366,7 +366,9 @@ type fakeRelay struct {
 	conns int
 	msgs  []recordedMsg
 	// reject, when it returns a non-zero status, refuses the handshake with it.
-	reject func() int
+	reject     func() int
+	activeConn *websocket.Conn
+	pauseCh    chan struct{}
 }
 
 type recordedMsg struct {
@@ -395,7 +397,12 @@ func newFakeRelay(t *testing.T) *fakeRelay {
 		f.mu.Lock()
 		f.conns++
 		idx := f.conns
+		f.activeConn = conn
+		pauseCh := f.pauseCh
 		f.mu.Unlock()
+		if pauseCh != nil {
+			<-pauseCh
+		}
 		for {
 			typ, data, err := conn.Read(r.Context())
 			if err != nil {
@@ -413,6 +420,28 @@ func newFakeRelay(t *testing.T) *fakeRelay {
 	}))
 	t.Cleanup(f.srv.Close)
 	return f
+}
+
+func (f *fakeRelay) pause() func() {
+	ch := make(chan struct{})
+	f.mu.Lock()
+	f.pauseCh = ch
+	f.mu.Unlock()
+	return func() {
+		close(ch)
+		f.mu.Lock()
+		f.pauseCh = nil
+		f.mu.Unlock()
+	}
+}
+
+func (f *fakeRelay) closeActive() {
+	f.mu.Lock()
+	conn := f.activeConn
+	f.mu.Unlock()
+	if conn != nil {
+		_ = conn.Close(websocket.StatusGoingAway, "bye")
+	}
 }
 
 func (f *fakeRelay) setReject(fn func() int) {
@@ -486,22 +515,34 @@ func TestClient_LogsSuccessfulConnectWithHello(t *testing.T) {
 // While connected, a full send buffer drops agent_update and command_result:
 // that loss must be logged with the message type and id.
 func TestClient_LogsDropsWhileConnected(t *testing.T) {
-	var logs syncBuffer
-	c := &Client{Logger: testLogger(&logs)}
-	c.connected = true
-	c.sendCh = make(chan outMsg, 1)
-	c.flushCh = make(chan struct{}, 1)
-	c.sendCh <- outMsg{typ: "filler"}
+	relay := newFakeRelay(t)
+	resume := relay.pause()
+	defer resume()
 
-	c.Send(model.AgentUpdateMsg{Type: model.WireAgentUpdate, Agent: model.AgentState{PaneID: "w1:p1"}})
+	var logs syncBuffer
+	c := &Client{
+		URL:        relay.url(),
+		Token:      "tok",
+		Logger:     testLogger(&logs),
+		MinBackoff: 10 * time.Millisecond,
+	}
+	runClient(t, c)
+	waitFor(t, 3*time.Second, "connected", func() bool { return c.Connected() })
+
+	largePayload := strings.Repeat("a", 64*1024)
+	for i := 0; i < 200; i++ {
+		c.Send(model.AgentUpdateMsg{
+			Type:  model.WireAgentUpdate,
+			Agent: model.AgentState{PaneID: "w1:p1", Workspace: largePayload},
+		})
+	}
 	c.Send(model.CommandResultMsg{Type: model.WireCommandResult, RequestID: "req-42"})
 
-	out := logs.String()
-	for _, want := range []string{"agent_update", "w1:p1", "command_result", "req-42"} {
-		if !strings.Contains(out, want) {
-			t.Errorf("drop log is missing %q:\n%s", want, out)
-		}
-	}
+	waitFor(t, 3*time.Second, "drop logs recorded", func() bool {
+		out := logs.String()
+		return strings.Contains(out, "agent_update") && strings.Contains(out, "w1:p1") &&
+			strings.Contains(out, "command_result") && strings.Contains(out, "req-42")
+	})
 }
 
 // A history item that finds the send buffer full while connected is queued
@@ -515,15 +556,12 @@ func TestClient_HistoryQueuedWhileConnectedIsFlushedWithoutReconnect(t *testing.
 		return n == 1 && len(msgs) >= 2
 	})
 
-	// Make Send see a full buffer: point it at a channel nobody reads. The
-	// connection's writer keeps its own channel and the flush signal.
-	c.mu.Lock()
-	full := make(chan outMsg, 1)
-	full <- outMsg{typ: "filler"}
-	c.sendCh = full
-	c.mu.Unlock()
-
+	resume := relay.pause()
+	for i := 0; i < sendBuffer+5; i++ {
+		c.Send(model.AgentUpdateMsg{Type: model.WireAgentUpdate, Agent: model.AgentState{PaneID: "w1:filler"}})
+	}
 	c.Send(model.HistoryItemMsg{Type: model.WireHistoryItem, Item: model.HistoryItem{ID: "hist-live"}})
+	resume()
 
 	waitFor(t, 3*time.Second, "hist-live on the first connection", func() bool {
 		return relay.hasHistory("hist-live")
@@ -543,20 +581,25 @@ func TestClient_ConnectedAtIsAfterTheDial(t *testing.T) {
 		if err != nil {
 			return
 		}
-		_ = conn.Close(websocket.StatusNormalClosure, "bye")
+		defer conn.Close(websocket.StatusNormalClosure, "bye")
+		for {
+			if _, _, err := conn.Read(r.Context()); err != nil {
+				return
+			}
+		}
 	}))
 	defer srv.Close()
 
-	c := &Client{URL: "ws" + strings.TrimPrefix(srv.URL, "http"), Token: "tok"}
+	c := &Client{URL: "ws" + strings.TrimPrefix(srv.URL, "http"), Token: "tok", MinBackoff: 10 * time.Millisecond}
 	start := time.Now()
 	const handshakeDelay = 80 * time.Millisecond
 	time.AfterFunc(handshakeDelay, func() { close(gate) })
 
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-	defer cancel()
-	connectedAt, _ := c.connectAndServe(ctx)
+	runClient(t, c)
+	waitFor(t, 3*time.Second, "connected", func() bool { return c.Connected() })
+	connectedAt := c.ConnectedAt()
 	if connectedAt.IsZero() {
-		t.Fatal("connectAndServe reported no successful dial")
+		t.Fatal("Client.ConnectedAt() reported no successful dial")
 	}
 	if got := connectedAt.Sub(start); got < handshakeDelay {
 		t.Errorf("connectedAt is %v after start, before the handshake finished (%v)", got, handshakeDelay)
@@ -593,24 +636,28 @@ func TestClient_LastErrorReportsAuthFailureAndClears(t *testing.T) {
 // History frames still sitting in the send buffer when a connection ends go
 // back to the offline queue instead of being lost.
 func TestClient_RequeuesUnsentHistoryOnDisconnect(t *testing.T) {
-	c := &Client{}
-	ch := make(chan outMsg, 4)
-	h := model.HistoryItemMsg{Type: model.WireHistoryItem, Item: model.HistoryItem{ID: "unsent"}}
-	ch <- outMsg{typ: model.WireAgentUpdate}
-	ch <- outMsg{typ: model.WireHistoryItem, hist: &h}
+	relay := newFakeRelay(t)
 
-	c.mu.Lock()
-	c.historyQ = []model.HistoryItemMsg{{Type: model.WireHistoryItem, Item: model.HistoryItem{ID: "queued"}}}
-	c.requeueUnsentLocked(ch)
-	got := make([]string, 0, len(c.historyQ))
-	for _, q := range c.historyQ {
-		got = append(got, q.Item.ID)
-	}
-	c.mu.Unlock()
+	c := &Client{URL: relay.url(), Token: "tok", MinBackoff: 10 * time.Millisecond}
+	runClient(t, c)
+	waitFor(t, 3*time.Second, "connected", func() bool { return c.Connected() })
 
-	if strings.Join(got, ",") != "unsent,queued" {
-		t.Errorf("history queue = %v, want [unsent queued]", got)
+	resume := relay.pause()
+	largePayload := strings.Repeat("x", 64*1024)
+	for i := 0; i < 20; i++ {
+		c.Send(model.AgentUpdateMsg{
+			Type:  model.WireAgentUpdate,
+			Agent: model.AgentState{PaneID: "w1:filler", Workspace: largePayload},
+		})
 	}
+	c.Send(model.HistoryItemMsg{Type: model.WireHistoryItem, Item: model.HistoryItem{ID: "unsent-item"}})
+
+	relay.closeActive()
+	resume()
+
+	waitFor(t, 3*time.Second, "unsent-item received after reconnect", func() bool {
+		return relay.hasHistory("unsent-item")
+	})
 }
 
 // The relay's version comes from each connection's handshake response. It

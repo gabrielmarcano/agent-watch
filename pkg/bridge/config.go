@@ -12,6 +12,7 @@ import (
 
 	"github.com/BurntSushi/toml"
 	"github.com/gabrielmarcano/agent-monitor/pkg/model"
+	"github.com/gabrielmarcano/agent-monitor/pkg/relayclient"
 )
 
 var hexTokenRe = regexp.MustCompile(`^[0-9a-fA-F]{64}$`)
@@ -259,35 +260,13 @@ func SaveConfig(path string, cfg *Config) error {
 // HTTPSBase returns the HTTP/HTTPS base URL derived from a WebSocket relay URL.
 // E.g. "wss://relay.example.com/v1/host" -> "https://relay.example.com".
 func HTTPSBase(relayURL string) (string, error) {
-	u, err := url.Parse(relayURL)
-	if err != nil {
-		return "", fmt.Errorf("invalid relay_url: %w", err)
-	}
-
-	var scheme string
-	switch u.Scheme {
-	case "wss":
-		scheme = "https"
-	case "ws":
-		scheme = "http"
-	default:
-		return "", fmt.Errorf("unsupported scheme %q; expected ws or wss", u.Scheme)
-	}
-
-	return fmt.Sprintf("%s://%s", scheme, u.Host), nil
+	return relayclient.HTTPSBase(relayURL)
 }
 
 // NormalizeRelayURL ensures the WebSocket URL has the /v1/host path.
 // E.g. "wss://relay.example.com" -> "wss://relay.example.com/v1/host".
 func NormalizeRelayURL(raw string) string {
-	u, err := url.Parse(raw)
-	if err != nil {
-		return raw
-	}
-	if u.Path == "" || u.Path == "/" {
-		u.Path = "/v1/host"
-	}
-	return u.String()
+	return relayclient.NormalizeRelayURL(raw)
 }
 
 // WriteStatus writes the status file atomically with 0644 mode.

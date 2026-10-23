@@ -45,13 +45,15 @@ type Client struct {
 	MinBackoff time.Duration // optional initial backoff (defaults to 1s)
 	MaxBackoff time.Duration // optional backoff ceiling (defaults to 60s)
 
-	mu        sync.Mutex
-	connected bool
-	sendCh    chan outMsg   // frames for the live connection's writer
-	flushCh   chan struct{} // wakes the writer to flush historyQ (cap 1)
-	historyQ  []model.HistoryItemMsg
-	lastErr   string
-	relayVer  string // from the last successful handshake
+	mu          sync.Mutex
+	connected   bool
+	connectedAt time.Time
+	sendCh      chan outMsg   // frames for the live connection's writer
+	flushCh     chan struct{} // wakes the writer to flush historyQ (cap 1)
+	historyQ    []model.HistoryItemMsg
+	lastErr     string
+	relayVer    string // from the last successful handshake
+	clock       clock
 }
 
 // outMsg is one encoded frame plus what the logs and the history queue need.
@@ -67,6 +69,20 @@ func (c *Client) Connected() bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.connected
+}
+
+// ConnectedAt reports when the current connection was established, or zero if disconnected.
+func (c *Client) ConnectedAt() time.Time {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.connectedAt
+}
+
+func (c *Client) clk() clock {
+	if c.clock != nil {
+		return c.clock
+	}
+	return realClock{}
 }
 
 // LastError describes why the relay is not connected (a rejected token, a
@@ -261,7 +277,7 @@ func (c *Client) Run(ctx context.Context) error {
 
 		// The healthy clock starts at the successful dial, so a slow dial
 		// followed by a short-lived connection does not reset the backoff.
-		if !connectedAt.IsZero() && time.Since(connectedAt) >= healthyAfter {
+		if !connectedAt.IsZero() && c.clk().Since(connectedAt) >= healthyAfter {
 			backoff = initialBackoff
 		}
 		if errors.Is(err, errInvalidToken) {
@@ -275,12 +291,12 @@ func (c *Client) Run(ctx context.Context) error {
 			c.Logger.Info("reconnecting to relay", "backoff", sleepDuration, "err", err)
 		}
 
-		timer := time.NewTimer(sleepDuration)
+		timer := c.clk().NewTimer(sleepDuration)
 		select {
 		case <-ctx.Done():
 			timer.Stop()
 			return ctx.Err()
-		case <-timer.C:
+		case <-timer.C():
 		}
 
 		backoff *= 2
@@ -319,7 +335,7 @@ func (c *Client) connectAndServe(ctx context.Context) (connectedAt time.Time, er
 		c.setLastError("relay unreachable: " + c.redact(err.Error()))
 		return time.Time{}, fmt.Errorf("dial: %w", err)
 	}
-	connectedAt = time.Now()
+	connectedAt = c.clk().Now()
 	defer conn.Close(websocket.StatusNormalClosure, "closing")
 
 	conn.SetReadLimit(1 << 20) // 1 MB limit
@@ -337,6 +353,7 @@ func (c *Client) connectAndServe(ctx context.Context) (connectedAt time.Time, er
 
 	c.mu.Lock()
 	c.connected = true
+	c.connectedAt = connectedAt
 	c.sendCh = sendCh
 	c.flushCh = flushCh
 	c.lastErr = ""
@@ -346,6 +363,7 @@ func (c *Client) connectAndServe(ctx context.Context) (connectedAt time.Time, er
 	defer func() {
 		c.mu.Lock()
 		c.connected = false
+		c.connectedAt = time.Time{}
 		c.sendCh = nil
 		c.flushCh = nil
 		c.requeueUnsentLocked(sendCh)
