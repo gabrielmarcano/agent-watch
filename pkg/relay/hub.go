@@ -44,6 +44,8 @@ const RelayVersionHeader = "X-Agent-Watch-Relay-Version"
 // and history items carry their host (stamped by the hub).
 type Notifier interface {
 	OnAgentUpdate(prev *model.AgentState, cur model.AgentState)
+	OnAgentRemoved(host, paneID string)
+	OnSnapshot(host string, agents []model.AgentState)
 	// OnHistoryItem reports a pane's new reply (never a resent duplicate), so
 	// a "finished" push can show it.
 	OnHistoryItem(item model.HistoryItem)
@@ -63,6 +65,12 @@ type NoopNotifier struct{}
 
 // OnAgentUpdate is a no-op implementation.
 func (NoopNotifier) OnAgentUpdate(prev *model.AgentState, cur model.AgentState) {}
+
+// OnAgentRemoved is a no-op implementation.
+func (NoopNotifier) OnAgentRemoved(host, paneID string) {}
+
+// OnSnapshot is a no-op implementation.
+func (NoopNotifier) OnSnapshot(host string, agents []model.AgentState) {}
 
 // OnHistoryItem is a no-op implementation.
 func (NoopNotifier) OnHistoryItem(item model.HistoryItem) {}
@@ -465,12 +473,14 @@ func (h *Hub) handleWireMessage(host *hostConnection, msg any) {
 	switch m := msg.(type) {
 	case model.SnapshotMsg:
 		h.state.ReplaceAll(id, m.Agents)
+		h.notifier.OnSnapshot(id, m.Agents)
 	case model.AgentUpdateMsg:
 		m.Agent.Host = id
 		prev := h.state.Upsert(m.Agent)
 		h.notifier.OnAgentUpdate(prev, m.Agent)
 	case model.AgentRemovedMsg:
 		h.state.Remove(id, m.PaneID)
+		h.notifier.OnAgentRemoved(id, m.PaneID)
 	case model.HistoryItemMsg:
 		m.Item.Host = id
 		// Duplicates (the bridge resends after a reconnect) are not news.

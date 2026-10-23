@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -316,6 +317,142 @@ func (d *Dispatcher) OnAgentUpdate(prev *model.AgentState, cur model.AgentState)
 			d.waitForReplyLocked(msg, cur)
 		} else {
 			d.enqueueLocked(msg, cur)
+		}
+	}
+}
+
+// OnAgentRemoved implements relay.Notifier: a pane was closed or removed.
+// Single-pane state is cleaned up: held messages, pending reply waits,
+// quiet presence state, debounce timers, and any active blocked notification
+// is withdrawn with EventResolved.
+func (d *Dispatcher) OnAgentRemoved(host, paneID string) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.initLocked()
+
+	d.agentRemovedLocked(paneKey{host: host, pane: paneID})
+}
+
+func (d *Dispatcher) agentRemovedLocked(key paneKey) {
+	held := d.held[:0]
+	for _, m := range d.held {
+		if !(m.Host == key.host && m.PaneID == key.pane) {
+			held = append(held, m)
+		}
+	}
+	clear(d.held[len(held):])
+	d.held = held
+
+	delete(d.latest, key)
+
+	if p, ok := d.pendingDone[key]; ok {
+		p.timer.Stop()
+		delete(d.pendingDone, key)
+	}
+
+	delete(d.presence.quiet, key)
+
+	for pk := range d.lastPush {
+		if pk.pane == key {
+			delete(d.lastPush, pk)
+		}
+	}
+
+	if shown, ok := d.blockedShown[key]; ok {
+		delete(d.blockedShown, key)
+		d.dispatchLocked(Message{
+			Event:          EventResolved,
+			Host:           key.host,
+			PaneID:         key.pane,
+			StateChangeSeq: shown.seq,
+		})
+	}
+}
+
+// OnSnapshot implements relay.Notifier: a host sent a full snapshot of its agents.
+// A snapshot never triggers new blocked or done pushes. For panes already tracked
+// on this host, it reconciles their state: missing panes are cleaned up as removed
+// (with EventResolved if blocked was shown), and present panes update held/quiet state
+// and withdraw blocked notifications if no longer blocked.
+func (d *Dispatcher) OnSnapshot(host string, agents []model.AgentState) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.initLocked()
+
+	newAgents := make(map[string]model.AgentState, len(agents))
+	for _, a := range agents {
+		a.Host = host
+		newAgents[a.PaneID] = a
+	}
+
+	tracked := make(map[string]struct{})
+	for k := range d.blockedShown {
+		if k.host == host {
+			tracked[k.pane] = struct{}{}
+		}
+	}
+	for k := range d.presence.quiet {
+		if k.host == host {
+			tracked[k.pane] = struct{}{}
+		}
+	}
+	for k := range d.pendingDone {
+		if k.host == host {
+			tracked[k.pane] = struct{}{}
+		}
+	}
+	for k := range d.latest {
+		if k.host == host {
+			tracked[k.pane] = struct{}{}
+		}
+	}
+	for _, m := range d.held {
+		if m.Host == host {
+			tracked[m.PaneID] = struct{}{}
+		}
+	}
+	for pk := range d.lastPush {
+		if pk.pane.host == host {
+			tracked[pk.pane.pane] = struct{}{}
+		}
+	}
+
+	paneIDs := make([]string, 0, len(tracked))
+	for paneID := range tracked {
+		paneIDs = append(paneIDs, paneID)
+	}
+	sort.Strings(paneIDs)
+
+	for _, paneID := range paneIDs {
+		key := paneKey{host: host, pane: paneID}
+		cur, present := newAgents[paneID]
+		if !present {
+			d.agentRemovedLocked(key)
+			continue
+		}
+
+		if _, held := d.latest[key]; held {
+			d.latest[key] = cur
+		}
+		if _, quiet := d.presence.quiet[key]; quiet && cur.Status != model.StatusBlocked {
+			delete(d.presence.quiet, key)
+		}
+		if p, ok := d.pendingDone[key]; ok {
+			p.cur = cur
+		}
+
+		if shown, ok := d.blockedShown[key]; ok && cur.Status != model.StatusBlocked {
+			delete(d.blockedShown, key)
+			seq := cur.StateChangeSeq
+			if seq < shown.seq {
+				seq = shown.seq
+			}
+			d.dispatchLocked(Message{
+				Event:          EventResolved,
+				Host:           host,
+				PaneID:         paneID,
+				StateChangeSeq: seq,
+			})
 		}
 	}
 }

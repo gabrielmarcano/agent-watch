@@ -944,6 +944,189 @@ func TestDispatcher_ShownBlockedIsBounded(t *testing.T) {
 	}
 }
 
+// Closing a pane (OnAgentRemoved) while its blocked push is shown sends EventResolved
+// with the shown prompt's StateChangeSeq and removes it from blockedShown.
+func TestDispatcher_OnAgentRemoved_WithdrawsBlockedPush(t *testing.T) {
+	fcm := newResolvedMock()
+	d, _, _ := newTestDispatcher(fcm)
+
+	blocked := agentAt("p1", "one", model.StatusBlocked, 42)
+	d.OnAgentUpdate(nil, blocked)
+	d.Wait()
+
+	d.mu.Lock()
+	_, shown := d.blockedShown[paneKey{host: "", pane: "p1"}]
+	d.mu.Unlock()
+	if !shown {
+		t.Fatal("p1 not in blockedShown after blocked push")
+	}
+
+	d.OnAgentRemoved("", "p1")
+	d.Wait()
+
+	d.mu.Lock()
+	_, shownAfter := d.blockedShown[paneKey{host: "", pane: "p1"}]
+	d.mu.Unlock()
+	if shownAfter {
+		t.Fatal("p1 still in blockedShown after OnAgentRemoved")
+	}
+
+	got := fcm.getMessages()
+	if len(got) != 2 {
+		t.Fatalf("fcm got %v, want blocked then resolved", eventsOf(got))
+	}
+	want := Message{Event: EventResolved, PaneID: "p1", StateChangeSeq: 42}
+	if got[1].Event != want.Event || got[1].PaneID != want.PaneID || got[1].StateChangeSeq != want.StateChangeSeq {
+		t.Fatalf("resolved message = %+v, want %+v", got[1], want)
+	}
+}
+
+// Closing a pane while its blocked push is held in the window or in presence.quiet
+// drops it so it never flushes later.
+func TestDispatcher_OnAgentRemoved_DropsHeldAndQuiet(t *testing.T) {
+	t.Run("held in window", func(t *testing.T) {
+		fcm := newResolvedMock()
+		d, _, timers := newTestDispatcher(fcm)
+
+		d.OnAgentUpdate(nil, blockedState("p0", "zero")) // sent at once, opens window
+		d.OnAgentUpdate(nil, blockedState("p1", "one"))  // held in window
+		d.Wait()
+
+		d.OnAgentRemoved("", "p1")
+		flushWindow(d, timers)
+
+		// p1 was removed while held in the window, so only p0's blocked push went out.
+		// p1 never sends a blocked push, and since it never showed a blocked push, no resolved is sent either.
+		want := []string{"blocked:p0"}
+		if got := eventsOf(fcm.getMessages()); fmt.Sprint(got) != fmt.Sprint(want) {
+			t.Fatalf("pushes = %v, want %v", got, want)
+		}
+	})
+
+	t.Run("held in presence.quiet", func(t *testing.T) {
+		d, _, timers, sender, states := presenceDispatcher(t)
+		d.OnHostPresence("", 30*time.Second, false) // present
+
+		block(d, states, "w1:p1", 10) // held back in presence.quiet
+		if n := pushed(d, sender); n != 0 {
+			t.Fatalf("pushes while present = %d, want 0", n)
+		}
+
+		d.OnAgentRemoved("", "w1:p1") // removed while held in quiet
+
+		// Presence ends (e.g. screen locked)
+		d.OnHostPresence("", 30*time.Second, true)
+		flushWindow(d, timers)
+
+		if n := pushed(d, sender); n != 0 {
+			t.Fatalf("pushes after presence ended for removed pane = %d, want 0", n)
+		}
+	})
+}
+
+// A reconnect snapshot where a previously blocked pane is now working or omitted
+// withdraws the shown blocked notification and clears presence.quiet, without
+// firing new blocked or done pushes for other panes in the snapshot.
+func TestDispatcher_OnSnapshot_ReconcilesPanes(t *testing.T) {
+	fcm := newResolvedMock()
+	d, _, timers := newTestDispatcher(fcm)
+	d.PresenceIdle = 10 * time.Minute
+
+	// p1: blocked, push goes out (shown at seq 42)
+	b1 := agentAt("p1", "one", model.StatusBlocked, 42)
+	b1.Host = "main"
+	d.OnAgentUpdate(nil, b1)
+	flushWindow(d, timers)
+
+	// p2: blocked, push goes out (shown at seq 50)
+	b2 := agentAt("p2", "two", model.StatusBlocked, 50)
+	b2.Host = "main"
+	d.OnAgentUpdate(nil, b2)
+	flushWindow(d, timers)
+
+	// Set presence to present, and block p3 (held back in presence.quiet)
+	d.OnHostPresence("main", 30*time.Second, false)
+	b3 := agentAt("p3", "three", model.StatusBlocked, 60)
+	b3.Host = "main"
+	d.OnAgentUpdate(nil, b3)
+	d.Wait()
+
+	d.mu.Lock()
+	if _, ok := d.presence.quiet[paneKey{host: "main", pane: "p3"}]; !ok {
+		t.Fatal("p3 not in presence.quiet")
+	}
+	d.mu.Unlock()
+
+	// Reconnect snapshot for "main":
+	// - p1 is now working (seq 43) -> should send EventResolved at seq 43
+	// - p2 is omitted -> should send EventResolved at seq 50
+	// - p3 is omitted -> should be cleared from presence.quiet
+	// - p4 is blocked (not previously tracked) -> MUST NOT trigger a push
+	// - p5 is done (not previously tracked) -> MUST NOT trigger a push
+	snap := []model.AgentState{
+		agentAt("p1", "one", model.StatusWorking, 43),
+		agentAt("p4", "four", model.StatusBlocked, 70),
+		agentAt("p5", "five", model.StatusDone, 80),
+	}
+	d.OnSnapshot("main", snap)
+	d.Wait()
+
+	d.mu.Lock()
+	if _, ok := d.presence.quiet[paneKey{host: "main", pane: "p3"}]; ok {
+		t.Fatal("p3 was not cleared from presence.quiet")
+	}
+	if _, ok := d.blockedShown[paneKey{host: "main", pane: "p1"}]; ok {
+		t.Fatal("p1 still in blockedShown")
+	}
+	if _, ok := d.blockedShown[paneKey{host: "main", pane: "p2"}]; ok {
+		t.Fatal("p2 still in blockedShown")
+	}
+	d.mu.Unlock()
+
+	// End presence to verify p3 does not flush
+	d.OnHostPresence("main", 30*time.Second, true)
+	flushWindow(d, timers)
+
+	// Verify all messages received:
+	// - blocked:main/p1 (seq 42)
+	// - blocked:main/p2 (seq 50)
+	// - resolved:main/p1 (seq 43)
+	// - resolved:main/p2 (seq 50)
+	// NO pushes for p3, p4, p5!
+	wantEvents := []string{
+		"blocked:main/p1",
+		"blocked:main/p2",
+		"resolved:main/p1",
+		"resolved:main/p2",
+	}
+	gotMsgs := fcm.getMessages()
+	var gotEvents []string
+	for _, m := range gotMsgs {
+		gotEvents = append(gotEvents, fmt.Sprintf("%s:%s/%s", m.Event, m.Host, m.PaneID))
+	}
+	sort.Strings(gotEvents)
+	sort.Strings(wantEvents)
+	if fmt.Sprint(gotEvents) != fmt.Sprint(wantEvents) {
+		t.Fatalf("got events = %v, want %v", gotEvents, wantEvents)
+	}
+
+	// Verify sequence numbers on the resolved messages
+	for _, m := range gotMsgs {
+		if m.Event == EventResolved {
+			switch m.PaneID {
+			case "p1":
+				if m.StateChangeSeq != 43 {
+					t.Errorf("p1 resolved seq = %d, want 43", m.StateChangeSeq)
+				}
+			case "p2":
+				if m.StateChangeSeq != 50 {
+					t.Errorf("p2 resolved seq = %d, want 50 (shown.seq)", m.StateChangeSeq)
+				}
+			}
+		}
+	}
+}
+
 // chanSender reports every message it gets on a channel, and can be held
 // inside Send until released.
 type chanSender struct {

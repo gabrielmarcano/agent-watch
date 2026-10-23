@@ -353,6 +353,10 @@ type hubHarness struct {
 }
 
 func newHubHarness(t *testing.T) *hubHarness {
+	return newHubHarnessWithNotifier(t, nil)
+}
+
+func newHubHarnessWithNotifier(t *testing.T, notifier Notifier) *hubHarness {
 	t.Helper()
 	store, err := NewStore(t.TempDir())
 	if err != nil {
@@ -361,10 +365,89 @@ func newHubHarness(t *testing.T) *hubHarness {
 	t.Cleanup(func() { _ = store.Close() })
 	state := NewState()
 	auth := NewAuthManager("valid-host-token", store, ClientIPPolicy{})
-	hub := NewHub(auth, state, store, nil)
+	hub := NewHub(auth, state, store, notifier)
 	s := httptest.NewServer(http.HandlerFunc(hub.ServeHost))
 	t.Cleanup(s.Close)
 	return &hubHarness{state: state, store: store, hub: hub, wsURL: strings.Replace(s.URL, "http://", "ws://", 1)}
+}
+
+type trackingNotifier struct {
+	NoopNotifier
+	mu      sync.Mutex
+	removed []string
+}
+
+func (n *trackingNotifier) OnAgentRemoved(host, paneID string) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	n.removed = append(n.removed, host+"/"+paneID)
+}
+
+func (n *trackingNotifier) getRemoved() []string {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	out := make([]string, len(n.removed))
+	copy(out, n.removed)
+	return out
+}
+
+// End-to-end wire test: bridge sends agent_update (blocked) -> agent_removed ->
+// Notifier receives OnAgentRemoved.
+func TestHub_WireAgentRemovedNotifiesOnAgentRemoved(t *testing.T) {
+	notifier := &trackingNotifier{}
+	hh := newHubHarnessWithNotifier(t, notifier)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	conn := hh.connectHost(t, ctx, "main")
+
+	// 1. Bridge sends agent_update (blocked)
+	update, _ := json.Marshal(model.AgentUpdateMsg{
+		Type: model.WireAgentUpdate,
+		Agent: model.AgentState{
+			PaneID:         "p1",
+			Label:          "test-agent",
+			Status:         model.StatusBlocked,
+			StateChangeSeq: 10,
+		},
+	})
+	if err := conn.Write(ctx, websocket.MessageText, update); err != nil {
+		t.Fatalf("agent_update: %v", err)
+	}
+
+	// Wait until state has pane p1
+	deadline := time.Now().Add(2 * time.Second)
+	for !hh.state.HasPane("main", "p1") {
+		if time.Now().After(deadline) {
+			t.Fatal("timed out waiting for agent_update in state")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	// 2. Bridge sends agent_removed
+	removed, _ := json.Marshal(model.AgentRemovedMsg{
+		Type:   model.WireAgentRemoved,
+		PaneID: "p1",
+	})
+	if err := conn.Write(ctx, websocket.MessageText, removed); err != nil {
+		t.Fatalf("agent_removed: %v", err)
+	}
+
+	// Wait until notifier receives OnAgentRemoved
+	for len(notifier.getRemoved()) == 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("timed out waiting for OnAgentRemoved call")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	if got := notifier.getRemoved(); fmt.Sprint(got) != "[main/p1]" {
+		t.Fatalf("removed = %v, want [main/p1]", got)
+	}
+	if hh.state.HasPane("main", "p1") {
+		t.Fatal("state still has pane p1 after agent_removed")
+	}
 }
 
 // connectHost dials the hub as a bridge and sends hello. The connection is
