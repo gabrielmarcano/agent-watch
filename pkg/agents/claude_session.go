@@ -8,7 +8,21 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
+	"time"
 )
+
+type sessionPathCache struct {
+	mu          sync.Mutex
+	entries     map[SessionRef]sessionPathEntry
+	resolutions int
+}
+
+type sessionPathEntry struct {
+	path  string
+	size  int64
+	mtime time.Time
+}
 
 // Which Claude conversation does a pane show? (docs/reference/agents.md §3.3)
 //
@@ -77,6 +91,41 @@ type claudeIndexEntry struct {
 // that conversation cannot be told for sure: the bridge then captures the
 // screen, which shows the pane's conversation by construction.
 func (c *claudeAdapter) sessionPath(ctx context.Context, ref SessionRef) (string, error) {
+	c.paths.mu.Lock()
+	cached, ok := c.paths.entries[ref]
+	c.paths.mu.Unlock()
+	if ok {
+		if fi, err := os.Stat(cached.path); err == nil && fi.Size() == cached.size && fi.ModTime().Equal(cached.mtime) {
+			return cached.path, nil
+		}
+	}
+
+	c.paths.mu.Lock()
+	c.paths.resolutions++
+	c.paths.mu.Unlock()
+
+	path, err := c.resolveSessionPath(ctx, ref)
+	if err != nil {
+		return "", err
+	}
+	if fi, err := os.Stat(path); err == nil {
+		c.paths.mu.Lock()
+		if c.paths.entries == nil || len(c.paths.entries) >= maxTurnEndCache {
+			c.paths.entries = map[SessionRef]sessionPathEntry{}
+		}
+		c.paths.entries[ref] = sessionPathEntry{path: path, size: fi.Size(), mtime: fi.ModTime()}
+		c.paths.mu.Unlock()
+	}
+	return path, nil
+}
+
+func (c *claudeAdapter) sessionPathResolutions() int {
+	c.paths.mu.Lock()
+	defer c.paths.mu.Unlock()
+	return c.paths.resolutions
+}
+
+func (c *claudeAdapter) resolveSessionPath(ctx context.Context, ref SessionRef) (string, error) {
 	path := c.resolvePath(ref)
 	want := strings.TrimSpace(ref.Title)
 

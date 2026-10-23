@@ -45,15 +45,6 @@ type bgTask struct {
 
 // BackgroundTasks implements BackgroundTaskReader.
 func (c *claudeAdapter) BackgroundTasks(ctx context.Context, ref SessionRef) (BackgroundTasks, error) {
-	c.tasks.mu.Lock()
-	cached, ok := c.tasks.entries[ref]
-	c.tasks.mu.Unlock()
-	if ok {
-		if fi, err := os.Stat(cached.path); err == nil && fi.Size() == cached.size && fi.ModTime().Equal(cached.mtime) {
-			return c.countTasks(cached.tasks), nil
-		}
-	}
-
 	path, err := c.sessionPath(ctx, ref)
 	if err != nil {
 		return BackgroundTasks{}, err
@@ -62,6 +53,17 @@ func (c *claudeAdapter) BackgroundTasks(ctx context.Context, ref SessionRef) (Ba
 	if err != nil {
 		return BackgroundTasks{}, ErrNoTranscript
 	}
+	return c.backgroundTasksWithPath(ctx, ref, path, fi)
+}
+
+func (c *claudeAdapter) backgroundTasksWithPath(ctx context.Context, ref SessionRef, path string, fi os.FileInfo) (BackgroundTasks, error) {
+	c.tasks.mu.Lock()
+	cached, ok := c.tasks.entries[ref]
+	c.tasks.mu.Unlock()
+	if ok && cached.path == path && fi.Size() == cached.size && fi.ModTime().Equal(cached.mtime) {
+		return c.countTasks(cached.tasks), nil
+	}
+
 	content, err := TailFile(path, c.taskWindow)
 	if err != nil {
 		return BackgroundTasks{}, ErrNoTranscript

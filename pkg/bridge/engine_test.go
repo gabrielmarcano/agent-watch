@@ -203,13 +203,11 @@ func TestEngine_AgentStateMapping(t *testing.T) {
 		t.Errorf("label = %q, want stripped-title", st3.Label)
 	}
 
-	// 4. Titles that are only the program, not a task, are no title.
-	for _, generic := range []string{"OpenCode", "agy --conversation 1234"} {
-		g := generic
-		st, _ := e.buildAgentState(herdr.AgentInfo{PaneID: "w1:p4", Agent: &agent, TerminalTitleStripped: &g, CWD: &cwd})
-		if st.Label != "repo" || st.Title != "" {
-			t.Errorf("title %q: label/title = %q/%q, want repo/\"\"", generic, st.Label, st.Title)
-		}
+	// 4. An empty title falls back to cwd.
+	emptyTitle := ""
+	st, _ := e.buildAgentState(herdr.AgentInfo{PaneID: "w1:p4", Agent: &agent, TerminalTitleStripped: &emptyTitle, CWD: &cwd})
+	if st.Label != "repo" || st.Title != "" {
+		t.Errorf("empty title: label/title = %q/%q, want repo/\"\"", st.Label, st.Title)
 	}
 
 	// 5. PaneID fallback when everything else is empty

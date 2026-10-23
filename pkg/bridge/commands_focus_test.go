@@ -10,7 +10,7 @@ import (
 	"github.com/gabrielmarcano/agent-monitor/pkg/model"
 )
 
-// OpenCode answers with Enter on a button bar, so the bridge checks the
+// Opencode answers with Enter on a button bar, so the bridge checks the
 // focus on the pane's ansi screen before sending them (agents.md §5.1). The
 // screens are real captures from pkg/agents/testdata/opencode/focus.
 
@@ -48,7 +48,7 @@ func ansiReadsSince(h *testHarness, from int) int {
 	return n
 }
 
-func newOpenCodeBlocked(t *testing.T, screen string) (*testHarness, string) {
+func newOpencodeBlocked(t *testing.T, screen string) (*testHarness, string) {
 	t.Helper()
 	h := newTestHarness(t)
 	h.server.SetAgents([]map[string]any{agentRow("w1:p1", "opencode", "blocked", 100)})
@@ -65,8 +65,8 @@ func answer(reqID, optionID, fp string) model.CommandMsg {
 // Allow once and Allow always are both refused with prompt_changed and no
 // key; the refusal does not consume the prompt, so once the focus is back on
 // Allow once the same answer goes through, once.
-func TestCommands_OpenCodeFocusMovedRefusesWithoutConsuming(t *testing.T) {
-	h, fp := newOpenCodeBlocked(t, "default-permission-always.ansi")
+func TestCommands_OpencodeFocusMovedRefusesWithoutConsuming(t *testing.T) {
+	h, fp := newOpencodeBlocked(t, "default-permission-always.ansi")
 
 	for _, opt := range []string{"opt-1", "opt-2"} {
 		before := len(h.server.Calls())
@@ -101,8 +101,8 @@ func TestCommands_OpenCodeFocusMovedRefusesWithoutConsuming(t *testing.T) {
 
 // Focus on Allow once (as the dialog mounts): the keys go out once, and a
 // second tap is still caught by the replay guard.
-func TestCommands_OpenCodeFocusOnDefaultSendsOnce(t *testing.T) {
-	h, fp := newOpenCodeBlocked(t, "tokyonight-permission-once.ansi")
+func TestCommands_OpencodeFocusOnDefaultSendsOnce(t *testing.T) {
+	h, fp := newOpencodeBlocked(t, "tokyonight-permission-once.ansi")
 
 	before := len(h.server.Calls())
 	res, _ := runCmd(t, h, answer("req-always", "opt-2", fp))
@@ -119,8 +119,8 @@ func TestCommands_OpenCodeFocusOnDefaultSendsOnce(t *testing.T) {
 }
 
 // esc acts whatever the focus: Reject and cancel are sent without an ansi read.
-func TestCommands_OpenCodeRejectAndCancelSkipFocusCheck(t *testing.T) {
-	h, fp := newOpenCodeBlocked(t, "default-permission-reject.ansi")
+func TestCommands_OpencodeRejectAndCancelSkipFocusCheck(t *testing.T) {
+	h, fp := newOpencodeBlocked(t, "default-permission-reject.ansi")
 
 	before := len(h.server.Calls())
 	res, _ := runCmd(t, h, answer("req-reject", "opt-3", fp))
@@ -135,7 +135,7 @@ func TestCommands_OpenCodeRejectAndCancelSkipFocusCheck(t *testing.T) {
 	}
 
 	// Cancel on the always stage with the focus moved to Cancel.
-	h2, fp2 := newOpenCodeBlocked(t, "default-confirm-cancel.ansi")
+	h2, fp2 := newOpencodeBlocked(t, "default-confirm-cancel.ansi")
 	before = len(h2.server.Calls())
 	res, _ = runCmd(t, h2, model.CommandMsg{RequestID: "req-cancel", Action: "cancel", PaneID: "w1:p1", ExpectedSeq: 100, Fingerprint: fp2})
 	if !res.OK {
@@ -150,8 +150,8 @@ func TestCommands_OpenCodeRejectAndCancelSkipFocusCheck(t *testing.T) {
 }
 
 // The always stage: Confirm is Enter, so it needs the focus on Confirm.
-func TestCommands_OpenCodeConfirmStageChecksFocus(t *testing.T) {
-	h, fp := newOpenCodeBlocked(t, "default-confirm-cancel.ansi")
+func TestCommands_OpencodeConfirmStageChecksFocus(t *testing.T) {
+	h, fp := newOpencodeBlocked(t, "default-confirm-cancel.ansi")
 	before := len(h.server.Calls())
 	res, _ := runCmd(t, h, answer("req-confirm-moved", "opt-1", fp))
 	if res.OK || res.ErrorCode != "prompt_changed" {
@@ -161,7 +161,7 @@ func TestCommands_OpenCodeConfirmStageChecksFocus(t *testing.T) {
 		t.Errorf("sent %v, want none", keys)
 	}
 
-	h2, fp2 := newOpenCodeBlocked(t, "lucent-orng-confirm-confirm.ansi")
+	h2, fp2 := newOpencodeBlocked(t, "lucent-orng-confirm-confirm.ansi")
 	before = len(h2.server.Calls())
 	res, _ = runCmd(t, h2, answer("req-confirm", "opt-1", fp2))
 	if !res.OK {
@@ -174,8 +174,8 @@ func TestCommands_OpenCodeConfirmStageChecksFocus(t *testing.T) {
 
 // No ansi screen from herdr (an empty read): the focus cannot be seen, so
 // nothing is sent.
-func TestCommands_OpenCodeUnreadableFocusSendsNothing(t *testing.T) {
-	h, fp := newOpenCodeBlocked(t, "default-permission-once.ansi")
+func TestCommands_OpencodeUnreadableFocusSendsNothing(t *testing.T) {
+	h, fp := newOpencodeBlocked(t, "default-permission-once.ansi")
 	h.server.SetANSIScreen("w1:p1", "visible", "")
 
 	before := len(h.server.Calls())

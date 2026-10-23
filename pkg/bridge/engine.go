@@ -366,16 +366,13 @@ func (e *Engine) adoptPrompt(paneID string, seq uint64, p agents.Prompt) {
 
 // backToConversation reports whether an update brings a pane back to a
 // conversation from a view without one, by its adapter's reading of the
-// terminal titles (agents.ViewDetector).
+// terminal titles.
 func (e *Engine) backToConversation(agent string, prev *herdr.AgentInfo, info herdr.AgentInfo) bool {
 	if prev == nil {
 		return false
 	}
-	v, ok := e.Agents.For(agent).(agents.ViewDetector)
-	if !ok {
-		return false
-	}
-	return !v.ShowsConversation(titleOf(*prev)) && v.ShowsConversation(titleOf(info))
+	ad := e.Agents.For(agent)
+	return !ad.ShowsConversation(titleOf(*prev)) && ad.ShowsConversation(titleOf(info))
 }
 
 func titleOf(info herdr.AgentInfo) string {
@@ -401,7 +398,7 @@ func (e *Engine) captureHistory(paneID, cwd, agent string, info herdr.AgentInfo)
 	ref := info.TrustedSession()
 	ad := e.Agents.For(agent)
 
-	if v, ok := ad.(agents.ViewDetector); ok && !v.ShowsConversation(titleOf(info)) {
+	if !ad.ShowsConversation(titleOf(info)) {
 		if e.Logger != nil {
 			e.Logger.Info("no history: the pane shows no conversation", "pane_id", paneID, "agent", agent)
 		}
@@ -409,22 +406,15 @@ func (e *Engine) captureHistory(paneID, cwd, agent string, info herdr.AgentInfo)
 		return
 	}
 
-	if reader, ok := ad.(agents.BackgroundTaskReader); ok {
-		if ref == nil {
-			e.setTasks(paneID, agents.BackgroundTasks{})
-		} else {
-			e.refreshTasks(ctx, paneID, agent, reader, agents.SessionRef{
-				Agent: ref.Agent, Kind: ref.Kind, Value: ref.Value, CWD: cwd, Title: titleOf(info),
-			})
-		}
-	}
-
 	var item *model.HistoryItem
 	var err error
 
-	if ref != nil {
+	if ref == nil {
+		e.setTasks(paneID, agents.BackgroundTasks{})
+	} else {
 		readCtx, readCancel := context.WithTimeout(ctx, e.TranscriptTimeout)
-		item, err = ad.LastTurn(readCtx, agents.SessionRef{
+		var tasks agents.BackgroundTasks
+		item, tasks, err = ad.ObserveSettledTurn(readCtx, agents.SessionRef{
 			Agent: ref.Agent,
 			Kind:  ref.Kind,
 			Value: ref.Value,
@@ -432,6 +422,8 @@ func (e *Engine) captureHistory(paneID, cwd, agent string, info herdr.AgentInfo)
 			Title: titleOf(info),
 		})
 		readCancel()
+		e.setTasks(paneID, tasks)
+
 		if errors.Is(err, agents.ErrNoReply) {
 			if e.Logger != nil {
 				e.Logger.Info("no history: the last turn has no reply yet", "pane_id", paneID, "agent", agent, "reason", err)
@@ -453,7 +445,7 @@ func (e *Engine) captureHistory(paneID, cwd, agent string, info herdr.AgentInfo)
 			}
 			return
 		}
-		item = agents.ScreenTurnFor(ad, text)
+		item = ad.ScreenTurn(text)
 		if item == nil && e.Logger != nil {
 			e.Logger.Info("no history: the screen shows no conversation", "pane_id", paneID, "agent", agent)
 		}
@@ -519,10 +511,7 @@ func (e *Engine) maybeBackfillHistoryLocked(paneID, cwd, agent string, info herd
 		return
 	}
 	ad := e.Agents.For(agent)
-	if _, ok := ad.(agents.HistoryReader); !ok {
-		return
-	}
-	if v, ok := ad.(agents.ViewDetector); ok && !v.ShowsConversation(titleOf(info)) {
+	if !ad.ShowsConversation(titleOf(info)) {
 		return
 	}
 	st, ok := e.states[paneID]
@@ -541,10 +530,6 @@ func (e *Engine) maybeBackfillHistoryLocked(paneID, cwd, agent string, info herd
 // drops anything it already holds.
 func (e *Engine) backfillHistory(paneID, cwd, agent string, info herdr.AgentInfo, ref *herdr.AgentSession) {
 	ad := e.Agents.For(agent)
-	reader, ok := ad.(agents.HistoryReader)
-	if !ok {
-		return
-	}
 	budget := 2 * e.TranscriptTimeout
 	if budget <= 0 {
 		budget = 6 * time.Second
@@ -552,7 +537,7 @@ func (e *Engine) backfillHistory(paneID, cwd, agent string, info herdr.AgentInfo
 	ctx, cancel := context.WithTimeout(context.Background(), budget)
 	defer cancel()
 
-	items, err := reader.RecentTurns(ctx, agents.SessionRef{
+	items, err := ad.RecentTurns(ctx, agents.SessionRef{
 		Agent: ref.Agent,
 		Kind:  ref.Kind,
 		Value: ref.Value,
@@ -632,8 +617,6 @@ func (e *Engine) StartTurnWatch(ctx context.Context) {
 // workingPane is a pane checked by checkWorkingTurns.
 type workingPane struct {
 	paneID, agent string
-	reader        agents.TurnEndReader
-	tasks         agents.BackgroundTaskReader // nil when the adapter counts none
 	ref           agents.SessionRef
 }
 
@@ -650,11 +633,7 @@ func (e *Engine) checkWorkingTurns(ctx context.Context) {
 			continue
 		}
 		ad := e.Agents.For(st.public.Agent)
-		reader, ok := ad.(agents.TurnEndReader)
-		if !ok {
-			continue
-		}
-		if v, ok := ad.(agents.ViewDetector); ok && !v.ShowsConversation(titleOf(st.info)) {
+		if !ad.ShowsConversation(titleOf(st.info)) {
 			hidden = append(hidden, paneID)
 			continue
 		}
@@ -663,8 +642,7 @@ func (e *Engine) checkWorkingTurns(ctx context.Context) {
 			hidden = append(hidden, paneID)
 			continue
 		}
-		tasks, _ := ad.(agents.BackgroundTaskReader)
-		panes = append(panes, workingPane{paneID: paneID, agent: st.public.Agent, reader: reader, tasks: tasks, ref: agents.SessionRef{
+		panes = append(panes, workingPane{paneID: paneID, agent: st.public.Agent, ref: agents.SessionRef{
 			Agent: ref.Agent, Kind: ref.Kind, Value: ref.Value, CWD: st.public.CWD, Title: titleOf(st.info),
 		}})
 	}
@@ -678,9 +656,13 @@ func (e *Engine) checkWorkingTurns(ctx context.Context) {
 		if ctx.Err() != nil {
 			return
 		}
+		ad := e.Agents.For(p.agent)
 		readCtx, cancel := context.WithTimeout(ctx, e.TranscriptTimeout)
-		end, err := p.reader.LastCompletedTurn(readCtx, p.ref)
+		end, tasks, ok, err := ad.ObserveWorkingTurn(readCtx, p.ref)
 		cancel()
+		if !ok {
+			continue
+		}
 		if err != nil {
 			// The count stays: a failed read says nothing new.
 			if e.Logger != nil {
@@ -702,26 +684,8 @@ func (e *Engine) checkWorkingTurns(ctx context.Context) {
 			e.publishHistory(p.paneID, p.agent, p.ref.Value, *end.Item)
 		}
 		e.setBackground(p.paneID, end.Background)
-		if p.tasks != nil {
-			e.refreshTasks(ctx, p.paneID, p.agent, p.tasks, p.ref)
-		}
+		e.setTasks(p.paneID, tasks)
 	}
-}
-
-// refreshTasks reads the pane's background shells and monitors and
-// publishes them when they changed. A failed read keeps the counts: it says
-// nothing new.
-func (e *Engine) refreshTasks(ctx context.Context, paneID, agent string, reader agents.BackgroundTaskReader, ref agents.SessionRef) {
-	readCtx, cancel := context.WithTimeout(ctx, e.TranscriptTimeout)
-	n, err := reader.BackgroundTasks(readCtx, ref)
-	cancel()
-	if err != nil {
-		if e.Logger != nil {
-			e.Logger.Debug("background task read failed", "pane_id", paneID, "agent", agent, "err", err)
-		}
-		return
-	}
-	e.setTasks(paneID, n)
 }
 
 // setTasks stores n as the pane's background_shells and background_monitors
@@ -890,7 +854,7 @@ func (e *Engine) refreshWorkspaces(ctx context.Context) {
 
 	for _, st := range e.states {
 		wsLabel := labels[st.info.WorkspaceID]
-		name, title := agentNames(st.info)
+		name, title := e.agentNames(st.info)
 		label := e.labelFor(st.info, name, title, st.public.CWD)
 		if st.public.Workspace == wsLabel && st.public.Label == label {
 			continue
@@ -908,14 +872,23 @@ func (e *Engine) refreshWorkspaces(ctx context.Context) {
 
 // agentNames returns herdr's name for the agent and its terminal title, when
 // the title describes a task: a title that only names the program is none.
-func agentNames(info herdr.AgentInfo) (name, title string) {
+func (e *Engine) agentNames(info herdr.AgentInfo) (name, title string) {
 	if info.Name != nil {
 		name = strings.TrimSpace(*info.Name)
 	}
 	if info.TerminalTitleStripped != nil {
-		t := strings.TrimSpace(*info.TerminalTitleStripped)
-		if t != "" && !strings.HasPrefix(t, "agy --conversation") && t != "OpenCode" {
-			title = t
+		agent := ""
+		if info.Agent != nil {
+			agent = *info.Agent
+		}
+		var ad agents.Adapter
+		if e.Agents != nil {
+			ad = e.Agents.For(agent)
+		}
+		if ad != nil {
+			title = ad.TaskTitle(*info.TerminalTitleStripped)
+		} else {
+			title = strings.TrimSpace(*info.TerminalTitleStripped)
 		}
 	}
 	return name, title
@@ -951,7 +924,7 @@ func (e *Engine) buildAgentState(info herdr.AgentInfo) (model.AgentState, string
 		cwd = *info.CWD
 	}
 
-	paneName, taskTitle := agentNames(info)
+	paneName, taskTitle := e.agentNames(info)
 	label := e.labelFor(info, paneName, taskTitle, cwd)
 
 	wsLabel := ""

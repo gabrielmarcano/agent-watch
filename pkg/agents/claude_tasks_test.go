@@ -143,3 +143,24 @@ func TestClaudeBackgroundTasks_Cache(t *testing.T) {
 	appendFile(t, path, jsonLine(t, map[string]any{"type": "user", "message": map[string]any{"role": "user", "content": notification("b1", "completed", "")}}))
 	check("the shell completed", BackgroundTasks{})
 }
+
+func TestClaudeObserveSettledTurn_ResolvesSessionPathOnce(t *testing.T) {
+	ctx := context.Background()
+	path := writeFile(t, "settled.jsonl", claudeTurnLines("run cmd", "done")+bgShell(t, "b1"))
+	ref := SessionRef{Agent: "claude", Kind: "path", Value: path}
+	c := newClaudeAdapter(Config{})
+
+	item, tasks, err := c.ObserveSettledTurn(ctx, ref)
+	if err != nil {
+		t.Fatalf("ObserveSettledTurn failed: %v", err)
+	}
+	if item == nil || item.Response != "done" {
+		t.Errorf("item = %+v, want response 'done'", item)
+	}
+	if tasks.Shells != 1 {
+		t.Errorf("tasks = %+v, want 1 shell", tasks)
+	}
+	if res := c.sessionPathResolutions(); res != 1 {
+		t.Errorf("sessionPathResolutions = %d, want 1", res)
+	}
+}

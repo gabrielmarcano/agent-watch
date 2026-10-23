@@ -23,6 +23,7 @@ type claudeAdapter struct {
 	// taskWindow is the transcript tail BackgroundTasks reads (§3.4).
 	taskWindow int64
 	tasks      taskCache
+	paths      sessionPathCache
 	// now is the clock monitor deadlines are checked against; nil: time.Now.
 	now func() time.Time
 }
@@ -143,6 +144,20 @@ func isQuestionTabBar(s string) bool {
 
 // The glyphs Claude animates in its status line ("✻ Booping…", "✢ Cooking…").
 const claudeSpinnerGlyphs = "✻✳✶✢✽·*"
+
+func (c *claudeAdapter) ScreenTurn(screen string) *model.HistoryItem {
+	if !c.ConversationScreen(screen) {
+		return nil
+	}
+	lines := screenBody(screen)
+	if query, reply, ok := c.SplitScreenTurn(lines); ok {
+		if reply = dedent(reply); len(reply) > 0 {
+			return screenItem(query, reply)
+		}
+		return nil
+	}
+	return screenItem("", lines)
+}
 
 // SplitScreenTurn implements ScreenTurnReader: Claude echoes the user's
 // message as "❯ text" (wrapped lines indented by 2), marks its reply with "⏺"
@@ -320,7 +335,10 @@ func (c *claudeAdapter) LastTurn(ctx context.Context, ref SessionRef) (*model.Hi
 	if err != nil {
 		return nil, ErrNoTranscript
 	}
+	return c.lastTurnWithPath(ctx, path, fi.Size())
+}
 
+func (c *claudeAdapter) lastTurnWithPath(ctx context.Context, path string, size int64) (*model.HistoryItem, error) {
 	for i, window := range c.tailWindows {
 		content, err := TailFile(path, window)
 		if err != nil {
@@ -330,7 +348,7 @@ func (c *claudeAdapter) LastTurn(ctx context.Context, ref SessionRef) (*model.Hi
 		if err != nil {
 			return nil, err
 		}
-		if !turn.found && fi.Size() > window && i < len(c.tailWindows)-1 {
+		if !turn.found && size > window && i < len(c.tailWindows)-1 {
 			continue
 		}
 		if turn.response == "" {
@@ -362,7 +380,7 @@ func (c *claudeAdapter) LastTurn(ctx context.Context, ref SessionRef) (*model.Hi
 // Only turns closed by a turn_duration record count (an interrupted turn has
 // none); the live capture publishes the last one as it ends.
 func (c *claudeAdapter) RecentTurns(ctx context.Context, ref SessionRef, max int) ([]model.HistoryItem, error) {
-	if max <= 0 {
+	if max <= 0 || !c.ShowsConversation(ref.Title) {
 		return nil, ErrNoTranscript
 	}
 	path, err := c.sessionPath(ctx, ref)

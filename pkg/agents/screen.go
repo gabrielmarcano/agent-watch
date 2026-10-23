@@ -19,27 +19,13 @@ type ScreenTurnReader interface {
 	SplitScreenTurn(lines []string) (query string, reply []string, ok bool)
 }
 
-// ScreenTurnFor formats a screen capture into a HistoryItem with ad's help
-// when ad implements ScreenTurnReader, and like ScreenTurn otherwise. It
-// returns nil when ad (a ViewDetector) sees no conversation on the screen:
-// such a screen holds no reply.
+// ScreenTurnFor formats a screen capture into a HistoryItem with ad's ScreenTurn,
+// or like ScreenTurn when ad is nil.
 func ScreenTurnFor(ad Adapter, text string) *model.HistoryItem {
-	if v, ok := ad.(ViewDetector); ok && !v.ConversationScreen(text) {
-		return nil
+	if ad == nil {
+		return ScreenTurn(text)
 	}
-	lines := screenBody(text)
-	if r, ok := ad.(ScreenTurnReader); ok {
-		if query, reply, ok := r.SplitScreenTurn(lines); ok {
-			if reply = dedent(reply); len(reply) > 0 {
-				return screenItem(query, reply)
-			}
-			// The adapter recognised the pane's last message but has no
-			// reply for it: the agent still works on it. The whole screen
-			// would be the running turn's live progress — publish nothing.
-			return nil
-		}
-	}
-	return screenItem("", lines)
+	return ad.ScreenTurn(text)
 }
 
 // ScreenTurn formats terminal screen text into a HistoryItem per agents.md §6.

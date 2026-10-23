@@ -236,3 +236,27 @@ func TestClaudeLastCompletedTurn_Background(t *testing.T) {
 		}
 	}
 }
+
+func TestClaudeObserveWorkingTurn_ResolvesSessionPathOnce(t *testing.T) {
+	ctx := context.Background()
+	path := writeFile(t, "obs.jsonl", claudeTurnLines("launch agent", "started")+bgShell(t, "b1")+turnDurationN("u1", false, 1))
+	ref := SessionRef{Agent: "claude", Kind: "path", Value: path}
+	c := newClaudeAdapter(Config{})
+
+	end, tasks, ok, err := c.ObserveWorkingTurn(ctx, ref)
+	if err != nil {
+		t.Fatalf("ObserveWorkingTurn failed: %v", err)
+	}
+	if !ok {
+		t.Fatalf("ObserveWorkingTurn returned ok=false")
+	}
+	if end.Marker != "u1" || end.Background != 1 {
+		t.Errorf("end = %+v, want marker u1 background 1", end)
+	}
+	if tasks.Shells != 1 {
+		t.Errorf("tasks = %+v, want 1 shell", tasks)
+	}
+	if res := c.sessionPathResolutions(); res != 1 {
+		t.Errorf("sessionPathResolutions = %d, want 1", res)
+	}
+}

@@ -103,6 +103,30 @@ func ocMainText(line string) string {
 	return strings.TrimRight(line, " ")
 }
 
+func (o *opencodeAdapter) TaskTitle(rawTitle string) string {
+	t := strings.TrimSpace(rawTitle)
+	if t == "OpenCode" {
+		return ""
+	}
+	return t
+}
+
+func (o *opencodeAdapter) ScreenTurn(screen string) *model.HistoryItem {
+	lines := screenBody(screen)
+	if query, reply, ok := o.SplitScreenTurn(lines); ok {
+		if reply = dedent(reply); len(reply) > 0 {
+			return screenItem(query, reply)
+		}
+		return nil
+	}
+	return screenItem("", lines)
+}
+
+func (o *opencodeAdapter) ObserveSettledTurn(ctx context.Context, ref SessionRef) (*model.HistoryItem, BackgroundTasks, error) {
+	item, err := o.LastTurn(ctx, ref)
+	return item, BackgroundTasks{}, err
+}
+
 func (o *opencodeAdapter) Name() string {
 	return "opencode"
 }

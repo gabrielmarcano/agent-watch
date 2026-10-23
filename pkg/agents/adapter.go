@@ -110,12 +110,32 @@ type Adapter interface {
 	ParsePrompt(screen string) (Prompt, bool)
 	CancelKeys() []string
 	PromptWhileWorking() bool
+	// TaskTitle returns a clean title for display, or "" if rawTitle names the
+	// agent itself rather than a specific task.
+	TaskTitle(rawTitle string) string
+	// ShowsConversation reports whether a pane with this terminal title shows
+	// a conversation. Unknown titles count as a conversation.
+	ShowsConversation(title string) bool
+	// ScreenTurn formats terminal screen text into a HistoryItem for this agent,
+	// or returns nil if the screen shows no conversation or an in-progress turn.
+	ScreenTurn(screen string) *model.HistoryItem
 	// LastTurn fills Query, Response, Source="transcript", and AskedAt and
 	// CompletedAt when the transcript records them. ID, PaneID, Agent and
 	// Label belong to the caller, which computes ID with model.HistoryID
 	// using ref.Value as the session value (CompletedAt is stamped when the
 	// transcript has no time).
 	LastTurn(ctx context.Context, ref SessionRef) (*model.HistoryItem, error)
+	// RecentTurns reads finished turns from a transcript beyond the last one,
+	// for the backfill the bridge publishes when it first sees a pane.
+	RecentTurns(ctx context.Context, ref SessionRef, max int) ([]model.HistoryItem, error)
+	// ObserveWorkingTurn checks for a turn that completed while herdr reports
+	// the pane working (e.g. background agents running), returning its reply and
+	// any background tasks. ok reports whether this adapter supports working-turn
+	// observation.
+	ObserveWorkingTurn(ctx context.Context, ref SessionRef) (TurnEnd, BackgroundTasks, bool, error)
+	// ObserveSettledTurn returns the settled turn's reply and any background tasks
+	// still running, resolving the session transcript once.
+	ObserveSettledTurn(ctx context.Context, ref SessionRef) (*model.HistoryItem, BackgroundTasks, error)
 }
 
 // HistoryReader is implemented by adapters that can read finished turns from

@@ -28,6 +28,30 @@ func (a *agyAdapter) SplitScreenTurn(lines []string) (string, []string, bool) {
 	return echoedMessage(lines, "> ")
 }
 
+func (a *agyAdapter) TaskTitle(rawTitle string) string {
+	t := strings.TrimSpace(rawTitle)
+	if strings.HasPrefix(t, "agy --conversation") {
+		return ""
+	}
+	return t
+}
+
+func (a *agyAdapter) ScreenTurn(screen string) *model.HistoryItem {
+	lines := screenBody(screen)
+	if query, reply, ok := a.SplitScreenTurn(lines); ok {
+		if reply = dedent(reply); len(reply) > 0 {
+			return screenItem(query, reply)
+		}
+		return nil
+	}
+	return screenItem("", lines)
+}
+
+func (a *agyAdapter) ObserveSettledTurn(ctx context.Context, ref SessionRef) (*model.HistoryItem, BackgroundTasks, error) {
+	item, err := a.LastTurn(ctx, ref)
+	return item, BackgroundTasks{}, err
+}
+
 func (a *agyAdapter) Name() string {
 	return "agy"
 }
