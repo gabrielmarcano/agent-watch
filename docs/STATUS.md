@@ -90,13 +90,6 @@ Two isolated runs of herdr 0.9.3: on macOS (own `HOME` and socket) and in a Linu
 - **On macOS `stop` did not last a login** (it left the LaunchAgent enabled): fixed in bridge `0.7.1`, whose `stop` also disables it and `start` enables it again, as `systemd` does on Linux.
 - `start`, `restart` and `stop` were tested only on Linux: on the owner's Mac they would act on his own LaunchAgent (its label is fixed).
 
-### Android (`:core` & `:mobile`) architecture deepening (2026-10-23)
-Claimed by Antigravity (2026-10-23). Five deepening slices for `wearos-app/core/` and `wearos-app/mobile/` as the project shifts to mobile Android first, specified in [`phases/android-architecture.md`](phases/android-architecture.md) (with parallelism rules and verification steps):
-- **Slice 1 (done 2026-10-23):** unify `:mobile` local chat state (`ChatStore`, `ChatSeen`, `ChatOutbox`) into one reactive `MobileChatState` module backed by a storage seam (fixes stale UI on unmute/unhide/mark-read, shadowed `ChatSeen` in `ChatScreen`, composition-time outbox mutation, and missing outbox clear on auth reset).
-- **Slice 2 (done 2026-10-23):** deepen per-pane history caching/merging and post-command refresh behind `RelayEngine` (`UiState.paneHistory` + `loadPaneHistory`, eliminating two-wave scroll jumps on chat re-entry and duplicate `refresh()` calls in `ChatScreen`).
-- **Slice 3 (done 2026-10-23):** share notification identity and dismissal in `:core`, wire `RelayObservers` (including `onAuthCleared` for HTTP `401`, Forget Pairing, and fresh pairing) in `MobileApplication`, and decouple `UpdateManager` behind an injectable `UpdateController` port seam for JVM testing.
-- **Slice 4 (done 2026-10-23):** introduce client-neutral `RelayErrorKind` in `:core` (including `not_allowed`), cache per-host `SessionOptions` in `RelayEngine`, deepen `NewSession.kt` with `NewSessionController`, and delete dead `HostChips` / `KindChips` composables in `NewSessionScreen.kt`.
-- **Slice 5 (done 2026-10-23):** introduce a shared `KeyValueStore` seam (`SharedPrefsKeyValueStore` + `InMemoryKeyValueStore`) in `:core` and make `Prefs.recordResolvedSeq(agent, seq)` atomic across concurrent FCM and UI threads.
 
 ### Code debt (for later)
 
