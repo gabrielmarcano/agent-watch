@@ -521,33 +521,20 @@ func TestEngine_PrunesCommandBookkeeping(t *testing.T) {
 		t.Fatalf("prime syncer: %v", err)
 	}
 
+	fp := fingerprintOf(t, h, "claude", bash)
 	if res, _ := runCmd(t, h, model.CommandMsg{
 		RequestID: "req-prune", Action: "answer", PaneID: "w1:p1",
-		ExpectedSeq: 100, OptionID: "opt-1", Fingerprint: fingerprintOf(t, h, "claude", bash),
+		ExpectedSeq: 100, OptionID: "opt-1", Fingerprint: fp,
 	}); !res.OK {
 		t.Fatalf("answer: code=%q msg=%q, want ok", res.ErrorCode, res.Message)
 	}
 
-	h.engine.mu.RLock()
-	_, marked := h.engine.consumed["w1:p1"]
-	h.engine.mu.RUnlock()
-	if !marked {
-		t.Fatal("answered prompt was not recorded as consumed")
-	}
-
-	// The pane lock is released and dropped once no command uses it.
-	deadline := time.Now().Add(time.Second)
-	for {
-		h.engine.lockMu.Lock()
-		n := len(h.engine.paneLocks)
-		h.engine.lockMu.Unlock()
-		if n == 0 {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("paneLocks still holds %d entries after the command finished", n)
-		}
-		time.Sleep(10 * time.Millisecond)
+	// Behavioural: prompt was consumed, so a duplicate answer at the same seq is rejected.
+	if res2, _ := runCmd(t, h, model.CommandMsg{
+		RequestID: "req-prune-2", Action: "answer", PaneID: "w1:p1",
+		ExpectedSeq: 100, OptionID: "opt-1", Fingerprint: fp,
+	}); res2.OK || res2.ErrorCode != "stale_state" {
+		t.Fatalf("second answer at same seq: ok=%v code=%q, want stale_state", res2.OK, res2.ErrorCode)
 	}
 
 	// The pane closes: its consumed record goes with it.
@@ -557,11 +544,77 @@ func TestEngine_PrunesCommandBookkeeping(t *testing.T) {
 	if _, err := h.syncer.Refresh(ctx); err != nil {
 		t.Fatalf("syncer refresh: %v", err)
 	}
-	h.engine.mu.RLock()
-	left := len(h.engine.consumed)
-	h.engine.mu.RUnlock()
-	if left != 0 {
-		t.Errorf("consumed still holds %d panes after the pane was removed", left)
+
+	// Behavioural: when a new pane appears on the same pane_id at seq 100,
+	// its prompt is no longer blocked as consumed.
+	h.server.SetAgents([]map[string]any{agentRow("w1:p1", "claude", "blocked", 100)})
+	h.server.SetScreen("w1:p1", "visible", bash)
+	if _, err := h.syncer.Refresh(ctx); err != nil {
+		t.Fatalf("syncer refresh 2: %v", err)
+	}
+	res3, _ := runCmd(t, h, model.CommandMsg{
+		RequestID: "req-prune-3", Action: "answer", PaneID: "w1:p1",
+		ExpectedSeq: 100, OptionID: "opt-1", Fingerprint: fp,
+	})
+	if !res3.OK {
+		t.Errorf("answer on new pane after cleanup: ok=%v code=%q msg=%q, want ok", res3.OK, res3.ErrorCode, res3.Message)
+	}
+}
+
+// When SendKeys fails with herdr.ErrUnavailable (e.g. socket dial failure),
+// the prompt claim is rolled back so a retry with a new request_id at the
+// same expected_seq succeeds once herdr is available again.
+func TestCommands_SendKeysUnavailableRollsBackClaim(t *testing.T) {
+	h := newTestHarness(t)
+	bash := loadFixture(t, "claude", "permission-bash.txt")
+	h.server.SetAgents([]map[string]any{agentRow("w1:p1", "claude", "blocked", 100)})
+	h.server.SetScreen("w1:p1", "visible", bash)
+	h.engine.OnHerdrOnline(true, herdr.Pong{Version: "0.9.1", Protocol: 22})
+
+	primeCtx, primeCancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer primeCancel()
+	if _, err := h.syncer.Refresh(primeCtx); err != nil {
+		t.Fatalf("prime syncer: %v", err)
+	}
+	fp := fingerprintOf(t, h, "claude", bash)
+
+	// Hold agent.read so we can stop the server right after the screen is read,
+	// causing the subsequent SendKeys dial to fail with herdr.ErrUnavailable.
+	hold := h.server.HoldNext("agent.read")
+	done := make(chan struct{})
+	var res model.CommandResultMsg
+	go func() {
+		defer close(done)
+		res, _ = runCmd(t, h, model.CommandMsg{
+			RequestID: "req-fail-sendkeys", Action: "answer", PaneID: "w1:p1",
+			ExpectedSeq: 100, OptionID: "opt-1", Fingerprint: fp,
+		})
+	}()
+
+	select {
+	case <-hold.Received():
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for agent.read hold")
+	}
+
+	h.server.Stop()
+	hold.Release()
+	<-done
+
+	if res.OK || res.ErrorCode != "herdr_offline" {
+		t.Fatalf("command during socket outage: ok=%v code=%q msg=%q, want herdr_offline", res.OK, res.ErrorCode, res.Message)
+	}
+
+	// Server comes back online.
+	h.server.Start()
+
+	// Retry answer with a new request_id at the same expected_seq.
+	resRetry, _ := runCmd(t, h, model.CommandMsg{
+		RequestID: "req-retry-sendkeys", Action: "answer", PaneID: "w1:p1",
+		ExpectedSeq: 100, OptionID: "opt-1", Fingerprint: fp,
+	})
+	if !resRetry.OK {
+		t.Errorf("retry after server back online: ok=%v code=%q msg=%q, want ok", resRetry.OK, resRetry.ErrorCode, resRetry.Message)
 	}
 }
 

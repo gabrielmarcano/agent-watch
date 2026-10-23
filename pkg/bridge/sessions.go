@@ -105,22 +105,6 @@ func insideRoots(path string, roots []string) (string, bool) {
 	return "", false
 }
 
-// lockSessions serialises session.create calls on this host, so two creates
-// cannot race for the same workspace. It gives up when ctx ends.
-func (e *Engine) lockSessions(ctx context.Context) (func(), error) {
-	e.sessionLockDo.Do(func() { e.sessionLock = make(chan struct{}, 1) })
-	select {
-	case e.sessionLock <- struct{}{}:
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	}
-	if err := ctx.Err(); err != nil {
-		<-e.sessionLock
-		return nil, err
-	}
-	return func() { <-e.sessionLock }, nil
-}
-
 // replyHost answers a host-level command, with an optional payload.
 func (e *Engine) replyHost(cmd model.CommandMsg, ok bool, code, msg string, fill func(*model.CommandResultMsg)) {
 	if e.Logger != nil {
@@ -149,16 +133,18 @@ func (e *Engine) replyHost(cmd model.CommandMsg, ok bool, code, msg string, fill
 
 // executeHostCommand handles the actions that are not tied to a pane.
 func (e *Engine) executeHostCommand(ctx context.Context, cmd model.CommandMsg) {
-	// Checked before any work: a replay must not create a second session.
-	if e.requests.observe(cmd.RequestID) {
-		e.replyHost(cmd, false, string(model.ErrStaleState), "duplicate request_id", nil)
-		return
-	}
-
 	switch cmd.Action {
 	case model.ActionSessionOptions:
+		if e.guard.ObserveRequest(cmd.RequestID) {
+			e.replyHost(cmd, false, string(model.ErrStaleState), "duplicate request_id", nil)
+			return
+		}
 		e.executeSessionOptions(cmd)
 	case model.ActionFoldersList:
+		if e.guard.ObserveRequest(cmd.RequestID) {
+			e.replyHost(cmd, false, string(model.ErrStaleState), "duplicate request_id", nil)
+			return
+		}
 		e.executeFoldersList(cmd)
 	case model.ActionSessionCreate:
 		e.executeSessionCreate(ctx, cmd)
@@ -315,9 +301,13 @@ func (e *Engine) executeSessionCreate(ctx context.Context, cmd model.CommandMsg)
 		return
 	}
 
-	unlock, err := e.lockSessions(ctx)
+	unlock, duplicate, err := e.guard.AcquireSession(ctx, cmd.RequestID)
 	if err != nil {
 		e.replyHost(cmd, false, string(model.ErrTimeout), "waited too long behind another session", nil)
+		return
+	}
+	if duplicate {
+		e.replyHost(cmd, false, string(model.ErrStaleState), "duplicate request_id", nil)
 		return
 	}
 	defer unlock()

@@ -80,14 +80,13 @@ type Engine struct {
 	wsRefreshes   int               // workspace refreshes started (tests)
 	herdrOnline   bool
 	pong          herdr.Pong
-	herdrErr      string                      // why herdr is offline; "" while online
-	consumed      map[string]*consumedPrompts // pane_id -> prompts already acted on (guarded by mu)
+	herdrErr      string // why herdr is offline; "" while online
+	guard         commandGuard
+}
 
-	lockMu        sync.Mutex
-	paneLocks     map[string]*paneLock // pane_id -> lock, only while commands are in flight
-	requests      requestIDLog
-	sessionLock   chan struct{} // cap 1: session.create runs one at a time
-	sessionLockDo sync.Once
+func (e *Engine) lockPane(ctx context.Context, paneID string) (func(), error) {
+	unlock, _, err := e.guard.AcquirePane(ctx, paneID, "")
+	return unlock, err
 }
 
 // NewEngine creates a new bridge Engine instance.
@@ -167,7 +166,7 @@ func (e *Engine) OnChanges(changes []herdr.Change) {
 		switch ch.Kind {
 		case herdr.Removed:
 			delete(e.states, paneID)
-			e.forgetConsumedLocked(paneID, true, 0)
+			e.guard.Forget(paneID, 0, true)
 			if e.Relay != nil {
 				e.Relay.Send(model.AgentRemovedMsg{
 					Type:   model.WireAgentRemoved,
@@ -183,7 +182,7 @@ func (e *Engine) OnChanges(changes []herdr.Change) {
 			}
 
 			// A new seq (or a lost agent) ends any "already answered" record.
-			e.forgetConsumedLocked(paneID, agentName == "", info.StateChangeSeq)
+			e.guard.Forget(paneID, info.StateChangeSeq, agentName == "")
 
 			// Only panes with a detected agent are tracked
 			if agentName == "" {

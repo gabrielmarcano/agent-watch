@@ -141,18 +141,16 @@ func (e *Engine) executeCommand(ctx context.Context, cmd model.CommandMsg) {
 		}
 	}
 
-	unlock, err := e.lockPane(ctx, cmd.PaneID)
+	unlock, duplicate, err := e.guard.AcquirePane(ctx, cmd.PaneID, cmd.RequestID)
 	if err != nil {
 		reply(false, string(model.ErrTimeout), "waited too long behind another command on this pane", "")
 		return
 	}
-	defer unlock()
-
-	// Checked under the pane lock, so a replay waits for the original to finish.
-	if e.requests.observe(cmd.RequestID) {
+	if duplicate {
 		reply(false, "stale_state", "duplicate request_id", "")
 		return
 	}
+	defer unlock()
 
 	if !e.isHerdrOnline() {
 		reply(false, "herdr_offline", "herdr is offline", "")
@@ -179,7 +177,7 @@ func (e *Engine) executeCommand(ctx context.Context, cmd model.CommandMsg) {
 	// Whatever the outcome, let the engine catch up so the watch sees the
 	// state this command acted on (or was rejected against).
 	defer e.refreshSoon()
-	e.pruneConsumed(agentsList)
+	e.guard.Prune(agentsList)
 
 	var info *herdr.AgentInfo
 	for i := range agentsList {
@@ -247,20 +245,16 @@ func (e *Engine) executeCommand(ctx context.Context, cmd model.CommandMsg) {
 		// before herdr reports the new state: type it once. Claimed before
 		// the send, like key presses: typing twice is the worse outcome.
 		claim := promptClaim(cmd.Text)
-		if !e.claimPrompt(cmd.PaneID, info.StateChangeSeq, claim) {
+		alreadyClaimed, err := e.guard.DoClaim(cmd.PaneID, info.StateChangeSeq, claim, func() error {
+			promptCtx, promptCancel := context.WithTimeout(ctx, 3*time.Second)
+			defer promptCancel()
+			return e.Herdr.Prompt(promptCtx, cmd.PaneID, cmd.Text)
+		})
+		if alreadyClaimed {
 			reply(false, "stale_state", "this prompt was already sent; waiting for herdr to report a new state", agentName)
 			return
 		}
-
-		promptCtx, promptCancel := context.WithTimeout(ctx, 3*time.Second)
-		defer promptCancel()
-
-		if err := e.Herdr.Prompt(promptCtx, cmd.PaneID, cmd.Text); err != nil {
-			// Nothing was typed only when the dial failed or herdr refused
-			// a blocked agent; anything else may have reached the pane.
-			if errors.Is(err, herdr.ErrUnavailable) || herdr.IsCode(err, "agent_blocked") {
-				e.releasePrompt(cmd.PaneID, info.StateChangeSeq, claim)
-			}
+		if err != nil {
 			reply(false, herdrErrorCode(ctx, err, "internal"), err.Error(), agentName)
 			return
 		}
@@ -373,12 +367,14 @@ func (e *Engine) executeCommand(ctx context.Context, cmd model.CommandMsg) {
 // send: a send that fails after reaching herdr (e.g. a timeout) cannot be told
 // apart from one that never arrived, and pressing twice is the worse outcome.
 func (e *Engine) pressPromptKeys(ctx context.Context, paneID string, seq uint64, fp string, keys []string) (string, string) {
-	if !e.claimPrompt(paneID, seq, fp) {
+	alreadyClaimed, err := e.guard.DoClaim(paneID, seq, fp, func() error {
+		sendCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+		defer cancel()
+		return e.Herdr.SendKeys(sendCtx, paneID, keys)
+	})
+	if alreadyClaimed {
 		return "stale_state", "prompt already answered; waiting for herdr to report a new state"
 	}
-	sendCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
-	err := e.Herdr.SendKeys(sendCtx, paneID, keys)
-	cancel()
 	if err != nil {
 		return herdrErrorCode(ctx, err, "internal"), err.Error()
 	}
