@@ -213,10 +213,7 @@ func TestHub_CommandRoundTrip(t *testing.T) {
 		OptionID:    "opt-1",
 	}
 
-	res, err := hub.Command(ctx, "main", cmd)
-	if err != nil {
-		t.Fatalf("hub.Command err: %v", err)
-	}
+	res := hub.Command(ctx, "main", cmd)
 	if !res.OK {
 		t.Fatalf("expected command result OK=true, got %+v", res)
 	}
@@ -527,14 +524,13 @@ func readCommands(ctx context.Context, conn *websocket.Conn) <-chan model.Comman
 
 type commandOutcome struct {
 	res model.CommandResultMsg
-	err error
 }
 
 func startCommand(ctx context.Context, hub *Hub) <-chan commandOutcome {
 	out := make(chan commandOutcome, 1)
 	go func() {
-		res, err := hub.Command(ctx, "main", model.CommandMsg{Action: "cancel", PaneID: "w1:p1", ExpectedSeq: 1})
-		out <- commandOutcome{res, err}
+		res := hub.Command(ctx, "main", model.CommandMsg{Action: "cancel", PaneID: "w1:p1", ExpectedSeq: 1})
+		out <- commandOutcome{res: res}
 	}()
 	return out
 }
@@ -554,9 +550,9 @@ func TestHub_PingFailureDropsHost(t *testing.T) {
 	waitHostOnline(t, ch, true, 5*time.Second)
 	waitHostOnline(t, ch, false, 5*time.Second)
 
-	res, err := hh.hub.Command(ctx, "main", model.CommandMsg{Action: "cancel", PaneID: "w1:p1"})
-	if err != nil || res.ErrorCode != string(model.ErrHostOffline) {
-		t.Fatalf("command after the host was dropped = %+v, %v; want host_offline", res, err)
+	res := hh.hub.Command(ctx, "main", model.CommandMsg{Action: "cancel", PaneID: "w1:p1"})
+	if res.ErrorCode != string(model.ErrHostOffline) {
+		t.Fatalf("command after the host was dropped = %+v; want host_offline", res)
 	}
 }
 
@@ -617,8 +613,8 @@ func TestHub_ReplacedHostFailsInFlightCommandImmediately(t *testing.T) {
 
 	select {
 	case o := <-outcome:
-		if o.err != nil || o.res.OK || o.res.ErrorCode != string(model.ErrHostOffline) {
-			t.Fatalf("command = %+v, %v; want host_offline", o.res, o.err)
+		if o.res.OK || o.res.ErrorCode != string(model.ErrHostOffline) {
+			t.Fatalf("command = %+v; want host_offline", o.res)
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatalf("command to the replaced host is still waiting")
@@ -648,8 +644,8 @@ func TestHub_DisconnectFailsInFlightCommandImmediately(t *testing.T) {
 
 	select {
 	case o := <-outcome:
-		if o.err != nil || o.res.OK || o.res.ErrorCode != string(model.ErrHostOffline) {
-			t.Fatalf("command = %+v, %v; want host_offline", o.res, o.err)
+		if o.res.OK || o.res.ErrorCode != string(model.ErrHostOffline) {
+			t.Fatalf("command = %+v; want host_offline", o.res)
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatalf("command to the disconnected host is still waiting")
@@ -713,20 +709,36 @@ func TestHub_CancelledCallerDoesNotKillHost(t *testing.T) {
 	gone, goneCancel := context.WithCancel(context.Background())
 	goneCancel()
 	for i := 0; i < 20; i++ {
-		res, err := hh.hub.Command(gone, "main", model.CommandMsg{Action: "cancel", PaneID: "w1:p1"})
+		res := hh.hub.Command(gone, "main", model.CommandMsg{Action: "cancel", PaneID: "w1:p1"})
 		// The command is still sent; if the host answers before Command
 		// notices the cancelled caller, the delivered answer wins (by design).
-		if err == nil && !res.OK {
-			t.Fatalf("command %d with a cancelled context = %+v; want the caller's error or the host's answer", i, res)
+		// Otherwise, a cancelled caller gets timeout (504).
+		if !res.OK && res.ErrorCode != string(model.ErrTimeout) {
+			t.Fatalf("command %d with a cancelled context = %+v; want timeout or answer", i, res)
 		}
 	}
 
-	res, err := hh.hub.Command(ctx, "main", model.CommandMsg{Action: "cancel", PaneID: "w1:p1"})
-	if err != nil || !res.OK {
-		t.Fatalf("command after cancelled callers = %+v, %v; want ok (host connection intact)", res, err)
+	res := hh.hub.Command(ctx, "main", model.CommandMsg{Action: "cancel", PaneID: "w1:p1"})
+	if !res.OK {
+		t.Fatalf("command after cancelled callers = %+v; want ok (host connection intact)", res)
 	}
 	if !hh.state.HostOnline("main") {
 		t.Fatalf("host went offline after cancelled callers")
+	}
+}
+
+// A host whose herdr is unreachable rejects commands with herdr_offline.
+func TestHub_CommandHerdrOffline(t *testing.T) {
+	hh := newHubHarness(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	hh.connectHost(t, ctx, "mac")
+	hh.state.SetHost("main", true, false)
+
+	res := hh.hub.Command(ctx, "main", model.CommandMsg{Action: "cancel", PaneID: "w1:p1"})
+	if res.OK || res.ErrorCode != string(model.ErrHerdrOffline) {
+		t.Fatalf("command with herdr offline = %+v; want herdr_offline", res)
 	}
 }
 

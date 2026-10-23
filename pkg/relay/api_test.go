@@ -838,3 +838,80 @@ func TestAPI_PairRateLimitIgnoresSpoofedHeaders(t *testing.T) {
 		t.Fatalf("6th attempt from the same peer with a spoofed IP header: status %d, want 429", code)
 	}
 }
+
+// A command whose bridge does not answer within the budget yields HTTP 504 timeout,
+// never HTTP 500 internal_error.
+func TestAPI_CommandTimeoutReturns504Not500(t *testing.T) {
+	server, ts := setupTestServer(t)
+	server.Hub().SetCommandTimeout(50 * time.Millisecond)
+
+	devToken, _ := GenerateDeviceToken()
+	_, _ = server.Store().AddDevice("Watch", Sha256Hex(devToken))
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	wsURL := strings.Replace(ts.URL, "http://", "ws://", 1) + "/v1/host"
+	conn, _, err := websocket.Dial(ctx, wsURL, &websocket.DialOptions{
+		HTTPHeader: http.Header{"Authorization": []string{"Bearer " + testHostToken}},
+	})
+	if err != nil {
+		t.Fatalf("websocket.Dial: %v", err)
+	}
+	defer conn.Close(websocket.StatusNormalClosure, "")
+
+	hello, _ := json.Marshal(model.HelloMsg{Type: model.WireHello, Host: "mac", HerdrOnline: true})
+	_ = conn.Write(ctx, websocket.MessageText, hello)
+
+	snap, _ := json.Marshal(model.SnapshotMsg{
+		Type: model.WireSnapshot,
+		Agents: []model.AgentState{
+			{PaneID: "w1:p1", Status: "blocked"},
+		},
+	})
+	_ = conn.Write(ctx, websocket.MessageText, snap)
+
+	// Wait for agent to appear in state
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		if server.State().HasPane("main", "w1:p1") {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("pane w1:p1 never appeared in state")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	// Server-side budget timeout: bridge reads command but never replies.
+	go func() {
+		for {
+			_, _, err := conn.Read(ctx)
+			if err != nil {
+				return
+			}
+			// intentionally do not write any CommandResultMsg
+		}
+	}()
+
+	body, _ := json.Marshal(model.CancelRequest{ExpectedSeq: 1})
+	req, _ := http.NewRequestWithContext(ctx, "POST", ts.URL+"/v1/agents/w1%3Ap1/cancel", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+devToken)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("POST cancel: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusGatewayTimeout {
+		t.Fatalf("status = %d, want 504 Gateway Timeout", resp.StatusCode)
+	}
+	var errResp model.ErrorResponse
+	if err := json.NewDecoder(resp.Body).Decode(&errResp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if errResp.Error.Code != string(model.ErrTimeout) {
+		t.Fatalf("error code = %q, want %q", errResp.Error.Code, model.ErrTimeout)
+	}
+}

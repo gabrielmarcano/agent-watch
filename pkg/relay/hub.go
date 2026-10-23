@@ -536,9 +536,10 @@ func commandFailure(reqID string, code model.ErrorCode, msg string) model.Comman
 // default).
 //
 // It returns host_offline when that host is not connected or goes away before
-// answering (at once, not after the budget), and timeout when the budget runs
-// out. A non-nil error means ctx ended first (the caller left).
-func (h *Hub) Command(ctx context.Context, hostID string, cmd model.CommandMsg) (model.CommandResultMsg, error) {
+// answering (at once, not after the budget), herdr_offline when herdr is
+// unreachable on that host, and timeout when the budget runs out or the caller
+// cancels.
+func (h *Hub) Command(ctx context.Context, hostID string, cmd model.CommandMsg) model.CommandResultMsg {
 	h.mu.Lock()
 	host := h.conns[hostID]
 	budget := h.commandTimeout
@@ -547,13 +548,17 @@ func (h *Hub) Command(ctx context.Context, hostID string, cmd model.CommandMsg) 
 	}
 	if host == nil {
 		h.mu.Unlock()
-		return commandFailure("", model.ErrHostOffline, "host offline"), nil
+		return commandFailure("", model.ErrHostOffline, "host offline")
+	}
+	if h.state != nil && !h.state.HerdrOnline(hostID) {
+		h.mu.Unlock()
+		return commandFailure("", model.ErrHerdrOffline, "herdr offline")
 	}
 
 	var reqIDBytes [8]byte
 	if _, err := rand.Read(reqIDBytes[:]); err != nil {
 		h.mu.Unlock()
-		return model.CommandResultMsg{}, fmt.Errorf("generate request id: %w", err)
+		return commandFailure("", model.ErrInternal, fmt.Sprintf("generate request id: %v", err))
 	}
 	reqID := hex.EncodeToString(reqIDBytes[:])
 	cmd.Type = model.WireCommand
@@ -571,7 +576,7 @@ func (h *Hub) Command(ctx context.Context, hostID string, cmd model.CommandMsg) 
 
 	data, err := json.Marshal(cmd)
 	if err != nil {
-		return model.CommandResultMsg{}, fmt.Errorf("marshal command: %w", err)
+		return commandFailure(reqID, model.ErrInternal, fmt.Sprintf("marshal command: %v", err))
 	}
 
 	deadline := time.Now().Add(budget)
@@ -586,9 +591,9 @@ func (h *Hub) Command(ctx context.Context, hostID string, cmd model.CommandMsg) 
 	cancelWrite()
 	if err != nil {
 		if writeTimedOut {
-			return timedOut, nil
+			return timedOut
 		}
-		return commandFailure(reqID, model.ErrHostOffline, "failed to send command to host"), nil
+		return commandFailure(reqID, model.ErrHostOffline, "failed to send command to host")
 	}
 
 	waitCtx, cancelWait := context.WithDeadline(ctx, deadline)
@@ -596,20 +601,20 @@ func (h *Hub) Command(ctx context.Context, hostID string, cmd model.CommandMsg) 
 
 	select {
 	case res := <-ch:
-		return res, nil
+		return res
 	case <-host.gone:
 		if res, ok := resultIfReady(ch); ok {
-			return res, nil
+			return res
 		}
-		return commandFailure(reqID, model.ErrHostOffline, "host disconnected before answering"), nil
+		return commandFailure(reqID, model.ErrHostOffline, "host disconnected before answering")
 	case <-waitCtx.Done():
 		if res, ok := resultIfReady(ch); ok {
-			return res, nil
+			return res
 		}
 		if err := ctx.Err(); err != nil {
-			return commandFailure(reqID, model.ErrTimeout, err.Error()), err
+			return commandFailure(reqID, model.ErrTimeout, err.Error())
 		}
-		return timedOut, nil
+		return timedOut
 	}
 }
 

@@ -302,6 +302,21 @@ func (s *Server) targetFromPath(r *http.Request) (commandTarget, model.ErrorCode
 	}
 }
 
+// executeCommand sends cmd to host via Hub.Command, writing the error response
+// on failure. It returns (res, true) on success.
+func (s *Server) executeCommand(w http.ResponseWriter, r *http.Request, host string, cmd model.CommandMsg) (model.CommandResultMsg, bool) {
+	res := s.hub.Command(r.Context(), host, cmd)
+	if !res.OK {
+		code := model.ErrorCode(res.ErrorCode)
+		if code == "" {
+			code = model.ErrInternal
+		}
+		writeError(w, code, res.Message)
+		return res, false
+	}
+	return res, true
+}
+
 // runCommand checks the target, sends cmd to its host and writes the outcome.
 func (s *Server) runCommand(w http.ResponseWriter, r *http.Request, cmd model.CommandMsg) {
 	target, code, msg := s.targetFromPath(r)
@@ -309,31 +324,10 @@ func (s *Server) runCommand(w http.ResponseWriter, r *http.Request, cmd model.Co
 		writeError(w, code, msg)
 		return
 	}
-	if !s.state.HostOnline(target.host) {
-		writeError(w, model.ErrHostOffline, "host offline")
-		return
-	}
-	if !s.state.HerdrOnline(target.host) {
-		writeError(w, model.ErrHerdrOffline, "herdr offline")
-		return
-	}
-
 	cmd.PaneID = target.pane
-	res, err := s.hub.Command(r.Context(), target.host, cmd)
-	if err != nil {
-		writeError(w, model.ErrInternal, err.Error())
-		return
+	if _, ok := s.executeCommand(w, r, target.host, cmd); ok {
+		writeJSON(w, http.StatusOK, model.CommandResponse{OK: true})
 	}
-	if !res.OK {
-		code := model.ErrorCode(res.ErrorCode)
-		if code == "" {
-			code = model.ErrInternal
-		}
-		writeError(w, code, res.Message)
-		return
-	}
-
-	writeJSON(w, http.StatusOK, model.CommandResponse{OK: true})
 }
 
 // POST /v1/hosts/{host}/agents/{pane_id}/prompt and /v1/agents/{pane_id}/prompt
@@ -418,29 +412,8 @@ func (s *Server) runHostCommand(w http.ResponseWriter, r *http.Request, cmd mode
 		writeError(w, model.ErrInvalidRequest, "missing host")
 		return "", model.CommandResultMsg{}, false
 	}
-	if !s.state.HostOnline(host) {
-		writeError(w, model.ErrHostOffline, "host offline")
-		return "", model.CommandResultMsg{}, false
-	}
-	if !s.state.HerdrOnline(host) {
-		writeError(w, model.ErrHerdrOffline, "herdr offline")
-		return "", model.CommandResultMsg{}, false
-	}
-
-	res, err := s.hub.Command(r.Context(), host, cmd)
-	if err != nil {
-		writeError(w, model.ErrInternal, err.Error())
-		return "", model.CommandResultMsg{}, false
-	}
-	if !res.OK {
-		code := model.ErrorCode(res.ErrorCode)
-		if code == "" {
-			code = model.ErrInternal
-		}
-		writeError(w, code, res.Message)
-		return "", model.CommandResultMsg{}, false
-	}
-	return host, res, true
+	res, ok := s.executeCommand(w, r, host, cmd)
+	return host, res, ok
 }
 
 // GET /v1/hosts/{host}/sessions/options
