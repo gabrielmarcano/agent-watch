@@ -9,7 +9,6 @@ import (
 	"os/signal"
 	"path/filepath"
 	"syscall"
-	"time"
 
 	"github.com/gabrielmarcano/agent-monitor/pkg/agents"
 	"github.com/gabrielmarcano/agent-monitor/pkg/bridge"
@@ -168,9 +167,6 @@ func runDaemon(args []string) error {
 	engine := bridge.NewEngine(hClient, syncer, reg, rClient, fullVersion, cfg.HostName, statusPath, logger)
 	engine.SessionRoots = cfg.SessionRoots
 	engine.SessionKinds = cfg.SessionKinds
-	syncer.Listener = engine
-	rClient.OnConnect = engine.ConnectMessages
-	rClient.OnMessage = engine.HandleRelayMessage
 	engine.Presence = bridge.ReadPresence
 	// Read on every report, so `presence on|off` applies without a restart.
 	engine.PresenceEnabled = func() bool {
@@ -183,23 +179,8 @@ func runDaemon(args []string) error {
 
 	logger.Info("starting agent-watch-bridge", "version", fullVersion, "socket", hClient.SocketPath, "config", targetConfig, "status", statusPath)
 
-	writerDone := engine.StartStatusWriter(ctx, 5*time.Second)
-	engine.StartTurnWatch(ctx)
-	engine.StartPresence(ctx)
-
-	go func() {
-		if err := syncer.Run(ctx); err != nil && ctx.Err() == nil {
-			logger.Error("syncer error", "err", err)
-		}
-	}()
-
-	runErr := rClient.Run(ctx)
-	// Run only returns once ctx is done; make sure it is, then let the
-	// writer mark the status file as stopped before the process exits.
-	cancel()
-	<-writerDone
-	if runErr != nil && !errors.Is(runErr, context.Canceled) {
-		return fmt.Errorf("relay client run: %w", runErr)
+	if err := engine.Run(ctx); err != nil {
+		return err
 	}
 
 	logger.Info("agent-watch-bridge stopped cleanly")

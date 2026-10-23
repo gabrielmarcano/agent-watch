@@ -3,6 +3,7 @@ package bridge
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -77,7 +78,6 @@ type Engine struct {
 	tabs          map[string]string // tab_id -> the owner's label ("" when it is only the tab's number); from the last tab.list
 	wsRefreshing  bool              // a workspace.list is in flight
 	wsRefreshedAt time.Time         // when the last workspace.list finished (ok or not)
-	wsRefreshes   int               // workspace refreshes started (tests)
 	herdrOnline   bool
 	pong          herdr.Pong
 	herdrErr      string // why herdr is offline; "" while online
@@ -104,7 +104,7 @@ func NewEngine(
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &Engine{
+	e := &Engine{
 		Herdr:        herdrClient,
 		Syncer:       syncer,
 		Agents:       reg,
@@ -126,6 +126,50 @@ func NewEngine(
 		workspaces: make(map[string]string),
 		tabs:       make(map[string]string),
 	}
+	if syncer != nil {
+		syncer.Listener = e
+	}
+	if relay != nil {
+		relay.OnConnect = e.ConnectMessages
+		relay.OnMessage = e.HandleRelayMessage
+	}
+	return e
+}
+
+// Run starts all background loops (status writer, turn watch, presence,
+// syncer, and relay client) and blocks until ctx is done or a fatal error
+// occurs. On cancellation, it ensures the status file writes stopped status
+// before returning.
+func (e *Engine) Run(ctx context.Context) error {
+	runCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	writerDone := e.StartStatusWriter(runCtx, 5*time.Second)
+	e.StartTurnWatch(runCtx)
+	e.StartPresence(runCtx)
+
+	if e.Syncer != nil {
+		go func() {
+			if err := e.Syncer.Run(runCtx); err != nil && runCtx.Err() == nil && e.Logger != nil {
+				e.Logger.Error("syncer error", "err", err)
+			}
+		}()
+	}
+
+	var runErr error
+	if e.Relay != nil {
+		runErr = e.Relay.Run(runCtx)
+	} else {
+		<-runCtx.Done()
+	}
+
+	cancel()
+	<-writerDone
+
+	if runErr != nil && !errors.Is(runErr, context.Canceled) {
+		return fmt.Errorf("relay client run: %w", runErr)
+	}
+	return nil
 }
 
 // OnHerdrOnline implements herdr.Listener.
@@ -788,6 +832,13 @@ func (e *Engine) maybeRefreshWorkspacesLocked(changes []herdr.Change) {
 	}
 }
 
+// RefreshWorkspaces triggers a background refresh of workspace and tab labels.
+func (e *Engine) RefreshWorkspaces() {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.startWorkspaceRefreshLocked()
+}
+
 // startWorkspaceRefreshLocked runs one workspace.list in the background
 // unless one is already in flight. Callers hold e.mu.
 func (e *Engine) startWorkspaceRefreshLocked() {
@@ -795,7 +846,6 @@ func (e *Engine) startWorkspaceRefreshLocked() {
 		return
 	}
 	e.wsRefreshing = true
-	e.wsRefreshes++
 	go e.refreshWorkspaces(context.Background())
 }
 

@@ -267,7 +267,7 @@ func TestSessionCreate_NewWorkspace(t *testing.T) {
 	root, _ := newFolder(t, base, "work")
 	_, resolvedProject := newFolder(t, root, "project")
 	h.engine.SessionRoots = []string{root}
-	h.engine.herdrOnline = true
+	h.engine.OnHerdrOnline(true, herdr.Pong{Version: "0.9.1", Protocol: 22})
 
 	before := len(h.server.Calls())
 	res := runHostCmd(t, h, model.CommandMsg{
@@ -335,7 +335,7 @@ func TestSessionCreate_ReusesWorkspaceAndSuffixesName(t *testing.T) {
 	root, _ := newFolder(t, base, "work")
 	_, resolvedProject := newFolder(t, root, "project")
 	h.engine.SessionRoots = []string{root}
-	h.engine.herdrOnline = true
+	h.engine.OnHerdrOnline(true, herdr.Pong{Version: "0.9.1", Protocol: 22})
 
 	h.server.SetWorkspaces([]map[string]any{
 		{"workspace_id": "w1", "number": 1, "label": "project"},
@@ -405,7 +405,7 @@ func TestSessionCreate_LabelAndKindOverrides(t *testing.T) {
 	_, resolvedProject := newFolder(t, root, "project")
 	h.engine.SessionRoots = []string{root}
 	h.engine.SessionKinds = []string{"agy"}
-	h.engine.herdrOnline = true
+	h.engine.OnHerdrOnline(true, herdr.Pong{Version: "0.9.1", Protocol: 22})
 
 	res := runHostCmd(t, h, model.CommandMsg{
 		RequestID: "req-create-label",
@@ -433,7 +433,7 @@ func TestSessionCreate_RefusalsNeverTouchHerdr(t *testing.T) {
 	_, outside := newFolder(t, base, "outside")
 	h.engine.SessionRoots = []string{root}
 	h.engine.SessionKinds = []string{"claude"}
-	h.engine.herdrOnline = true
+	h.engine.OnHerdrOnline(true, herdr.Pong{Version: "0.9.1", Protocol: 22})
 
 	longLabel := strings.Repeat("x", maxSessionLabel+1)
 	cases := []struct {
@@ -508,7 +508,7 @@ func TestSessionCreate_HerdrOffline(t *testing.T) {
 	root, _ := newFolder(t, base, "work")
 	_, resolvedProject := newFolder(t, root, "project")
 	h.engine.SessionRoots = []string{root}
-	h.engine.herdrOnline = false
+	h.engine.OnHerdrOnline(false, herdr.Pong{})
 
 	before := len(h.server.Calls())
 	res := runHostCmd(t, h, model.CommandMsg{
@@ -531,7 +531,7 @@ func TestSessionCreate_DuplicateRequestRunsOnce(t *testing.T) {
 	root, _ := newFolder(t, base, "work")
 	_, resolvedProject := newFolder(t, root, "project")
 	h.engine.SessionRoots = []string{root}
-	h.engine.herdrOnline = true
+	h.engine.OnHerdrOnline(true, herdr.Pong{Version: "0.9.1", Protocol: 22})
 
 	before := len(h.server.Calls())
 	cmd := model.CommandMsg{
@@ -558,7 +558,7 @@ func TestSessionCreate_AgentStartFailureIsInternal(t *testing.T) {
 	root, _ := newFolder(t, base, "work")
 	_, resolvedProject := newFolder(t, root, "project")
 	h.engine.SessionRoots = []string{root}
-	h.engine.herdrOnline = true
+	h.engine.OnHerdrOnline(true, herdr.Pong{Version: "0.9.1", Protocol: 22})
 	h.server.FailNext("agent.start", "invalid_request", "kind not installed")
 
 	res := runHostCmd(t, h, model.CommandMsg{
@@ -582,7 +582,10 @@ func TestSessionCreate_Timeout(t *testing.T) {
 	_, resolvedProject := newFolder(t, root, "project")
 	h.engine.SessionRoots = []string{root}
 	h.engine.SessionTimeout = 200 * time.Millisecond
-	h.engine.herdrOnline = true
+	h.engine.OnHerdrOnline(true, herdr.Pong{Version: "0.9.1", Protocol: 22})
+	pollUntil(t, 3*time.Second, "initial workspace list", func() bool {
+		return callsSince(h, 0, "workspace.list") >= 1
+	})
 
 	hold := h.server.HoldNext("workspace.list")
 	t.Cleanup(hold.Release)

@@ -82,22 +82,15 @@ func TestEngine_WorkspaceListIsCached(t *testing.T) {
 
 	h.engine.OnHerdrOnline(true, herdr.Pong{Version: "0.9.1", Protocol: 22})
 	pollUntil(t, 3*time.Second, "first workspace refresh", func() bool {
-		h.engine.mu.RLock()
-		defer h.engine.mu.RUnlock()
-		_, known := h.engine.workspaces["w1"]
-		return known && !h.engine.wsRefreshing
+		return callsSince(h, 0, "workspace.list") == 1
 	})
-	h.engine.mu.RLock()
-	started := h.engine.wsRefreshes
-	h.engine.mu.RUnlock()
+	started := callsSince(h, 0, "workspace.list")
 
 	for seq := uint64(1); seq <= 3; seq++ {
 		addAgent(h.engine, "w1:p1", "working", seq)
 	}
 
-	h.engine.mu.RLock()
-	after := h.engine.wsRefreshes
-	h.engine.mu.RUnlock()
+	after := callsSince(h, 0, "workspace.list")
 	if after != started {
 		t.Errorf("change batches on an unlabeled workspace started %d extra workspace refreshes, want 0", after-started)
 	}
@@ -117,10 +110,7 @@ func TestEngine_WorkspaceListIsCached(t *testing.T) {
 	h.engine.OnChanges([]herdr.Change{{Kind: herdr.Added, Agent: herdr.AgentInfo{
 		PaneID: "w3:p1", WorkspaceID: "w3", TabID: "t1", Agent: &agent, AgentStatus: "idle", StateChangeSeq: 1,
 	}}})
-	h.engine.mu.RLock()
-	final := h.engine.wsRefreshes
-	h.engine.mu.RUnlock()
-	if final != started+1 {
-		t.Errorf("unknown workspace started %d refreshes, want 1", final-started)
-	}
+	pollUntil(t, 3*time.Second, "refresh for unknown workspace", func() bool {
+		return callsSince(h, 0, "workspace.list") == started+1
+	})
 }
