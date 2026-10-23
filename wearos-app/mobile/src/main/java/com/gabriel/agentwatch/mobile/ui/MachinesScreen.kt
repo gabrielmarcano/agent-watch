@@ -78,6 +78,7 @@ fun MachinesScreen(
                     host = host,
                     agents = state.agents.count { it.host == host.id },
                     waiting = state.agents.count { it.host == host.id && it.needsAnswer() },
+                    cachedRoots = state.sessionOptionsByHost[host.id]?.roots,
                     onOpenChats = { onOpenChats(host.id) },
                     onNewSession = { onNewSession(host.id) }
                 )
@@ -92,19 +93,25 @@ private fun MachineCard(
     host: HostInfo,
     agents: Int,
     waiting: Int,
+    cachedRoots: List<String>?,
     onOpenChats: () -> Unit,
     onNewSession: () -> Unit
 ) {
-    var roots by remember(host.id) { mutableStateOf<List<String>>(emptyList()) }
-    var loaded by remember(host.id) { mutableStateOf(false) }
+    var roots by remember(host.id, cachedRoots) { mutableStateOf(cachedRoots.orEmpty()) }
+    var loaded by remember(host.id, cachedRoots) { mutableStateOf(cachedRoots != null) }
 
     // The projects are the roots the bridge on that machine allows (contracts §2.1).
     LaunchedEffect(host.id) {
-        RelayRepository.sessionOptions(host.id).fold(
-            onSuccess = { roots = it.roots },
-            onFailure = { roots = emptyList() }
+        RelayRepository.loadSessionOptions(host.id).fold(
+            onSuccess = {
+                roots = it.roots
+                loaded = true
+            },
+            onFailure = {
+                if (cachedRoots == null) roots = emptyList()
+                loaded = true
+            }
         )
-        loaded = true
     }
 
     Card(Modifier.fillMaxWidth()) {

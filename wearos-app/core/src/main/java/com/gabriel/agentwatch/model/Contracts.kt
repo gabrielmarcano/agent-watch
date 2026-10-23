@@ -134,6 +134,8 @@ data class SessionOptionsResponse(
     val roots: List<String> = emptyList()
 )
 
+typealias SessionOptions = SessionOptionsResponse
+
 @Keep
 data class FolderEntry(
     val name: String = "",

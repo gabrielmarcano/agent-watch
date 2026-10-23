@@ -168,4 +168,35 @@ class CommandFeedbackTest {
         assertFeedback(relay("host_required", 409), "Several devices — refreshed", refresh = true)
         assertEquals("Several devices — open the app", commandErrorFeedback(relay("host_required", 409), FeedbackSurface.NOTIFICATION).message)
     }
+
+    @Test
+    fun classifyRelayErrorCoversAllKinds() {
+        assertEquals(RelayErrorKind.PROMPT_CHANGED, classifyRelayError(relay("stale_state", 409)))
+        assertEquals(RelayErrorKind.PROMPT_CHANGED, classifyRelayError(relay("prompt_changed", 409)))
+        assertEquals(RelayErrorKind.PROMPT_CHANGED, classifyRelayError(relay("unknown_option", 409)))
+        assertEquals(RelayErrorKind.PROMPT_CHANGED, classifyRelayError(relay("host_required", 409)))
+        assertEquals(RelayErrorKind.AGENT_NOT_BLOCKED, classifyRelayError(relay("agent_busy", 409)))
+        assertEquals(RelayErrorKind.AGENT_BLOCKED, classifyRelayError(relay("agent_blocked", 409)))
+        assertEquals(RelayErrorKind.PANE_NOT_FOUND, classifyRelayError(relay("unknown_pane", 404)))
+        assertEquals(RelayErrorKind.HOST_OFFLINE, classifyRelayError(relay("host_offline", 503)))
+        assertEquals(RelayErrorKind.HERDR_UNAVAILABLE, classifyRelayError(relay("herdr_offline", 503)))
+        assertEquals(RelayErrorKind.HERDR_UNAVAILABLE, classifyRelayError(relay("herdr_unavailable", 503)))
+        assertEquals(RelayErrorKind.BRIDGE_BUSY, classifyRelayError(relay("bridge_busy", 429)))
+        assertEquals(RelayErrorKind.BRIDGE_BUSY, classifyRelayError(relay("rate_limited", 429)))
+        assertEquals(RelayErrorKind.NOT_ALLOWED, classifyRelayError(relay("not_allowed", 403)))
+        assertEquals(RelayErrorKind.TIMEOUT, classifyRelayError(relay("timeout", 504)))
+        assertEquals(RelayErrorKind.TIMEOUT, classifyRelayError(SocketTimeoutException("slow")))
+        assertEquals(RelayErrorKind.UNAUTHORIZED, classifyRelayError(relay("unauthorized", 401)))
+        assertEquals(RelayErrorKind.UNAUTHORIZED, classifyRelayError(RelayError("not_paired", "no token", 0)))
+        assertEquals(RelayErrorKind.NETWORK, classifyRelayError(IOException("offline")))
+        assertEquals(RelayErrorKind.NETWORK, classifyRelayError(relay("http_502", 502)))
+        assertEquals(RelayErrorKind.OTHER, classifyRelayError(relay("invalid_request", 400)))
+        assertEquals(RelayErrorKind.OTHER, classifyRelayError(null))
+    }
+
+    @Test
+    fun notAllowedProducesProblemFeedback() {
+        assertFeedback(relay("not_allowed", 403), "Not allowed", refresh = false)
+        assertFeedback(relay("http_403", 403), "Not allowed", refresh = false)
+    }
 }

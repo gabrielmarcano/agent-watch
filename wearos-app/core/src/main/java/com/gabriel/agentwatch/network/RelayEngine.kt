@@ -384,9 +384,21 @@ class RelayEngine(
     }
 
     /** What [host]'s bridge allows for new sessions (contracts §2.1). */
-    suspend fun sessionOptions(host: String): Result<SessionOptionsResponse> {
-        val currentClient = getClient() ?: return notPaired()
-        return currentClient.sessionOptions(host)
+    suspend fun sessionOptions(host: String): Result<SessionOptionsResponse> =
+        loadSessionOptions(host)
+
+    /** Fetches host session options and caches them in [UiState.sessionOptionsByHost]. */
+    suspend fun loadSessionOptions(host: String): Result<SessionOptionsResponse> {
+        val (currentClient, epoch) = synchronized(lock) { (clientLocked() ?: return notPaired()) to pairingEpoch }
+        val result = currentClient.sessionOptions(host)
+        return result.onSuccess { options ->
+            synchronized(lock) {
+                if (epoch != pairingEpoch) return@onSuccess
+                state.update { current ->
+                    current.copy(sessionOptionsByHost = current.sessionOptionsByHost + (host to options))
+                }
+            }
+        }
     }
 
     /** One folder listing on [host] for the picker: its roots when [path] is null. */

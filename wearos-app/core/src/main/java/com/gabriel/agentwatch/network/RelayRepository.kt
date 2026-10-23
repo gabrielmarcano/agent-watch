@@ -174,7 +174,11 @@ object RelayRepository {
 
     /** What [host]'s bridge allows for new sessions: agent kinds and root folders (contracts §2.1). */
     suspend fun sessionOptions(host: String): Result<SessionOptionsResponse> =
-        engine?.sessionOptions(host) ?: notPaired()
+        loadSessionOptions(host)
+
+    /** Fetches host session options and caches them in [UiState.sessionOptionsByHost]. */
+    suspend fun loadSessionOptions(host: String): Result<SessionOptionsResponse> =
+        engine?.loadSessionOptions(host) ?: notPaired()
 
     /** One folder listing on [host] for the folder picker; its roots when [path] is null. */
     suspend fun folders(host: String, path: String? = null): Result<FolderListResponse> =

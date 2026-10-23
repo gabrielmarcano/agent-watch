@@ -5,6 +5,7 @@ import com.gabriel.agentwatch.model.AgentKey
 import com.gabriel.agentwatch.model.AgentState
 import com.gabriel.agentwatch.model.HistoryItem
 import com.gabriel.agentwatch.model.HostInfo
+import com.gabriel.agentwatch.model.SessionOptionsResponse
 import com.gabriel.agentwatch.model.key
 
 sealed class Connection {
@@ -30,6 +31,7 @@ data class UiState(
     val agents: List<AgentState> = emptyList(),
     val history: List<HistoryItem> = emptyList(),
     val paneHistory: Map<AgentKey, List<HistoryItem>> = emptyMap(),
+    val sessionOptionsByHost: Map<String, SessionOptionsResponse> = emptyMap(),
     /**
      * True while [agents] and the host flags are not backed by a live stream: before the first SSE
      * `snapshot`, after the stream closed, failed or went silent (no keepalive for 45 s) while it

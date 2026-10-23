@@ -18,7 +18,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -29,7 +28,6 @@ import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -42,18 +40,18 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.gabriel.agentwatch.approval.RelayErrorKind
 import com.gabriel.agentwatch.mobile.R
+import com.gabriel.agentwatch.mobile.ui.logic.NewSessionController
 import com.gabriel.agentwatch.mobile.ui.logic.canCreateSession
 import com.gabriel.agentwatch.mobile.ui.logic.defaultSessionLabel
 import com.gabriel.agentwatch.mobile.ui.logic.sessionHosts
@@ -62,18 +60,16 @@ import com.gabriel.agentwatch.model.FolderListResponse
 import com.gabriel.agentwatch.model.HostInfo
 import com.gabriel.agentwatch.model.SessionCreated
 import com.gabriel.agentwatch.model.SessionOptionsResponse
-import com.gabriel.agentwatch.network.RelayError
-import com.gabriel.agentwatch.network.RelayRepository
 import kotlinx.coroutines.launch
 
 /** The relay code of a failed session request, as the form's one-line error. */
 @StringRes
-private fun sessionErrorRes(error: Throwable): Int = when ((error as? RelayError)?.code) {
-    "not_allowed" -> R.string.session_err_not_allowed
-    "host_offline" -> R.string.session_err_host_offline
-    "herdr_offline" -> R.string.session_err_herdr_offline
-    "timeout" -> R.string.session_err_timeout
-    "not_paired", "unauthorized" -> R.string.session_expired
+private fun sessionErrorRes(kind: RelayErrorKind): Int = when (kind) {
+    RelayErrorKind.NOT_ALLOWED -> R.string.session_err_not_allowed
+    RelayErrorKind.HOST_OFFLINE -> R.string.session_err_host_offline
+    RelayErrorKind.HERDR_UNAVAILABLE -> R.string.session_err_herdr_offline
+    RelayErrorKind.TIMEOUT -> R.string.session_err_timeout
+    RelayErrorKind.UNAUTHORIZED -> R.string.session_expired
     else -> R.string.session_err_generic
 }
 
@@ -91,87 +87,35 @@ fun NewSessionScreen(
     hosts: List<HostInfo>,
     startHost: String = "",
     onBack: () -> Unit,
-    onCreated: (SessionCreated) -> Unit
+    onCreated: (SessionCreated) -> Unit,
+    controller: NewSessionController = remember(startHost) {
+        NewSessionController(initialHostId = startHost)
+    }
 ) {
     val scope = rememberCoroutineScope()
     val startable = remember(hosts) { sessionHosts(hosts) }
+    val uiState by controller.state.collectAsStateWithLifecycle()
 
-    var hostId by rememberSaveable { mutableStateOf("") }
-    var options by remember { mutableStateOf<SessionOptionsResponse?>(null) }
-    var optionsError by remember { mutableStateOf<Int?>(null) }
-    var kind by rememberSaveable { mutableStateOf("") }
-    var viewPath by rememberSaveable { mutableStateOf("") }
-    var listing by remember { mutableStateOf<FolderListResponse?>(null) }
-    var foldersError by remember { mutableStateOf<Int?>(null) }
-    var loadingFolders by remember { mutableStateOf(false) }
-    var chosen by rememberSaveable { mutableStateOf("") }
-    var label by rememberSaveable { mutableStateOf("") }
-    var creating by remember { mutableStateOf(false) }
-    var createError by remember { mutableStateOf<Int?>(null) }
-    // Three steps, the way a messenger asks for a contact: the machine, the agent, the folder.
-    var step by rememberSaveable { mutableStateOf(if (startHost.isBlank()) 0 else 1) }
-
-    // A host that went offline cannot stay selected; the machine the caller asked for wins, else
-    // the first startable one.
     LaunchedEffect(startable, startHost) {
-        if (startHost.isNotBlank() && startable.any { it.id == startHost }) {
-            hostId = startHost
-        } else if (startable.none { it.id == hostId }) {
-            hostId = startable.firstOrNull()?.id.orEmpty()
-        }
+        controller.syncStartableHosts(startable, startHost)
     }
 
-    // What the chosen host allows: kinds and roots. Both reset with the host.
-    LaunchedEffect(hostId) {
-        if (hostId.isBlank()) return@LaunchedEffect
-        options = null
-        optionsError = null
-        kind = ""
-        viewPath = ""
-        chosen = ""
-        label = ""
-        createError = null
-        RelayRepository.sessionOptions(hostId)
-            .onSuccess { loaded ->
-                options = loaded
-                kind = sessionKinds(loaded).firstOrNull().orEmpty()
-            }
-            .onFailure { optionsError = sessionErrorRes(it) }
-    }
-
-    // The folder being browsed, or the roots when nothing is open yet.
-    LaunchedEffect(hostId, viewPath, options) {
-        val current = options ?: return@LaunchedEffect
-        if (hostId.isBlank() || current.roots.isEmpty()) {
-            listing = null
-            loadingFolders = false
-            return@LaunchedEffect
-        }
-        loadingFolders = true
-        foldersError = null
-        RelayRepository.folders(hostId, viewPath.ifBlank { null })
-            .onSuccess { listing = it }
-            .onFailure {
-                listing = null
-                foldersError = sessionErrorRes(it)
-            }
-        loadingFolders = false
-    }
-
-    fun choose(path: String) {
-        chosen = path
-        createError = null
-    }
+    val hostId = uiState.selectedHostId
+    val options = uiState.options
+    val optionsError = uiState.optionsError?.let(::sessionErrorRes)
+    val kind = uiState.selectedKind
+    val listing = uiState.folderListing
+    val foldersError = uiState.foldersError?.let(::sessionErrorRes)
+    val loadingFolders = uiState.loadingFolders
+    val chosen = uiState.chosenPath
+    val label = uiState.label
+    val creating = uiState.creating
+    val createError = uiState.createError?.let(::sessionErrorRes)
+    val step = uiState.step
 
     fun create() {
-        if (!canCreateSession(hostId, kind, chosen, creating)) return
-        creating = true
-        createError = null
-        val name = label.trim().ifEmpty { null }
         scope.launch {
-            val res = RelayRepository.createSession(hostId, kind, chosen, name)
-            creating = false
-            res.onSuccess(onCreated).onFailure { createError = sessionErrorRes(it) }
+            controller.createSession().onSuccess(onCreated)
         }
     }
 
@@ -180,7 +124,7 @@ fun NewSessionScreen(
             TopAppBar(
                 title = { Text(stringResource(stepTitle(step))) },
                 navigationIcon = {
-                    IconButton(onClick = { if (step > 0) step-- else onBack() }) {
+                    IconButton(onClick = { if (step > 0) controller.setStep(step - 1) else onBack() }) {
                         Icon(
                             Icons.AutoMirrored.Filled.ArrowBack,
                             contentDescription = stringResource(R.string.back)
@@ -193,7 +137,7 @@ fun NewSessionScreen(
             if (step == 2) {
                 CreateBar(
                     label = label,
-                    onLabelChange = { label = it; createError = null },
+                    onLabelChange = { controller.setLabel(it) },
                     hint = defaultSessionLabel(chosen),
                     enabled = canCreateSession(hostId, kind, chosen, creating),
                     creating = creating,
@@ -208,13 +152,13 @@ fun NewSessionScreen(
                 startable.isEmpty() ->
                     Centered(stringResource(R.string.session_no_hosts), MaterialTheme.colorScheme.onSurfaceVariant)
                 optionsError != null && step > 0 ->
-                    Centered(stringResource(optionsError!!), MaterialTheme.colorScheme.error)
+                    Centered(stringResource(optionsError), MaterialTheme.colorScheme.error)
                 step == 0 -> MachineStep(
                     hosts = startable,
                     selected = hostId,
                     onSelect = {
-                        hostId = it
-                        step = 1
+                        controller.selectHost(it)
+                        controller.setStep(1)
                     }
                 )
                 step == 1 -> {
@@ -227,14 +171,14 @@ fun NewSessionScreen(
                             selected = kind,
                             machine = startable.firstOrNull { it.id == hostId }?.name.orEmpty(),
                             onSelect = {
-                                kind = it
-                                step = 2
+                                controller.selectKind(it)
+                                controller.setStep(2)
                             }
                         )
                     }
                 }
                 else -> {
-                    if (options != null && options!!.roots.isEmpty()) {
+                    if (options != null && options.roots.isEmpty()) {
                         Text(
                             text = stringResource(R.string.session_not_configured),
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -249,8 +193,8 @@ fun NewSessionScreen(
                             error = foldersError,
                             chosen = chosen,
                             modifier = Modifier.weight(1f),
-                            onOpen = { viewPath = it },
-                            onChoose = ::choose
+                            onOpen = { controller.navigateToFolder(it) },
+                            onChoose = { controller.chooseFolder(it) }
                         )
                     }
                 }
@@ -334,37 +278,7 @@ private fun KindStep(kinds: List<String>, selected: String, machine: String, onS
     }
 }
 
-@Composable
-private fun HostChips(hosts: List<HostInfo>, selected: String, onSelect: (String) -> Unit) {
-    LazyRow(
-        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
-    ) {
-        items(hosts, key = { it.id }) { host ->
-            FilterChip(
-                selected = selected == host.id,
-                onClick = { onSelect(host.id) },
-                label = { Text(host.name.ifBlank { host.id }, maxLines = 1) }
-            )
-        }
-    }
-}
 
-@Composable
-private fun KindChips(kinds: List<String>, selected: String, onSelect: (String) -> Unit) {
-    LazyRow(
-        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
-    ) {
-        items(kinds, key = { it }) { kind ->
-            FilterChip(
-                selected = selected == kind,
-                onClick = { onSelect(kind) },
-                label = { Text(kind) }
-            )
-        }
-    }
-}
 
 @Composable
 private fun ChosenFolder(path: String) {
