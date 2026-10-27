@@ -92,6 +92,86 @@ func TestScreenTurnFor_RealScreens(t *testing.T) {
 	}
 }
 
+// A pane working on its last message has nothing to publish: the adapter
+// reports an empty reply and ScreenTurnFor yields no item, so the bridge
+// keeps the last item instead of publishing the live progress, a queued
+// message or the chrome over the input box (aw-sandbox captures).
+func TestScreenTurnFor_ClaudeRunningTurn(t *testing.T) {
+	ad := NewRegistry(Config{}).For("claude")
+	for _, fixture := range []string{
+		"claude/no-menu-working.txt",
+		"claude/no-menu-working-numbered-list.txt",
+		"claude/no-menu-working-queued.txt",
+	} {
+		data, err := os.ReadFile(filepath.Join("testdata", fixture))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if item := ScreenTurnFor(ad, string(data)); item != nil {
+			t.Errorf("%s: item = %+v, want none", fixture, item)
+		}
+	}
+}
+
+// A message queued while the pane worked shows under the running turn; when
+// the turn closes, both answers sit above the closing status line and the
+// queued message is the query of the turn that answered it.
+func TestScreenTurnFor_ClaudeQueuedMessageTurn(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("testdata", "claude", "no-menu-idle-queued-merged.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	item := ScreenTurnFor(NewRegistry(Config{}).For("claude"), string(data))
+	if item == nil {
+		t.Fatal("no item for the closed turn")
+	}
+	if item.Query != "Also reply QUEUED-ONE when you are done." {
+		t.Errorf("query = %q", item.Query)
+	}
+	if item.Response != "DONE-PY\n\nQUEUED-ONE" {
+		t.Errorf("response = %q", item.Response)
+	}
+}
+
+// The chrome Claude leaves over its input box — a recap, the update notice,
+// the titled rule — is not part of the last reply. With no echo on the
+// screen, the reply alone is kept.
+func TestScreenTurnFor_ClaudeComposerChrome(t *testing.T) {
+	screen := "⏺ Renamed note.txt to notes.txt.\n\n" +
+		"✻ Worked for 1s · done 10:25 AM\n\n" +
+		"  ⎿  Tip: Use /feedback to help us improve!\n\n" +
+		"※ recap: the rename is done and git status is clean. (disable recaps in /config)\n\n" +
+		"currentVersion: 2.1.301\nUpdate available! Run: claude update\n\n" +
+		"──────────── rename-note-to-notes ────────────\n❯ \n────────────\n" +
+		"  ⏵⏵ auto mode on (shift+tab to cycle) · ← for agents\n"
+	item := ScreenTurnFor(NewRegistry(Config{}).For("claude"), screen)
+	if item == nil {
+		t.Fatal("no item for the screen")
+	}
+	if item.Query != "" {
+		t.Errorf("query = %q", item.Query)
+	}
+	if item.Response != "Renamed note.txt to notes.txt." {
+		t.Errorf("response = %q", item.Response)
+	}
+}
+
+// A queued message that wraps puts its continuation line right over the
+// input box, where the box cut alone cannot reach (the scan stops at the
+// next drawn line above it). The message still has no reply under it, so
+// nothing is published.
+func TestScreenTurnFor_ClaudeWrappedQueuedMessage(t *testing.T) {
+	screen := "⏺ Renamed note.txt to notes.txt.\n\n" +
+		"✻ Worked for 1s · done 10:25 AM\n\n" +
+		"❯ Also check that the wrapped queued message keeps its continuation line above the input\n" +
+		"  box, which the box cut alone would not reach.\n\n" +
+		"────────────\n❯ \n────────────\n" +
+		"  ⏵⏵ auto mode on (shift+tab to cycle) · ← for agents\n"
+	if item := ScreenTurnFor(NewRegistry(Config{}).For("claude"), screen); item != nil {
+		t.Errorf("item = %+v, want none", item)
+	}
+}
+
 // Without an adapter that knows the screen, the whole screen above the input
 // box is kept; OpenCode's heavy frame (┃, ╹▀▀▀) counts as the input box too.
 func TestScreenTurn_OpenCodeInputBoxIsCut(t *testing.T) {

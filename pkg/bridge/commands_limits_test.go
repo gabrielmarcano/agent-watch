@@ -179,9 +179,7 @@ func TestCommands_QueuedCommandExpiresAtDeadline(t *testing.T) {
 	}
 
 	pollUntil(t, 2*time.Second, "pane lock released", func() bool {
-		h.engine.lockMu.Lock()
-		defer h.engine.lockMu.Unlock()
-		return len(h.engine.paneLocks) == 0
+		return h.engine.guard.ActiveLocks() == 0
 	})
 	if n := callsSince(h, before, "agent.send_keys"); n != 0 {
 		t.Errorf("expired command sent keys %d time(s)", n)

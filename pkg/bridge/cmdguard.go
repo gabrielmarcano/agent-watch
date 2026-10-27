@@ -2,19 +2,17 @@ package bridge
 
 import (
 	"context"
+	"errors"
 	"sync"
 
 	"github.com/gabrielmarcano/agent-monitor/pkg/herdr"
 )
 
-// Replay protection for commands that press keys.
+// Replay protection for commands that press keys or create sessions.
 //
-// The per-pane mutex only serialises commands; it does not stop a duplicate
-// from re-validating against the same seq and screen before herdr and the TUI
-// reflect the first key press. A second "1" would then land on whatever menu
-// comes next. Duplicates are real: transport replays (same request_id) and
-// second taps (new request_id, same expected_seq + fingerprint) from a retry,
-// a notification action plus the in-app button, or a re-enabled button.
+// The commandGuard serialises commands per pane, serialises session creation,
+// deduplicates request_ids, and ensures prompt key presses and prompt submissions
+// are only executed once per state_change_seq.
 
 const (
 	// requestIDCap bounds how many recent request_ids are remembered.
@@ -61,125 +59,189 @@ type consumedPrompts struct {
 	fingerprints []string
 }
 
-// claimPrompt marks the prompt fp at seq as acted on. It returns false, and
-// changes nothing, if that prompt was already claimed at the same seq.
-func (e *Engine) claimPrompt(paneID string, seq uint64, fp string) bool {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	if e.consumed == nil {
-		e.consumed = make(map[string]*consumedPrompts)
-	}
-	c, ok := e.consumed[paneID]
-	if !ok || c.seq != seq {
-		c = &consumedPrompts{seq: seq}
-		e.consumed[paneID] = c
-	}
-	for _, f := range c.fingerprints {
-		if f == fp {
-			return false
-		}
-	}
-	if len(c.fingerprints) >= consumedCap {
-		c.fingerprints = c.fingerprints[1:]
-	}
-	c.fingerprints = append(c.fingerprints, fp)
-	return true
-}
-
-// releasePrompt undoes claimPrompt for an action herdr provably never
-// performed (the socket could not be dialed, or herdr refused the prompt
-// without typing it), so a retry at the same seq is not rejected.
-func (e *Engine) releasePrompt(paneID string, seq uint64, fp string) {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	c, ok := e.consumed[paneID]
-	if !ok || c.seq != seq {
-		return
-	}
-	for i, f := range c.fingerprints {
-		if f == fp {
-			c.fingerprints = append(c.fingerprints[:i:i], c.fingerprints[i+1:]...)
-			return
-		}
-	}
-}
-
-// forgetConsumedLocked drops the pane's record when the pane is gone or herdr
-// reports a different seq. Callers hold e.mu.
-func (e *Engine) forgetConsumedLocked(paneID string, gone bool, seq uint64) {
-	c, ok := e.consumed[paneID]
-	if !ok {
-		return
-	}
-	if gone || c.seq != seq {
-		delete(e.consumed, paneID)
-	}
-}
-
-// pruneConsumed drops records for panes that are no longer in live or whose
-// seq moved on, so the map never outgrows the live pane set.
-func (e *Engine) pruneConsumed(live []herdr.AgentInfo) {
-	seqs := make(map[string]uint64, len(live))
-	for _, a := range live {
-		seqs[a.PaneID] = a.StateChangeSeq
-	}
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	for paneID, c := range e.consumed {
-		if seq, ok := seqs[paneID]; !ok || seq != c.seq {
-			delete(e.consumed, paneID)
-		}
-	}
-}
-
 // paneLock serialises commands on one pane. It lives only while commands for
 // that pane are waiting or running.
 type paneLock struct {
 	held chan struct{} // cap 1: a value in it means a command holds the pane
-	refs int           // commands waiting for or holding the lock (guarded by lockMu)
+	refs int           // commands waiting for or holding the lock (guarded by commandGuard.mu)
 }
 
-// lockPane waits until no other command runs on paneID and returns the
-// matching unlock. It gives up with ctx's error when ctx ends first: a
-// command queued behind a slow one must not run after its deadline, by which
-// time the relay has already answered the watch. The entry is removed once
-// no command references it.
-func (e *Engine) lockPane(ctx context.Context, paneID string) (func(), error) {
-	e.lockMu.Lock()
-	if e.paneLocks == nil {
-		e.paneLocks = make(map[string]*paneLock)
+// commandGuard owns command serialization, request deduplication, and prompt
+// claim protection, independent of Engine.mu.
+type commandGuard struct {
+	mu          sync.Mutex
+	consumed    map[string]*consumedPrompts
+	paneLocks   map[string]*paneLock
+	sessionOnce sync.Once
+	sessionLock chan struct{}
+	requests    requestIDLog
+}
+
+func newCommandGuard() *commandGuard {
+	return &commandGuard{
+		consumed:    make(map[string]*consumedPrompts),
+		paneLocks:   make(map[string]*paneLock),
+		sessionLock: make(chan struct{}, 1),
 	}
-	pl, ok := e.paneLocks[paneID]
+}
+
+// AcquirePane acquires the per-pane lock within ctx and checks/records requestID
+// under that lock.
+func (g *commandGuard) AcquirePane(ctx context.Context, paneID, requestID string) (release func(), duplicate bool, err error) {
+	g.mu.Lock()
+	if g.paneLocks == nil {
+		g.paneLocks = make(map[string]*paneLock)
+	}
+	pl, ok := g.paneLocks[paneID]
 	if !ok {
 		pl = &paneLock{held: make(chan struct{}, 1)}
-		e.paneLocks[paneID] = pl
+		g.paneLocks[paneID] = pl
 	}
 	pl.refs++
-	e.lockMu.Unlock()
+	g.mu.Unlock()
 
-	release := func() {
-		e.lockMu.Lock()
+	decRef := func() {
+		g.mu.Lock()
 		pl.refs--
 		if pl.refs == 0 {
-			delete(e.paneLocks, paneID)
+			delete(g.paneLocks, paneID)
 		}
-		e.lockMu.Unlock()
+		g.mu.Unlock()
 	}
 
 	select {
 	case pl.held <- struct{}{}:
 	case <-ctx.Done():
-		release()
-		return nil, ctx.Err()
+		decRef()
+		return nil, false, ctx.Err()
 	}
 	// Both cases can be ready at once; never start past the deadline.
 	if err := ctx.Err(); err != nil {
 		<-pl.held
-		release()
-		return nil, err
+		decRef()
+		return nil, false, err
 	}
-	return func() {
+
+	unlock := func() {
 		<-pl.held
-		release()
-	}, nil
+		decRef()
+	}
+
+	if g.requests.observe(requestID) {
+		unlock()
+		return func() {}, true, nil
+	}
+
+	return unlock, false, nil
+}
+
+// AcquireSession acquires the host-session lock within ctx and checks/records requestID.
+func (g *commandGuard) AcquireSession(ctx context.Context, requestID string) (release func(), duplicate bool, err error) {
+	g.sessionOnce.Do(func() {
+		if g.sessionLock == nil {
+			g.sessionLock = make(chan struct{}, 1)
+		}
+	})
+
+	select {
+	case g.sessionLock <- struct{}{}:
+	case <-ctx.Done():
+		return nil, false, ctx.Err()
+	}
+	if err := ctx.Err(); err != nil {
+		<-g.sessionLock
+		return nil, false, err
+	}
+
+	unlock := func() {
+		<-g.sessionLock
+	}
+
+	if g.requests.observe(requestID) {
+		unlock()
+		return func() {}, true, nil
+	}
+
+	return unlock, false, nil
+}
+
+// DoClaim atomically claims (paneID, seq, claim), runs fn(), and automatically
+// rolls back the claim if fn() fails with errors.Is(err, herdr.ErrUnavailable)
+// or herdr.IsCode(err, "agent_blocked").
+func (g *commandGuard) DoClaim(paneID string, seq uint64, claim string, fn func() error) (alreadyClaimed bool, err error) {
+	g.mu.Lock()
+	if g.consumed == nil {
+		g.consumed = make(map[string]*consumedPrompts)
+	}
+	c, ok := g.consumed[paneID]
+	if !ok || c.seq != seq {
+		c = &consumedPrompts{seq: seq}
+		g.consumed[paneID] = c
+	}
+	for _, f := range c.fingerprints {
+		if f == claim {
+			g.mu.Unlock()
+			return true, nil
+		}
+	}
+	if len(c.fingerprints) >= consumedCap {
+		c.fingerprints = c.fingerprints[1:]
+	}
+	c.fingerprints = append(c.fingerprints, claim)
+	g.mu.Unlock()
+
+	err = fn()
+	if err != nil && (errors.Is(err, herdr.ErrUnavailable) || herdr.IsCode(err, "agent_blocked")) {
+		g.mu.Lock()
+		if cur, ok := g.consumed[paneID]; ok && cur.seq == seq {
+			for i, f := range cur.fingerprints {
+				if f == claim {
+					cur.fingerprints = append(cur.fingerprints[:i:i], cur.fingerprints[i+1:]...)
+					break
+				}
+			}
+		}
+		g.mu.Unlock()
+	}
+	return false, err
+}
+
+// Forget drops the pane's record when the pane is gone or herdr reports a different seq.
+func (g *commandGuard) Forget(paneID string, seq uint64, gone bool) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	c, ok := g.consumed[paneID]
+	if !ok {
+		return
+	}
+	if gone || c.seq != seq {
+		delete(g.consumed, paneID)
+	}
+}
+
+// Prune drops records for panes that are no longer in live or whose seq moved on.
+func (g *commandGuard) Prune(live []herdr.AgentInfo) {
+	seqs := make(map[string]uint64, len(live))
+	for _, a := range live {
+		seqs[a.PaneID] = a.StateChangeSeq
+	}
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	for paneID, c := range g.consumed {
+		if seq, ok := seqs[paneID]; !ok || seq != c.seq {
+			delete(g.consumed, paneID)
+		}
+	}
+}
+
+// ActiveLocks returns the count of panes with active or waiting command locks.
+func (g *commandGuard) ActiveLocks() int {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return len(g.paneLocks)
+}
+
+// ObserveRequest records id and reports whether it had already been seen.
+func (g *commandGuard) ObserveRequest(id string) bool {
+	return g.requests.observe(id)
 }

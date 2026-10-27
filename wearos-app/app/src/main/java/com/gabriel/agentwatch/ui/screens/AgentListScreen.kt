@@ -62,6 +62,8 @@ import com.gabriel.agentwatch.ui.logic.pageStatus
 import com.gabriel.agentwatch.ui.theme.Amber
 import com.gabriel.agentwatch.ui.theme.OnSurfaceVariant
 import com.gabriel.agentwatch.ui.theme.Red
+import com.gabriel.agentwatch.update.UpdatePhase
+import com.gabriel.agentwatch.update.UpdateState
 
 private const val DIMMED_ALPHA = 0.6f
 
@@ -72,13 +74,22 @@ private const val DIMMED_ALPHA = 0.6f
 @Composable
 fun AgentListScreen(
     state: UiState,
+    update: UpdateState,
     onAgentClick: (AgentKey) -> Unit,
     onHistoryClick: () -> Unit,
-    onSettingsClick: () -> Unit
+    onSettingsClick: () -> Unit,
+    onUpdate: () -> Unit,
+    onRetryUpdate: () -> Unit,
+    onCancelUpdate: () -> Unit,
+    onInstallUpdate: () -> Unit,
+    onDismissUpdate: () -> Unit
 ) {
     val pages = remember(state.hosts, state.agents) { hostPages(state) }
     if (pages.size == 1) {
-        HostPageList(state, pages[0], onAgentClick, onHistoryClick, onSettingsClick)
+        HostPageList(
+            state, pages[0], update, onAgentClick, onHistoryClick, onSettingsClick,
+            onUpdate, onRetryUpdate, onCancelUpdate, onInstallUpdate, onDismissUpdate
+        )
         return
     }
 
@@ -99,7 +110,10 @@ fun AgentListScreen(
         HorizontalPager(state = pagerState, key = { currentPages.getOrNull(it)?.key ?: it }) { index ->
             AnimatedPage(pageIndex = index, pagerState = pagerState) {
                 currentPages.getOrNull(index)?.let { page ->
-                    HostPageList(state, page, onAgentClick, onHistoryClick, onSettingsClick)
+                    HostPageList(
+                        state, page, update, onAgentClick, onHistoryClick, onSettingsClick,
+                        onUpdate, onRetryUpdate, onCancelUpdate, onInstallUpdate, onDismissUpdate
+                    )
                 }
             }
         }
@@ -111,9 +125,15 @@ fun AgentListScreen(
 private fun HostPageList(
     state: UiState,
     page: HostPage,
+    update: UpdateState,
     onAgentClick: (AgentKey) -> Unit,
     onHistoryClick: () -> Unit,
-    onSettingsClick: () -> Unit
+    onSettingsClick: () -> Unit,
+    onUpdate: () -> Unit,
+    onRetryUpdate: () -> Unit,
+    onCancelUpdate: () -> Unit,
+    onInstallUpdate: () -> Unit,
+    onDismissUpdate: () -> Unit
 ) {
     // The last notice shown, so a retry after a failure keeps saying "Can't reach the relay".
     val lastNotice = remember { arrayOfNulls<ListNotice>(1) }
@@ -145,6 +165,19 @@ private fun HostPageList(
         }
         item(key = "notice") {
             status.notice?.let { Notice(it, transformedItem(spec).padding(start = 20.dp, end = 20.dp, bottom = 4.dp)) }
+        }
+        if (update.phase !in UPDATE_HIDDEN) {
+            item(key = "update") {
+                UpdateCard(
+                    update = update,
+                    onUpdate = onUpdate,
+                    onRetry = onRetryUpdate,
+                    onCancel = onCancelUpdate,
+                    onInstall = onInstallUpdate,
+                    onDismiss = onDismissUpdate,
+                    modifier = transformedItem(spec).padding(horizontal = 8.dp, vertical = 4.dp)
+                )
+            }
         }
 
         if (page.agents.isEmpty()) {
@@ -208,6 +241,126 @@ private fun HostPageList(
             )
         }
     }
+}
+
+private val UPDATE_HIDDEN = setOf(UpdatePhase.IDLE, UpdatePhase.CHECKING, UpdatePhase.UP_TO_DATE)
+
+/**
+ * The update card: one primary action per phase (update, cancel, install or retry) and Later. It is
+ * not dismissible while downloading except through Cancel, so a tap cannot hide a running download.
+ */
+@Composable
+private fun UpdateCard(
+    update: UpdateState,
+    onUpdate: () -> Unit,
+    onRetry: () -> Unit,
+    onCancel: () -> Unit,
+    onInstall: () -> Unit,
+    onDismiss: () -> Unit,
+    modifier: Modifier
+) {
+    val info = update.info
+    val version = info?.version_name?.takeIf { it.isNotBlank() } ?: info?.version_code?.toString().orEmpty()
+
+    Column(modifier, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text(
+            stringResource(R.string.update_title),
+            modifier = Modifier.fillMaxWidth(),
+            style = MaterialTheme.typography.titleSmall,
+            textAlign = TextAlign.Center
+        )
+        when (update.phase) {
+            UpdatePhase.AVAILABLE -> {
+                Text(
+                    stringResource(R.string.update_available, version),
+                    modifier = Modifier.fillMaxWidth(),
+                    style = MaterialTheme.typography.bodySmall,
+                    textAlign = TextAlign.Center
+                )
+                FilledTonalButton(
+                    onClick = onUpdate,
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text(stringResource(R.string.update_action)) }
+                )
+            }
+            UpdatePhase.DOWNLOADING -> {
+                Text(
+                    stringResource(R.string.update_downloading, (update.progress * 100).toInt()),
+                    modifier = Modifier.fillMaxWidth(),
+                    style = MaterialTheme.typography.bodySmall,
+                    textAlign = TextAlign.Center
+                )
+                Text(
+                    stringResource(R.string.update_tap_cancel),
+                    modifier = Modifier.fillMaxWidth(),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = OnSurfaceVariant,
+                    textAlign = TextAlign.Center
+                )
+                OutlinedButton(
+                    onClick = onCancel,
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text(stringResource(R.string.update_cancel)) }
+                )
+            }
+            UpdatePhase.READY -> {
+                Text(
+                    stringResource(R.string.update_ready, version),
+                    modifier = Modifier.fillMaxWidth(),
+                    style = MaterialTheme.typography.bodySmall,
+                    textAlign = TextAlign.Center
+                )
+                FilledTonalButton(
+                    onClick = onInstall,
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text(stringResource(R.string.update_install)) }
+                )
+            }
+            UpdatePhase.NEEDS_PERMISSION -> {
+                Text(
+                    stringResource(R.string.update_permission),
+                    modifier = Modifier.fillMaxWidth(),
+                    style = MaterialTheme.typography.bodySmall,
+                    textAlign = TextAlign.Center
+                )
+                FilledTonalButton(
+                    onClick = onInstall,
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text(stringResource(R.string.update_open_settings)) }
+                )
+            }
+            UpdatePhase.FAILED -> {
+                Text(
+                    updateErrorText(update.errorCode),
+                    modifier = Modifier.fillMaxWidth(),
+                    style = MaterialTheme.typography.bodySmall,
+                    textAlign = TextAlign.Center
+                )
+                FilledTonalButton(
+                    onClick = onRetry,
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text(stringResource(R.string.update_retry)) }
+                )
+            }
+            else -> Unit
+        }
+        if (update.phase != UpdatePhase.DOWNLOADING) {
+            OutlinedButton(
+                onClick = onDismiss,
+                modifier = Modifier.fillMaxWidth(),
+                label = { Text(stringResource(R.string.update_later)) }
+            )
+        }
+    }
+}
+
+@Composable
+private fun updateErrorText(code: String?): String = when (code) {
+    "bad_download", "bad_update" -> stringResource(R.string.update_error_download)
+    "install_unavailable", "install_settings_unavailable" -> stringResource(R.string.update_error_install)
+    "not_paired", "unauthorized" -> stringResource(R.string.update_error_auth)
+    "network", "timeout" -> stringResource(R.string.update_error_network)
+    else -> stringResource(R.string.update_error_generic)
 }
 
 private val AttentionSection.title: Int

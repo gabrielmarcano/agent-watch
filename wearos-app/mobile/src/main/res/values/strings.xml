@@ -1,0 +1,231 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Agent Watch</string>
+
+    <!-- Agent status words (herdr's enum, shown to the user) -->
+    <string name="status_blocked">Blocked</string>
+    <string name="status_done">Done</string>
+    <string name="status_working">Working</string>
+    <string name="status_idle">Idle</string>
+    <string name="status_unknown">Unknown</string>
+    <!-- Under the status word: what the agent still runs in the background, joined by the separator. -->
+    <string name="background_separator">" · "</string>
+    <plurals name="background_agents">
+        <item quantity="one">%d agent</item>
+        <item quantity="other">%d agents</item>
+    </plurals>
+    <plurals name="background_shells">
+        <item quantity="one">%d shell</item>
+        <item quantity="other">%d shells</item>
+    </plurals>
+    <plurals name="background_monitors">
+        <item quantity="one">%d monitor</item>
+        <item quantity="other">%d monitors</item>
+    </plurals>
+
+    <!-- Chat list -->
+    <string name="chats_title">Chats</string>
+    <string name="chats_section">All chats</string>
+    <string name="section_needs_you">Needs you</string>
+    <string name="host_all">All</string>
+    <string name="filter_all">All</string>
+    <string name="filter_machine">Machine: %1$s</string>
+    <string name="filter_machine_all">Filter by machine</string>
+    <string name="search_chats">Search chats</string>
+    <string name="search_clear">Clear the search</string>
+    <string name="mark_read">Mark as read</string>
+    <string name="chat_empty_start">Start a session</string>
+    <string name="chat_empty_filter">Nothing here</string>
+    <string name="chat_empty_search">No chats match</string>
+    <string name="agent_avatar">Agent</string>
+    <string name="chat_no_messages">No messages yet</string>
+    <string name="chat_waiting_answer">Waiting for your answer</string>
+    <string name="chat_working">Working…</string>
+    <string name="chat_waiting_background">Waiting on background agents</string>
+    <string name="chat_unread">Unread</string>
+    <string name="chat_muted">Muted</string>
+    <string name="chat_mute">Mute this chat</string>
+    <string name="chat_pin">Pin this chat</string>
+    <string name="chat_unpin">Unpin this chat</string>
+    <string name="chat_pinned">Pinned</string>
+    <string name="chat_hide">Hide this chat</string>
+    <string name="chat_archive">Archive this chat</string>
+    <string name="chat_mark_unread">Mark as unread</string>
+    <string name="chat_unmute">Unmute this chat</string>
+    <string name="chat_unread_count">%1$d unread</string>
+    <string name="chat_sent">Sent</string>
+    <string name="no_agents">No agents</string>
+    <string name="no_agents_host">No agents on this machine</string>
+    <string name="notice_connecting">Connecting…</string>
+    <string name="notice_relay_unreachable">Relay offline</string>
+    <string name="notice_device_offline">Device offline</string>
+    <string name="notice_herdr_stopped">herdr stopped</string>
+    <string name="refresh">Refresh</string>
+    <string name="history">History</string>
+
+    <!-- Conversation -->
+    <string name="chat_today">Today</string>
+    <string name="chat_yesterday">Yesterday</string>
+    <string name="chat_composer_hint">Message the agent</string>
+    <string name="chat_answer_first">Answer the prompt above</string>
+    <string name="chat_workspace">Workspace %1$s</string>
+    <string name="chat_folder">Folder %1$s</string>
+    <string name="chat_screen_source">Screen capture</string>
+    <string name="chat_details">Agent details</string>
+    <string name="chat_read_more">Read more</string>
+    <string name="chat_read_less">Read less</string>
+    <string name="chat_copy">Copy</string>
+    <string name="chat_copied">Copied</string>
+    <string name="chat_latest">Go to the latest</string>
+    <string name="chat_details_none">Nothing more to show</string>
+    <string name="prompt_chosen">Chosen: %1$s</string>
+    <string name="agent_closed">Agent closed</string>
+    <string name="back">Back</string>
+    <string name="send">Send</string>
+    <string name="reply_empty">Empty reply — nothing sent</string>
+
+    <!-- The bottom navigation -->
+    <string name="tab_chats">Chats</string>
+    <string name="tab_machines">Machines</string>
+    <string name="tab_history">History</string>
+    <string name="tab_settings">Settings</string>
+
+    <!-- Machines: the hosts the relay knows -->
+    <string name="machines_title">Machines</string>
+    <string name="machines_empty">No machines yet</string>
+    <string name="machines_online">Online</string>
+    <string name="machines_offline">Offline — its bridge is not connected</string>
+    <string name="machines_herdr_stopped">herdr is not running there</string>
+    <string name="machines_agents">%1$d agents · %2$d waiting</string>
+    <string name="machines_projects">Projects</string>
+    <string name="machines_chats">Its chats</string>
+
+    <!-- Settings -->
+    <string name="settings_title">Settings</string>
+    <string name="settings_account">Account</string>
+    <string name="settings_relay">Relay</string>
+    <string name="settings_device">This phone</string>
+    <string name="settings_forget">Forget this phone</string>
+    <string name="settings_forget_hint">The phone forgets its pairing and asks for a new code. The relay keeps the device until you revoke it.</string>
+    <string name="settings_appearance">Appearance</string>
+    <string name="settings_theme_system">System</string>
+    <string name="settings_theme_light">Light</string>
+    <string name="settings_theme_dark">Dark</string>
+    <string name="settings_dynamic_color">Wallpaper colours</string>
+    <string name="settings_dynamic_color_hint">Use the system palette (Android 12 and newer)</string>
+    <string name="settings_notifications">Notifications</string>
+    <string name="settings_muted">Muted chats</string>
+    <string name="settings_unmute">Unmute</string>
+    <string name="settings_hidden">Archived chats</string>
+    <string name="settings_restore">Restore</string>
+    <string name="settings_data">Data</string>
+    <string name="settings_machines">Machines</string>
+    <string name="settings_machines_hint">%1$d known</string>
+    <string name="settings_check_updates">Check for updates</string>
+    <string name="settings_version">Version %1$s</string>
+    <string name="settings_connection">Relay connection</string>
+    <string name="settings_connected">Connected</string>
+
+    <!-- New session: the device, agent kind and folder the bridge allows -->
+    <string name="new_session">New session</string>
+    <string name="session_step_machine">Machine</string>
+    <string name="session_step_agent">Agent</string>
+    <string name="session_step_folder">Folder</string>
+    <string name="session_on_machine">On %1$s</string>
+    <string name="session_folder">Folder</string>
+    <string name="session_folder_none">Choose a folder below</string>
+    <string name="session_name_hint">Name (optional): %1$s</string>
+    <string name="session_up">Up</string>
+    <string name="session_use">Use</string>
+    <string name="session_use_folder">Use this folder</string>
+    <string name="session_selected">Selected</string>
+    <string name="session_create">Start</string>
+    <string name="session_empty_folder">No subfolders</string>
+    <string name="session_no_hosts">No device is online</string>
+    <string name="session_not_configured">This device doesn\'t allow starting sessions from the phone. Set a root folder in its bridge config (agent-watch-bridge configure --session-root).</string>
+    <string name="session_err_not_allowed">That folder or agent isn\'t allowed on this device</string>
+    <string name="session_err_host_offline">Device offline</string>
+    <string name="session_err_herdr_offline">herdr stopped</string>
+    <string name="session_err_timeout">No answer from the device — the session may still be starting</string>
+    <string name="session_err_generic">Couldn\'t start the session</string>
+    <string name="starting_session_hint">The chat opens as soon as the device reports the agent.</string>
+
+    <!-- Age -->
+    <string name="age_now">now</string>
+    <string name="age_minutes">%d min ago</string>
+    <string name="age_hours">%d h ago</string>
+    <string name="age_days">%d d ago</string>
+
+    <!-- Prompt -->
+    <string name="prompt_permission">Permission</string>
+    <string name="prompt_question">Question</string>
+    <string name="prompt_unknown">Prompt</string>
+    <string name="allow">Allow</string>
+    <string name="deny">Deny</string>
+    <string name="more_options">More options</string>
+    <string name="cancel_prompt">Cancel</string>
+    <string name="answer_on_device">Answer on the device</string>
+    <string name="confirm_always_title">Don\'t ask again?</string>
+    <string name="confirm_always_text">This changes the agent\'s rules for good.</string>
+    <string name="confirm">Confirm</string>
+
+    <!-- History and the full-text reader -->
+    <string name="history_title">History</string>
+    <string name="no_history">No answers yet</string>
+    <string name="you_asked">You asked</string>
+    <string name="reader_screen_source">Screen capture — shown as it appears</string>
+
+    <!-- Pairing -->
+    <string name="pair_title">Pair this phone</string>
+    <string name="pair_intro">Run agent-watch-bridge pair on the machine running the bridge, then type the 6-digit code here.</string>
+    <string name="session_expired">Session expired — pair again</string>
+    <string name="relay_url">Relay URL</string>
+    <string name="relay_url_missing">Not set</string>
+    <string name="relay_url_invalid">Use an https:// address</string>
+    <string name="pair_code">Pairing code</string>
+    <string name="pair_code_missing">6 digits</string>
+    <string name="pair_code_incomplete">Needs 6 digits</string>
+    <string name="pair">Pair</string>
+    <string name="pairing">Pairing…</string>
+
+    <!-- Android updates: relay-hosted APK, Android's own install confirmation (docs/GUIDE.md) -->
+    <string name="update_title">Update available</string>
+    <string name="update_available">Version %1$s is ready to download.</string>
+    <string name="update_downloading">Downloading… %1$d%%</string>
+    <string name="update_ready">Version %1$s is downloaded. Android will ask you to confirm the install.</string>
+    <string name="update_permission">Allow Agent Watch to install apps in Settings, then tap Open settings again.</string>
+    <string name="update_action">Update</string>
+    <string name="update_cancel">Cancel</string>
+    <string name="update_install">Install</string>
+    <string name="update_open_settings">Open settings</string>
+    <string name="update_later">Later</string>
+    <string name="update_retry">Retry</string>
+    <string name="update_error_download">The download was incomplete or damaged. Try again.</string>
+    <string name="update_error_install">Android could not open the installer. Open the relay download on this device instead.</string>
+    <string name="update_error_auth">Pair this phone again, then retry.</string>
+    <string name="update_error_network">Couldn\'t reach the relay. Check the connection and try again.</string>
+    <string name="update_error_generic">The update failed. Try again.</string>
+
+    <!-- Notifications: the phone builds them locally from data-only pushes -->
+    <string name="notification_channel_chats">Agent chats</string>
+    <string name="notification_channel_chats_description">Approvals and finished replies from your agents</string>
+    <string name="notification_channel_approvals">Agent approvals</string>
+    <string name="notification_channel_approvals_description">An agent is waiting for your answer</string>
+    <string name="notification_channel_feedback">Agent action feedback</string>
+    <string name="notification_channel_feedback_description">Brief silent feedback after acting on an agent notification</string>
+    <plurals name="notification_summary">
+        <item quantity="one">%d chat</item>
+        <item quantity="other">%d chats</item>
+    </plurals>
+    <string name="notification_you">You</string>
+    <string name="notification_open">Open</string>
+    <string name="notification_reply">Reply</string>
+    <string name="notification_reply_hint">Reply to %1$s…</string>
+    <string name="notification_unlock_to_approve">Unlock your phone to approve</string>
+    <string name="notification_approved">Approved</string>
+    <string name="notification_denied">Denied</string>
+    <string name="notification_answered">Answered</string>
+    <string name="notification_canceled">Canceled</string>
+    <string name="notification_sent">Sent</string>
+    <string name="notification_done">Done</string>
+</resources>

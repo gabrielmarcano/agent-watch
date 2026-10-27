@@ -51,6 +51,7 @@ type Server struct {
 	state             *State
 	auth              *AuthManager
 	hub               *Hub
+	admin             *Admin
 	handler           http.Handler
 	keepAliveInterval time.Duration
 	sseWriteTimeout   time.Duration // per SSE event; 0 means sseWriteTimeoutDefault
@@ -146,6 +147,7 @@ func NewServer(cfg *Config) (_ *Server, err error) {
 		keepAliveInterval: 15 * time.Second,
 		lock:              lock,
 	}
+	s.admin = newServerAdmin(store, state, auth, hub)
 	s.handler = s.routes()
 	return s, nil
 }
@@ -194,6 +196,7 @@ func NewServerWithDeps(cfg *Config, store *Store, state *State, auth *AuthManage
 		hub:               hub,
 		keepAliveInterval: 15 * time.Second,
 	}
+	s.admin = newServerAdmin(store, state, auth, hub)
 	s.handler = s.routes()
 	return s
 }
@@ -226,6 +229,11 @@ func (s *Server) Auth() *AuthManager {
 // Hub returns the underlying Hub.
 func (s *Server) Hub() *Hub {
 	return s.hub
+}
+
+// Admin returns the underlying Admin.
+func (s *Server) Admin() *Admin {
+	return s.admin
 }
 
 // Run starts the HTTP server and the local admin socket, and blocks until ctx

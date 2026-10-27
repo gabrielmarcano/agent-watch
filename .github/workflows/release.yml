@@ -121,6 +121,7 @@ jobs:
             echo "| Relay (\`agent-watch-relay\`) | $RELAY_VERSION |"
             echo "| macOS menu bar | $MENUBAR_VERSION |"
             echo "| Wear OS app | $WEAROS_VERSION_NAME ($WEAROS_VERSION_CODE), built from source (see README) |"
+            echo "| Android phone app | $MOBILE_VERSION_NAME ($MOBILE_VERSION_CODE), built from source (see README) |"
             echo
             echo "macOS binaries and the menu bar app are not notarized: after downloading, run \`xattr -d com.apple.quarantine <file>\` (or open the app with right click → Open)."
             echo

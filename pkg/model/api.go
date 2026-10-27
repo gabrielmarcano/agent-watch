@@ -74,6 +74,68 @@ type PushRegisterRequest struct {
 	Token    string `json:"token"`
 }
 
+// SessionOptionsResponse is what a host allows for new agent sessions: the
+// agent kinds its bridge may start and the root folders they may use. Empty
+// roots mean session creation is not configured on that host.
+type SessionOptionsResponse struct {
+	Kinds []string `json:"kinds"`
+	Roots []string `json:"roots"`
+}
+
+// FolderEntry is one subdirectory in a FolderListResponse.
+type FolderEntry struct {
+	Name string `json:"name"`
+	Path string `json:"path"`
+}
+
+// FolderListResponse lists the subdirectories of one folder on a host, for
+// the phone's folder picker.
+type FolderListResponse struct {
+	Path      string        `json:"path"`             // the resolved directory listed; "" when listing the roots
+	Parent    string        `json:"parent,omitempty"` // the next folder up, when it is still inside a root
+	Roots     []string      `json:"roots"`            // every configured root, resolved
+	Entries   []FolderEntry `json:"entries"`          // subdirectories sorted by name; the roots when path is ""
+	Truncated bool          `json:"truncated,omitempty"`
+}
+
+// SessionCreateRequest asks a host's bridge to start one new agent session in
+// cwd. The bridge re-validates kind and cwd against its configuration.
+type SessionCreateRequest struct {
+	Kind  string `json:"kind"`
+	Cwd   string `json:"cwd"`
+	Label string `json:"label,omitempty"` // tab and agent name; default: the folder's name
+}
+
+// SessionCreated identifies the agent pane a host started.
+type SessionCreated struct {
+	Host        string `json:"host,omitempty"` // stamped by the relay
+	PaneID      string `json:"pane_id"`
+	WorkspaceID string `json:"workspace_id"`
+	TabID       string `json:"tab_id"`
+	Kind        string `json:"kind"`
+	Label       string `json:"label"` // the name actually used, possibly suffixed to stay unique
+}
+
+// The Android apps the relay can publish updates for (contracts.md §2.1).
+const (
+	UpdateAppPhone = "phone"
+	UpdateAppWatch = "watch"
+)
+
+// ValidUpdateApp reports whether app is one of the update endpoints' closed set.
+func ValidUpdateApp(app string) bool {
+	return app == UpdateAppPhone || app == UpdateAppWatch
+}
+
+// UpdateInfo is one Android app's published build (contracts.md §2.2).
+type UpdateInfo struct {
+	App         string `json:"app"` // "phone" | "watch"
+	VersionCode int    `json:"version_code"`
+	VersionName string `json:"version_name"`
+	SHA256      string `json:"sha256"`
+	Size        int64  `json:"size"` // bytes
+}
+
 // CommandResponse indicates successful command receipt.
 type CommandResponse struct {
 	OK bool `json:"ok"` // always true on 200
@@ -97,6 +159,7 @@ const (
 	ErrInvalidRequest    ErrorCode = "invalid_request"
 	ErrUnauthorized      ErrorCode = "unauthorized"
 	ErrUnknownPane       ErrorCode = "unknown_pane"
+	ErrUpdateUnavailable ErrorCode = "update_not_available"
 	ErrStaleState        ErrorCode = "stale_state"
 	ErrPromptChanged     ErrorCode = "prompt_changed"
 	ErrAgentBusy         ErrorCode = "agent_busy"
@@ -108,6 +171,7 @@ const (
 	ErrHostOffline       ErrorCode = "host_offline"
 	ErrHostRequired      ErrorCode = "host_required"
 	ErrHerdrOffline      ErrorCode = "herdr_offline"
+	ErrNotAllowed        ErrorCode = "not_allowed"
 	ErrTimeout           ErrorCode = "timeout"
 	ErrInternal          ErrorCode = "internal"
 )
@@ -119,9 +183,9 @@ func (c ErrorCode) HTTPStatus() int {
 		return http.StatusBadRequest // 400
 	case ErrUnauthorized:
 		return http.StatusUnauthorized // 401
-	case ErrPairCodeInvalid:
+	case ErrPairCodeInvalid, ErrNotAllowed:
 		return http.StatusForbidden // 403
-	case ErrUnknownPane:
+	case ErrUnknownPane, ErrUpdateUnavailable:
 		return http.StatusNotFound // 404
 	case ErrStaleState, ErrPromptChanged, ErrAgentBusy, ErrAgentBlocked, ErrAgentStateUnknown, ErrUnknownOption, ErrHostRequired:
 		return http.StatusConflict // 409

@@ -303,28 +303,28 @@ func TestStore_HistoryBoundsAndDedup(t *testing.T) {
 		t.Fatalf("expected 1 item after duplicate insertion, got %d", len(items))
 	}
 
-	// 2. Max 20 per pane
-	for i := 0; i < 25; i++ {
+	// 2. Max maxHistoryPane per pane
+	for i := 0; i < maxHistoryPane+5; i++ {
 		store.AddHistory(model.HistoryItem{
 			ID:          "pane-item-" + strconv.Itoa(i),
 			PaneID:      "w1:p1",
 			CompletedAt: at(time.Duration(10+i) * time.Second),
 		})
 	}
-	paneItems := store.GetHistory("", "w1:p1", 50)
-	if len(paneItems) != 20 {
-		t.Fatalf("expected max 20 items per pane, got %d", len(paneItems))
+	paneItems := store.GetHistory("", "w1:p1", maxHistoryPane)
+	if len(paneItems) != maxHistoryPane {
+		t.Fatalf("expected max %d items per pane, got %d", maxHistoryPane, len(paneItems))
 	}
 	// Newest should be at index 0
-	if paneItems[0].ID != "pane-item-24" {
+	if paneItems[0].ID != "pane-item-"+strconv.Itoa(maxHistoryPane+4) {
 		t.Fatalf("expected newest item first, got %s", paneItems[0].ID)
 	}
 
-	// 3. Max 200 total across panes
-	// Add 15 items across 20 panes (300 items total)
-	for p := 0; p < 20; p++ {
+	// 3. Max maxHistoryTotal across panes
+	// Add 90 items across 6 panes (540 items total)
+	for p := 0; p < 6; p++ {
 		paneID := "pane-" + strconv.Itoa(p)
-		for i := 0; i < 15; i++ {
+		for i := 0; i < 90; i++ {
 			store.AddHistory(model.HistoryItem{
 				ID:          paneID + "-it-" + strconv.Itoa(i),
 				PaneID:      paneID,
@@ -332,9 +332,9 @@ func TestStore_HistoryBoundsAndDedup(t *testing.T) {
 			})
 		}
 	}
-	all := store.GetHistory("", "", 300)
-	if len(all) != 200 {
-		t.Fatalf("expected total history to be capped at exactly 200, got %d", len(all))
+	all := store.GetHistory("", "", maxHistoryTotal+100)
+	if len(all) != maxHistoryTotal {
+		t.Fatalf("expected total history to be capped at exactly %d, got %d", maxHistoryTotal, len(all))
 	}
 }
 
@@ -346,7 +346,7 @@ func TestStore_PruneOldPanes(t *testing.T) {
 	}
 	defer store.Close()
 
-	oldTime := time.Now().Add(-8 * 24 * time.Hour).UTC().Format(time.RFC3339)
+	oldTime := time.Now().Add(-historyMaxAge - time.Hour).UTC().Format(time.RFC3339)
 	store.AddHistory(model.HistoryItem{
 		ID:          "old-item",
 		PaneID:      "old-pane",

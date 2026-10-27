@@ -8,9 +8,11 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/gabrielmarcano/agent-monitor/pkg/bridge"
 )
 
-const pluginID = "herdr-agent-watch"
+const pluginID = bridge.PluginID
 
 // realRunner runs launchctl/systemctl. Tests replace it with one that fails.
 var realRunner commandRunner = execRunner
@@ -65,9 +67,9 @@ func currentExecutable() string {
 func (a *app) defaults() ServiceSpec {
 	spec := ServiceSpec{
 		Binary:     a.exe,
-		ConfigPath: filepath.Join(a.home, ".config", "herdr", "plugins", "config", pluginID, "config.toml"),
-		SocketPath: filepath.Join(a.home, ".config", "herdr", "herdr.sock"),
-		StateDir:   filepath.Join(a.home, ".local", "state", "agent-watch"),
+		ConfigPath: bridge.DefaultConfigPathFor(a.home, nil),
+		SocketPath: bridge.DefaultSocketPathFor(a.home, nil),
+		StateDir:   bridge.DefaultStateDirFor(a.home, nil),
 	}
 	if a.svc.Kind() == "launchd" {
 		spec.LogPath = filepath.Join(a.home, "Library", "Logs", "agent-watch-bridge.log")

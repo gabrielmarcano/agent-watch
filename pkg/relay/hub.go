@@ -28,6 +28,9 @@ const (
 	// watch's 8 s call timeout: inner layers give up first, so a timeout
 	// reported to the watch means the bridge has already stopped.
 	commandTimeout = 7 * time.Second
+	// sessionTimeout does the same for session.create, between the bridge's
+	// 35 s and the phone's 45 s (contracts.md §2.4).
+	sessionTimeout = 40 * time.Second
 	pingInterval   = 30 * time.Second
 	pingTimeout    = 10 * time.Second
 )
@@ -41,6 +44,8 @@ const RelayVersionHeader = "X-Agent-Watch-Relay-Version"
 // and history items carry their host (stamped by the hub).
 type Notifier interface {
 	OnAgentUpdate(prev *model.AgentState, cur model.AgentState)
+	OnAgentRemoved(host, paneID string)
+	OnSnapshot(host string, agents []model.AgentState)
 	// OnHistoryItem reports a pane's new reply (never a resent duplicate), so
 	// a "finished" push can show it.
 	OnHistoryItem(item model.HistoryItem)
@@ -60,6 +65,12 @@ type NoopNotifier struct{}
 
 // OnAgentUpdate is a no-op implementation.
 func (NoopNotifier) OnAgentUpdate(prev *model.AgentState, cur model.AgentState) {}
+
+// OnAgentRemoved is a no-op implementation.
+func (NoopNotifier) OnAgentRemoved(host, paneID string) {}
+
+// OnSnapshot is a no-op implementation.
+func (NoopNotifier) OnSnapshot(host string, agents []model.AgentState) {}
 
 // OnHistoryItem is a no-op implementation.
 func (NoopNotifier) OnHistoryItem(item model.HistoryItem) {}
@@ -149,6 +160,7 @@ type Hub struct {
 	pending        map[string]pendingCommand
 	helloTimeout   time.Duration
 	commandTimeout time.Duration
+	sessionTimeout time.Duration
 	pingInterval   time.Duration
 	pingTimeout    time.Duration
 	afterPing      func(err error) // test hook, see setAfterPing
@@ -172,6 +184,7 @@ func NewHub(auth *AuthManager, state *State, store *Store, notifier Notifier) *H
 		pending:        make(map[string]pendingCommand),
 		helloTimeout:   helloTimeout,
 		commandTimeout: commandTimeout,
+		sessionTimeout: sessionTimeout,
 		pingInterval:   pingInterval,
 		pingTimeout:    pingTimeout,
 	}
@@ -183,6 +196,14 @@ func (h *Hub) SetCommandTimeout(d time.Duration) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.commandTimeout = d
+}
+
+// SetSessionTimeout overrides the 40-second budget for session.create
+// (useful for tests).
+func (h *Hub) SetSessionTimeout(d time.Duration) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.sessionTimeout = d
 }
 
 // SetPingInterval overrides how often the host is pinged (30 s) and how long
@@ -361,11 +382,17 @@ func (h *Hub) ServeHost(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// RevokeHost drops a revoked host's connection, if any: its in-flight
-// commands fail with host_offline and nothing it sent after this point
-// changes the state. The notifier forgets the host, connected or not. It
-// reports whether the host was connected.
-func (h *Hub) RevokeHost(id string) bool {
+// RevokeHost removes a registered host from the store, drops its connection if
+// any, notifies the push dispatcher, and removes the host from state.
+// It reports whether the host was found, whether it was currently connected,
+// and any error saving the store.
+func (h *Hub) RevokeHost(id string) (found bool, wasConnected bool, err error) {
+	if h.store != nil {
+		if _, ok := h.store.RevokeHost(id); !ok {
+			return false, false, nil
+		}
+	}
+
 	h.mu.Lock()
 	host := h.conns[id]
 	delete(h.conns, id)
@@ -375,8 +402,18 @@ func (h *Hub) RevokeHost(id string) bool {
 		host.retire()
 		go func() { _ = host.conn.Close(wsCloseCodeRevoked, "host revoked") }()
 	}
-	h.notifier.OnHostRevoked(id)
-	return host != nil
+	if h.notifier != nil {
+		h.notifier.OnHostRevoked(id)
+	}
+	if h.state != nil {
+		h.state.RemoveHost(id)
+	}
+	if h.store != nil {
+		if err := h.store.Flush(); err != nil {
+			return true, host != nil, fmt.Errorf("saving store: %w", err)
+		}
+	}
+	return true, host != nil, nil
 }
 
 // Shutdown stops accepting hosts, drops the connected ones (watches see them go
@@ -452,18 +489,24 @@ func (h *Hub) handleWireMessage(host *hostConnection, msg any) {
 	switch m := msg.(type) {
 	case model.SnapshotMsg:
 		h.state.ReplaceAll(id, m.Agents)
+		h.notifier.OnSnapshot(id, m.Agents)
 	case model.AgentUpdateMsg:
 		m.Agent.Host = id
 		prev := h.state.Upsert(m.Agent)
 		h.notifier.OnAgentUpdate(prev, m.Agent)
 	case model.AgentRemovedMsg:
 		h.state.Remove(id, m.PaneID)
+		h.notifier.OnAgentRemoved(id, m.PaneID)
 	case model.HistoryItemMsg:
 		m.Item.Host = id
 		// Duplicates (the bridge resends after a reconnect) are not news.
 		if h.store.AddHistory(m.Item) {
 			h.state.BroadcastHistory(m.Item)
-			h.notifier.OnHistoryItem(m.Item)
+			if !m.Backfill {
+				// An older turn read at startup must not fill a pending
+				// "done" push with a reply that is not the turn's own.
+				h.notifier.OnHistoryItem(m.Item)
+			}
 		}
 	case model.HerdrStatusMsg:
 		h.state.SetHost(id, true, m.HerdrOnline)
@@ -509,21 +552,29 @@ func commandFailure(reqID string, code model.ErrorCode, msg string) model.Comman
 // default).
 //
 // It returns host_offline when that host is not connected or goes away before
-// answering (at once, not after the budget), and timeout when the budget runs
-// out. A non-nil error means ctx ended first (the caller left).
-func (h *Hub) Command(ctx context.Context, hostID string, cmd model.CommandMsg) (model.CommandResultMsg, error) {
+// answering (at once, not after the budget), herdr_offline when herdr is
+// unreachable on that host, and timeout when the budget runs out or the caller
+// cancels.
+func (h *Hub) Command(ctx context.Context, hostID string, cmd model.CommandMsg) model.CommandResultMsg {
 	h.mu.Lock()
 	host := h.conns[hostID]
 	budget := h.commandTimeout
+	if cmd.Action == model.ActionSessionCreate {
+		budget = h.sessionTimeout
+	}
 	if host == nil {
 		h.mu.Unlock()
-		return commandFailure("", model.ErrHostOffline, "host offline"), nil
+		return commandFailure("", model.ErrHostOffline, "host offline")
+	}
+	if h.state != nil && !h.state.HerdrOnline(hostID) {
+		h.mu.Unlock()
+		return commandFailure("", model.ErrHerdrOffline, "herdr offline")
 	}
 
 	var reqIDBytes [8]byte
 	if _, err := rand.Read(reqIDBytes[:]); err != nil {
 		h.mu.Unlock()
-		return model.CommandResultMsg{}, fmt.Errorf("generate request id: %w", err)
+		return commandFailure("", model.ErrInternal, fmt.Sprintf("generate request id: %v", err))
 	}
 	reqID := hex.EncodeToString(reqIDBytes[:])
 	cmd.Type = model.WireCommand
@@ -541,7 +592,7 @@ func (h *Hub) Command(ctx context.Context, hostID string, cmd model.CommandMsg) 
 
 	data, err := json.Marshal(cmd)
 	if err != nil {
-		return model.CommandResultMsg{}, fmt.Errorf("marshal command: %w", err)
+		return commandFailure(reqID, model.ErrInternal, fmt.Sprintf("marshal command: %v", err))
 	}
 
 	deadline := time.Now().Add(budget)
@@ -556,9 +607,9 @@ func (h *Hub) Command(ctx context.Context, hostID string, cmd model.CommandMsg) 
 	cancelWrite()
 	if err != nil {
 		if writeTimedOut {
-			return timedOut, nil
+			return timedOut
 		}
-		return commandFailure(reqID, model.ErrHostOffline, "failed to send command to host"), nil
+		return commandFailure(reqID, model.ErrHostOffline, "failed to send command to host")
 	}
 
 	waitCtx, cancelWait := context.WithDeadline(ctx, deadline)
@@ -566,20 +617,20 @@ func (h *Hub) Command(ctx context.Context, hostID string, cmd model.CommandMsg) 
 
 	select {
 	case res := <-ch:
-		return res, nil
+		return res
 	case <-host.gone:
 		if res, ok := resultIfReady(ch); ok {
-			return res, nil
+			return res
 		}
-		return commandFailure(reqID, model.ErrHostOffline, "host disconnected before answering"), nil
+		return commandFailure(reqID, model.ErrHostOffline, "host disconnected before answering")
 	case <-waitCtx.Done():
 		if res, ok := resultIfReady(ch); ok {
-			return res, nil
+			return res
 		}
 		if err := ctx.Err(); err != nil {
-			return commandFailure(reqID, model.ErrTimeout, err.Error()), err
+			return commandFailure(reqID, model.ErrTimeout, err.Error())
 		}
-		return timedOut, nil
+		return timedOut
 	}
 }
 

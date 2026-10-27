@@ -31,14 +31,15 @@ func claudePane(status, title string, seq uint64, session *herdr.AgentSession) h
 	}
 }
 
-// waitHistory returns the next history item the bridge sends, or nil when
-// none arrives before the deadline.
+// waitHistory returns the next history item the bridge sends live, or nil
+// when none arrives before the deadline. Backfilled turns are skipped: they
+// read the same transcript the live capture does and are tested separately.
 func waitHistory(h *testHarness, within time.Duration) *model.HistoryItem {
 	deadline := time.Now().Add(within)
 	for time.Now().Before(deadline) {
 		select {
 		case msg := <-h.relayMsgs:
-			if hm, ok := msg.(model.HistoryItemMsg); ok {
+			if hm, ok := msg.(model.HistoryItemMsg); ok && !hm.Backfill {
 				return &hm.Item
 			}
 		case <-time.After(20 * time.Millisecond):
@@ -49,6 +50,88 @@ func waitHistory(h *testHarness, within time.Duration) *model.HistoryItem {
 
 func (h *testHarness) track(info herdr.AgentInfo) {
 	h.engine.OnChanges([]herdr.Change{{Kind: herdr.Added, Agent: info}})
+}
+
+// waitBackfills collects n backfilled history items, or fewer on timeout.
+func waitBackfills(h *testHarness, n int, within time.Duration) []model.HistoryItemMsg {
+	deadline := time.Now().Add(within)
+	var got []model.HistoryItemMsg
+	for len(got) < n && time.Now().Before(deadline) {
+		select {
+		case msg := <-h.relayMsgs:
+			if hm, ok := msg.(model.HistoryItemMsg); ok && hm.Backfill {
+				got = append(got, hm)
+			}
+		case <-time.After(20 * time.Millisecond):
+		}
+	}
+	return got
+}
+
+// A pane first seen with a transcript has its finished turns published as
+// Backfill items, oldest first and with the transcript's times; the same
+// session is never read again, a new session is.
+func TestEngine_HistoryBackfill(t *testing.T) {
+	h := newTestHarness(t)
+	home := t.TempDir()
+	dir := filepath.Join(home, ".claude", "projects", "-tmp-aw-sandbox")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	write := func(name, content string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("s1.jsonl",
+		`{"type":"user","timestamp":"2026-10-05T10:00:00.000Z","message":{"role":"user","content":"first question"}}`+"\n"+
+			`{"type":"assistant","timestamp":"2026-10-05T10:00:05.000Z","message":{"role":"assistant","content":[{"type":"text","text":"first answer"}]}}`+"\n"+
+			`{"type":"system","subtype":"turn_duration","uuid":"e1","timestamp":"2026-10-05T10:00:06.000Z"}`+"\n"+
+			`{"type":"user","timestamp":"2026-10-05T10:01:00.000Z","message":{"role":"user","content":"second question"}}`+"\n"+
+			`{"type":"assistant","timestamp":"2026-10-05T10:01:05.000Z","message":{"role":"assistant","content":[{"type":"text","text":"second answer"}]}}`+"\n"+
+			`{"type":"system","subtype":"turn_duration","uuid":"e2","timestamp":"2026-10-05T10:01:06.000Z"}`+"\n")
+	write("s2.jsonl",
+		`{"type":"user","timestamp":"2026-10-05T11:00:00.000Z","message":{"role":"user","content":"other question"}}`+"\n"+
+			`{"type":"assistant","timestamp":"2026-10-05T11:00:04.000Z","message":{"role":"assistant","content":[{"type":"text","text":"other answer"}]}}`+"\n"+
+			`{"type":"system","subtype":"turn_duration","uuid":"e3","timestamp":"2026-10-05T11:00:05.000Z"}`+"\n")
+	h.engine.Agents = agents.NewRegistry(agents.Config{Home: home})
+
+	s1 := &herdr.AgentSession{Agent: "claude", Kind: "id", Value: "s1"}
+	pane := claudePane("done", "Sandbox hello", 2, s1)
+	h.track(pane)
+
+	got := waitBackfills(h, 2, 2*time.Second)
+	if len(got) != 2 {
+		t.Fatalf("backfilled %d turns, want 2", len(got))
+	}
+	if got[0].Item.Query != "first question" || got[1].Item.Query != "second question" {
+		t.Errorf("order = %q, %q; want oldest first", got[0].Item.Query, got[1].Item.Query)
+	}
+	first := got[0].Item
+	if first.ID == "" || first.PaneID != "w1:p1" || first.Agent != "claude" || first.Label != "Sandbox hello" {
+		t.Errorf("item = %+v", first)
+	}
+	if first.AskedAt != "2026-10-05T10:00:00Z" || first.CompletedAt != "2026-10-05T10:00:06Z" {
+		t.Errorf("first times = %q / %q", first.AskedAt, first.CompletedAt)
+	}
+	if got[1].Item.AskedAt != "2026-10-05T10:01:00Z" || got[1].Item.CompletedAt != "2026-10-05T10:01:06Z" {
+		t.Errorf("second times = %q / %q", got[1].Item.AskedAt, got[1].Item.CompletedAt)
+	}
+
+	// The same session on a later change is not read again.
+	h.engine.OnChanges([]herdr.Change{{Kind: herdr.Updated, Agent: claudePane("done", "Sandbox hello", 3, s1)}})
+	if again := waitBackfills(h, 1, 150*time.Millisecond); len(again) != 0 {
+		t.Errorf("backfilled the same session again: %+v", again)
+	}
+
+	// A new session in the pane is.
+	s2 := &herdr.AgentSession{Agent: "claude", Kind: "id", Value: "s2"}
+	h.engine.OnChanges([]herdr.Change{{Kind: herdr.Updated, Agent: claudePane("done", "Sandbox hello", 4, s2)}})
+	again := waitBackfills(h, 1, 2*time.Second)
+	if len(again) != 1 || again[0].Item.Query != "other question" {
+		t.Errorf("new session backfill = %+v", again)
+	}
 }
 
 func (h *testHarness) published() string {
@@ -91,7 +174,7 @@ func TestEngine_HistoryAgentsViewPublishesNothing(t *testing.T) {
 // the conversation was in the background.
 func TestEngine_HistoryBackToConversation(t *testing.T) {
 	h := newTestHarness(t)
-	h.server.SetScreen("w1:p1", "recent_unwrapped", "❯ say hi\n\n⏺ hi there\n\n✻ Worked for 1s\n\n────\n❯ \n────\n")
+	h.server.SetScreen("w1:p1", "recent_unwrapped", "❯ say hi\n\n⏺ hi there\n\n✻ Worked for 1s · done 10:25 AM\n\n────\n❯ \n────\n")
 	h.engine.OnHerdrOnline(true, herdr.Pong{Version: "0.9.3", Protocol: 22})
 
 	inView := claudePane("done", "claude agents", 5, nil)
@@ -118,7 +201,7 @@ func TestEngine_HistoryScreenReadRetried(t *testing.T) {
 	h := newTestHarness(t)
 	h.engine.ScreenReadTimeout = 100 * time.Millisecond
 	h.engine.ScreenRetryTimeout = 2 * time.Second
-	h.server.SetScreen("w1:p1", "recent_unwrapped", "❯ say hi\n\n⏺ hi again\n\n────\n❯ \n────\n")
+	h.server.SetScreen("w1:p1", "recent_unwrapped", "❯ say hi\n\n⏺ hi again\n\n✻ Worked for 1s · done 10:25 AM\n\n────\n❯ \n────\n")
 	hold := h.server.HoldNext("agent.read") // never released: the first read times out
 	defer hold.Release()
 

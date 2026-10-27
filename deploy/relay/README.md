@@ -84,6 +84,29 @@ Opt-in. It never runs on a plain deploy, and it changes live secrets.
 - **Secrets:** the values travel in a `0600` temp file over `scp` and are deleted after the run. Nothing is printed but key names: `env: changed: …; added: …; unchanged: …`.
 - **Rollback:** if the relay is not healthy after the restart, both the binary and the env file are rolled back.
 
+## Android updates
+
+The relay serves the latest APK of the phone and Wear OS apps to their own clients, authenticated with the device token (`GET /v1/updates/{app}` and `…/apk`; contracts §2.1). It only reads the update directory; publishing is a separate step.
+
+- **Files:** `<AW_UPDATE_DIR>/phone.json` and `watch.json`, each naming an immutable `<app>-<version_code>.apk` beside it (contracts §5). `AW_UPDATE_DIR` defaults to `<AW_DATA_DIR>/updates`; the relay user must be able to read it.
+- **Publish:** from a clean tree on the Mac, with `AW_RELAY_SSH` in `agent-watch.env` and a release key in `wearos-app/keystore.properties` (docs/GUIDE.md § Android updates):
+  ```bash
+  make publish-android
+  ```
+  It builds both release APKs, verifies they are not debug-signed, and publishes only the apps whose `version_code` increased. It refuses a lower code. Files are written APK first and metadata second, so a client never sees metadata without its APK. With `--phone` or `--watch` it builds and publishes that app only; the other one is neither built nor touched on the relay.
+- **SSH:** root is needed: the script creates `AW_UPDATE_DIR` with mode `0750` and files with `0640`, owned by `agentwatch:agentwatch` so the relay can read them. It reads `AW_UPDATE_DIR` from `/etc/agent-watch-relay/env` on the server, not from the Mac.
+- **Environment:** if you move the directory, set `AW_UPDATE_DIR` on the server (and in `agent-watch.env` if you use `--sync-env`):
+  ```bash
+  # /etc/agent-watch-relay/env
+  AW_UPDATE_DIR=/var/lib/agent-watch-relay/updates
+  ```
+  Then restart the relay. Keep it outside the static root your proxy serves: the only intended access is the authenticated endpoint.
+- **No restart:** the relay reads the metadata and APK on every request. Old APKs stay seven days (`publish-android.sh` deletes older ones); the relay never deletes anything.
+- **No downgrades:** Android will not install an APK with a lower `version_code` over a higher one. To recover from a bad release, publish a fixed build with a higher code; the only way to go back to an older code is uninstalling the app (which loses pairing).
+- **Never serve the directory directly.** The APKs are public builds, but the metadata endpoint is the only supported path and keeps downloads behind the device token.
+
+Publishing a release does not deploy the relay; deploy the relay first when its version changed (`make deploy-relay`). The Android apps' version pairs are in [`VERSIONS`](../../VERSIONS).
+
 ## Client IP and the pairing rate limit
 
 `POST /v1/pair` is limited per client IP. How the relay picks the client IP from `AW_TRUSTED_PROXIES` and the forwarding headers: contracts §5. What to set per topology:

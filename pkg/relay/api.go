@@ -25,6 +25,10 @@ const (
 	// astral character escaped as a surrogate pair (two backslash-u escapes) is 12
 	// bytes, and some encoders (Gson) escape even '<' or '=' as 6 bytes.
 	maxPromptBodyBytes = 64 << 10
+	// maxSessionPath bounds a folder path, in bytes; maxSessionLabel bounds a
+	// session name, in characters (contracts.md §2.1).
+	maxSessionPath  = 4096
+	maxSessionLabel = 64
 )
 
 // writeError serializes an ErrorResponse with the appropriate HTTP status code.
@@ -97,11 +101,16 @@ func (s *Server) routes() http.Handler {
 	mux.Handle("POST /v1/hosts/{host}/agents/{pane_id}/prompt", s.auth.DeviceAuthMiddleware(http.HandlerFunc(s.prompt)))
 	mux.Handle("POST /v1/hosts/{host}/agents/{pane_id}/answer", s.auth.DeviceAuthMiddleware(http.HandlerFunc(s.answer)))
 	mux.Handle("POST /v1/hosts/{host}/agents/{pane_id}/cancel", s.auth.DeviceAuthMiddleware(http.HandlerFunc(s.cancel)))
+	mux.Handle("GET /v1/hosts/{host}/sessions/options", s.auth.DeviceAuthMiddleware(http.HandlerFunc(s.sessionOptions)))
+	mux.Handle("GET /v1/hosts/{host}/folders", s.auth.DeviceAuthMiddleware(http.HandlerFunc(s.folders)))
+	mux.Handle("POST /v1/hosts/{host}/sessions", s.auth.DeviceAuthMiddleware(http.HandlerFunc(s.createSession)))
 	// The paths that predate hosts: the relay finds the pane's host.
 	mux.Handle("POST /v1/agents/{pane_id}/prompt", s.auth.DeviceAuthMiddleware(http.HandlerFunc(s.prompt)))
 	mux.Handle("POST /v1/agents/{pane_id}/answer", s.auth.DeviceAuthMiddleware(http.HandlerFunc(s.answer)))
 	mux.Handle("POST /v1/agents/{pane_id}/cancel", s.auth.DeviceAuthMiddleware(http.HandlerFunc(s.cancel)))
 	mux.Handle("POST /v1/push/register", s.auth.DeviceAuthMiddleware(http.HandlerFunc(s.pushRegister)))
+	mux.Handle("GET /v1/updates/{app}", s.auth.DeviceAuthMiddleware(http.HandlerFunc(s.updateInfo)))
+	mux.Handle("GET /v1/updates/{app}/apk", s.auth.DeviceAuthMiddleware(http.HandlerFunc(s.updateAPK)))
 
 	// Access logging wrapper
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -293,6 +302,21 @@ func (s *Server) targetFromPath(r *http.Request) (commandTarget, model.ErrorCode
 	}
 }
 
+// executeCommand sends cmd to host via Hub.Command, writing the error response
+// on failure. It returns (res, true) on success.
+func (s *Server) executeCommand(w http.ResponseWriter, r *http.Request, host string, cmd model.CommandMsg) (model.CommandResultMsg, bool) {
+	res := s.hub.Command(r.Context(), host, cmd)
+	if !res.OK {
+		code := model.ErrorCode(res.ErrorCode)
+		if code == "" {
+			code = model.ErrInternal
+		}
+		writeError(w, code, res.Message)
+		return res, false
+	}
+	return res, true
+}
+
 // runCommand checks the target, sends cmd to its host and writes the outcome.
 func (s *Server) runCommand(w http.ResponseWriter, r *http.Request, cmd model.CommandMsg) {
 	target, code, msg := s.targetFromPath(r)
@@ -300,31 +324,10 @@ func (s *Server) runCommand(w http.ResponseWriter, r *http.Request, cmd model.Co
 		writeError(w, code, msg)
 		return
 	}
-	if !s.state.HostOnline(target.host) {
-		writeError(w, model.ErrHostOffline, "host offline")
-		return
-	}
-	if !s.state.HerdrOnline(target.host) {
-		writeError(w, model.ErrHerdrOffline, "herdr offline")
-		return
-	}
-
 	cmd.PaneID = target.pane
-	res, err := s.hub.Command(r.Context(), target.host, cmd)
-	if err != nil {
-		writeError(w, model.ErrInternal, err.Error())
-		return
+	if _, ok := s.executeCommand(w, r, target.host, cmd); ok {
+		writeJSON(w, http.StatusOK, model.CommandResponse{OK: true})
 	}
-	if !res.OK {
-		code := model.ErrorCode(res.ErrorCode)
-		if code == "" {
-			code = model.ErrInternal
-		}
-		writeError(w, code, res.Message)
-		return
-	}
-
-	writeJSON(w, http.StatusOK, model.CommandResponse{OK: true})
 }
 
 // POST /v1/hosts/{host}/agents/{pane_id}/prompt and /v1/agents/{pane_id}/prompt
@@ -399,6 +402,99 @@ func (s *Server) cancel(w http.ResponseWriter, r *http.Request) {
 		ExpectedSeq: req.ExpectedSeq,
 		Fingerprint: req.Fingerprint,
 	})
+}
+
+// runHostCommand checks the host and sends a host-level command to its
+// bridge, writing the error response itself when it cannot.
+func (s *Server) runHostCommand(w http.ResponseWriter, r *http.Request, cmd model.CommandMsg) (string, model.CommandResultMsg, bool) {
+	host := r.PathValue("host")
+	if host == "" {
+		writeError(w, model.ErrInvalidRequest, "missing host")
+		return "", model.CommandResultMsg{}, false
+	}
+	res, ok := s.executeCommand(w, r, host, cmd)
+	return host, res, ok
+}
+
+// GET /v1/hosts/{host}/sessions/options
+func (s *Server) sessionOptions(w http.ResponseWriter, r *http.Request) {
+	_, res, ok := s.runHostCommand(w, r, model.CommandMsg{Action: model.ActionSessionOptions})
+	if !ok {
+		return
+	}
+	if res.Options == nil {
+		writeError(w, model.ErrInternal, "bridge returned no session options")
+		return
+	}
+	writeJSON(w, http.StatusOK, *res.Options)
+}
+
+// GET /v1/hosts/{host}/folders?path=
+func (s *Server) folders(w http.ResponseWriter, r *http.Request) {
+	path := r.URL.Query().Get("path")
+	if len(path) > maxSessionPath {
+		writeError(w, model.ErrInvalidRequest, "path is too long")
+		return
+	}
+	_, res, ok := s.runHostCommand(w, r, model.CommandMsg{
+		Action: model.ActionFoldersList,
+		Path:   path,
+	})
+	if !ok {
+		return
+	}
+	if res.Folders == nil {
+		writeError(w, model.ErrInternal, "bridge returned no folder listing")
+		return
+	}
+	writeJSON(w, http.StatusOK, *res.Folders)
+}
+
+// POST /v1/hosts/{host}/sessions
+func (s *Server) createSession(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, 16<<10)
+	var req model.SessionCreateRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, model.ErrInvalidRequest, "malformed request body")
+		return
+	}
+
+	kind := strings.TrimSpace(req.Kind)
+	cwd := strings.TrimSpace(req.Cwd)
+	label := strings.TrimSpace(req.Label)
+	if kind == "" {
+		writeError(w, model.ErrInvalidRequest, "kind is required")
+		return
+	}
+	if cwd == "" {
+		writeError(w, model.ErrInvalidRequest, "cwd is required")
+		return
+	}
+	if len(cwd) > maxSessionPath {
+		writeError(w, model.ErrInvalidRequest, "cwd is too long")
+		return
+	}
+	if utf8.RuneCountInString(label) > maxSessionLabel {
+		writeError(w, model.ErrInvalidRequest, fmt.Sprintf("label must be at most %d characters", maxSessionLabel))
+		return
+	}
+
+	host, res, ok := s.runHostCommand(w, r, model.CommandMsg{
+		Action: model.ActionSessionCreate,
+		Kind:   kind,
+		Cwd:    cwd,
+		Label:  label,
+	})
+	if !ok {
+		return
+	}
+	if res.Session == nil {
+		writeError(w, model.ErrInternal, "bridge returned no session")
+		return
+	}
+	created := *res.Session
+	created.Host = host
+	writeJSON(w, http.StatusOK, created)
 }
 
 // POST /v1/push/register

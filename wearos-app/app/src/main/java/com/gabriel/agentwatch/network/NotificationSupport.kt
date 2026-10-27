@@ -110,39 +110,18 @@ object NotificationIntents {
 
 /** Dismisses approval notifications that no longer match an agent's state. */
 object ApprovalNotifications {
-    private const val TAG = "ApprovalNotifications"
-
-    private fun manager(context: Context) =
-        context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-
-    private fun shown(manager: NotificationManager): List<ShownApproval> =
-        manager.activeNotifications.mapNotNull { sbn ->
-            val extras = sbn.notification.extras
-            if (extras.getString(AgentNotifications.EXTRA_KIND) != AgentNotifications.KIND_APPROVAL) return@mapNotNull null
-            val paneId = extras.getString(AgentNotifications.EXTRA_PANE) ?: return@mapNotNull null
-            val host = extras.getString(AgentNotifications.EXTRA_HOST).orEmpty()
-            ShownApproval(sbn.id, paneId, extras.getLong(AgentNotifications.EXTRA_SEQ, 0L), host)
-        }
-
     /** A data-only `resolved` push: dismiss the agent's approval, show nothing. */
     fun onResolved(context: Context, message: PushMessage.Resolved) {
-        try {
-            val manager = manager(context)
-            val approval = shown(manager).firstOrNull { it.key == message.key }
-            if (shouldDismissOnResolved(approval, message.seq)) manager.cancel(approval!!.notificationId)
-        } catch (e: RuntimeException) {
-            Log.w(TAG, "Could not dismiss a resolved approval: ${e.javaClass.simpleName}")
-        }
+        dismissResolved(context, message)
     }
 
     /** SSE or refresh news from the repository. */
     fun onAgentsUpdated(context: Context, update: AgentsUpdate) {
-        if (update is AgentsUpdate.Changed && update.agent.status == "blocked") return // nothing to dismiss
-        try {
-            val manager = manager(context)
-            approvalsToDismiss(shown(manager), update).forEach(manager::cancel)
-        } catch (e: RuntimeException) {
-            Log.w(TAG, "Could not dismiss stale approvals: ${e.javaClass.simpleName}")
-        }
+        dismissStaleApprovals(context, update)
+    }
+
+    /** Dismisses all active notifications on auth clear or revocation. */
+    fun cancelAll(context: Context) {
+        cancelAllNotifications(context)
     }
 }

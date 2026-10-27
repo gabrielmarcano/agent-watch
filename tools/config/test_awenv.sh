@@ -96,6 +96,7 @@ AW_LISTEN=127.0.0.1:8080
 AW_NTFY_TOKEN=
 # AW_NTFY_TOPIC=commented-out
 AW_TRUSTED_PROXIES=127.0.0.1/32, 10.0.0.0/8
+AW_UPDATE_DIR=/var/lib/agent-watch-relay/updates
 AW_WATCHOS_BUNDLE_ID=com.example.agentwatch
 EOF
 out="$(bash "$A" relay-env "$T/r.env" "$T/r.out" 2>&1)"
@@ -103,10 +104,11 @@ expect 0 $? "relay-env: exit 0"
 expect "AW_HOST_TOKEN=$TOK
 AW_LISTEN=127.0.0.1:8080
 AW_TRUSTED_PROXIES=127.0.0.1/32, 10.0.0.0/8
+AW_UPDATE_DIR=/var/lib/agent-watch-relay/updates
 AW_NTFY_TOKEN=" "$(cat "$T/r.out")" "relay-env: only the relay keys the file sets, in contract order"
 expect 600 "$(mode "$T/r.out")" "relay-env: output mode 0600"
 lacks "$out" "$TOK" "relay-env: token printed"
-contains "$out" "AW_HOST_TOKEN AW_LISTEN AW_TRUSTED_PROXIES AW_NTFY_TOKEN" "relay-env: names the keys"
+contains "$out" "AW_HOST_TOKEN AW_LISTEN AW_TRUSTED_PROXIES AW_UPDATE_DIR AW_NTFY_TOKEN" "relay-env: names the keys"
 
 printf 'AW_HOST_TOKEN=\nAW_LISTEN=127.0.0.1:8080\n' >"$T/r2.env"
 bash "$A" relay-env "$T/r2.env" "$T/r2.out" >/dev/null 2>&1

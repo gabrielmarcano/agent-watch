@@ -83,6 +83,7 @@ fun PairingScreen(revoked: Boolean, onPaired: () -> Unit) {
             val deviceName = "${Build.MANUFACTURER.replaceFirstChar { it.uppercase() }} ${Build.MODEL}"
             RelayClient(baseUrl = relayUrl).pair(code = code, deviceName = deviceName).fold(
                 onSuccess = { resp ->
+                    RelayRepository.clearPairing(context)
                     prefs.relayUrl = relayUrl
                     prefs.deviceId = resp.device_id
                     prefs.deviceToken = resp.device_token

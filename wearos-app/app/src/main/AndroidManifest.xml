@@ -2,11 +2,15 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Updates are downloaded from the relay and handed to Android's installer; the user still
+         confirms each install and allows this source once. -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
     <uses-feature android:name="android.hardware.type.watch" />
 
     <!-- allowBackup=false: the device token in SharedPreferences must never reach cloud backup. -->
     <application
+        android:name=".AgentWatchApp"
         android:allowBackup="false"
         android:icon="@mipmap/ic_launcher"
         android:roundIcon="@mipmap/ic_launcher"
@@ -99,7 +103,17 @@
             android:name=".tile.QuickDictateActivity"
             android:exported="true"
             android:theme="@android:style/Theme.DeviceDefault" />
-        
+
+        <!-- The downloaded APK lives in cache/updates; only this app may grant access to it. -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.updates"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/update_paths" />
+        </provider>
     </application>
 
 </manifest>

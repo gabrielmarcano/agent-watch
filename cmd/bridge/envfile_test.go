@@ -19,103 +19,6 @@ func writeEnvFile(t *testing.T, dir, content string) string {
 	return p
 }
 
-func TestReadEnvFile(t *testing.T) {
-	p := writeEnvFile(t, t.TempDir(), strings.Join([]string{
-		"# Agent Watch",
-		"",
-		"AW_RELAY_DOMAIN=relay.example.com",
-		"  AW_RELAY_SSH =  root@relay.example.com  ",
-		"AW_RELAY_SSH_OPTS=-i ~/.ssh/key -o Port=2222 # inline comment",
-		"AW_EMPTY=",
-		"AW_TWICE=first",
-		"AW_TWICE=second",
-		"   # indented comment",
-		"AW_LAST=no-trailing-newline",
-	}, "\n"))
-
-	got, err := readEnvFile(p)
-	if err != nil {
-		t.Fatalf("readEnvFile: %v", err)
-	}
-	want := map[string]string{
-		"AW_RELAY_DOMAIN":   "relay.example.com",
-		"AW_RELAY_SSH":      "root@relay.example.com",
-		"AW_RELAY_SSH_OPTS": "-i ~/.ssh/key -o Port=2222",
-		"AW_EMPTY":          "",
-		"AW_TWICE":          "second",
-		"AW_LAST":           "no-trailing-newline",
-	}
-	if len(got) != len(want) {
-		t.Errorf("got %d keys %v, want %d", len(got), got, len(want))
-	}
-	for k, v := range want {
-		if gv, ok := got[k]; !ok || gv != v {
-			t.Errorf("%s = %q (set %v), want %q", k, gv, ok, v)
-		}
-	}
-}
-
-// A malformed line is an error that names the line number but never quotes
-// the line: the file holds the host token.
-func TestReadEnvFile_RejectsMalformedLinesWithoutQuotingThem(t *testing.T) {
-	for _, line := range []string{
-		"AW_HOST_TOKEN " + testToken, // no '='
-		"export AW_HOST_TOKEN=" + testToken,
-		"=" + testToken,
-		"9AW=" + testToken,
-	} {
-		p := writeEnvFile(t, t.TempDir(), "# ok\n"+line+"\n")
-		_, err := readEnvFile(p)
-		if err == nil {
-			t.Errorf("%q: no error", line)
-			continue
-		}
-		if !strings.Contains(err.Error(), "line 2") {
-			t.Errorf("%q: error %q does not name line 2", line, err)
-		}
-		if strings.Contains(err.Error(), testToken) {
-			t.Errorf("%q: error quotes the token: %q", line, err)
-		}
-	}
-}
-
-func TestReadEnvFile_Missing(t *testing.T) {
-	_, err := readEnvFile(filepath.Join(t.TempDir(), "agent-watch.env"))
-	if err == nil || !strings.Contains(err.Error(), "make config") {
-		t.Errorf("err = %v, want a hint to run make config", err)
-	}
-}
-
-func TestRelayURLFromDomain(t *testing.T) {
-	for _, tc := range []struct{ domain, want string }{
-		{"relay.example.com", "wss://relay.example.com/v1/host"},
-		{"relay.example.com:8443", "wss://relay.example.com:8443/v1/host"},
-		{"RELAY-1.example.com", "wss://RELAY-1.example.com/v1/host"},
-	} {
-		got, err := relayURLFromDomain(tc.domain)
-		if err != nil || got != tc.want {
-			t.Errorf("%q → %q, %v; want %q", tc.domain, got, err, tc.want)
-		}
-	}
-	for _, bad := range []string{
-		"",
-		"https://relay.example.com",
-		"wss://relay.example.com",
-		"relay.example.com/",
-		"relay.example.com/v1/host",
-		"relay example.com",
-		`"relay.example.com"`,
-		"user@relay.example.com",
-		"relay.example.com:",
-		"relay.example.com:port",
-		"-relay.example.com",
-	} {
-		if got, err := relayURLFromDomain(bad); err == nil {
-			t.Errorf("%q accepted as %q", bad, got)
-		}
-	}
-}
-
 func TestCLI_ConfigureFromEnvFile(t *testing.T) {
 	ta := newTestApp(t, "launchd")
 	cfgPath := filepath.Join(ta.home, "config.toml")
@@ -173,6 +76,60 @@ func TestCLI_ConfigureFlagsOverrideEnvFile(t *testing.T) {
 	}
 	if cfg.RelayURL != "wss://relay.example.com/v1/host" || cfg.HostToken != otherToken {
 		t.Errorf("relay_url = %q, token from flag = %v", cfg.RelayURL, cfg.HostToken == otherToken)
+	}
+}
+
+// configure --session-root/--session-kind are repeatable, and a later rewrite
+// without them drops them and says so: the phone would silently lose the
+// ability to start sessions.
+func TestCLI_ConfigureSessionRoots(t *testing.T) {
+	ta := newTestApp(t, "launchd")
+	cfgPath := filepath.Join(ta.home, "config.toml")
+	envPath := writeEnvFile(t, ta.home, "AW_RELAY_DOMAIN=relay.example.com\nAW_HOST_TOKEN="+testToken+"\n")
+
+	args := []string{
+		"--env-file", envPath, "--config", cfgPath,
+		"--session-root", "/Users/me/Code",
+		"--session-root", "/Users/me/Personal",
+		"--session-kind", "claude",
+		"--session-kind", "opencode",
+	}
+	if err := ta.cmdConfigure(args); err != nil {
+		t.Fatalf("configure --session-root: %v", err)
+	}
+	cfg, err := bridge.CheckConfig(cfgPath)
+	if err != nil {
+		t.Fatalf("written config: %v", err)
+	}
+	if len(cfg.SessionRoots) != 2 || cfg.SessionRoots[1] != "/Users/me/Personal" {
+		t.Errorf("session_roots = %v", cfg.SessionRoots)
+	}
+	if len(cfg.SessionKinds) != 2 || cfg.SessionKinds[1] != "opencode" {
+		t.Errorf("session_kinds = %v", cfg.SessionKinds)
+	}
+
+	// A relative root is refused and the previous file is left alone.
+	if err := ta.cmdConfigure([]string{"--env-file", envPath, "--config", cfgPath, "--session-root", "Code"}); err == nil || !strings.Contains(err.Error(), "absolute") {
+		t.Fatalf("configure with a relative root: err = %v, want an absolute-path error", err)
+	}
+	if cfg, err = bridge.CheckConfig(cfgPath); err != nil || len(cfg.SessionRoots) != 2 {
+		t.Fatalf("the refused configure rewrote the config: %+v, %v", cfg, err)
+	}
+
+	// Rewriting without the flags drops them, and the note names the flags.
+	ta.errOut.Reset()
+	if err := ta.cmdConfigure([]string{"--env-file", envPath, "--config", cfgPath}); err != nil {
+		t.Fatalf("configure without session flags: %v", err)
+	}
+	if cfg, err = bridge.CheckConfig(cfgPath); err != nil || len(cfg.SessionRoots) != 0 || len(cfg.SessionKinds) != 0 {
+		t.Fatalf("session settings survived the rewrite: %+v, %v", cfg, err)
+	}
+	note := ta.errOut.String()
+	if !strings.Contains(note, "session_roots") || !strings.Contains(note, "--session-root") {
+		t.Errorf("stderr = %q, want a note about the dropped session_roots", note)
+	}
+	if !strings.Contains(note, "session_kinds") || !strings.Contains(note, "--session-kind") {
+		t.Errorf("stderr = %q, want a note about the dropped session_kinds", note)
 	}
 }
 

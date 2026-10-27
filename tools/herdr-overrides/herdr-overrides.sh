@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 # Temporary herdr agent-detection override for claude.
 #
-# herdr 0.9.1 misses some open permission dialogs (see README.md). Each
-# override is herdr's own cached remote manifest plus one rule from
-# <agent>.rule.toml, with a version suffix. It is generated, never copied into
-# the repo, so re-running `install` rebases it on the current upstream rules.
+# herdr misses some screens (open permission dialogs, and a pane waiting on
+# background subagents after its turn ended; see README.md). Each override is
+# herdr's own cached remote manifest plus rules from <agent>.rule.toml, with a
+# version suffix. It is generated, never copied into the repo, so re-running
+# `install` rebases it on the current upstream rules.
 #
 #   herdr-overrides.sh verify [--upstream] [agent...]   check the fixtures (no server change)
 #   herdr-overrides.sh install [agent...]               verify, write, reload herdr
@@ -21,7 +22,7 @@ MARK="# agent-watch-override"
 SUFFIX="900"
 ALL_AGENTS=(claude)
 
-# Fixtures: "<file> <expected>", expected is "blocked" or "not-blocked".
+# Fixtures: "<file> <expected>", expected is "blocked", "not-blocked", "working" or "idle".
 fixtures() {
 	local fx="$REPO/pkg/agents/testdata" td="$HERE/testdata"
 	case "$1" in
@@ -34,9 +35,14 @@ $fx/claude/permission-write-numbered-list.txt blocked
 $fx/claude/permission-bash-dont-ask-again.txt blocked
 $fx/claude/plan-approval.txt blocked
 $fx/claude/question-multiple.txt blocked
+$td/claude-question-named-session.txt blocked
 $td/claude-webfetch-fresh.txt blocked
+$td/claude-webfetch-named-session.txt blocked
 $td/claude-webfetch-stale-box.txt blocked
 $td/claude-bash-stale-box.txt blocked
+$td/claude-background-agent-waiting.txt working
+$td/claude-background-agents-finished.txt idle
+$td/claude-dialog-while-subagent.txt blocked
 $fx/claude/no-menu-working.txt not-blocked
 $td/claude-idle-typed-prompt.txt not-blocked
 $fx/claude/no-menu-idle-numbered-list.txt not-blocked
@@ -83,6 +89,8 @@ run_fixtures() {
 		local state="${got%% *}" rule="${got#* }" ok="ok"
 		if [ "$want" = blocked ] && [ "$state" != blocked ]; then ok="FAIL"; fail=1; fi
 		if [ "$want" = not-blocked ] && [ "$state" = blocked ]; then ok="FAIL"; fail=1; fi
+		if [ "$want" = working ] && [ "$state" != working ]; then ok="FAIL"; fail=1; fi
+		if [ "$want" = idle ] && [ "$state" != idle ]; then ok="FAIL"; fail=1; fi
 		printf '  %-4s %-7s want %-11s got %-8s rule %-28s %s\n' "$ok" "$agent" "$want" "$state" "$rule" "${file#"$REPO"/}"
 	done < <(fixtures "$agent")
 	return $fail
@@ -164,7 +172,7 @@ cmd_check() {
 		if run_fixtures "$tmp" "$agent" >/dev/null; then
 			echo "$agent: upstream alone now detects every fixture -> the override can be removed: $0 uninstall $agent"
 		else
-			echo "$agent: upstream alone still misses some dialogs -> keep the override (details: $0 verify --upstream $agent)"
+			echo "$agent: upstream alone still misses some screens -> keep the override (details: $0 verify --upstream $agent)"
 		fi
 	done
 	rm -rf "$tmp"

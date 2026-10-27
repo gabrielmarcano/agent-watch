@@ -1,6 +1,7 @@
-# Wear OS unit tests, lint and debug build, only when the app (or its version) changes.
-# A placeholder google-services.json is generated here: the real Firebase config never
-# leaves the owner's machine, and push is not exercised by these builds.
+# Android unit tests, lint and debug builds (the Wear OS app and the phone app),
+# only when the Android tree (or a version) changes. Placeholder google-services.json
+# files are generated here: the real Firebase config never leaves the owner's machine,
+# and push is not exercised by these builds.
 name: Wear OS
 
 on:
@@ -47,4 +48,16 @@ jobs:
             "configuration_version": "1"
           }
           JSON
-      - run: ./gradlew --no-daemon :app:testDebugUnitTest :app:lintDebug :app:assembleDebug
+          cat > mobile/google-services.json <<'JSON'
+          {
+            "project_info": {"project_number": "000000000000", "project_id": "ci-placeholder", "storage_bucket": "ci-placeholder.appspot.com"},
+            "client": [{
+              "client_info": {"mobilesdk_app_id": "1:000000000000:android:0000000000000001", "android_client_info": {"package_name": "com.gabriel.agentwatch.mobile"}},
+              "oauth_client": [],
+              "api_key": [{"current_key": "ci-placeholder"}],
+              "services": {"appinvite_service": {"other_platform_oauth_client": []}}
+            }],
+            "configuration_version": "1"
+          }
+          JSON
+      - run: ./gradlew --no-daemon :core:testDebugUnitTest :app:testDebugUnitTest :app:lintDebug :app:assembleDebug :mobile:testDebugUnitTest :mobile:lintDebug :mobile:assembleDebug

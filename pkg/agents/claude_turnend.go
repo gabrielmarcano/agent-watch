@@ -39,15 +39,6 @@ const maxTurnEndCache = 64
 
 // LastCompletedTurn implements TurnEndReader.
 func (c *claudeAdapter) LastCompletedTurn(ctx context.Context, ref SessionRef) (TurnEnd, error) {
-	c.turnEnds.mu.Lock()
-	cached, ok := c.turnEnds.entries[ref]
-	c.turnEnds.mu.Unlock()
-	if ok {
-		if fi, err := os.Stat(cached.path); err == nil && fi.Size() == cached.size && fi.ModTime().Equal(cached.mtime) {
-			return cached.end, nil
-		}
-	}
-
 	path, err := c.sessionPath(ctx, ref)
 	if err != nil {
 		return TurnEnd{}, err
@@ -56,6 +47,17 @@ func (c *claudeAdapter) LastCompletedTurn(ctx context.Context, ref SessionRef) (
 	if err != nil {
 		return TurnEnd{}, ErrNoTranscript
 	}
+	return c.completedTurnWithPath(ctx, ref, path, fi)
+}
+
+func (c *claudeAdapter) completedTurnWithPath(ctx context.Context, ref SessionRef, path string, fi os.FileInfo) (TurnEnd, error) {
+	c.turnEnds.mu.Lock()
+	cached, ok := c.turnEnds.entries[ref]
+	c.turnEnds.mu.Unlock()
+	if ok && cached.path == path && fi.Size() == cached.size && fi.ModTime().Equal(cached.mtime) {
+		return cached.end, nil
+	}
+
 	end, err := c.completedTurn(ctx, path, fi.Size())
 	if err != nil {
 		return TurnEnd{}, err
@@ -68,6 +70,50 @@ func (c *claudeAdapter) LastCompletedTurn(ctx context.Context, ref SessionRef) (
 	c.turnEnds.entries[ref] = turnEndEntry{path: path, size: fi.Size(), mtime: fi.ModTime(), end: end}
 	c.turnEnds.mu.Unlock()
 	return end, nil
+}
+
+// ObserveWorkingTurn implements Adapter: checks for a turn that completed
+// while the pane stays working, and counts background tasks.
+func (c *claudeAdapter) ObserveWorkingTurn(ctx context.Context, ref SessionRef) (TurnEnd, BackgroundTasks, bool, error) {
+	if !c.ShowsConversation(ref.Title) {
+		return TurnEnd{}, BackgroundTasks{}, false, nil
+	}
+	path, err := c.sessionPath(ctx, ref)
+	if err != nil {
+		return TurnEnd{}, BackgroundTasks{}, true, err
+	}
+	fi, err := os.Stat(path)
+	if err != nil {
+		return TurnEnd{}, BackgroundTasks{}, true, ErrNoTranscript
+	}
+	end, turnErr := c.completedTurnWithPath(ctx, ref, path, fi)
+	if turnErr != nil {
+		return TurnEnd{}, BackgroundTasks{}, true, turnErr
+	}
+	tasks, tasksErr := c.backgroundTasksWithPath(ctx, ref, path, fi)
+	if tasksErr != nil {
+		return end, BackgroundTasks{}, true, tasksErr
+	}
+	return end, tasks, true, nil
+}
+
+// ObserveSettledTurn implements Adapter: reads the settled turn's reply and
+// counts background tasks, resolving the session path once.
+func (c *claudeAdapter) ObserveSettledTurn(ctx context.Context, ref SessionRef) (*model.HistoryItem, BackgroundTasks, error) {
+	if !c.ShowsConversation(ref.Title) {
+		return nil, BackgroundTasks{}, nil
+	}
+	path, err := c.sessionPath(ctx, ref)
+	if err != nil {
+		return nil, BackgroundTasks{}, err
+	}
+	fi, err := os.Stat(path)
+	if err != nil {
+		return nil, BackgroundTasks{}, ErrNoTranscript
+	}
+	item, turnErr := c.lastTurnWithPath(ctx, path, fi.Size())
+	tasks, _ := c.backgroundTasksWithPath(ctx, ref, path, fi)
+	return item, tasks, turnErr
 }
 
 // completedTurn reads the turn that ends at the last turn_duration record of

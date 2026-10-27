@@ -3,6 +3,7 @@ package bridge
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -24,6 +25,9 @@ type paneState struct {
 	prompt     *agents.Prompt
 	lastHistID string
 	turnMarker string // the last turn end seen while working (StartTurnWatch)
+	// backfilledSession is the transcript session whose older turns this pane
+	// has already sent (engine.go, backfillHistory); "" before the first read.
+	backfilledSession string
 }
 
 // Engine connects herdr events and agent adapters to the remote relay.
@@ -58,6 +62,15 @@ type Engine struct {
 	// CommandTimeout bounds a command from its arrival, including the wait
 	// for the pane lock (defaults to commandTimeout, below the relay's wait).
 	CommandTimeout time.Duration
+	// SessionRoots and SessionKinds are the host's new-session allowlist,
+	// from config.toml (contracts.md §6). Empty roots turn the feature off;
+	// empty kinds mean DefaultSessionKinds.
+	SessionRoots []string
+	SessionKinds []string
+	// SessionTimeout and FolderTimeout bound the host-level commands; 0
+	// means defaultSessionTimeout / defaultFolderTimeout.
+	SessionTimeout time.Duration
+	FolderTimeout  time.Duration
 
 	mu            sync.RWMutex
 	states        map[string]*paneState
@@ -65,15 +78,15 @@ type Engine struct {
 	tabs          map[string]string // tab_id -> the owner's label ("" when it is only the tab's number); from the last tab.list
 	wsRefreshing  bool              // a workspace.list is in flight
 	wsRefreshedAt time.Time         // when the last workspace.list finished (ok or not)
-	wsRefreshes   int               // workspace refreshes started (tests)
 	herdrOnline   bool
 	pong          herdr.Pong
-	herdrErr      string                      // why herdr is offline; "" while online
-	consumed      map[string]*consumedPrompts // pane_id -> prompts already acted on (guarded by mu)
+	herdrErr      string // why herdr is offline; "" while online
+	guard         commandGuard
+}
 
-	lockMu    sync.Mutex
-	paneLocks map[string]*paneLock // pane_id -> lock, only while commands are in flight
-	requests  requestIDLog
+func (e *Engine) lockPane(ctx context.Context, paneID string) (func(), error) {
+	unlock, _, err := e.guard.AcquirePane(ctx, paneID, "")
+	return unlock, err
 }
 
 // NewEngine creates a new bridge Engine instance.
@@ -91,7 +104,7 @@ func NewEngine(
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &Engine{
+	e := &Engine{
 		Herdr:        herdrClient,
 		Syncer:       syncer,
 		Agents:       reg,
@@ -113,6 +126,50 @@ func NewEngine(
 		workspaces: make(map[string]string),
 		tabs:       make(map[string]string),
 	}
+	if syncer != nil {
+		syncer.Listener = e
+	}
+	if relay != nil {
+		relay.OnConnect = e.ConnectMessages
+		relay.OnMessage = e.HandleRelayMessage
+	}
+	return e
+}
+
+// Run starts all background loops (status writer, turn watch, presence,
+// syncer, and relay client) and blocks until ctx is done or a fatal error
+// occurs. On cancellation, it ensures the status file writes stopped status
+// before returning.
+func (e *Engine) Run(ctx context.Context) error {
+	runCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	writerDone := e.StartStatusWriter(runCtx, 5*time.Second)
+	e.StartTurnWatch(runCtx)
+	e.StartPresence(runCtx)
+
+	if e.Syncer != nil {
+		go func() {
+			if err := e.Syncer.Run(runCtx); err != nil && runCtx.Err() == nil && e.Logger != nil {
+				e.Logger.Error("syncer error", "err", err)
+			}
+		}()
+	}
+
+	var runErr error
+	if e.Relay != nil {
+		runErr = e.Relay.Run(runCtx)
+	} else {
+		<-runCtx.Done()
+	}
+
+	cancel()
+	<-writerDone
+
+	if runErr != nil && !errors.Is(runErr, context.Canceled) {
+		return fmt.Errorf("relay client run: %w", runErr)
+	}
+	return nil
 }
 
 // OnHerdrOnline implements herdr.Listener.
@@ -153,7 +210,7 @@ func (e *Engine) OnChanges(changes []herdr.Change) {
 		switch ch.Kind {
 		case herdr.Removed:
 			delete(e.states, paneID)
-			e.forgetConsumedLocked(paneID, true, 0)
+			e.guard.Forget(paneID, 0, true)
 			if e.Relay != nil {
 				e.Relay.Send(model.AgentRemovedMsg{
 					Type:   model.WireAgentRemoved,
@@ -169,7 +226,7 @@ func (e *Engine) OnChanges(changes []herdr.Change) {
 			}
 
 			// A new seq (or a lost agent) ends any "already answered" record.
-			e.forgetConsumedLocked(paneID, agentName == "", info.StateChangeSeq)
+			e.guard.Forget(paneID, info.StateChangeSeq, agentName == "")
 
 			// Only panes with a detected agent are tracked
 			if agentName == "" {
@@ -240,6 +297,8 @@ func (e *Engine) OnChanges(changes []herdr.Change) {
 					Agent: pub,
 				})
 			}
+
+			e.maybeBackfillHistoryLocked(info.PaneID, cwd, agentName, info)
 
 			// History triggers: working -> done|idle, and a pane coming back
 			// to a conversation from a view without one (Claude's agents
@@ -350,16 +409,13 @@ func (e *Engine) adoptPrompt(paneID string, seq uint64, p agents.Prompt) {
 
 // backToConversation reports whether an update brings a pane back to a
 // conversation from a view without one, by its adapter's reading of the
-// terminal titles (agents.ViewDetector).
+// terminal titles.
 func (e *Engine) backToConversation(agent string, prev *herdr.AgentInfo, info herdr.AgentInfo) bool {
 	if prev == nil {
 		return false
 	}
-	v, ok := e.Agents.For(agent).(agents.ViewDetector)
-	if !ok {
-		return false
-	}
-	return !v.ShowsConversation(titleOf(*prev)) && v.ShowsConversation(titleOf(info))
+	ad := e.Agents.For(agent)
+	return !ad.ShowsConversation(titleOf(*prev)) && ad.ShowsConversation(titleOf(info))
 }
 
 func titleOf(info herdr.AgentInfo) string {
@@ -385,7 +441,7 @@ func (e *Engine) captureHistory(paneID, cwd, agent string, info herdr.AgentInfo)
 	ref := info.TrustedSession()
 	ad := e.Agents.For(agent)
 
-	if v, ok := ad.(agents.ViewDetector); ok && !v.ShowsConversation(titleOf(info)) {
+	if !ad.ShowsConversation(titleOf(info)) {
 		if e.Logger != nil {
 			e.Logger.Info("no history: the pane shows no conversation", "pane_id", paneID, "agent", agent)
 		}
@@ -393,22 +449,15 @@ func (e *Engine) captureHistory(paneID, cwd, agent string, info herdr.AgentInfo)
 		return
 	}
 
-	if reader, ok := ad.(agents.BackgroundTaskReader); ok {
-		if ref == nil {
-			e.setTasks(paneID, agents.BackgroundTasks{})
-		} else {
-			e.refreshTasks(ctx, paneID, agent, reader, agents.SessionRef{
-				Agent: ref.Agent, Kind: ref.Kind, Value: ref.Value, CWD: cwd, Title: titleOf(info),
-			})
-		}
-	}
-
 	var item *model.HistoryItem
 	var err error
 
-	if ref != nil {
+	if ref == nil {
+		e.setTasks(paneID, agents.BackgroundTasks{})
+	} else {
 		readCtx, readCancel := context.WithTimeout(ctx, e.TranscriptTimeout)
-		item, err = ad.LastTurn(readCtx, agents.SessionRef{
+		var tasks agents.BackgroundTasks
+		item, tasks, err = ad.ObserveSettledTurn(readCtx, agents.SessionRef{
 			Agent: ref.Agent,
 			Kind:  ref.Kind,
 			Value: ref.Value,
@@ -416,6 +465,8 @@ func (e *Engine) captureHistory(paneID, cwd, agent string, info herdr.AgentInfo)
 			Title: titleOf(info),
 		})
 		readCancel()
+		e.setTasks(paneID, tasks)
+
 		if errors.Is(err, agents.ErrNoReply) {
 			if e.Logger != nil {
 				e.Logger.Info("no history: the last turn has no reply yet", "pane_id", paneID, "agent", agent, "reason", err)
@@ -437,7 +488,7 @@ func (e *Engine) captureHistory(paneID, cwd, agent string, info herdr.AgentInfo)
 			}
 			return
 		}
-		item = agents.ScreenTurnFor(ad, text)
+		item = ad.ScreenTurn(text)
 		if item == nil && e.Logger != nil {
 			e.Logger.Info("no history: the screen shows no conversation", "pane_id", paneID, "agent", agent)
 		}
@@ -460,7 +511,10 @@ func (e *Engine) publishHistory(paneID, agent, sessionValue string, item model.H
 	item.ID = model.HistoryID(paneID, sessionValue, item.Query, item.Response)
 	item.PaneID = paneID
 	item.Agent = agent
-	item.CompletedAt = model.Now()
+	if item.CompletedAt == "" {
+		// A transcript turn carries its own time; a screen capture has none.
+		item.CompletedAt = model.Now()
+	}
 
 	e.mu.Lock()
 	st, exists := e.states[paneID]
@@ -482,6 +536,99 @@ func (e *Engine) publishHistory(paneID, agent, sessionValue string, item model.H
 			Type: model.WireHistoryItem,
 			Item: item,
 		})
+	}
+}
+
+// historyBackfillTurns is how many finished turns the bridge reads from a
+// transcript when it first sees a pane or a new session in it.
+const historyBackfillTurns = 20
+
+// maybeBackfillHistoryLocked starts a transcript backfill when the pane shows
+// a conversation whose session has not been read yet. e.mu must be held.
+func (e *Engine) maybeBackfillHistoryLocked(paneID, cwd, agent string, info herdr.AgentInfo) {
+	if e.Relay == nil || e.Agents == nil {
+		return
+	}
+	ref := info.TrustedSession()
+	if ref == nil {
+		return
+	}
+	ad := e.Agents.For(agent)
+	if !ad.ShowsConversation(titleOf(info)) {
+		return
+	}
+	st, ok := e.states[paneID]
+	if !ok || st.backfilledSession == ref.Value {
+		return
+	}
+	st.backfilledSession = ref.Value
+	go e.backfillHistory(paneID, cwd, agent, info, ref)
+}
+
+// backfillHistory publishes the older turns of a pane's transcript, oldest
+// first, so the relay's newest-first bucket ends up in order. The items are
+// marked Backfill: the relay stores and shows them but never takes one for
+// the reply of a pending "done" push (contracts.md §3). A read failure is
+// logged and forgotten: the live capture covers the last turn, and the relay
+// drops anything it already holds.
+func (e *Engine) backfillHistory(paneID, cwd, agent string, info herdr.AgentInfo, ref *herdr.AgentSession) {
+	ad := e.Agents.For(agent)
+	budget := 2 * e.TranscriptTimeout
+	if budget <= 0 {
+		budget = 6 * time.Second
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), budget)
+	defer cancel()
+
+	items, err := ad.RecentTurns(ctx, agents.SessionRef{
+		Agent: ref.Agent,
+		Kind:  ref.Kind,
+		Value: ref.Value,
+		CWD:   cwd,
+		Title: titleOf(info),
+	}, historyBackfillTurns)
+	if err != nil {
+		if !errors.Is(err, agents.ErrNoTranscript) && e.Logger != nil {
+			e.Logger.Info("no history backfill", "pane_id", paneID, "agent", agent, "err", err)
+		}
+		if !errors.Is(err, agents.ErrNoTranscript) {
+			// A transient failure may succeed on the pane's next change;
+			// a missing transcript will not.
+			e.mu.Lock()
+			if st, ok := e.states[paneID]; ok && st.backfilledSession == ref.Value {
+				st.backfilledSession = ""
+			}
+			e.mu.Unlock()
+		}
+		return
+	}
+
+	e.mu.RLock()
+	st, exists := e.states[paneID]
+	if !exists || st.backfilledSession != ref.Value {
+		e.mu.RUnlock()
+		return // the pane went away or moved to another session
+	}
+	label := st.public.Label
+	e.mu.RUnlock()
+
+	for i := len(items) - 1; i >= 0; i-- { // RecentTurns is newest first
+		item := items[i]
+		item.ID = model.HistoryID(paneID, ref.Value, item.Query, item.Response)
+		item.PaneID = paneID
+		item.Agent = agent
+		item.Label = label
+		if item.CompletedAt == "" {
+			item.CompletedAt = model.Now()
+		}
+		e.Relay.Send(model.HistoryItemMsg{
+			Type:     model.WireHistoryItem,
+			Item:     item,
+			Backfill: true,
+		})
+	}
+	if e.Logger != nil && len(items) > 0 {
+		e.Logger.Info("history backfilled", "pane_id", paneID, "agent", agent, "turns", len(items))
 	}
 }
 
@@ -513,8 +660,6 @@ func (e *Engine) StartTurnWatch(ctx context.Context) {
 // workingPane is a pane checked by checkWorkingTurns.
 type workingPane struct {
 	paneID, agent string
-	reader        agents.TurnEndReader
-	tasks         agents.BackgroundTaskReader // nil when the adapter counts none
 	ref           agents.SessionRef
 }
 
@@ -531,11 +676,7 @@ func (e *Engine) checkWorkingTurns(ctx context.Context) {
 			continue
 		}
 		ad := e.Agents.For(st.public.Agent)
-		reader, ok := ad.(agents.TurnEndReader)
-		if !ok {
-			continue
-		}
-		if v, ok := ad.(agents.ViewDetector); ok && !v.ShowsConversation(titleOf(st.info)) {
+		if !ad.ShowsConversation(titleOf(st.info)) {
 			hidden = append(hidden, paneID)
 			continue
 		}
@@ -544,8 +685,7 @@ func (e *Engine) checkWorkingTurns(ctx context.Context) {
 			hidden = append(hidden, paneID)
 			continue
 		}
-		tasks, _ := ad.(agents.BackgroundTaskReader)
-		panes = append(panes, workingPane{paneID: paneID, agent: st.public.Agent, reader: reader, tasks: tasks, ref: agents.SessionRef{
+		panes = append(panes, workingPane{paneID: paneID, agent: st.public.Agent, ref: agents.SessionRef{
 			Agent: ref.Agent, Kind: ref.Kind, Value: ref.Value, CWD: st.public.CWD, Title: titleOf(st.info),
 		}})
 	}
@@ -559,9 +699,13 @@ func (e *Engine) checkWorkingTurns(ctx context.Context) {
 		if ctx.Err() != nil {
 			return
 		}
+		ad := e.Agents.For(p.agent)
 		readCtx, cancel := context.WithTimeout(ctx, e.TranscriptTimeout)
-		end, err := p.reader.LastCompletedTurn(readCtx, p.ref)
+		end, tasks, ok, err := ad.ObserveWorkingTurn(readCtx, p.ref)
 		cancel()
+		if !ok {
+			continue
+		}
 		if err != nil {
 			// The count stays: a failed read says nothing new.
 			if e.Logger != nil {
@@ -583,26 +727,8 @@ func (e *Engine) checkWorkingTurns(ctx context.Context) {
 			e.publishHistory(p.paneID, p.agent, p.ref.Value, *end.Item)
 		}
 		e.setBackground(p.paneID, end.Background)
-		if p.tasks != nil {
-			e.refreshTasks(ctx, p.paneID, p.agent, p.tasks, p.ref)
-		}
+		e.setTasks(p.paneID, tasks)
 	}
-}
-
-// refreshTasks reads the pane's background shells and monitors and
-// publishes them when they changed. A failed read keeps the counts: it says
-// nothing new.
-func (e *Engine) refreshTasks(ctx context.Context, paneID, agent string, reader agents.BackgroundTaskReader, ref agents.SessionRef) {
-	readCtx, cancel := context.WithTimeout(ctx, e.TranscriptTimeout)
-	n, err := reader.BackgroundTasks(readCtx, ref)
-	cancel()
-	if err != nil {
-		if e.Logger != nil {
-			e.Logger.Debug("background task read failed", "pane_id", paneID, "agent", agent, "err", err)
-		}
-		return
-	}
-	e.setTasks(paneID, n)
 }
 
 // setTasks stores n as the pane's background_shells and background_monitors
@@ -706,6 +832,13 @@ func (e *Engine) maybeRefreshWorkspacesLocked(changes []herdr.Change) {
 	}
 }
 
+// RefreshWorkspaces triggers a background refresh of workspace and tab labels.
+func (e *Engine) RefreshWorkspaces() {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.startWorkspaceRefreshLocked()
+}
+
 // startWorkspaceRefreshLocked runs one workspace.list in the background
 // unless one is already in flight. Callers hold e.mu.
 func (e *Engine) startWorkspaceRefreshLocked() {
@@ -713,7 +846,6 @@ func (e *Engine) startWorkspaceRefreshLocked() {
 		return
 	}
 	e.wsRefreshing = true
-	e.wsRefreshes++
 	go e.refreshWorkspaces(context.Background())
 }
 
@@ -771,7 +903,7 @@ func (e *Engine) refreshWorkspaces(ctx context.Context) {
 
 	for _, st := range e.states {
 		wsLabel := labels[st.info.WorkspaceID]
-		name, title := agentNames(st.info)
+		name, title := e.agentNames(st.info)
 		label := e.labelFor(st.info, name, title, st.public.CWD)
 		if st.public.Workspace == wsLabel && st.public.Label == label {
 			continue
@@ -789,14 +921,23 @@ func (e *Engine) refreshWorkspaces(ctx context.Context) {
 
 // agentNames returns herdr's name for the agent and its terminal title, when
 // the title describes a task: a title that only names the program is none.
-func agentNames(info herdr.AgentInfo) (name, title string) {
+func (e *Engine) agentNames(info herdr.AgentInfo) (name, title string) {
 	if info.Name != nil {
 		name = strings.TrimSpace(*info.Name)
 	}
 	if info.TerminalTitleStripped != nil {
-		t := strings.TrimSpace(*info.TerminalTitleStripped)
-		if t != "" && !strings.HasPrefix(t, "agy --conversation") && t != "OpenCode" {
-			title = t
+		agent := ""
+		if info.Agent != nil {
+			agent = *info.Agent
+		}
+		var ad agents.Adapter
+		if e.Agents != nil {
+			ad = e.Agents.For(agent)
+		}
+		if ad != nil {
+			title = ad.TaskTitle(*info.TerminalTitleStripped)
+		} else {
+			title = strings.TrimSpace(*info.TerminalTitleStripped)
 		}
 	}
 	return name, title
@@ -832,7 +973,7 @@ func (e *Engine) buildAgentState(info herdr.AgentInfo) (model.AgentState, string
 		cwd = *info.CWD
 	}
 
-	paneName, taskTitle := agentNames(info)
+	paneName, taskTitle := e.agentNames(info)
 	label := e.labelFor(info, paneName, taskTitle, cwd)
 
 	wsLabel := ""

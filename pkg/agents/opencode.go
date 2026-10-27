@@ -103,6 +103,30 @@ func ocMainText(line string) string {
 	return strings.TrimRight(line, " ")
 }
 
+func (o *opencodeAdapter) TaskTitle(rawTitle string) string {
+	t := strings.TrimSpace(rawTitle)
+	if t == "OpenCode" {
+		return ""
+	}
+	return t
+}
+
+func (o *opencodeAdapter) ScreenTurn(screen string) *model.HistoryItem {
+	lines := screenBody(screen)
+	if query, reply, ok := o.SplitScreenTurn(lines); ok {
+		if reply = dedent(reply); len(reply) > 0 {
+			return screenItem(query, reply)
+		}
+		return nil
+	}
+	return screenItem("", lines)
+}
+
+func (o *opencodeAdapter) ObserveSettledTurn(ctx context.Context, ref SessionRef) (*model.HistoryItem, BackgroundTasks, error) {
+	item, err := o.LastTurn(ctx, ref)
+	return item, BackgroundTasks{}, err
+}
+
 func (o *opencodeAdapter) Name() string {
 	return "opencode"
 }
@@ -390,6 +414,243 @@ func (o *opencodeAdapter) LastTurn(ctx context.Context, ref SessionRef) (*model.
 // errNoV2Session: the database has no V2 session_message row for the session.
 var errNoV2Session = errors.New("no V2 session")
 
+// RecentTurns implements HistoryReader: up to max finished turns of the
+// session, newest first. V2's session_message is read first; V1's message and
+// part tables only when V2 has no user row for the session, as in LastTurn.
+func (o *opencodeAdapter) RecentTurns(ctx context.Context, ref SessionRef, max int) ([]model.HistoryItem, error) {
+	if ref.Value == "" || max <= 0 {
+		return nil, ErrNoTranscript
+	}
+	dbPath := o.cfg.OpenCodeDBPath
+	if _, err := os.Stat(dbPath); err != nil {
+		return nil, ErrNoTranscript
+	}
+	db, err := sql.Open("sqlite", "file:"+dbPath+"?mode=ro&_pragma=busy_timeout(2000)")
+	if err != nil {
+		return nil, ErrNoTranscript
+	}
+	defer db.Close()
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
+	items, err := o.recentTurnsV2(ctx, db, ref.Value, max)
+	if !errors.Is(err, errNoV2Session) {
+		return items, err
+	}
+	return o.recentTurnsV1(ctx, db, ref.Value, max)
+}
+
+// recentTurnsV2 reads the last max user rows and, for each, the newest
+// assistant step with text before the next user row.
+func (o *opencodeAdapter) recentTurnsV2(ctx context.Context, db *sql.DB, sessionID string, max int) ([]model.HistoryItem, error) {
+	var tables int
+	if err := db.QueryRowContext(ctx,
+		`SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = 'session_message'`).Scan(&tables); err != nil {
+		return nil, ErrNoTranscript
+	}
+	if tables == 0 {
+		return nil, errNoV2Session
+	}
+
+	rows, err := db.QueryContext(ctx, `
+		SELECT seq, time_created, data FROM session_message
+		WHERE session_id = ? AND type = 'user'
+		ORDER BY seq DESC
+		LIMIT ?;
+	`, sessionID, max)
+	if err != nil {
+		return nil, ErrNoTranscript
+	}
+	type userRow struct {
+		seq       int64
+		createdAt int64
+		text      string
+	}
+	var users []userRow
+	for rows.Next() {
+		var seq, createdAt int64
+		var dataJSON string
+		if err := rows.Scan(&seq, &createdAt, &dataJSON); err != nil {
+			rows.Close()
+			return nil, ErrNoTranscript
+		}
+		var m opencodeV2Message
+		if err := json.Unmarshal([]byte(dataJSON), &m); err != nil {
+			continue
+		}
+		if text := strings.TrimSpace(m.Text); text != "" {
+			users = append(users, userRow{seq: seq, createdAt: createdAt, text: text})
+		}
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return nil, ErrNoTranscript
+	}
+	rows.Close()
+	if len(users) == 0 {
+		return nil, errNoV2Session
+	}
+
+	items := make([]model.HistoryItem, 0, len(users))
+	for i, u := range users { // newest first
+		before := int64(1<<63 - 1)
+		if i > 0 {
+			before = users[i-1].seq
+		}
+		response, responseCreated, err := o.v2Answer(ctx, db, sessionID, u.seq, before)
+		if err != nil {
+			return nil, err
+		}
+		if response == "" {
+			continue
+		}
+		items = append(items, model.HistoryItem{
+			Query:       u.text,
+			Response:    model.TruncateUTF8(response, model.MaxResponseBytes),
+			Source:      "transcript",
+			AskedAt:     millisTime(u.createdAt),
+			CompletedAt: millisTime(responseCreated),
+		})
+	}
+	if len(items) == 0 {
+		return nil, ErrNoTranscript
+	}
+	return items, nil
+}
+
+// v2Answer returns the newest assistant step with text between two user rows
+// (afterSeq exclusive, beforeSeq exclusive) and its time.
+func (o *opencodeAdapter) v2Answer(ctx context.Context, db *sql.DB, sessionID string, afterSeq, beforeSeq int64) (string, int64, error) {
+	rows, err := db.QueryContext(ctx, `
+		SELECT time_created, data FROM session_message
+		WHERE session_id = ? AND type = 'assistant' AND seq > ? AND seq < ?
+		ORDER BY seq DESC
+		LIMIT 40;
+	`, sessionID, afterSeq, beforeSeq)
+	if err != nil {
+		return "", 0, ErrNoTranscript
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var createdAt int64
+		var dataJSON string
+		if err := rows.Scan(&createdAt, &dataJSON); err != nil {
+			return "", 0, ErrNoTranscript
+		}
+		var m opencodeV2Message
+		if err := json.Unmarshal([]byte(dataJSON), &m); err != nil {
+			continue
+		}
+		if text := ocJoinText(m.Content); text != "" {
+			return text, createdAt, nil
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return "", 0, ErrNoTranscript
+	}
+	return "", 0, nil
+}
+
+// recentTurnsV1 reads a window of the last messages and pairs each user
+// message with the newest assistant step that has text before the next one.
+func (o *opencodeAdapter) recentTurnsV1(ctx context.Context, db *sql.DB, sessionID string, max int) ([]model.HistoryItem, error) {
+	limit := max * 8
+	if limit > 400 {
+		limit = 400
+	}
+	rows, err := db.QueryContext(ctx, `
+		SELECT id, time_created, data FROM message
+		WHERE session_id = ?
+		ORDER BY time_created DESC, id DESC
+		LIMIT ?;
+	`, sessionID, limit)
+	if err != nil {
+		return nil, ErrNoTranscript
+	}
+	type msgRecord struct {
+		id        string
+		role      string
+		createdAt int64
+	}
+	var messages []msgRecord
+	for rows.Next() {
+		var id, dataJSON string
+		var createdAt int64
+		if err := rows.Scan(&id, &createdAt, &dataJSON); err != nil {
+			rows.Close()
+			return nil, ErrNoTranscript
+		}
+		var m opencodeMessageData
+		if err := json.Unmarshal([]byte(dataJSON), &m); err != nil {
+			continue
+		}
+		messages = append(messages, msgRecord{id: id, role: m.Role, createdAt: createdAt})
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return nil, ErrNoTranscript
+	}
+	rows.Close()
+
+	var users []int // indices into messages, newest first
+	for i, m := range messages {
+		if m.role == "user" {
+			users = append(users, i)
+		}
+	}
+	if len(users) == 0 {
+		return nil, ErrNoTranscript
+	}
+	if len(users) > max {
+		users = users[:max]
+	}
+
+	items := make([]model.HistoryItem, 0, len(users))
+	for n, idx := range users { // newest first
+		upper := -1
+		if n > 0 {
+			upper = users[n-1]
+		}
+		query, err := o.readPartsText(ctx, db, messages[idx].id)
+		if err != nil {
+			return nil, ErrNoTranscript
+		}
+		if strings.TrimSpace(query) == "" {
+			continue
+		}
+		var response string
+		var responseCreated int64
+		for j := upper + 1; j < idx; j++ {
+			if messages[j].role != "assistant" {
+				continue
+			}
+			text, err := o.readPartsText(ctx, db, messages[j].id)
+			if err != nil {
+				return nil, ErrNoTranscript
+			}
+			if text != "" {
+				response, responseCreated = text, messages[j].createdAt
+				break
+			}
+		}
+		if response == "" {
+			continue
+		}
+		items = append(items, model.HistoryItem{
+			Query:       strings.TrimSpace(query),
+			Response:    model.TruncateUTF8(response, model.MaxResponseBytes),
+			Source:      "transcript",
+			AskedAt:     millisTime(messages[idx].createdAt),
+			CompletedAt: millisTime(responseCreated),
+		})
+	}
+	if len(items) == 0 {
+		return nil, ErrNoTranscript
+	}
+	return items, nil
+}
+
 // opencodeV2Message is the data of a V2 session_message row: a user message
 // has its text in text, an assistant message (one per step) has content.
 type opencodeV2Message struct {
@@ -409,14 +670,14 @@ func (o *opencodeAdapter) lastTurnV2(ctx context.Context, db *sql.DB, sessionID 
 
 	// The query is the newest user message. A long turn has many assistant
 	// steps after it, so it is looked up on its own, not within their window.
-	var userSeq int64
+	var userSeq, userCreated int64
 	var userJSON string
 	err := db.QueryRowContext(ctx, `
-		SELECT seq, data FROM session_message
+		SELECT seq, time_created, data FROM session_message
 		WHERE session_id = ? AND type = 'user'
 		ORDER BY seq DESC
 		LIMIT 1;
-	`, sessionID).Scan(&userSeq, &userJSON)
+	`, sessionID).Scan(&userSeq, &userCreated, &userJSON)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, errNoV2Session
 	}
@@ -435,7 +696,7 @@ func (o *opencodeAdapter) lastTurnV2(ctx context.Context, db *sql.DB, sessionID 
 	// The answer is the newest step after it with text: earlier steps are
 	// tool calls, with or without a line of text before them.
 	rows, err := db.QueryContext(ctx, `
-		SELECT data FROM session_message
+		SELECT time_created, data FROM session_message
 		WHERE session_id = ? AND type = 'assistant' AND seq > ?
 		ORDER BY seq DESC
 		LIMIT 40;
@@ -445,24 +706,30 @@ func (o *opencodeAdapter) lastTurnV2(ctx context.Context, db *sql.DB, sessionID 
 	}
 	defer rows.Close()
 	var response string
+	var responseCreated int64
 	for response == "" && rows.Next() {
 		var dataJSON string
-		if err := rows.Scan(&dataJSON); err != nil {
+		var createdAt int64
+		if err := rows.Scan(&createdAt, &dataJSON); err != nil {
 			return nil, ErrNoTranscript
 		}
 		var m opencodeV2Message
 		if err := json.Unmarshal([]byte(dataJSON), &m); err != nil {
 			continue
 		}
-		response = ocJoinText(m.Content)
+		if text := ocJoinText(m.Content); text != "" {
+			response, responseCreated = text, createdAt
+		}
 	}
 	if err := rows.Err(); err != nil || response == "" {
 		return nil, ErrNoTranscript
 	}
 	return &model.HistoryItem{
-		Query:    query,
-		Response: model.TruncateUTF8(response, model.MaxResponseBytes),
-		Source:   "transcript",
+		Query:       query,
+		Response:    model.TruncateUTF8(response, model.MaxResponseBytes),
+		Source:      "transcript",
+		AskedAt:     millisTime(userCreated),
+		CompletedAt: millisTime(responseCreated),
 	}, nil
 }
 
@@ -479,7 +746,7 @@ func ocJoinText(parts []opencodePartData) string {
 
 func (o *opencodeAdapter) lastTurnV1(ctx context.Context, db *sql.DB, sessionID string) (*model.HistoryItem, error) {
 	rows, err := db.QueryContext(ctx, `
-		SELECT id, data FROM message
+		SELECT id, time_created, data FROM message
 		WHERE session_id = ?
 		ORDER BY time_created DESC, id DESC
 		LIMIT 40;
@@ -490,22 +757,24 @@ func (o *opencodeAdapter) lastTurnV1(ctx context.Context, db *sql.DB, sessionID 
 	defer rows.Close()
 
 	type msgRecord struct {
-		id   string
-		role string
+		id        string
+		role      string
+		createdAt int64
 	}
 
 	var messages []msgRecord
 	for rows.Next() {
 		var id string
+		var createdAt int64
 		var dataJSON string
-		if err := rows.Scan(&id, &dataJSON); err != nil {
+		if err := rows.Scan(&id, &createdAt, &dataJSON); err != nil {
 			return nil, ErrNoTranscript
 		}
 		var mData opencodeMessageData
 		if err := json.Unmarshal([]byte(dataJSON), &mData); err != nil {
 			continue
 		}
-		messages = append(messages, msgRecord{id: id, role: mData.Role})
+		messages = append(messages, msgRecord{id: id, role: mData.Role, createdAt: createdAt})
 	}
 	if err := rows.Err(); err != nil {
 		return nil, ErrNoTranscript
@@ -534,6 +803,7 @@ func (o *opencodeAdapter) lastTurnV1(ctx context.Context, db *sql.DB, sessionID 
 	// the query (index < userIdx). The answer is the newest one with text:
 	// earlier steps are tool calls, with or without a line of text before them.
 	var response string
+	var responseCreated int64
 	for i := 0; i < userIdx && response == ""; i++ {
 		if messages[i].role != "assistant" {
 			continue
@@ -542,6 +812,7 @@ func (o *opencodeAdapter) lastTurnV1(ctx context.Context, db *sql.DB, sessionID 
 		if err != nil {
 			return nil, ErrNoTranscript
 		}
+		responseCreated = messages[i].createdAt
 	}
 	if response == "" {
 		return nil, ErrNoTranscript
@@ -550,9 +821,11 @@ func (o *opencodeAdapter) lastTurnV1(ctx context.Context, db *sql.DB, sessionID 
 	response = model.TruncateUTF8(response, model.MaxResponseBytes)
 
 	return &model.HistoryItem{
-		Query:    query,
-		Response: response,
-		Source:   "transcript",
+		Query:       query,
+		Response:    response,
+		Source:      "transcript",
+		AskedAt:     millisTime(messages[userIdx].createdAt),
+		CompletedAt: millisTime(responseCreated),
 	}, nil
 }
 

@@ -33,8 +33,7 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
         when (message) {
             is PushMessage.Resolved -> {
                 message.seq?.let { seq ->
-                    val prefs = Prefs(this)
-                    prefs.resolvedSeqs = prefs.resolvedSeqs.record(message.key, seq)
+                    Prefs(this).recordResolvedSeq(message.key, seq)
                 }
                 ApprovalNotifications.onResolved(this, message)
             }
@@ -67,7 +66,7 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
         val body = MarkdownFormatter.clean(message.body)
 
         val builder = NotificationCompat.Builder(this, NotificationChannels.BLOCKED)
-            .setSmallIcon(R.drawable.ic_agent_alert)
+            .setSmallIcon(com.gabriel.agentwatch.core.R.drawable.ic_agent_alert)
             .setContentTitle(message.title)
             .setContentText(body)
             .setStyle(NotificationCompat.BigTextStyle().bigText(body))
@@ -112,7 +111,7 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
                     }
                     builder.addAction(R.drawable.ic_close, button.label, pending)
                 }
-                NotificationButton.Kind.OPEN -> builder.addAction(R.drawable.ic_agent, button.label, openPendingIntent)
+                NotificationButton.Kind.OPEN -> builder.addAction(com.gabriel.agentwatch.core.R.drawable.ic_agent, button.label, openPendingIntent)
             }
         }
         return builder.build()
@@ -141,7 +140,7 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
         // The body is the agent's reply (the relay waits for it): shown in full.
         val body = MarkdownFormatter.clean(message.body)
         return NotificationCompat.Builder(this, NotificationChannels.DONE)
-            .setSmallIcon(R.drawable.ic_agent)
+            .setSmallIcon(com.gabriel.agentwatch.core.R.drawable.ic_agent)
             .setContentTitle(message.title)
             .setContentText(body)
             .setStyle(NotificationCompat.BigTextStyle().bigText(body))
@@ -155,7 +154,7 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
 
     private fun digestNotification(message: PushMessage.Digest): Notification =
         NotificationCompat.Builder(this, NotificationChannels.DONE)
-            .setSmallIcon(R.drawable.ic_agent)
+            .setSmallIcon(com.gabriel.agentwatch.core.R.drawable.ic_agent)
             .setContentTitle(message.title)
             .setContentText(MarkdownFormatter.clean(message.body))
             .setAutoCancel(true)

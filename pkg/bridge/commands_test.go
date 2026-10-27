@@ -58,7 +58,6 @@ func TestCommands_AllErrorCodes(t *testing.T) {
 	})
 	h.server.SetScreen("w1:p1", "visible", string(fixture))
 	h.engine.OnHerdrOnline(true, herdr.Pong{Version: "0.9.1", Protocol: 22})
-	h.engine.herdrOnline = true
 
 	// Helper to send command and wait for result
 	sendCmd := func(cmd model.CommandMsg) model.CommandResultMsg {
@@ -89,7 +88,7 @@ func TestCommands_AllErrorCodes(t *testing.T) {
 	}
 
 	// 1. herdr_offline
-	h.engine.herdrOnline = false
+	h.engine.OnHerdrOnline(false, herdr.Pong{})
 	res := sendCmd(model.CommandMsg{
 		Type:        model.WireCommand,
 		RequestID:   "req-offline",
@@ -101,7 +100,7 @@ func TestCommands_AllErrorCodes(t *testing.T) {
 	if res.OK || res.ErrorCode != "herdr_offline" {
 		t.Errorf("expected herdr_offline, got ok=%v code=%s msg=%s", res.OK, res.ErrorCode, res.Message)
 	}
-	h.engine.herdrOnline = true
+	h.engine.OnHerdrOnline(true, herdr.Pong{Version: "0.9.1", Protocol: 22})
 
 	// 2. unknown_pane (non-existent pane)
 	res = sendCmd(model.CommandMsg{
@@ -284,7 +283,7 @@ func TestCommands_AnswerDispatchesGoldenKeys(t *testing.T) {
 		},
 	})
 	h.server.SetScreen("w1:p1", "visible", string(fixture))
-	h.engine.herdrOnline = true
+	h.engine.OnHerdrOnline(true, herdr.Pong{Version: "0.9.1", Protocol: 22})
 
 	ad := h.registry.For("claude")
 	p, ok := ad.ParsePrompt(string(fixture))
@@ -443,7 +442,7 @@ func TestCommands_PromptWhileWorking(t *testing.T) {
 			"state_change_seq": 100,
 		},
 	})
-	h.engine.herdrOnline = true
+	h.engine.OnHerdrOnline(true, herdr.Pong{Version: "0.9.1", Protocol: 22})
 
 	beforeCalls := len(h.server.Calls())
 

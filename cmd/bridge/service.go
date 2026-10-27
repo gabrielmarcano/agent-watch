@@ -95,30 +95,6 @@ func readInstalled(m ServiceManager) (*ServiceSpec, error) {
 	return &spec, nil
 }
 
-// writeFileAtomic writes data to path through a temp file in the same
-// directory and chmods it to mode, whatever the old file's mode was.
-func writeFileAtomic(path string, data []byte, mode os.FileMode) error {
-	dir := filepath.Dir(path)
-	tmp, err := os.CreateTemp(dir, "."+filepath.Base(path)+".*")
-	if err != nil {
-		return err
-	}
-	name := tmp.Name()
-	defer os.Remove(name) // no-op after the rename
-	if _, err := tmp.Write(data); err != nil {
-		tmp.Close()
-		return err
-	}
-	if err := tmp.Chmod(mode); err != nil {
-		tmp.Close()
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		return err
-	}
-	return os.Rename(name, path)
-}
-
 // validateSpec rejects specs that would produce a service that cannot start.
 func validateSpec(spec ServiceSpec) error {
 	for name, p := range map[string]string{

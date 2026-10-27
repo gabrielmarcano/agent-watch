@@ -89,23 +89,23 @@ class AgentStatusComplicationService : SuspendingComplicationDataSourceService()
             )
             ComplicationKind.NEEDS_YOU -> Texts(
                 c.label ?: app, status(R.string.status_blocked),
-                R.drawable.ic_agent_alert, plural(R.plurals.cd_complication_needs_you)
+                com.gabriel.agentwatch.core.R.drawable.ic_agent_alert, plural(R.plurals.cd_complication_needs_you)
             )
             ComplicationKind.DONE -> Texts(
                 c.label ?: app, status(R.string.status_done),
-                R.drawable.ic_agent, plural(R.plurals.cd_complication_done)
+                com.gabriel.agentwatch.core.R.drawable.ic_agent, plural(R.plurals.cd_complication_done)
             )
             ComplicationKind.WORKING -> Texts(
                 app, plural(R.plurals.complication_working),
-                R.drawable.ic_agent, plural(R.plurals.cd_complication_working)
+                com.gabriel.agentwatch.core.R.drawable.ic_agent, plural(R.plurals.cd_complication_working)
             )
             ComplicationKind.IDLE -> Texts(
                 app, plural(R.plurals.complication_idle),
-                R.drawable.ic_agent, plural(R.plurals.cd_complication_idle)
+                com.gabriel.agentwatch.core.R.drawable.ic_agent, plural(R.plurals.cd_complication_idle)
             )
             ComplicationKind.NO_AGENTS -> Texts(
                 app, getString(R.string.no_agents),
-                R.drawable.ic_agent, getString(R.string.cd_complication_no_agents)
+                com.gabriel.agentwatch.core.R.drawable.ic_agent, getString(R.string.cd_complication_no_agents)
             )
         }
     }
@@ -136,8 +136,8 @@ class AgentStatusComplicationService : SuspendingComplicationDataSourceService()
 
     private val BadgeIcon.drawable: Int
         get() = when (this) {
-            BadgeIcon.ALERT -> R.drawable.ic_agent_alert
-            BadgeIcon.AGENT -> R.drawable.ic_agent
+            BadgeIcon.ALERT -> com.gabriel.agentwatch.core.R.drawable.ic_agent_alert
+            BadgeIcon.AGENT -> com.gabriel.agentwatch.core.R.drawable.ic_agent
             BadgeIcon.NOT_PAIRED -> R.drawable.ic_link
             BadgeIcon.UNREACHABLE -> R.drawable.ic_cloud_off
             BadgeIcon.DEVICE_OFFLINE -> R.drawable.ic_computer

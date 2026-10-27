@@ -547,3 +547,31 @@ func TestOpenCodeLastTurn_MultiStep(t *testing.T) {
 		t.Errorf("first turn response = %q, want the final step %q", item.Response, want)
 	}
 }
+
+func TestAdapter_TaskTitle(t *testing.T) {
+	reg := NewRegistry(Config{})
+	cases := []struct {
+		agent    string
+		raw      string
+		expected string
+	}{
+		{"claude", "  refactoring backend  ", "refactoring backend"},
+		{"claude", "OpenCode", "OpenCode"},
+		{"agy", "agy --conversation foo", ""},
+		{"agy", "agy --conversation", ""},
+		{"agy", "  debugging issue  ", "debugging issue"},
+		{"opencode", "OpenCode", ""},
+		{"opencode", "Fixing bug", "Fixing bug"},
+		{"opencode", "  Adding feature  ", "Adding feature"},
+		{"generic", "  some title  ", "some title"},
+		{"generic", "OpenCode", "OpenCode"},
+	}
+
+	for _, tc := range cases {
+		ad := reg.For(tc.agent)
+		got := ad.TaskTitle(tc.raw)
+		if got != tc.expected {
+			t.Errorf("%s TaskTitle(%q) = %q, want %q", tc.agent, tc.raw, got, tc.expected)
+		}
+	}
+}

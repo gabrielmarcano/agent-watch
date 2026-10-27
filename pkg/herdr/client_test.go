@@ -211,6 +211,79 @@ func TestSubscribeAck(t *testing.T) {
 	}
 }
 
+func TestSessionCalls(t *testing.T) {
+	srv := herdrtest.New(t)
+	client := herdr.NewClient(srv.SocketPath)
+
+	srv.SetWorkspaces([]map[string]any{
+		{"workspace_id": "w1", "number": 1, "label": "proj"},
+	})
+	srv.SetPanes([]map[string]any{
+		{"pane_id": "w1:p1", "workspace_id": "w1", "tab_id": "t1", "cwd": "/tmp/proj"},
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	panes, err := client.ListPanes(ctx)
+	if err != nil {
+		t.Fatalf("ListPanes: %v", err)
+	}
+	if len(panes) != 1 || panes[0].PaneID != "w1:p1" || panes[0].CWD == nil || *panes[0].CWD != "/tmp/proj" {
+		t.Fatalf("ListPanes = %+v", panes)
+	}
+
+	ws, tab, pane, err := client.CreateWorkspace(ctx, "/tmp/proj", "proj")
+	if err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
+	if ws.WorkspaceID == "" || tab.TabID == "" || pane.PaneID == "" {
+		t.Fatalf("CreateWorkspace returned %+v %+v %+v", ws, tab, pane)
+	}
+
+	tab2, pane2, err := client.CreateTab(ctx, ws.WorkspaceID, "/tmp/proj/sub", "proj 2")
+	if err != nil {
+		t.Fatalf("CreateTab: %v", err)
+	}
+	if tab2.WorkspaceID != ws.WorkspaceID || pane2.PaneID == "" {
+		t.Fatalf("CreateTab returned %+v %+v", tab2, pane2)
+	}
+
+	started, err := client.StartAgent(ctx, pane2.PaneID, "claude", "proj 2", 25000)
+	if err != nil {
+		t.Fatalf("StartAgent: %v", err)
+	}
+	if started.PaneID != pane2.PaneID || started.Name == nil || *started.Name != "proj 2" {
+		t.Fatalf("StartAgent = %+v", started)
+	}
+
+	calls := srv.Calls()
+	byMethod := func(method string) map[string]any {
+		for i := len(calls) - 1; i >= 0; i-- {
+			if calls[i].Method == method {
+				return calls[i].Params
+			}
+		}
+		t.Fatalf("no %s call", method)
+		return nil
+	}
+
+	// herdr-socket-api.md §2.2: create and start without taking the owner's
+	// focus, with a label, and an explicit startup wait.
+	p := byMethod("workspace.create")
+	if p["cwd"] != "/tmp/proj" || p["label"] != "proj" || p["focus"] != false {
+		t.Errorf("workspace.create params = %v, want cwd, label and focus false", p)
+	}
+	p = byMethod("tab.create")
+	if p["workspace_id"] != ws.WorkspaceID || p["cwd"] != "/tmp/proj/sub" || p["label"] != "proj 2" || p["focus"] != false {
+		t.Errorf("tab.create params = %v", p)
+	}
+	p = byMethod("agent.start")
+	if p["pane_id"] != pane2.PaneID || p["kind"] != "claude" || p["name"] != "proj 2" || p["timeout_ms"] != float64(25000) {
+		t.Errorf("agent.start params = %v", p)
+	}
+}
+
 func TestTrustedSession(t *testing.T) {
 	agentClaude := "claude"
 	agentAgy := "agy"

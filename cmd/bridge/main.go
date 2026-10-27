@@ -9,7 +9,6 @@ import (
 	"os/signal"
 	"path/filepath"
 	"syscall"
-	"time"
 
 	"github.com/gabrielmarcano/agent-monitor/pkg/agents"
 	"github.com/gabrielmarcano/agent-monitor/pkg/bridge"
@@ -107,6 +106,10 @@ Usage:
 configure --env-file takes AW_RELAY_DOMAIN and AW_HOST_TOKEN from the shared
 agent-watch.env (see agent-watch.env.example), so the token never appears on
 a command line; --relay-url and --host-token override it.
+configure --session-root adds a folder where the phone may start new agent
+sessions (repeat it per folder; none means the feature is off), and
+--session-kind limits the agent kinds it may start (default: claude, agy,
+opencode).
 start installs the service (LaunchAgent on macOS, systemd --user unit on
 Linux) and (re)loads it. A value not given as a flag or by herdr's plugin
 environment is kept from the installed service definition.
@@ -162,9 +165,8 @@ func runDaemon(args []string) error {
 	}
 
 	engine := bridge.NewEngine(hClient, syncer, reg, rClient, fullVersion, cfg.HostName, statusPath, logger)
-	syncer.Listener = engine
-	rClient.OnConnect = engine.ConnectMessages
-	rClient.OnMessage = engine.HandleRelayMessage
+	engine.SessionRoots = cfg.SessionRoots
+	engine.SessionKinds = cfg.SessionKinds
 	engine.Presence = bridge.ReadPresence
 	// Read on every report, so `presence on|off` applies without a restart.
 	engine.PresenceEnabled = func() bool {
@@ -177,23 +179,8 @@ func runDaemon(args []string) error {
 
 	logger.Info("starting agent-watch-bridge", "version", fullVersion, "socket", hClient.SocketPath, "config", targetConfig, "status", statusPath)
 
-	writerDone := engine.StartStatusWriter(ctx, 5*time.Second)
-	engine.StartTurnWatch(ctx)
-	engine.StartPresence(ctx)
-
-	go func() {
-		if err := syncer.Run(ctx); err != nil && ctx.Err() == nil {
-			logger.Error("syncer error", "err", err)
-		}
-	}()
-
-	runErr := rClient.Run(ctx)
-	// Run only returns once ctx is done; make sure it is, then let the
-	// writer mark the status file as stopped before the process exits.
-	cancel()
-	<-writerDone
-	if runErr != nil && !errors.Is(runErr, context.Canceled) {
-		return fmt.Errorf("relay client run: %w", runErr)
+	if err := engine.Run(ctx); err != nil {
+		return err
 	}
 
 	logger.Info("agent-watch-bridge stopped cleanly")

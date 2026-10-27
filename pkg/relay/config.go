@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/netip"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -32,8 +33,11 @@ type Config struct {
 	HostID string
 	// HostName (AW_HOST_NAME) is HostToken's host as the watch shows it.
 	// Empty: HostID.
-	HostName       string
-	DataDir        string
+	HostName string
+	DataDir  string
+	// UpdateDir (AW_UPDATE_DIR) holds published Android APKs and their JSON
+	// metadata. Empty: <DataDir>/updates. The relay only reads it.
+	UpdateDir      string
 	FCMCredentials string
 	NtfyURL        string
 	NtfyTopic      string
@@ -113,6 +117,10 @@ func LoadConfig() (*Config, error) {
 	if dataDir == "" {
 		dataDir = DefaultDataDir
 	}
+	updateDir := strings.TrimSpace(os.Getenv("AW_UPDATE_DIR"))
+	if updateDir == "" {
+		updateDir = filepath.Join(dataDir, "updates")
+	}
 
 	trustedProxies, err := ParseTrustedProxies(os.Getenv("AW_TRUSTED_PROXIES"))
 	if err != nil {
@@ -156,6 +164,7 @@ func LoadConfig() (*Config, error) {
 		HostID:           hostID,
 		HostName:         hostName,
 		DataDir:          dataDir,
+		UpdateDir:        updateDir,
 		FCMCredentials:   os.Getenv("AW_FCM_CREDENTIALS"),
 		NtfyURL:          os.Getenv("AW_NTFY_URL"),
 		NtfyTopic:        os.Getenv("AW_NTFY_TOPIC"),

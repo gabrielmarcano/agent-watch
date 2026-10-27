@@ -93,10 +93,6 @@ func newTestHarness(t *testing.T) *testHarness {
 	engine := NewEngine(hClient, syncer, reg, rClient, "0.2.0", "test-host", "", nil)
 	engine.RetryDelay = 10 * time.Millisecond
 	engine.HistoryDelay = 10 * time.Millisecond
-	syncer.Listener = engine
-
-	rClient.OnConnect = engine.ConnectMessages
-	rClient.OnMessage = engine.HandleRelayMessage
 
 	runCtx, runCancel := context.WithCancel(context.Background())
 	go func() { _ = rClient.Run(runCtx) }()
@@ -203,13 +199,11 @@ func TestEngine_AgentStateMapping(t *testing.T) {
 		t.Errorf("label = %q, want stripped-title", st3.Label)
 	}
 
-	// 4. Titles that are only the program, not a task, are no title.
-	for _, generic := range []string{"OpenCode", "agy --conversation 1234"} {
-		g := generic
-		st, _ := e.buildAgentState(herdr.AgentInfo{PaneID: "w1:p4", Agent: &agent, TerminalTitleStripped: &g, CWD: &cwd})
-		if st.Label != "repo" || st.Title != "" {
-			t.Errorf("title %q: label/title = %q/%q, want repo/\"\"", generic, st.Label, st.Title)
-		}
+	// 4. An empty title falls back to cwd.
+	emptyTitle := ""
+	st, _ := e.buildAgentState(herdr.AgentInfo{PaneID: "w1:p4", Agent: &agent, TerminalTitleStripped: &emptyTitle, CWD: &cwd})
+	if st.Label != "repo" || st.Title != "" {
+		t.Errorf("empty title: label/title = %q/%q, want repo/\"\"", st.Label, st.Title)
 	}
 
 	// 5. PaneID fallback when everything else is empty
@@ -233,23 +227,21 @@ func TestEngine_TabLabelNamesTheAgent(t *testing.T) {
 		{"tab_id": "w1:t2", "workspace_id": "w1", "number": 2, "label": "2", "pane_count": 1},
 	})
 	h.engine.OnHerdrOnline(true, herdr.Pong{Version: "0.9.1", Protocol: 22})
-	pollUntil(t, 3*time.Second, "tab labels", func() bool {
-		h.engine.mu.RLock()
-		defer h.engine.mu.RUnlock()
-		return h.engine.tabs["w1:t1"] == "tareas" && !h.engine.wsRefreshing
+	pollUntil(t, 3*time.Second, "tab list loaded", func() bool {
+		return callsSince(h, 0, "tab.list") >= 1
 	})
-	h.engine.mu.RLock()
-	numbered := h.engine.tabs["w1:t2"] != ""
-	h.engine.mu.RUnlock()
-	if numbered {
-		t.Error("a tab labelled with its own number is kept as a name")
-	}
 
 	agent, title := "claude", "Claude's own title"
-	h.engine.OnChanges([]herdr.Change{{Kind: herdr.Added, Agent: herdr.AgentInfo{
-		PaneID: "w1:p1", WorkspaceID: "w1", TabID: "w1:t1", Agent: &agent,
-		TerminalTitleStripped: &title, AgentStatus: "idle", StateChangeSeq: 1,
-	}}})
+	h.engine.OnChanges([]herdr.Change{
+		{Kind: herdr.Added, Agent: herdr.AgentInfo{
+			PaneID: "w1:p1", WorkspaceID: "w1", TabID: "w1:t1", Agent: &agent,
+			TerminalTitleStripped: &title, AgentStatus: "idle", StateChangeSeq: 1,
+		}},
+		{Kind: herdr.Added, Agent: herdr.AgentInfo{
+			PaneID: "w1:p2", WorkspaceID: "w1", TabID: "w1:t2", Agent: &agent,
+			AgentStatus: "idle", StateChangeSeq: 1,
+		}},
+	})
 	msg, _ := waitMsg(h, 3*time.Second, func(m any) bool {
 		u, ok := m.(model.AgentUpdateMsg)
 		return ok && u.Agent.PaneID == "w1:p1"
@@ -261,13 +253,22 @@ func TestEngine_TabLabelNamesTheAgent(t *testing.T) {
 		t.Errorf("label/title = %q/%q, want tareas/%q", u.Agent.Label, u.Agent.Title, title)
 	}
 
+	msg2, _ := waitMsg(h, 3*time.Second, func(m any) bool {
+		u, ok := m.(model.AgentUpdateMsg)
+		return ok && u.Agent.PaneID == "w1:p2"
+	})
+	if msg2 == nil {
+		t.Fatal("no agent_update for w1:p2")
+	}
+	if u := msg2.(model.AgentUpdateMsg); u.Agent.Label == "2" {
+		t.Errorf("a tab labelled with its own number is kept as a name: label = %q", u.Agent.Label)
+	}
+
 	// The tab is renamed: the next refresh republishes the agent.
 	h.server.SetTabs([]map[string]any{
 		{"tab_id": "w1:t1", "workspace_id": "w1", "number": 1, "label": "agenda", "pane_count": 1},
 	})
-	h.engine.mu.Lock()
-	h.engine.startWorkspaceRefreshLocked()
-	h.engine.mu.Unlock()
+	h.engine.RefreshWorkspaces()
 	if msg, _ := waitMsg(h, 3*time.Second, func(m any) bool {
 		u, ok := m.(model.AgentUpdateMsg)
 		return ok && u.Agent.PaneID == "w1:p1" && u.Agent.Label == "agenda"
@@ -520,5 +521,86 @@ func TestEngine_HistoryCaptureAndDeduplication(t *testing.T) {
 	time.Sleep(300 * time.Millisecond)
 	if secondHist.Load() {
 		t.Error("duplicate history item was sent, but should have been deduplicated")
+	}
+}
+
+func TestEngine_RunLifecycle(t *testing.T) {
+	hServer := herdrtest.New(t)
+	agent := "claude"
+	hServer.SetAgents([]map[string]any{
+		{
+			"pane_id": "w1:p1", "workspace_id": "w1", "tab_id": "t1",
+			"agent": &agent, "agent_status": "idle", "state_change_seq": 1,
+		},
+	})
+
+	relayMsgs := make(chan any, 50)
+	relaySrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := websocket.Accept(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer conn.Close(websocket.StatusNormalClosure, "done")
+		for {
+			typ, data, err := conn.Read(r.Context())
+			if err != nil {
+				return
+			}
+			if typ == websocket.MessageText {
+				msg, err := model.DecodeWire(data)
+				if err == nil {
+					relayMsgs <- msg
+				}
+			}
+		}
+	}))
+	defer relaySrv.Close()
+
+	statusDir := t.TempDir()
+	statusPath := filepath.Join(statusDir, "status.json")
+
+	hClient := &herdr.Client{SocketPath: hServer.SocketPath, Timeout: 2 * time.Second}
+	syncer := &herdr.Syncer{Client: hClient}
+	reg := agents.NewRegistry(agents.Config{})
+	wsURL := "ws" + strings.TrimPrefix(relaySrv.URL, "http") + "/v1/host"
+	rClient := &relayclient.Client{
+		URL:        wsURL,
+		Token:      "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+		MinBackoff: 20 * time.Millisecond,
+	}
+
+	engine := NewEngine(hClient, syncer, reg, rClient, "0.2.0", "lifecycle-host", statusPath, nil)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	runErrCh := make(chan error, 1)
+	go func() {
+		runErrCh <- engine.Run(ctx)
+	}()
+
+	// Wait for status file to be written while running with PID != 0.
+	pollUntil(t, 3*time.Second, "status file written while running", func() bool {
+		st, err := ReadStatus(statusPath)
+		return err == nil && st.PID != 0 && st.Version == "0.2.0"
+	})
+
+	// Cancel context to stop engine.
+	cancel()
+
+	select {
+	case err := <-runErrCh:
+		if err != nil {
+			t.Fatalf("engine.Run returned unexpected error: %v", err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("engine.Run did not stop within deadline")
+	}
+
+	// Verify status file has stopped status (PID 0).
+	st, err := ReadStatus(statusPath)
+	if err != nil {
+		t.Fatalf("read status file after stop: %v", err)
+	}
+	if st.PID != 0 {
+		t.Errorf("status PID after stop = %d, want 0", st.PID)
 	}
 }

@@ -17,7 +17,7 @@ Rules for every AI agent working in this repository: Claude Code, Antigravity, O
 | The herdr socket: methods, events, keys, verified behaviour, and the bridge's herdr policy | [`docs/reference/herdr-socket-api.md`](docs/reference/herdr-socket-api.md) |
 | Per agent: menus, option roles, keys, transcripts | [`docs/reference/agents.md`](docs/reference/agents.md) |
 | Wear OS internals, client rules, screens, notifications and UX decisions | [`wearos-app/ARCHITECTURE.md`](wearos-app/ARCHITECTURE.md) |
-| Exact texts the watch shows | the code: `wearos-app/app/src/main/res/values/strings.xml`, `approval/CommandFeedback.kt`, and the notification builders in `network/AgentNotifications.kt`, `MyFirebaseMessagingService.kt`, `NotificationActionReceiver.kt` |
+| Exact texts the watch shows | the code: `wearos-app/app/src/main/res/values/strings.xml`, `wearos-app/core/src/main/java/com/gabriel/agentwatch/approval/CommandFeedback.kt`, and the notification builders in `network/AgentNotifications.kt`, `MyFirebaseMessagingService.kt`, `NotificationActionReceiver.kt` |
 | The pitch and a quick start: a short version of `docs/GUIDE.md`'s setup, kept on purpose (the owner's decision) | [`README.md`](README.md) |
 | Installing, operating and troubleshooting the bridge and the watch app; the tool minimums users need; releases and CI; security model; known issues (symptom and workaround only) | [`docs/GUIDE.md`](docs/GUIDE.md) |
 | Relay operations: VPS setup, deploys, rollback, the relay CLI, proxy, devices, backups | [`deploy/relay/README.md`](deploy/relay/README.md) |
@@ -30,11 +30,28 @@ Rules for every AI agent working in this repository: Claude Code, Antigravity, O
 | Repo layout | §2 |
 | Rules per area, with their build and test commands | `.agents/rules/*.md` (§4) |
 | Procedures | `.agents/skills/*/SKILL.md`: `capture-fixture` (capture and audit agent CLIs; the checklist after a herdr upgrade), `add-agent-adapter`, `schema-sync`, `herdr-probe`, `wearos-deploy`, `relay-deploy` |
+| Agent skills configuration | [`docs/agents/`](docs/agents/) |
 | Reporting a vulnerability | [`SECURITY.md`](SECURITY.md) |
 
 **To start work:** claim it in `docs/STATUS.md` when its workflow line asks for a claim (not every fix needs one), then read the phase's guide or the rule and skill for the area.
 
 > ⚠️ **The herdr on the development Mac runs the owner's real agent sessions.** Before any herdr command, read `.agents/rules/herdr-integration.md` § Safety.
+
+---
+
+## Agent skills
+
+### Issue tracker
+
+Issues and specs live in GitHub Issues (`gh` CLI). See [`docs/agents/issue-tracker.md`](docs/agents/issue-tracker.md).
+
+### Triage labels
+
+Canonical 5-role triage vocabulary. See [`docs/agents/triage-labels.md`](docs/agents/triage-labels.md).
+
+### Domain docs
+
+Single-context layout (`GLOSSARY.md` + `docs/adr/`). See [`docs/agents/domain.md`](docs/agents/domain.md).
 
 ---
 
@@ -115,7 +132,7 @@ agent-watch/                      # the Go module keeps its old name, github.com
 ├── tools/config/                 # awenv.sh: agent-watch.env reader for the Makefile and deploy.sh (+ test_awenv.sh)
 ├── tools/guards/                 # guard implementation (hooks, pre-commit)
 ├── tools/herdr-overrides/        # TEMPORARY herdr detection override (claude); remove when upstream fixes it
-├── wearos-app/                   # Wear OS client (Kotlin, Jetpack Compose)
+├── wearos-app/                   # Android clients: :core (shared Kotlin data layer), :app (Wear OS), :mobile (phone)
 └── watchos-app/                  # watchOS client (Swift, SwiftUI)
 ```
 

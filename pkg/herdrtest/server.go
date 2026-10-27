@@ -65,6 +65,8 @@ type Server struct {
 	agents       []map[string]any
 	workspaces   []map[string]any
 	tabs         []map[string]any
+	panes        []map[string]any
+	ids          int                          // counter for workspace.create / tab.create / agent.start ids
 	screens      map[string]map[string]string // paneID -> source -> text
 	ansiScreens  map[string]map[string]string // paneID -> source -> styled text (format "ansi")
 	calls        []Call
@@ -96,6 +98,7 @@ func New(t testing.TB) *Server {
 		SocketPath:  sockPath,
 		dir:         dir,
 		t:           t,
+		ids:         1000,
 		screens:     make(map[string]map[string]string),
 		ansiScreens: make(map[string]map[string]string),
 		failNext:    make(map[string]failEntry),
@@ -203,6 +206,14 @@ func (s *Server) SetWorkspaces(workspaces []map[string]any) {
 	defer s.mu.Unlock()
 	s.workspaces = make([]map[string]any, len(workspaces))
 	copy(s.workspaces, workspaces)
+}
+
+// SetPanes replaces the pane.list payload.
+func (s *Server) SetPanes(panes []map[string]any) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.panes = make([]map[string]any, len(panes))
+	copy(s.panes, panes)
 }
 
 // SetScreen sets the text returned by agent.read for a pane and source.
@@ -478,6 +489,83 @@ func (s *Server) respond(id, method string, params map[string]any) map[string]an
 		s.mu.Unlock()
 		return resultResp(id, map[string]any{"type": "tab_list", "tabs": tabsCopy})
 
+	case "pane.list":
+		workspaceID, _ := params["workspace_id"].(string)
+		s.mu.Lock()
+		panesCopy := make([]map[string]any, 0, len(s.panes))
+		for _, p := range s.panes {
+			if workspaceID == "" || p["workspace_id"] == workspaceID {
+				panesCopy = append(panesCopy, p)
+			}
+		}
+		s.mu.Unlock()
+		return resultResp(id, map[string]any{"type": "pane_list", "panes": panesCopy})
+
+	case "workspace.create":
+		cwd, _ := params["cwd"].(string)
+		label, _ := params["label"].(string)
+		s.mu.Lock()
+		s.ids++
+		ws, tab, pane := s.newWorkspaceLocked(s.ids, label, cwd)
+		s.mu.Unlock()
+		return resultResp(id, map[string]any{
+			"type": "workspace_created", "workspace": ws, "tab": tab, "root_pane": pane,
+		})
+
+	case "tab.create":
+		workspaceID, _ := params["workspace_id"].(string)
+		cwd, _ := params["cwd"].(string)
+		label, _ := params["label"].(string)
+		s.mu.Lock()
+		found := false
+		for _, w := range s.workspaces {
+			if w["workspace_id"] == workspaceID {
+				found = true
+				break
+			}
+		}
+		if !found {
+			s.mu.Unlock()
+			return errorResp(id, "invalid_request", fmt.Sprintf("workspace %q not found", workspaceID))
+		}
+		s.ids++
+		tab, pane := s.newTabLocked(s.ids, workspaceID, label, cwd)
+		s.mu.Unlock()
+		return resultResp(id, map[string]any{"type": "tab_created", "tab": tab, "root_pane": pane})
+
+	case "agent.start":
+		paneID, _ := params["pane_id"].(string)
+		kind, _ := params["kind"].(string)
+		name, _ := params["name"].(string)
+		s.mu.Lock()
+		var pane map[string]any
+		for _, p := range s.panes {
+			if p["pane_id"] == paneID {
+				pane = p
+				break
+			}
+		}
+		if pane == nil {
+			s.mu.Unlock()
+			return errorResp(id, "invalid_request", fmt.Sprintf("pane %q not found", paneID))
+		}
+		agent := map[string]any{
+			"pane_id":          paneID,
+			"workspace_id":     pane["workspace_id"],
+			"tab_id":           pane["tab_id"],
+			"terminal_id":      fmt.Sprintf("term_%d", s.ids),
+			"agent":            kind,
+			"agent_status":     "idle",
+			"name":             name,
+			"focused":          false,
+			"cwd":              pane["cwd"],
+			"foreground_cwd":   pane["cwd"],
+			"state_change_seq": 1,
+		}
+		s.agents = append(s.agents, agent)
+		s.mu.Unlock()
+		return resultResp(id, map[string]any{"type": "agent_started", "agent": agent, "argv": []any{kind}})
+
 	case "agent.get":
 		target, _ := params["target"].(string)
 		found := s.findAgent(target)
@@ -562,6 +650,63 @@ func (s *Server) respond(id, method string, params map[string]any) map[string]an
 	default:
 		return errorResp(id, "invalid_request", fmt.Sprintf("unknown method: %s", method))
 	}
+}
+
+// newWorkspaceLocked adds a workspace with its root tab and pane. Callers
+// hold s.mu.
+func (s *Server) newWorkspaceLocked(n int, label, cwd string) (map[string]any, map[string]any, map[string]any) {
+	workspaceID := fmt.Sprintf("w%d", n)
+	tab, pane := s.newTabLocked(n, workspaceID, label, cwd)
+	ws := map[string]any{
+		"workspace_id":  workspaceID,
+		"number":        n,
+		"label":         label,
+		"focused":       false,
+		"pane_count":    1,
+		"tab_count":     1,
+		"active_tab_id": tab["tab_id"],
+		"agent_status":  "idle",
+	}
+	s.workspaces = append(s.workspaces, ws)
+	return ws, tab, pane
+}
+
+// newTabLocked adds a tab and its root pane in workspaceID. Callers hold s.mu.
+func (s *Server) newTabLocked(n int, workspaceID, label, cwd string) (map[string]any, map[string]any) {
+	number := 1
+	for _, t := range s.tabs {
+		if t["workspace_id"] == workspaceID {
+			number++
+		}
+	}
+	if label == "" {
+		label = fmt.Sprintf("%d", number)
+	}
+	tabID := fmt.Sprintf("t%d", n)
+	pane := map[string]any{
+		"pane_id":        fmt.Sprintf("%s:p%d", workspaceID, n),
+		"terminal_id":    fmt.Sprintf("term_%d", n),
+		"workspace_id":   workspaceID,
+		"tab_id":         tabID,
+		"label":          label,
+		"cwd":            cwd,
+		"foreground_cwd": cwd,
+		"focused":        false,
+		"agent_status":   "idle",
+		"revision":       1,
+	}
+	tab := map[string]any{
+		"tab_id":       tabID,
+		"workspace_id": workspaceID,
+		"number":       number,
+		"label":        label,
+		"focused":      false,
+		"pane_count":   1,
+		"agent_status": "idle",
+	}
+	s.tabs = append(s.tabs, tab)
+	s.panes = append(s.panes, pane)
+	return tab, pane
 }
 
 // findAgent returns the agent whose pane_id or name is target, or nil. It

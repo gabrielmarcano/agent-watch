@@ -3,17 +3,13 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
-	"io"
-	"io/fs"
-	"net/http"
-	"net/url"
 	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/gabrielmarcano/agent-monitor/pkg/bridge"
+	"github.com/gabrielmarcano/agent-monitor/pkg/relayclient"
 )
 
 // localStatus assembles the bridge's health from local files only: the
@@ -22,45 +18,24 @@ import (
 func (a *app) localStatus() bridge.LocalStatus {
 	r := a.resolveForRead(ServiceSpec{})
 	statusPath := filepath.Join(r.spec.StateDir, "status.json")
-	ls := bridge.LocalStatus{
-		Installed:      r.installed != nil || r.installErr != nil,
-		Service:        a.svc.Kind(),
-		DefinitionPath: a.svc.DefinitionPath(),
-		Binary:         r.spec.Binary,
-		ConfigPath:     r.spec.ConfigPath,
-		StateDir:       r.spec.StateDir,
-		StatusPath:     statusPath,
-		LogPath:        a.svc.LogHint(r.spec),
-		Version:        fullVersion,
-	}
+	var defErr string
 	if r.installErr != nil {
-		ls.DefinitionError = r.installErr.Error()
+		defErr = r.installErr.Error()
 	}
-
-	if cfg, err := bridge.CheckConfig(r.spec.ConfigPath); err != nil {
-		ls.ConfigError = err.Error()
-	} else {
-		ls.Configured = true
-		ls.PushPresence = cfg.PushPresence
-		if u, err := url.Parse(cfg.RelayURL); err == nil {
-			ls.RelayHost = u.Host
-		}
-	}
-
-	var stp *bridge.StatusFile
-	st, err := bridge.ReadStatus(statusPath)
-	switch {
-	case err == nil:
-		stp = &st
-	case !errors.Is(err, fs.ErrNotExist):
-		ls.LastError = err.Error()
-	}
-	lastErr := ls.LastError
-	ls.ApplyStatusFile(stp, a.now(), a.pidAlive)
-	if stp == nil && lastErr != "" {
-		ls.LastError = lastErr
-	}
-	return ls
+	return bridge.EvaluateLocalStatus(bridge.LocalStatusParams{
+		Installed:       r.installed != nil || r.installErr != nil,
+		Service:         a.svc.Kind(),
+		DefinitionPath:  a.svc.DefinitionPath(),
+		DefinitionError: defErr,
+		Binary:          r.spec.Binary,
+		ConfigPath:      r.spec.ConfigPath,
+		StateDir:        r.spec.StateDir,
+		StatusPath:      statusPath,
+		LogPath:         a.svc.LogHint(r.spec),
+		Version:         fullVersion,
+		Now:             a.now(),
+		PIDAlive:        a.pidAlive,
+	})
 }
 
 // cmdStatus prints the bridge's health.
@@ -185,28 +160,11 @@ func (a *app) relayStatus(configPath string) (json.RawMessage, string) {
 	if err != nil {
 		return nil, err.Error()
 	}
-	base, err := bridge.HTTPSBase(cfg.RelayURL)
-	if err != nil {
-		return nil, err.Error()
-	}
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, base+"/v1/host/status", nil)
+	body, err := relayclient.HostStatus(ctx, a.http, cfg.RelayURL, cfg.HostToken)
 	if err != nil {
 		return nil, err.Error()
 	}
-	req.Header.Set("Authorization", "Bearer "+cfg.HostToken)
-	resp, err := a.http.Do(req)
-	if err != nil {
-		return nil, "could not reach the relay: " + err.Error()
-	}
-	defer resp.Body.Close()
-	body, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Sprintf("relay answered HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
-	}
-	if !json.Valid(body) {
-		return nil, "relay answered invalid JSON"
-	}
-	return json.RawMessage(body), ""
+	return body, ""
 }

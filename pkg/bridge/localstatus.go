@@ -1,6 +1,11 @@
 package bridge
 
-import "time"
+import (
+	"errors"
+	"io/fs"
+	"net/url"
+	"time"
+)
 
 // StaleAfter is how old status.json may get while the bridge process is
 // alive before readers call it stale. The daemon writes it every 5 s.
@@ -78,4 +83,59 @@ func (ls *LocalStatus) ApplyStatusFile(st *StatusFile, now time.Time, alive func
 	ls.HerdrOnline = st.HerdrOnline
 	ls.Agents = st.Agents
 	ls.Blocked = st.Blocked
+}
+
+// LocalStatusParams supplies the local file paths and environment hooks needed
+// to evaluate LocalStatus.
+type LocalStatusParams struct {
+	Installed       bool
+	DefinitionError string
+	Service         string
+	DefinitionPath  string
+	Binary          string
+	ConfigPath      string
+	StateDir        string
+	StatusPath      string
+	LogPath         string
+	Version         string
+	Now             time.Time
+	PIDAlive        func(pid int) bool
+}
+
+// EvaluateLocalStatus builds a LocalStatus report by checking local files:
+// configuration validity, reading status.json, and checking if the daemon PID is alive.
+func EvaluateLocalStatus(p LocalStatusParams) LocalStatus {
+	ls := LocalStatus{
+		Installed:       p.Installed,
+		DefinitionError: p.DefinitionError,
+		Service:         p.Service,
+		DefinitionPath:  p.DefinitionPath,
+		Binary:          p.Binary,
+		ConfigPath:      p.ConfigPath,
+		StateDir:        p.StateDir,
+		StatusPath:      p.StatusPath,
+		LogPath:         p.LogPath,
+		Version:         p.Version,
+	}
+
+	if cfg, err := CheckConfig(p.ConfigPath); err != nil {
+		ls.ConfigError = err.Error()
+	} else {
+		ls.Configured = true
+		ls.PushPresence = cfg.PushPresence
+		if u, err := url.Parse(cfg.RelayURL); err == nil {
+			ls.RelayHost = u.Host
+		}
+	}
+
+	var stp *StatusFile
+	st, err := ReadStatus(p.StatusPath)
+	switch {
+	case err == nil:
+		stp = &st
+	case !errors.Is(err, fs.ErrNotExist):
+		ls.LastError = err.Error()
+	}
+	ls.ApplyStatusFile(stp, p.Now, p.PIDAlive)
+	return ls
 }

@@ -2,25 +2,27 @@
 #
 # Each component has its own version, and they may diverge: bump only the one
 # you change. Read by the Makefile (bridge and relay ldflags, `make bar`),
-# macos-bar/build.sh, deploy/relay/deploy.sh, the Wear OS Gradle build,
-# herdr-plugin.toml's [[build]] and .github/workflows/release.yml. The
+# macos-bar/build.sh, deploy/relay/deploy.sh, the Android Gradle build (:app and
+# :mobile), herdr-plugin.toml's [[build]] and .github/workflows/release.yml. The
 # manifest's `version` field cannot read it: keep it equal to BRIDGE_VERSION
 # (`make check-versions` fails when they differ).
 #
 # The Go binaries add the commit they were built from on their own (format:
 # docs/reference/contracts.md §3): never write a commit here.
 #
-# WEAROS_VERSION_CODE must increase for every build you ship: Android refuses
-# to install a lower code over a higher one, and an equal code hides which
-# build is on the watch.
+# WEAROS_VERSION_CODE and MOBILE_VERSION_CODE must increase for every build you
+# ship: Android refuses to install a lower code over a higher one, and an equal
+# code hides which build is on the device.
 #
 # Releases: docs/GUIDE.md § Versions and Releases.
 #
 # Syntax (make's, like agent-watch.env): bare KEY=value lines, no quotes, no
 # spaces, comments on their own line.
 
-BRIDGE_VERSION=0.8.0
-RELAY_VERSION=0.7.0
+BRIDGE_VERSION=0.9.0
+RELAY_VERSION=0.9.0
 MENUBAR_VERSION=0.6.0
-WEAROS_VERSION_NAME=1.4.0
-WEAROS_VERSION_CODE=13
+WEAROS_VERSION_NAME=1.4.1
+WEAROS_VERSION_CODE=14
+MOBILE_VERSION_NAME=0.5.10
+MOBILE_VERSION_CODE=20
