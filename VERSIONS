@@ -17,7 +17,7 @@
 # Syntax (make's, like agent-watch.env): bare KEY=value lines, no quotes, no
 # spaces, comments on their own line.
 
-BRIDGE_VERSION=0.9.0
+BRIDGE_VERSION=0.10.0
 RELAY_VERSION=0.9.0
 MENUBAR_VERSION=0.6.0
 WEAROS_VERSION_NAME=1.4.1

@@ -59,7 +59,7 @@ type AgentState struct {
 | `pane_id` | herdr `pane_id` | Contains `:` (e.g. `w5:pAW`). Unique only within one host: every herdr numbers its own panes, so the key is `(host, pane_id)` |
 | `host` | **relay** | The id of the host whose connection sent the agent (§1.6), stamped by the relay from the connection's host token. The bridge leaves it empty. Clients key an agent by `(host, pane_id)`; an older relay omits it (one host) |
 | `agent` | herdr `agent` | Lowercase herdr id: `claude`, `agy`, `opencode`, `codex`, … Never empty: a pane whose herdr `agent` is null is not tracked (the relay gets `agent_removed`) |
-| `label` | computed | The name the owner gave, first non-empty of: herdr `name`; the tab's `label` from `tab.list` (ignored when it is only the tab's `number`, herdr's default); `title`; `basename(cwd)`; `pane_id`. Agents that share a tab share its label |
+| `label` | computed | The name the owner gave, first non-empty of: herdr `name`; the tab's `label` from `labels["where"]`; `title`; `basename(cwd)`; `pane_id`. Agents that share a tab share its label |
 | `name` | herdr `name` | Explicit pane name or slug if set, otherwise omitted |
 | `title` | herdr `terminal_title_stripped` | The agent's own task title (e.g. the one Claude Code sets); omitted when empty or when it only names the program (`OpenCode`, `agy --conversation …`) |
 | `cwd` | herdr `foreground_cwd`, else `cwd` | Omit if both are null |
@@ -284,7 +284,7 @@ Never accept a token in the query string.
 - The bridge starts a session only for a `kind` in its `session_kinds` (§6) and a `cwd` inside one of its `session_roots`; otherwise it answers `not_allowed`, which the relay returns as `403 not_allowed`. With no `session_roots` configured, session creation is off on that host (`roots` is empty in the options).
 - One herdr workspace per folder: the bridge reuses the workspace that already has a pane in `cwd`, else creates one labelled with the folder's name. Each session gets its own tab and its own agent. The first session of a new workspace uses the tab and pane that workspace creation makes; later ones get a new tab. Nothing takes focus on the host (`focus: false`).
 - `label` names the tab and the agent; default: the folder's name. When that name is already used in the workspace, the bridge appends ` 2`, ` 3`, … and returns the name it used.
-- **Never retry a create that timed out:** the session may exist. The budgets nest from the inside out: bridge 35 s < relay 40 s < phone 45 s (a `timeout` means the bridge has already given up). Inside the bridge's 35 s, `agent.start` waits up to 25 s for the agent to become interactive.
+- **Never retry a create that timed out:** the session may exist. The budgets nest from the inside out: bridge 35 s < relay 40 s < phone 45 s (a `timeout` means the bridge has already given up). Inside the bridge's 35 s, `terminal.run` waits up to 25 s for the agent to become interactive.
 - `GET …/folders` without `path` lists the roots themselves (`path` is `""` and `entries` are the roots). A `path` must be equal to or under a root (symlinks resolved), else `not_allowed`. Only directories are listed, sorted by name, at most 500 (`truncated: true` when there are more); unreadable entries are skipped. `parent` is empty at a root.
 - These three endpoints need the host connected and its herdr reachable: `host_offline` / `herdr_offline`. They take the normal 7 s relay budget, except `POST …/sessions` (40 s).
 
@@ -470,7 +470,7 @@ Every non-200 response of the endpoints in §2.1 carries an `ErrorResponse`. A p
 | `host_offline` | 503 | The agent's host is not connected, or its bridge disconnected (or was replaced) before answering a command |
 | `herdr_offline` | 503 | Bridge connected, herdr unreachable |
 | `timeout` | 504 | The relay's 7 s budget ran out (one budget for sending the command and waiting for `command_result`), or the bridge's own 6 s budget did (e.g. waiting behind another command on the same pane). Timeouts nest from the inside out, bridge 6 s < relay 7 s < watch 8 s, so a `timeout` means the bridge has already given up. `session.create` uses longer budgets of the same shape: bridge 35 s < relay 40 s < phone 45 s |
-| `internal` | 500 | Bug, or herdr failed `agent.prompt` / `agent.send_keys` for an unclassified reason (the text or keys may have reached the pane) |
+| `internal` | 500 | Bug, or herdr-core failed `terminal.send` / `terminal.keys` for an unclassified reason (the text or keys may have reached the pane) |
 
 What the Wear OS app shows for each code: `commandErrorFeedback` in `wearos-app/core/src/main/java/com/gabriel/agentwatch/approval/CommandFeedback.kt`.
 
@@ -749,9 +749,9 @@ The relay reads them from `/etc/agent-watch-relay/env` (systemd `EnvironmentFile
 
 ## 6. Bridge configuration (`config.toml`)
 
-- **Location:** `$HERDR_PLUGIN_CONFIG_DIR/config.toml`. For the plugin id `herdr-agent-watch` this is `~/.config/herdr/plugins/config/herdr-agent-watch/config.toml`.
+- **Location:** `$AW_CONFIG_FILE`, `$AW_CONFIG_DIR/config.toml`, or `~/.config/agent-watch/config.toml`.
 - **Mode:** `0600`, in a `0700` directory. Both are enforced on every write, also for a file that already exists.
-- **Written by:** `agent-watch-bridge configure` (atomically). Without `--config` it writes the config herdr's environment names, else the one the installed service uses, else the default above.
+- **Written by:** `agent-watch-bridge configure` (atomically). Without `--config` it writes the config the environment names, else the one the installed service uses, else the default above.
   - `--env-file <agent-watch.env>` (what `make configure-bridge` runs) takes `relay_url = wss://<AW_RELAY_DOMAIN>/v1/host` and `host_token = AW_HOST_TOKEN` from the file (§7), so the token never appears in argv. `--relay-url` / `--host-token` override it value by value.
   - It rewrites the whole file. When that drops a previous `host_name` or `claude_config_dirs`, it prints a `note:` on stderr; pass `--host-name` / `--claude-config-dir` again to keep them. It keeps `push_presence`.
 - **`push_presence`** ("Only Notify When Away", off by default) is set by `agent-watch-bridge presence [--config PATH] on|off` (the menu bar's item of that name runs it), which keeps the rest of the file; `presence` alone prints `on` or `off`. The running bridge reads it before each presence report (§3), so it applies within 15 s, without a restart.
@@ -768,12 +768,12 @@ session_kinds = ["claude", "agy", "opencode"] # kinds it may start; empty: those
 ```
 
 - **`session_roots`** must be absolute. Each is resolved through symlinks when used; a session's `cwd` must be equal to or under one of them, and the folder picker cannot leave them. A root that does not exist is skipped (it comes back when the path exists).
-- **`session_kinds`** defaults to `claude`, `agy`, `opencode` when omitted or empty. Any herdr agent id works (`herdr agent start --help` lists them), but the bridge starts only what is listed here.
+- **`session_kinds`** defaults to `claude`, `agy`, `opencode` when omitted or empty. Any agent kind works, but the bridge starts only what is listed here.
 - `configure` rewrites the whole file: pass `--session-root` and `--session-kind` again to keep them; it prints a `note:` when they would be dropped.
 
 ### 6.1 `status.json` (written by `agent-watch-bridge run`)
 
-- **Path:** `$HERDR_PLUGIN_STATE_DIR/status.json`, else `~/.local/state/agent-watch/status.json`. The installed service pins `HERDR_PLUGIN_STATE_DIR` in its definition, and `status` reads the installed service's state dir first.
+- **Path:** `$AW_STATE_DIR/status.json`, else `~/.local/state/agent-watch/status.json`. The installed service pins `AW_STATE_DIR` in its definition, and `status` reads the installed service's state dir first.
 - **Written** atomically at start, every 5 s, and once more on exit.
 - **Every key is always present** (no `omitempty`): older readers decode the first six unconditionally.
 
@@ -815,7 +815,7 @@ A reader must not trust `pid` alone: a file left by a crash names a dead pid. `s
   "service": "launchd",
   "definition_path": "/Users/me/Library/LaunchAgents/com.gabrielmarcano.agent-watch-bridge.plist",
   "binary": "/Users/me/Code/agent-watch/bin/agent-watch-bridge",
-  "config_path": "/Users/me/.config/herdr/plugins/config/herdr-agent-watch/config.toml",
+  "config_path": "/Users/me/.config/agent-watch/config.toml",
   "state_dir": "/Users/me/.local/state/agent-watch",
   "status_path": "/Users/me/.local/state/agent-watch/status.json",
   "log_path": "/Users/me/Library/Logs/agent-watch-bridge.log"

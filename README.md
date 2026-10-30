@@ -17,11 +17,11 @@ Answer your coding agents from your wrist. When Claude Code, OpenCode, Antigravi
 ## How It Works
 
 ```
-your agents ─▶ herdr ─▶ agent-watch-bridge ══ WSS ══▶ agent-watch-relay ══ HTTPS · SSE · push ══▶ watch
+your agents ─▶ herdr-core ─▶ agent-watch-bridge ══ WSS ══▶ agent-watch-relay ══ HTTPS · SSE · push ══▶ watch
                └──── your Mac or Linux box ────┘      └──── your VPS ────┘
 ```
 
-- **[herdr](https://herdr.dev)** runs your agents and knows what each one is doing.
+- **[herdr-core](https://herdr.dev)** (`hc` / Herdr app) runs your agents and reports their lifecycle over a local Unix domain socket.
 - **The bridge** runs on your computer and only dials out: no open ports, no VPN.
 - **The relay** is a small server you host. The watch talks to it (and to Firebase for push) over any internet path it has.
 - **The watch never sends keystrokes.** It sends "answer option X", and the bridge checks the prompt on screen is still the same before pressing anything.
@@ -30,7 +30,7 @@ your agents ─▶ herdr ─▶ agent-watch-bridge ══ WSS ══▶ agent-wa
 
 ## What You Need
 
-- **herdr** and **Go** on the computer that runs your agents.
+- **herdr-core** (`hc`) or **Herdr.app** and **Go** on the computer that runs your agents.
 - A small **Linux VPS** with a domain and a TLS reverse proxy, for the relay.
 - A **Wear OS** watch (tested on a Pixel Watch 2), plus a JDK, the Android SDK and your own **Firebase** project (for push) to build the app.
 
@@ -42,10 +42,9 @@ Minimum versions and details: [Requirements](docs/GUIDE.md#requirements).
 
 1. **Configure:** `make config`, then set your relay domain and SSH target in `agent-watch.env`. It is the one config file, git-ignored.
 2. **Relay:** prepare the VPS once ([guide](docs/GUIDE.md#1-deploy-the-cloud-relay)), then `make deploy-relay ARGS=--sync-env`.
-3. **Bridge**, on the computer that runs herdr:
+3. **Bridge**, on the computer that runs herdr-core:
    ```bash
    make bridge
-   herdr plugin link "$PWD"
    make configure-bridge
    ./bin/agent-watch-bridge start
    ```
@@ -55,8 +54,6 @@ Minimum versions and details: [Requirements](docs/GUIDE.md#requirements).
 **Optional:** the macOS menu bar app shows whether the bridge and the relay are up: `make bar && open "bin/Agent Watch.app"`.
 
 Every step in detail, the day-to-day commands and troubleshooting are in **[the full guide](docs/GUIDE.md)**.
-
-**Install with herdr:** Agent Watch is a herdr plugin, listed on [herdr.dev/plugins](https://herdr.dev/plugins/); it installs the bridge only ([guide](docs/GUIDE.md#alternative-install-the-bridge-with-herdr)).
 
 Prebuilt bridge, relay and menu bar binaries are on the [releases page](https://github.com/gabrielmarcano/agent-watch/releases).
 

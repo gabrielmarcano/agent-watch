@@ -10,7 +10,7 @@ How to set up, run and troubleshoot Agent Watch, in detail. The [README](../READ
 
 The minimums below come from the build files named with each one; those files win if this list lags.
 
-1. **herdr** 0.9.1 or later (`min_herdr_version` in `herdr-plugin.toml`) on the machine that runs your agents, with its integrations installed for your agents (`herdr integration status`).
+1. **herdr-core** (`hc`) 0.1.14 or later (or Herdr.app) on the machine that runs your agents.
 2. **Go** 1.23 or later (`go.mod`) to build the bridge and the relay (static binaries).
 3. **Cloud relay:** a small **x86-64 (amd64)** Linux VPS (1 vCPU, 512 MB RAM) with a public domain (e.g. `relay.example.com`). For arm64: [`deploy/relay/README.md` § First-time setup](../deploy/relay/README.md#first-time-setup-once-per-vps).
    - **Any TLS reverse proxy** in front of it works if it passes WebSockets and unbuffered SSE (nginx, Caddy, Nginx Proxy Manager; Cloudflare optional): [`deploy/relay/README.md`](../deploy/relay/README.md).
@@ -63,17 +63,13 @@ Everything a deployment needs lives in **one file**, `agent-watch.env` at the re
 
 ### 2. Install and Configure the Host Bridge
 
-On the machine that runs herdr:
+On the machine that runs herdr-core:
 
 1. Build the bridge binary:
    ```bash
    make bridge
    ```
-2. Link the plugin into herdr (absolute path):
-   ```bash
-   herdr plugin link "$PWD"
-   ```
-3. Write the bridge config from `agent-watch.env` (relay URL and host token; `config.toml`, mode `0600`):
+2. Write the bridge config from `agent-watch.env` (relay URL and host token; `config.toml`, mode `0600`):
    ```bash
    make configure-bridge
    # = ./bin/agent-watch-bridge configure --env-file agent-watch.env
@@ -82,14 +78,13 @@ On the machine that runs herdr:
    - `--claude-config-dir` is only for Claude profiles the bridge does not find on its own ([`agents.md` §3.2](reference/agents.md)).
    - To let the phone start new agent sessions on this machine, name the folders and agent kinds it may use (repeatable; no root means the feature is off): `make configure-bridge ARGS="--session-root ~/Code --session-kind claude --session-kind opencode"`. What the policy does: [`contracts.md` §2.1](reference/contracts.md).
    - Without the file: `./bin/agent-watch-bridge configure --relay-url wss://relay.<domain> --host-token <64-hex-token>` (the token then shows in `ps`).
-4. Start the bridge service (a LaunchAgent on macOS, a `systemd --user` unit on Linux):
+3. Start the bridge service (a LaunchAgent on macOS, a `systemd --user` unit on Linux):
    ```bash
-   herdr plugin action invoke start --plugin herdr-agent-watch
-   # or: ./bin/agent-watch-bridge start
+   ./bin/agent-watch-bridge start
    ```
    Already installed? After `make configure-bridge`, apply the new config with `make restart`.
    On Linux, a `systemd --user` unit stops when you log out unless lingering is on: `loginctl enable-linger` (a server you only reach over SSH needs it).
-5. Verify the bridge:
+4. Verify the bridge:
    ```bash
    ./bin/agent-watch-bridge status
    # bridge:   running (pid …); launchd: running (pid …)
@@ -98,34 +93,6 @@ On the machine that runs herdr:
    # agents:   N (M blocked)
    # …then the config, status and log paths
    ```
-
-### Alternative: Install the Bridge with herdr
-
-Agent Watch is a herdr plugin, listed on [herdr.dev/plugins](https://herdr.dev/plugins/). herdr can install it instead of step 2's `make bridge` and `herdr plugin link`. Whether it has been tested end to end: [STATUS](STATUS.md); please report problems as issues.
-
-1. Install it. herdr clones the repository, shows the source and the build command, and asks before running them. The build compiles the bridge on your machine, so it needs **Go** ([Requirements](#requirements)):
-   ```bash
-   herdr plugin install gabrielmarcano/agent-watch
-   ```
-   Without a terminal to answer it (a script), add `--yes`.
-2. Find the plugin's folder: `plugin_root` in
-   ```bash
-   herdr plugin list --plugin herdr-agent-watch --json
-   ```
-   The bridge is `<plugin_root>/bin/agent-watch-bridge`, and the folder also holds `agent-watch.env.example`.
-3. Configure and start it, as in step 2:
-   ```bash
-   "<plugin_root>/bin/agent-watch-bridge" configure --env-file /path/to/agent-watch.env
-   herdr plugin action invoke start --plugin herdr-agent-watch
-   ```
-   A plugin action runs in the background: its output and exit code are in `herdr plugin log list --plugin herdr-agent-watch`.
-4. To remove it, stop the service first: `herdr plugin uninstall` deletes the bridge binary but leaves the service, which keeps running until it next starts, then fails every few seconds.
-   ```bash
-   herdr plugin action invoke stop --plugin herdr-agent-watch
-   herdr plugin uninstall herdr-agent-watch
-   ```
-
-The relay (step 1), the watch app (step 4) and pairing (step 5) are unchanged. The relay deploy (`make deploy-relay`) still needs a checkout of this repository, or a relay binary from a [release](#versions-and-releases).
 
 ### Another Machine (several hosts)
 
@@ -241,9 +208,8 @@ AW_ENV_FILE=agent-watch.env deploy/relay/publish-android.sh --phone
 1. Get a short-lived pairing code:
    ```bash
    ./bin/agent-watch-bridge pair
-   # or: herdr plugin action invoke pair --plugin herdr-agent-watch
    ```
-   It shows the code, its real expiry and the relay URL, and also posts a herdr notification.
+   It shows the code, its real expiry and the relay URL, and also posts a notification.
 2. On the watch, open Agent Watch, check the relay URL (`https://relay.<domain>`, prefilled from `agent-watch.env` at build time; `https://` is added if you leave it out) and enter the code.
 3. The watch exchanges the code for a device token (the relay stores only its SHA-256 hash) and registers for push. Your agents appear.
 
@@ -262,15 +228,14 @@ AW_ENV_FILE=agent-watch.env deploy/relay/publish-android.sh --phone
 | `make deploy-relay [ARGS=--sync-env]` | Build and deploy the relay to `AW_RELAY_SSH`; `--sync-env` also updates the server's env file from `agent-watch.env` |
 | `make publish-android` | Build, sign and publish both Android APKs to the relay ([Android updates](#android-updates-phone-and-watch)) |
 | `make restart` | Rebuild `bin/agent-watch-bridge` and restart the installed service without rewriting its definition |
-| `./bin/agent-watch-bridge restart` | Restart only (also a plugin action) |
-| `./bin/agent-watch-bridge start` | Install or rewrite the service definition; keeps the installed values unless a flag or herdr's environment gives new ones |
+| `./bin/agent-watch-bridge restart` | Restart the installed service |
+| `./bin/agent-watch-bridge start` | Install or rewrite the service definition; keeps the installed values unless flags or environment override them |
 | `./bin/agent-watch-bridge stop` | Stop the service; it stays stopped across logins and reboots until the next `start` |
 | `./bin/agent-watch-bridge status` | Human status, including the relay's view; exit 1 when the bridge is not running |
 | `./bin/agent-watch-bridge status --json --local` | Local files only, no network: what the menu bar reads ([`contracts.md` §6.2](reference/contracts.md)) |
 | `sudo agent-watch-relay devices list` / `devices revoke <id>` | On the VPS ([`deploy/relay/README.md`](../deploy/relay/README.md) § Devices) |
 | `make bar` | Rebuild the menu bar app (quit the running one and `open "bin/Agent Watch.app"` again) |
 | `make check` | Format, vet and test the Go code (`make bar-test` for the menu bar logic) |
-| `tools/herdr-overrides/herdr-overrides.sh check` | After a herdr update: are the temporary detection overrides still needed? ([Known issues](#known-issues)) |
 
 ---
 
@@ -292,7 +257,7 @@ The Android apps (Wear OS and phone) are not attached: they need your own `googl
 **Installing from a release** instead of building:
 - Check the download with `shasum -a 256 -c SHA256SUMS --ignore-missing`.
 - The macOS binaries and the app are not notarized. A file downloaded with a browser is quarantined: `xattr -d com.apple.quarantine <file>` (or right click → Open for the app).
-- The setup guide applies unchanged with the downloaded binary in place of `bin/…`, except the herdr plugin actions, which need the plugin in herdr (`herdr plugin link` on a checkout, or [`herdr plugin install`](#alternative-install-the-bridge-with-herdr)). Run `agent-watch-bridge start` from a herdr pane (it takes the socket from `$HERDR_SOCKET_PATH`) or pass `--socket`.
+- The setup guide applies unchanged with the downloaded binary in place of `bin/…`. Run `agent-watch-bridge start` from a herdr-core environment or pass `--socket`.
 
 ### Continuous Integration
 
@@ -313,7 +278,7 @@ GitHub Actions, sized for the free plan (macOS minutes count ten times, so macOS
 |---|---|---|
 | **Claude Code** (`claude`) | First-class | Permissions, plan approval, questions, history |
 | **OpenCode** (`opencode`) | First-class | Permissions, questions, history |
-| **Antigravity CLI** (`agy`) | First-class, with a herdr gap ([known issues](#known-issues)) | Permissions, history |
+| **Antigravity CLI** (`agy`) | First-class | Permissions, history |
 | **Any other agent herdr detects** | Generic | Numbered menus, history from the screen |
 
 How each agent's menus, keys and history work: [`docs/reference/agents.md`](reference/agents.md).
@@ -340,9 +305,7 @@ How each agent's menus, keys and history work: [`docs/reference/agents.md`](refe
 
 ## Known Issues
 
-- **herdr misses some open permission dialogs** (Antigravity CLI's, and Claude's after a relaunch in the same pane), so the watch cannot answer them without a workaround. **Workaround:** the temporary local detection overrides in [`tools/herdr-overrides/`](../tools/herdr-overrides/README.md), which explains the cause, how to install them and when to remove them. While a dialog is open, dictation to that agent is refused.
 - **OpenCode approvals need the default focus.** If someone moves the focus in OpenCode's dialog at the computer (arrow keys or mouse hover), the watch's Allow is refused with nothing pressed: answer at the computer. Deny always works. Why: [`agents.md` §5.1](reference/agents.md).
-- **OpenCode 2's history cards come from the screen** (plain text, only what fits on it) when herdr's OpenCode integration is older than v13: OpenCode 2 never loads its TUI plugin, so herdr has no session to read and the bridge cannot read the transcript. **Workaround:** `herdr integration install opencode` (`herdr integration status` must say `current`), then restart OpenCode in each pane. Why: [`agents.md` §5.2](reference/agents.md#52-transcript-sqlite).
 - **The watchOS app is not on the relay API yet** ([status](STATUS.md)).
 - **An approval answered at the computer can stay in the watch's or phone's notifications** until the app next sees the live state (e.g. when you open it). The `resolved` push that withdraws them is off by default (`AW_PUSH_RESOLVED`). The current apps handle it; whether the relay has it on yet is in [STATUS](STATUS.md).
 
@@ -353,7 +316,6 @@ How each agent's menus, keys and history work: [`docs/reference/agents.md`](refe
 - **Check status anytime:**
   ```bash
   ./bin/agent-watch-bridge status
-  # or: herdr plugin action invoke status --plugin herdr-agent-watch
   ```
 - **Log files:**
   - Bridge logs: `~/Library/Logs/agent-watch-bridge.log` (macOS), `journalctl --user -u agent-watch-bridge` (Linux)
