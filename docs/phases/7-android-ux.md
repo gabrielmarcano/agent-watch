@@ -7,7 +7,7 @@
 | | |
 |---|---|
 | **Order and parallel work** | [`docs/STATUS.md`](../STATUS.md) |
-| **Touches** | `wearos-app/mobile/` (the UI), `wearos-app/mobile/build.gradle.kts` (the toolchain), `wearos-app/app/src/main/res/values/strings.xml` only if a string moves, `wearos-app/ARCHITECTURE.md` §4b (the watch's look is the reference for *information*, not for the phone's palette), `docs/STATUS.md` |
+| **Touches** | `android/mobile/` (the UI), `android/mobile/build.gradle.kts` (the toolchain), `android/app/src/main/res/values/strings.xml` only if a string moves, `android/ARCHITECTURE.md` §4b (the watch's look is the reference for *information*, not for the phone's palette), `docs/STATUS.md` |
 | **Must not** | Change the relay's API or the contracts (no new fields, so no `schema-sync`); change the watch app's UI; send raw keys; change the notification safety rules (approving needs the phone unlocked) |
 
 ---
@@ -30,7 +30,7 @@ What the phone compiles against today, and where it goes:
 | `compileSdk` (`:mobile`) | 36 | **37** | `platforms;android-37.0` is installable from the SDK manager; the watch module stays at 36 |
 | `targetSdk` (`:mobile`) | 34 | **36** | 35+ draws the app behind the system bars, so every screen handles the insets (the composer already does; the bars get light icons on the phone's dark look) |
 | Compose BOM (`:mobile`) | 2025.09.00 | **2026.03.00** | Material 3 1.4.0 (the expressive line: the motion scheme, the shapes). The newest BOM (2026.09.00) ships Compose 1.12, which needs AGP 9.1; that comes with the AGP change, not before. Compose 1.10 also moved the Material icons out of material3: `:mobile` depends on `material-icons-core` now (the six icons it uses are in that set) |
-| AGP | 8.13.2 | 8.13.2, then maybe 9.x | AGP 8.13 warns about `compileSdk 37`; the warning is suppressed with `android.suppressUnsupportedCompileSdk=37` in `wearos-app/gradle.properties`. Moving to AGP 9.x is its own change, and only if the watch module still builds and behaves on the wrist |
+| AGP | 8.13.2 | 8.13.2, then maybe 9.x | AGP 8.13 warns about `compileSdk 37`; the warning is suppressed with `android.suppressUnsupportedCompileSdk=37` in `android/gradle.properties`. Moving to AGP 9.x is its own change, and only if the watch module still builds and behaves on the wrist |
 | `minSdk` | 30 | 30 | unchanged |
 
 Why not jump straight to AGP 9: the watch app shares the Gradle root, and the watch is the reference client that must not change behaviour. The phone's toolchain is a contained change; the AGP bump is a separate one.
@@ -119,7 +119,7 @@ WhatsApp's shape, with our content:
 
 The watch keeps its fixed dark palette (its colours carry status meaning on a tiny screen). The phone gets its own theme, in the messenger tradition: a light and a dark scheme, blue as the accent, WhatsApp-like bubble containers, and **dynamic colour** on Android 12+ (the Pixel 8 Pro's wallpaper palette) with a toggle to turn it off. Status colours keep their meaning on top of it: the status word always accompanies the colour, and the colour is never the only signal.
 
-This changes the watch's rule that "other clients copy the watch's look": the watch's look is the reference for *information architecture* (what a row shows, what an approval says), not for the phone's palette. `wearos-app/ARCHITECTURE.md` §4b is amended in the same change.
+This changes the watch's rule that "other clients copy the watch's look": the watch's look is the reference for *information architecture* (what a row shows, what an approval says), not for the phone's palette. `android/ARCHITECTURE.md` §4b is amended in the same change.
 
 ## 10. What we do not copy from WhatsApp
 

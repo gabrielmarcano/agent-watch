@@ -16,7 +16,7 @@
 
 - `AGENTS.md`, `.agents/rules/wearos.md` (its process rules carry over).
 - `docs/reference/contracts.md` §1, §2 (API, error codes), §4 (push payloads, `resolved`).
-- `wearos-app/ARCHITECTURE.md`: the data layer this phase shares, and §4b, the UX rules (target agent, approvals) a phone copies.
+- `android/ARCHITECTURE.md`: the data layer this phase shares, and §4b, the UX rules (target agent, approvals) a phone copies.
 
 ---
 
@@ -89,7 +89,7 @@ The relay does not care what kind of client it serves. Any app that pairs (`POST
 - `RelayRepository` from `:core`; the SSE stream bound to the foreground, like the watch.
 
 ### 3. Screens
-- **Agent list** and **detail with the prompt card:** the watch's screens and UX rules (`wearos-app/ARCHITECTURE.md` §4a–§4b), with the logic from `:core`.
+- **Agent list** and **detail with the prompt card:** the watch's screens and UX rules (`android/ARCHITECTURE.md` §4a–§4b), with the logic from `:core`.
 - **Prompt input:** keyboard and voice.
 - **History** and the markdown reader.
 - **Settings:** relay, unpair, notification behaviour.
@@ -104,7 +104,7 @@ The relay does not care what kind of client it serves. Any app that pairs (`POST
 - **No duplicate notification on the watch.**
 
 ### 6. UI and UX pass (the owner's focus, from 2026-10-21)
-The redesign is written up in [`7-android-ux.md`](7-android-ux.md): the principles, the screens, the toolchain and the slices. The watch's information architecture is the reference (`wearos-app/ARCHITECTURE.md` §4a–§4b); the phone's layout and palette are its own. The owner drives this step: they say what feels wrong on the device, and each change goes through the same loop — code, JVM test, lint, `:mobile:assembleRelease`, `deploy/relay/publish-android.sh --phone`, then the update card on the phone. The release key makes that loop a couple of minutes, so changes are small and one at a time, each visible on the device before the next.
+The redesign is written up in [`7-android-ux.md`](7-android-ux.md): the principles, the screens, the toolchain and the slices. The watch's information architecture is the reference (`android/ARCHITECTURE.md` §4a–§4b); the phone's layout and palette are its own. The owner drives this step: they say what feels wrong on the device, and each change goes through the same loop — code, JVM test, lint, `:mobile:assembleRelease`, `deploy/relay/publish-android.sh --phone`, then the update card on the phone. The release key makes that loop a couple of minutes, so changes are small and one at a time, each visible on the device before the next.
 
 Checklist (each row is a decision to take, not a promise):
 - **Chat list:** the order (today "Needs you" first, then by recency); what a row shows (name, preview, status, host, time) and what it drops; the unread dot; pull to refresh instead of the refresh icon; what a swipe does; where the global **History** screen belongs; searching the chats.
@@ -148,7 +148,7 @@ Checklist (each row is a decision to take, not a promise):
 
 ```
 You are executing Phase 7 (Android phone client) of Agent Watch in this repository.
-Read AGENTS.md, docs/phases/7-android-mobile.md, wearos-app/ARCHITECTURE.md and docs/reference/contracts.md (§1, §2, §4).
+Read AGENTS.md, docs/phases/7-android-mobile.md, android/ARCHITECTURE.md and docs/reference/contracts.md (§1, §2, §4).
 First confirm the "Decisions" table with the owner. Then do step 1 (module restructure) alone and commit it before any
 phone code: keep the Wear OS app's application id, signing key and behaviour unchanged and its tests green. Build
 :mobile, verify on the owner's phone with sandbox agents only (never approve or prompt real agents), update

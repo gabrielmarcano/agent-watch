@@ -15,7 +15,7 @@
 #
 # Refuses to run from a dirty tree or with a debug-signed APK. Each app is
 # published only when its version code increased; a lower code is refused. The
-# release key comes from wearos-app/keystore.properties (git-ignored;
+# release key comes from android/keystore.properties (git-ignored;
 # docs/GUIDE.md § Android updates). The relay needs no restart: it reads the
 # metadata on each request. The previous APKs stay for seven days.
 set -euo pipefail
@@ -88,8 +88,8 @@ if [ -n "$(git status --porcelain)" ]; then
 	git status --short >&2
 	exit 1
 fi
-if [ ! -f wearos-app/keystore.properties ]; then
-	echo "publish-android.sh: wearos-app/keystore.properties is missing." >&2
+if [ ! -f android/keystore.properties ]; then
+	echo "publish-android.sh: android/keystore.properties is missing." >&2
 	echo "Create the release key and the properties file first (docs/GUIDE.md § Android updates)." >&2
 	exit 1
 fi
@@ -142,8 +142,8 @@ for name in "$phone_name" "$watch_name"; do
 done
 
 sdk="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
-if [ -z "$sdk" ] && [ -f wearos-app/local.properties ]; then
-	sdk="$(sed -n 's/^[[:space:]]*sdk\.dir[[:space:]]*=[[:space:]]*//p' wearos-app/local.properties | tail -n 1)"
+if [ -z "$sdk" ] && [ -f android/local.properties ]; then
+	sdk="$(sed -n 's/^[[:space:]]*sdk\.dir[[:space:]]*=[[:space:]]*//p' android/local.properties | tail -n 1)"
 fi
 if [ -z "$sdk" ] || [ ! -d "$sdk" ]; then
 	sdk="$HOME/Library/Android/sdk"
@@ -162,12 +162,12 @@ tasks=()
 if has_app phone; then tasks+=(":mobile:assembleRelease"); fi
 if has_app watch; then tasks+=(":app:assembleRelease"); fi
 (
-	cd wearos-app
+	cd android
 	./gradlew "${tasks[@]}"
 )
 
-phone_apk="wearos-app/mobile/build/outputs/apk/release/mobile-release.apk"
-watch_apk="wearos-app/app/build/outputs/apk/release/app-release.apk"
+phone_apk="android/mobile/build/outputs/apk/release/mobile-release.apk"
+watch_apk="android/app/build/outputs/apk/release/app-release.apk"
 apk_paths=()
 if has_app phone; then apk_paths+=("$phone_apk"); fi
 if has_app watch; then apk_paths+=("$watch_apk"); fi
@@ -182,7 +182,7 @@ for apk in "${apk_paths[@]}"; do
 	}
 	if grep -q 'CN=Android Debug' <<<"$certs"; then
 		echo "publish-android.sh: $apk is debug-signed; refusing to publish it." >&2
-		echo "Check wearos-app/keystore.properties and build again." >&2
+		echo "Check android/keystore.properties and build again." >&2
 		exit 1
 	fi
 done

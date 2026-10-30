@@ -15,10 +15,10 @@ The minimums below come from the build files named with each one; those files wi
 3. **Cloud relay:** a small **x86-64 (amd64)** Linux VPS (1 vCPU, 512 MB RAM) with a public domain (e.g. `relay.example.com`). For arm64: [`deploy/relay/README.md` § First-time setup](../deploy/relay/README.md#first-time-setup-once-per-vps).
    - **Any TLS reverse proxy** in front of it works if it passes WebSockets and unbuffered SSE (nginx, Caddy, Nginx Proxy Manager; Cloudflare optional): [`deploy/relay/README.md`](../deploy/relay/README.md).
 4. **Smartwatch:**
-   - **Wear OS** 3 or later (`minSdk` 30 in `wearos-app/app/build.gradle.kts`) — *primary; verified only on a Google Pixel Watch 2*.
+   - **Wear OS** 3 or later (`minSdk` 30 in `android/app/build.gradle.kts`) — *primary; verified only on a Google Pixel Watch 2*.
    - **watchOS** — *best-effort*, simulator-only ([status](STATUS.md)).
    - **Network:** the watch needs only a path to the relay over HTTPS and to Firebase for push: Wi-Fi, LTE, or its phone's connection over Bluetooth (Wear OS routes it through the phone on its own; no companion app of ours is involved). Which paths have been checked: [STATUS](STATUS.md).
-5. **To build the Wear OS app:** JDK 17 (`wearos-app/app/build.gradle.kts`; Android Studio's bundled JBR works), the Android SDK, `adb`, and your own **Firebase project** for push.
+5. **To build the Wear OS app:** JDK 17 (`android/app/build.gradle.kts`; Android Studio's bundled JBR works), the Android SDK, `adb`, and your own **Firebase project** for push.
 
 ---
 
@@ -112,11 +112,11 @@ The phone is its own relay client, with its own device token: pairing it does no
 
 1. **Build** with the JDK from [Requirements](#requirements):
    ```bash
-   cd wearos-app
+   cd android
    export JAVA_HOME="/Applications/Android Studio.app/Contents/jbr/Contents/Home"
    ./gradlew :mobile:assembleDebug
    ```
-   **Push (optional):** in the same Firebase project as the watch, add another Android app with the package name `com.gabriel.agentwatch.mobile`, download its `google-services.json` to `wearos-app/mobile/`, and build again. It is git-ignored; never commit it. Without that file the app builds and works, it just has no notifications. The relay's FCM service account ([step 4](#4-build-and-install-the-wear-os-app), item 5) sends to both apps.
+   **Push (optional):** in the same Firebase project as the watch, add another Android app with the package name `com.gabriel.agentwatch.mobile`, download its `google-services.json` to `android/mobile/`, and build again. It is git-ignored; never commit it. Without that file the app builds and works, it just has no notifications. The relay's FCM service account ([step 4](#4-build-and-install-the-wear-os-app), item 5) sends to both apps.
 2. **Install** it on the phone with the phone connected over USB: `./gradlew :mobile:installDebug` (or `adb install -r mobile/build/outputs/apk/debug/mobile-debug.apk`). For updates that install without USB later, install a release-signed build once instead ([Android updates](#android-updates-phone-and-watch)); a debug build cannot be replaced by the release-signed APK.
 3. **Pair:** `./bin/agent-watch-bridge pair`, then enter the relay URL (prefilled from `agent-watch.env` at build time) and the code. The phone keeps its device token in its private app storage (backup off); the relay stores only its hash.
 4. **Allow it to start agents** (bridge `0.9.0`): on each machine, name the folders and agent kinds the phone may use, then apply the config:
@@ -126,14 +126,14 @@ The phone is its own relay client, with its own device token: pairing it does no
    ```
    With no `--session-root`, that machine starts no sessions and the phone says so. The folder browser cannot leave the roots, and a folder or kind outside them is refused (`not_allowed`, [`contracts.md` §2.1](reference/contracts.md)). The first session in a folder creates one herdr workspace for it; each session gets its own tab and agent, and nothing takes focus on that machine.
 
-What the app does today: agents as chats, one list filterable by machine, "Needs you" first, unread dots; a chat shows the agent's turns as a conversation with the approval menu inline, typed replies, and the history reader; "+" starts a session on a chosen machine, agent kind and folder, then opens its chat as soon as herdr reports it. With `mobile/google-services.json` in place it also posts local notifications, one chat per agent, grouped like a messaging app: tapping one opens that chat, and replies and approvals can be sent from the notification. Notifications stay on the phone (Android does not mirror them to the watch); Allow and a question's answer need the phone unlocked, while Deny, Cancel and a reply do not. A newer published build appears as an update card at the top of the chat list ([Android updates](#android-updates-phone-and-watch)). No settings screen yet: [STATUS](STATUS.md). Release builds use the key in `wearos-app/keystore.properties` when it exists; without it they are debug-signed, and `make publish-android` refuses to publish them.
+What the app does today: agents as chats, one list filterable by machine, "Needs you" first, unread dots; a chat shows the agent's turns as a conversation with the approval menu inline, typed replies, and the history reader; "+" starts a session on a chosen machine, agent kind and folder, then opens its chat as soon as herdr reports it. With `mobile/google-services.json` in place it also posts local notifications, one chat per agent, grouped like a messaging app: tapping one opens that chat, and replies and approvals can be sent from the notification. Notifications stay on the phone (Android does not mirror them to the watch); Allow and a question's answer need the phone unlocked, while Deny, Cancel and a reply do not. A newer published build appears as an update card at the top of the chat list ([Android updates](#android-updates-phone-and-watch)). No settings screen yet: [STATUS](STATUS.md). Release builds use the key in `android/keystore.properties` when it exists; without it they are debug-signed, and `make publish-android` refuses to publish them.
 
 ### 4. Build and Install the Wear OS App
 
-1. **Firebase:** create a Firebase project, add an Android app with the package name `com.gabriel.agentwatch` (the app's id; the `google-services.json` must match it), and download its `google-services.json` to `wearos-app/app/`. It is git-ignored; never commit it. The build fails without it.
+1. **Firebase:** create a Firebase project, add an Android app with the package name `com.gabriel.agentwatch` (the app's id; the `google-services.json` must match it), and download its `google-services.json` to `android/app/`. It is git-ignored; never commit it. The build fails without it.
 2. **Build** with the JDK from [Requirements](#requirements):
    ```bash
-   cd wearos-app
+   cd android
    export JAVA_HOME="/Applications/Android Studio.app/Contents/jbr/Contents/Home"   # or another JDK of that version
    ./gradlew :app:testDebugUnitTest :app:assembleDebug
    ```
@@ -146,13 +146,13 @@ What the app does today: agents as chats, one list filterable by machine, "Needs
 
 **watchOS** ([status](STATUS.md)): `make watchos-config` writes the git-ignored `watchos-app/Config.generated.xcconfig` ([`contracts.md` §7](reference/contracts.md)).
 
-The release build (`assembleRelease`, R8 on) uses the key in `wearos-app/keystore.properties` when it exists; without it, it is debug-signed, which is fine for a throwaway build but cannot be updated by a published APK. See [Android updates](#android-updates-phone-and-watch).
+The release build (`assembleRelease`, R8 on) uses the key in `android/keystore.properties` when it exists; without it, it is debug-signed, which is fine for a throwaway build but cannot be updated by a published APK. See [Android updates](#android-updates-phone-and-watch).
 
 ### Android updates (phone and watch)
 
 The relay serves the latest APK of each Android app, so later versions install from the phone or the watch without USB or the same Wi-Fi. Android still asks you to confirm each install, and the first one asks you to allow Agent Watch as an install source; that permission is once per app.
 
-**1. Create the release key once.** Every published build must use the same key: Android refuses an APK signed by another key, and the only fix is uninstalling the app (losing its pairing and local state). In `wearos-app/`:
+**1. Create the release key once.** Every published build must use the same key: Android refuses an APK signed by another key, and the only fix is uninstalling the app (losing its pairing and local state). In `android/`:
 
 ```bash
 keytool -genkeypair -v -keystore agent-watch-release.jks \
@@ -160,7 +160,7 @@ keytool -genkeypair -v -keystore agent-watch-release.jks \
 chmod 600 agent-watch-release.jks
 ```
 
-Create `wearos-app/keystore.properties` next to it (git-ignored; keep both backed up somewhere safe). Values are bare, without quotes; `storeFile` is relative to `wearos-app/`, or absolute:
+Create `android/keystore.properties` next to it (git-ignored; keep both backed up somewhere safe). Values are bare, without quotes; `storeFile` is relative to `android/`, or absolute:
 
 ```
 storeFile=agent-watch-release.jks
@@ -174,7 +174,7 @@ Both apps use this key. Without the file, release builds fall back to the debug 
 **2. Install a release-signed build once.** A debug-signed app cannot be replaced by a release-signed one. Build and install the release APKs on each device:
 
 ```bash
-cd wearos-app
+cd android
 export JAVA_HOME="/Applications/Android Studio.app/Contents/jbr/Contents/Home"
 ./gradlew :mobile:assembleRelease :app:assembleRelease
 
@@ -268,7 +268,7 @@ GitHub Actions, sized for the free plan (macOS minutes count ten times, so macOS
 | Workflow | Runner | When | What |
 |---|---|---|---|
 | [`ci.yml`](../.github/workflows/ci.yml) | Linux | every push to `main` and pull request | `gofmt`, `go vet`, `go test -race`, static cross-builds; guard and `agent-watch.env` tool tests |
-| [`wearos.yml`](../.github/workflows/wearos.yml) | Linux | changes under `wearos-app/` or `VERSIONS` | unit tests, lint and debug builds of both Android clients — the Wear OS app and the phone app — with a placeholder `google-services.json` |
+| [`android.yml`](../.github/workflows/android.yml) | Linux | changes under `android/` or `VERSIONS` | unit tests, lint and debug builds of both Android clients — the Wear OS app and the phone app — with a placeholder `google-services.json` |
 | [`macos-bar.yml`](../.github/workflows/macos-bar.yml) | macOS | changes to the menu bar, the bridge CLI or `VERSIONS` | `make bar-test` and `make bar` |
 | [`release.yml`](../.github/workflows/release.yml) | Linux + macOS | changes to released components on `main` (or by hand, as a dry run without publishing) | the release above |
 

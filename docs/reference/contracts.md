@@ -2,8 +2,8 @@
 
 Every JSON object that crosses a process boundary is defined here.
 
-- **The shapes the watch sends or receives (§1–§2)** must match this file exactly in the Go structs (`pkg/model/`), the Kotlin models (`wearos-app/`) and the Swift models (`watchos-app/`; the watchOS app's state: `docs/STATUS.md`). To change one, follow the `schema-sync` skill: it lists every copy.
-- **§3** exists only in Go (`pkg/model/wire.go`). **§4**'s data keys are read by `wearos-app/app/src/main/java/com/gabriel/agentwatch/network/AgentNotifications.kt`. **§5** is the relay's environment and data dir. **§6** (the bridge's config, local files and CLI output) is defined in `pkg/bridge` and `cmd/bridge`, not in `pkg/model`.
+- **The shapes the watch sends or receives (§1–§2)** must match this file exactly in the Go structs (`pkg/model/`), the Kotlin models (`android/`) and the Swift models (`watchos-app/`; the watchOS app's state: `docs/STATUS.md`). To change one, follow the `schema-sync` skill: it lists every copy.
+- **§3** exists only in Go (`pkg/model/wire.go`). **§4**'s data keys are read by `android/app/src/main/java/com/gabriel/agentwatch/network/AgentNotifications.kt`. **§5** is the relay's environment and data dir. **§6** (the bridge's config, local files and CLI output) is defined in `pkg/bridge` and `cmd/bridge`, not in `pkg/model`.
 
 **Conventions (apply everywhere):**
 - JSON keys are `snake_case`.
@@ -472,7 +472,7 @@ Every non-200 response of the endpoints in §2.1 carries an `ErrorResponse`. A p
 | `timeout` | 504 | The relay's 7 s budget ran out (one budget for sending the command and waiting for `command_result`), or the bridge's own 6 s budget did (e.g. waiting behind another command on the same pane). Timeouts nest from the inside out, bridge 6 s < relay 7 s < watch 8 s, so a `timeout` means the bridge has already given up. `session.create` uses longer budgets of the same shape: bridge 35 s < relay 40 s < phone 45 s |
 | `internal` | 500 | Bug, or herdr-core failed `terminal.send` / `terminal.keys` for an unclassified reason (the text or keys may have reached the pane) |
 
-What the Wear OS app shows for each code: `commandErrorFeedback` in `wearos-app/core/src/main/java/com/gabriel/agentwatch/approval/CommandFeedback.kt`.
+What the Wear OS app shows for each code: `commandErrorFeedback` in `android/core/src/main/java/com/gabriel/agentwatch/approval/CommandFeedback.kt`.
 
 ---
 
@@ -587,7 +587,7 @@ On a `resync` the bridge sends `hello` and `snapshot` again (the current relay n
 
 All values are strings (FCM data maps allow only strings). No `notification` block: the clients build the notification themselves.
 
-Both Android clients parse these fields locally (`:core`'s `PushMessages`, `wearos-app/core`). The phone app (`:mobile`) shows one conversation per `(host, pane_id)` as a `MessagingStyle` notification, grouped under a summary, and sets `setLocalOnly(true)` so Android never mirrors a chat to the watch. Its approving actions (`ALLOW`, and a question's `ANSWER`) are behind the device lock: `setAuthenticationRequired(true)` and a keyguard check in the receiver refuse them while locked; `DENY`, `CANCEL` and `PROMPT` stay available. A `resolved` dismisses the phone's approval too.
+Both Android clients parse these fields locally (`:core`'s `PushMessages`, `android/core`). The phone app (`:mobile`) shows one conversation per `(host, pane_id)` as a `MessagingStyle` notification, grouped under a summary, and sets `setLocalOnly(true)` so Android never mirrors a chat to the watch. Its approving actions (`ALLOW`, and a question's `ANSWER`) are behind the device lock: `setAuthenticationRequired(true)` and a keyguard check in the receiver refuse them while locked; `DENY`, `CANCEL` and `PROMPT` stay available. A `resolved` dismisses the phone's approval too.
 
 | Key | Example | Notes |
 |---|---|---|

@@ -89,7 +89,7 @@ Opt-in. It never runs on a plain deploy, and it changes live secrets.
 The relay serves the latest APK of the phone and Wear OS apps to their own clients, authenticated with the device token (`GET /v1/updates/{app}` and `…/apk`; contracts §2.1). It only reads the update directory; publishing is a separate step.
 
 - **Files:** `<AW_UPDATE_DIR>/phone.json` and `watch.json`, each naming an immutable `<app>-<version_code>.apk` beside it (contracts §5). `AW_UPDATE_DIR` defaults to `<AW_DATA_DIR>/updates`; the relay user must be able to read it.
-- **Publish:** from a clean tree on the Mac, with `AW_RELAY_SSH` in `agent-watch.env` and a release key in `wearos-app/keystore.properties` (docs/GUIDE.md § Android updates):
+- **Publish:** from a clean tree on the Mac, with `AW_RELAY_SSH` in `agent-watch.env` and a release key in `android/keystore.properties` (docs/GUIDE.md § Android updates):
   ```bash
   make publish-android
   ```

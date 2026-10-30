@@ -288,7 +288,7 @@ func present(state: BarState, status: LocalStatus?, busy: String? = nil, barVers
         p.dot = err.isEmpty ? .gray : .red // an error means it failed to start
         p.headline = "Bridge stopped"
         if err.isEmpty {
-            p.details = ["Your watch shows this Mac as offline."]
+            p.details = ["Your devices show this Mac as offline."]
         } else {
             let e = errorLine(err)
             p.details = [e.line]; p.detailHelp = e.help

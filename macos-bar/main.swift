@@ -119,7 +119,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(.separator())
         restartItem = addAction("Restart Bridge", #selector(restartBridge), "r")
         menu.addItem(.separator())
-        pairItem = addAction("Pair a Watch…", #selector(pairWatch), "p")
+        pairItem = addAction("Pair a Device…", #selector(pairDevice), "p")
         menu.addItem(.separator())
         logsItem = addAction("Open Bridge Log", #selector(openLogs), "l")
         configItem = addAction("Show Configuration in Finder", #selector(revealConfig), ",")
@@ -136,7 +136,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         menu.addItem(.separator())
         awayItem = addAction("Only Notify When Away", #selector(toggleAwayOnly), "")
-        awayItem.toolTip = "Your watch gets no pushes while you are using this computer; its list stays live."
+        awayItem.toolTip = "Your devices get no pushes while you are using this computer; their lists stay live."
         loginItem = addAction("Open at Login", #selector(toggleOpenAtLogin), "")
         renderLoginItem()
         _ = addAction("Quit Agent Watch Menu", #selector(quit), "q")
@@ -312,7 +312,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         return true
     }
 
-    @objc private func pairWatch() {
+    @objc private func pairDevice() {
         guard let bin = binary, busy == nil else { return }
         busy = "Requesting a pairing code"
         render()
@@ -333,8 +333,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private func showPairCode(_ info: PairInfo) {
         let alert = NSAlert()
-        alert.messageText = "Watch pairing code"
-        alert.informativeText = "Enter it in Agent Watch on your watch.\n\(pairExpiryText(info))"
+        alert.messageText = "Device pairing code"
+        alert.informativeText = "Enter it in Agent Watch on your watch or phone.\n\(pairExpiryText(info))"
         let code = NSTextField(labelWithString: spacedCode(info.code))
         code.font = NSFont.monospacedDigitSystemFont(ofSize: 30, weight: .semibold)
         code.isSelectable = true

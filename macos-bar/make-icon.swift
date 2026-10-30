@@ -1,6 +1,6 @@
 // Draws the menu bar app's icon from the Wear OS launcher icon, so both
 // apps share one artwork: the background and foreground vector drawables in
-// wearos-app/app/src/main/res/drawable. Run by build.sh:
+// android/app/src/main/res/drawable. Run by build.sh:
 //
 //   swift macos-bar/make-icon.swift <drawable dir> <out.iconset>
 //

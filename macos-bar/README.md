@@ -52,7 +52,7 @@ If none exists the icon shows the watch with `!` and a red dot, and the menu say
 
 ## What the icon says
 
-The bar reports the health of the bridge and the relay, and pairs watches. It never shows agents or blocked counts: that is the watch's job. Next to the clock there is only the icon and a small status circle: **green** connected, **yellow** running but not fully connected yet, **red** it should be working and is not, **gray** off on purpose. The menu's first row says which state it is, under "Agent Watch".
+The bar reports the health of the bridge and the relay, and pairs watches and phones. It never shows agents or blocked counts: that is the watch's job. Next to the clock there is only the icon and a small status circle: **green** connected, **yellow** running but not fully connected yet, **red** it should be working and is not, **gray** off on purpose. The menu's first row says which state it is, under "Agent Watch".
 
 | Icon | Dot | Menu says | What to do |
 |---|---|---|---|
@@ -79,7 +79,7 @@ The version strings' format is in `docs/reference/contracts.md` §3.
 - **The switch** in the first row (next to "Agent Watch" and the state): on runs `agent-watch-bridge start`, off runs `agent-watch-bridge stop`. Start keeps the installed LaunchAgent's paths, so it never moves the state dir or the binary. Off asks nothing: your watch shows this Mac as offline until you turn it on again. The switch is disabled while an action runs, and while the bridge is not configured. It is the system switch; it shows the accent colour only while the app is active, so the app activates while its menu is open and gives the focus back to the app you were in when the menu closes.
 - **Restart Bridge** (⌘R): `agent-watch-bridge restart`, which restarts the
   installed service without rewriting it (use it after `make bridge`).
-- **Pair a Watch…** (⌘P): `agent-watch-bridge pair --json`; shows the code and
+- **Pair a Device…** (⌘P): `agent-watch-bridge pair --json`; shows the code and
   its real expiry.
   "Copy Code" marks the clipboard entry as concealed.
 - **Open Bridge Log** (⌘L) and **Show Configuration in Finder** (⌘,): the

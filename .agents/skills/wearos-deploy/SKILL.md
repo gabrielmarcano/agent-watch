@@ -10,12 +10,12 @@ The user-facing steps (Firebase file, JDK, wireless `adb` pairing, install) are 
 ## Build and unit tests (no device needed)
 
 ```bash
-cd wearos-app
+cd android
 export JAVA_HOME="$(/usr/libexec/java_home -v <JDK version, docs/GUIDE.md § Requirements>)"
 ./gradlew :app:testDebugUnitTest :app:lintDebug :app:assembleDebug
 ```
 
-- `google-services.json` must exist in `wearos-app/app/`. It is the owner's file and git-ignored. If it is missing, **ask the owner**. Never create or commit it.
+- `google-services.json` must exist in `android/app/`. It is the owner's file and git-ignored. If it is missing, **ask the owner**. Never create or commit it.
 - One Gradle build at a time (`.agents/rules/wearos.md`).
 
 ## Emulator first
@@ -46,7 +46,7 @@ Install on the watch only after the owner agrees. There: never tap approvals of 
 Bump `WEAROS_VERSION_CODE` per `VERSIONS` for every build you install on the watch.
 
 ```bash
-cd wearos-app
+cd android
 ./gradlew :app:installRelease                     # the owner's watch runs the release build; :app:installDebug on the emulator
 adb shell am start -n com.gabriel.agentwatch/.MainActivity
 ```

@@ -9,7 +9,7 @@ description: "Change a JSON contract (agent state, prompt, history, API bodies, 
 |---|---|---|
 | 1 | Source of truth | `docs/reference/contracts.md` |
 | 2 | Go | `pkg/model/{agent,api,wire}.go` + golden `pkg/model/testdata/agent_state.json` |
-| 3 | Kotlin (`:core`) | `wearos-app/core/src/main/java/com/gabriel/agentwatch/model/*.kt` |
+| 3 | Kotlin (`:core`) | `android/core/src/main/java/com/gabriel/agentwatch/model/*.kt` |
 
 *(Note: `watchos-app/` is stopped/legacy and no longer required by the pre-commit hook.)*
 
@@ -23,13 +23,13 @@ description: "Change a JSON contract (agent state, prompt, history, API bodies, 
 2. **Edit the Go structs.** If §1.2 changed, update `pkg/model/testdata/agent_state.json` to match its example, and the struct literal of `TestGoldenAgentState` (`pkg/model/model_test.go`).
 3. **Fill the value where it is produced.** An `AgentState` field is built in `buildAgentState` (`pkg/bridge/engine.go`).
 4. **Run `go test ./pkg/model/... ./pkg/bridge/... ./pkg/herdr/...`.** The golden test must pass.
-5. **Update the Kotlin model.** Add `@Keep` if the class is new, and an assert for the new field in `ContractsTest` (why: `wearos-app/ARCHITECTURE.md` §6). Then run:
+5. **Update the Kotlin model.** Add `@Keep` if the class is new, and an assert for the new field in `ContractsTest` (why: `android/ARCHITECTURE.md` §6). Then run:
 
    ```bash
-   cd wearos-app && ./gradlew :core:testDebugUnitTest --tests '*ContractsTest*'
+   cd android && ./gradlew :core:testDebugUnitTest --tests '*ContractsTest*'
    ```
 
-6. **Grep for the old field name** in `cmd pkg wearos-app`. Nothing may still use it.
+6. **Grep for the old field name** in `cmd pkg android`. Nothing may still use it.
 7. **Commit all copies together** in one commit, with explicit paths.
 8. **Ship it.** The relay stores agents as `model.AgentState`, so a deployed relay drops the new field until it runs the new code. Bump the changed components per `VERSIONS`, deploy the relay (`relay-deploy` skill), restart the bridge (`make restart`), and publish/install the Android app.
 

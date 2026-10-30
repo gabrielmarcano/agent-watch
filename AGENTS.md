@@ -13,11 +13,11 @@ Rules for every AI agent working in this repository: Claude Code, Antigravity, O
 | State: phases, claims (also for work outside a phase), open items, blockers, next steps, what is deployed | [`docs/STATUS.md`](docs/STATUS.md) |
 | Guides for the open phases | [`docs/phases/`](docs/phases/) |
 | Every JSON shape, endpoint, error code, push payload, config key, machine-readable CLI output (`--json`, version strings), and product env vars (relay `AW_*`, `agent-watch.env` keys) | [`docs/reference/contracts.md`](docs/reference/contracts.md) |
-| Timeouts, limits and intervals | the doc of their layer: `contracts.md` (relay, bridge, watch protocol; pairing and history limits), `herdr-socket-api.md` (herdr side and the bridge's herdr policy), `agents.md` (transcript reads and screen captures), `wearos-app/ARCHITECTURE.md` (the watch app's own timers); other components: their README (`macos-bar/README.md`, `deploy/relay/README.md`) |
+| Timeouts, limits and intervals | the doc of their layer: `contracts.md` (relay, bridge, watch protocol; pairing and history limits), `herdr-socket-api.md` (herdr side and the bridge's herdr policy), `agents.md` (transcript reads and screen captures), `android/ARCHITECTURE.md` (the watch app's own timers); other components: their README (`macos-bar/README.md`, `deploy/relay/README.md`) |
 | The herdr socket: methods, events, keys, verified behaviour, and the bridge's herdr policy | [`docs/reference/herdr-socket-api.md`](docs/reference/herdr-socket-api.md) |
 | Per agent: menus, option roles, keys, transcripts | [`docs/reference/agents.md`](docs/reference/agents.md) |
-| Wear OS internals, client rules, screens, notifications and UX decisions | [`wearos-app/ARCHITECTURE.md`](wearos-app/ARCHITECTURE.md) |
-| Exact texts the watch shows | the code: `wearos-app/app/src/main/res/values/strings.xml`, `wearos-app/core/src/main/java/com/gabriel/agentwatch/approval/CommandFeedback.kt`, and the notification builders in `network/AgentNotifications.kt`, `MyFirebaseMessagingService.kt`, `NotificationActionReceiver.kt` |
+| Wear OS internals, client rules, screens, notifications and UX decisions | [`android/ARCHITECTURE.md`](android/ARCHITECTURE.md) |
+| Exact texts the watch shows | the code: `android/app/src/main/res/values/strings.xml`, `android/core/src/main/java/com/gabriel/agentwatch/approval/CommandFeedback.kt`, and the notification builders in `network/AgentNotifications.kt`, `MyFirebaseMessagingService.kt`, `NotificationActionReceiver.kt` |
 | The pitch and a quick start: a short version of `docs/GUIDE.md`'s setup, kept on purpose (the owner's decision) | [`README.md`](README.md) |
 | Installing, operating and troubleshooting the bridge and the watch app; the tool minimums users need; releases and CI; security model; known issues (symptom and workaround only) | [`docs/GUIDE.md`](docs/GUIDE.md) |
 | Relay operations: VPS setup, deploys, rollback, the relay CLI, proxy, devices, backups | [`deploy/relay/README.md`](deploy/relay/README.md) |
@@ -128,7 +128,7 @@ agent-watch/                      # the Go module keeps its old name, github.com
 ├── macos-bar/                    # macOS menu bar app over the bridge CLI (make bar, make bar-test)
 ├── tools/config/                 # awenv.sh: agent-watch.env reader for the Makefile and deploy.sh (+ test_awenv.sh)
 ├── tools/guards/                 # guard implementation (hooks, pre-commit)
-├── wearos-app/                   # Android clients: :core (shared Kotlin data layer), :app (Wear OS), :mobile (phone)
+├── android/                      # Android clients: :core (shared Kotlin data layer), :app (Wear OS), :mobile (phone)
 └── watchos-app/                  # STOPPED / LEGACY watchOS client (Swift)
 ```
 

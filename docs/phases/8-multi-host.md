@@ -72,7 +72,7 @@ The only host identity on the wire, `hello.host`, is logged and dropped.
 |---|---|---|
 | 1 | Contract: `contracts.md`, `pkg/model`, Kotlin and Swift copies, golden file (`schema-sync` skill). **Done 2026-10-10:** §1.2, §1.4–§1.6, §2.1–§2.4, §4.1. §3, §4.3, §5 and §7 followed in 2a | **Alone:** every layer reads these files |
 | 2a | Relay + push + relay CLI (`pkg/relay`, `pkg/push`, `cmd/relay`, `deploy/relay/README.md`) | **With 2b**: disjoint directories |
-| 2b | Wear OS (`wearos-app/`, `ARCHITECTURE.md`) | **With 2a** |
+| 2b | Wear OS (`android/`, `ARCHITECTURE.md`) | **With 2a** |
 | 3 | Deploy the relay; install Wear OS `1.4.0` on the watch **before** a second host connects (`1.3.1` mixes agents that share a pane id, until the relay restarts); register the hosts; install the bridge on each Linux machine | After 2a and 2b. The owner chose (2026-10-11) to have it installed on his machines over SSH |
 | 4 | End to end on the watch: two hosts with the same pane id, commands to each, a host going offline; with two hosts online and no pin or finished agent the Quick Dictate tile has no target; an offline host's agents are never the tile's target or count | After 2b and 3. A local run first (relay on the Mac, test bridges, the emulator) |
 

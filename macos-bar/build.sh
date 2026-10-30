@@ -40,7 +40,7 @@ mkdir -p "$APP_DIR/Contents/MacOS" "$APP_DIR/Contents/Resources"
 lipo -create "${slices[@]}" -output "$APP_DIR/Contents/MacOS/Agent Watch"
 
 # The icon is drawn from the Wear OS launcher icon (make-icon.swift).
-swift "$SCRIPT_DIR/make-icon.swift" "$REPO_ROOT/wearos-app/app/src/main/res/drawable" "$WORK/AppIcon.iconset"
+swift "$SCRIPT_DIR/make-icon.swift" "$REPO_ROOT/android/app/src/main/res/drawable" "$WORK/AppIcon.iconset"
 iconutil -c icns -o "$APP_DIR/Contents/Resources/AppIcon.icns" "$WORK/AppIcon.iconset"
 
 cp "$SCRIPT_DIR/Info.plist" "$APP_DIR/Contents/Info.plist"
