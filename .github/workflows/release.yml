@@ -65,16 +65,17 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
-      - name: Build and zip
+      - name: Build app, zip and dmg
         run: |
-          set -a; . ./VERSIONS; set +a
-          make bar
+          make dist-mac
           mkdir -p "$RUNNER_TEMP/dist"
-          ditto -c -k --keepParent "bin/Agent Watch.app" "$RUNNER_TEMP/dist/AgentWatchBar_${MENUBAR_VERSION}_macos_universal.zip"
+          cp bin/*.zip bin/*.dmg "$RUNNER_TEMP/dist/"
       - uses: actions/upload-artifact@v4
         with:
           name: menubar
-          path: ${{ runner.temp }}/dist/*.zip
+          path: |
+            ${{ runner.temp }}/dist/*.zip
+            ${{ runner.temp }}/dist/*.dmg
 
   publish:
     name: Publish the release

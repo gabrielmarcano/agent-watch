@@ -10,7 +10,9 @@ services: every 2.5 s it runs `agent-watch-bridge status --json --local`
 ## Build
 
 ```bash
-make bar            # or: macos-bar/build.sh
+make bar            # fast UI build (or: macos-bar/build.sh)
+make app            # self-contained app with embedded universal bridge (EMBED_BRIDGE=1)
+make dist-mac       # packages app into .zip and .dmg in bin/
 open "bin/Agent Watch.app"
 ```
 
@@ -41,10 +43,12 @@ After moving or renaming the app (up to menu bar 0.4.0 it was `bin/AgentWatchBar
 1. The binary the installed LaunchAgent runs
    (`~/Library/LaunchAgents/com.gabrielmarcano.agent-watch-bridge.plist`,
    first `ProgramArguments` entry).
-2. Otherwise `agent-watch-bridge` next to the app (`bin/`, where `make`
+2. The embedded helper inside the app bundle
+   (`Contents/Helpers/agent-watch-bridge`), present in distributed releases and `make app`.
+3. Otherwise `agent-watch-bridge` next to the app (`bin/`, where `make`
    puts both).
 
-If neither exists the icon shows the watch with `!` and a red dot, and the menu says how to build it.
+If none exists the icon shows the watch with `!` and a red dot, and the menu says how to build it.
 
 ## What the icon says
 

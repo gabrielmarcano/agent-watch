@@ -1,4 +1,4 @@
-.PHONY: build bridge relay relay-linux bar bar-test restart test vet fmt check check-versions clean
+.PHONY: build bridge relay relay-linux bar bar-test app dist-mac restart test vet fmt check check-versions clean
 .PHONY: config configure-bridge deploy-relay publish-android watchos-config _need-bridge-env _need-deploy-env _need-watchos-env
 
 # ── Component versions: VERSIONS ──────────────────────────────────────────
@@ -44,6 +44,25 @@ ifeq ($(UNAME_S),Darwin)
 	MENUBAR_VERSION=$(MENUBAR_VERSION) ./macos-bar/build.sh
 else
 	@echo "bar: the menu bar app only builds on macOS" >&2; exit 1
+endif
+
+# Self-contained macOS app bundle with embedded universal bridge ("bin/Agent Watch.app").
+app:
+ifeq ($(UNAME_S),Darwin)
+	@:$(call need-version,MENUBAR_VERSION)
+	@:$(call need-version,BRIDGE_VERSION)
+	EMBED_BRIDGE=1 MENUBAR_VERSION=$(MENUBAR_VERSION) ./macos-bar/build.sh
+else
+	@echo "app: the menu bar app only builds on macOS" >&2; exit 1
+endif
+
+# Packages the self-contained app into both .zip and .dmg in bin/.
+dist-mac: app
+ifeq ($(UNAME_S),Darwin)
+	@:$(call need-version,MENUBAR_VERSION)
+	./macos-bar/package.sh "bin/Agent Watch.app" bin
+else
+	@echo "dist-mac: packaging only runs on macOS" >&2; exit 1
 endif
 
 # Tests the menu bar's logic (macos-bar/BarLogic.swift) with a swiftc-built

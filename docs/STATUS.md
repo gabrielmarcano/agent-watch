@@ -28,7 +28,7 @@ One line per app: what runs today and what is left. The versions live in [`VERSI
 | **watchOS** | **STOPPED / LEGACY** (frozen in `watchos-app/`). | None (stopped). |
 | **Bridge** | Runs on the owner's Mac (`herdr-core` `0.1.14` / `Herdr.app` `0.9.10`): the relay link, the transcript reads (including PID-based Claude and CWD-based Antigravity resolution), the host sessions (`terminal.run`) and the presence switch. | Update other hosts (`home`, `bazzite`) when migrating them to `herdr-core`. |
 | **Relay** | Runs on the VPS: the snapshots, the SSE stream, the commands and the phone's update. | Phase 8 steps 3–4 (the other hosts). |
-| **macOS menu bar** | Released; the presence switch lives in it. | The single-app packaging idea, later. |
+| **macOS menu bar** | Released; presence switch, self-contained app bundle with embedded universal bridge helper, and DMG + ZIP packaging. | Done. |
 
 **Deployed** (2026-10-30): the relay `0.9.0` (on Google Cloud `general-vps`, from `c8c2073`) and, on the owner's Mac, the bridge `0.10.0` (`9ee8631`, migrated to `herdr-core` `0.1.14` and clean paths in `~/.config/agent-watch/config.toml`, Only Notify When Away on). The menu bar `0.6.0` (rebuilt from `main` on 2026-10-07) and the Wear OS app `1.3.1` (release build, version code 12, 2026-10-07) are unchanged. The phone app `0.5.10` (version code 20) is release-signed, installed and paired on the owner's phone and published to the relay's update directory (2026-10-22); the watch app was neither rebuilt nor published (its release build comes with the watch's own day). The component versions are in `VERSIONS`.
 

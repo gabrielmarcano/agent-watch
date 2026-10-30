@@ -409,13 +409,18 @@ func binaryFromLaunchAgent(_ data: Data) -> String? {
     return first
 }
 
-/// The bridge binary: the one the installed LaunchAgent runs, else the one
+/// The bridge binary: the one the installed LaunchAgent runs, else the embedded
+/// helper inside the app bundle (Contents/Helpers/agent-watch-bridge), else the one
 /// next to this app bundle (build.sh puts both in bin/). Never a guess based
 /// on the working directory or a hard-coded path.
 func locateBridgeBinary(launchAgent: URL, appBundle: URL, isExecutable: (String) -> Bool) -> String? {
     if let data = try? Data(contentsOf: launchAgent),
        let bin = binaryFromLaunchAgent(data), isExecutable(bin) {
         return bin
+    }
+    let helper = appBundle.appendingPathComponent("Contents/Helpers/agent-watch-bridge").path
+    if isExecutable(helper) {
+        return helper
     }
     let sibling = appBundle.deletingLastPathComponent().appendingPathComponent("agent-watch-bridge").path
     return isExecutable(sibling) ? sibling : nil

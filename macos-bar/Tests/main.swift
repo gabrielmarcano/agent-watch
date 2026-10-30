@@ -281,6 +281,10 @@ let bundle = tmp.appendingPathComponent("bin/Agent Watch.app")
 let plistURL = tmp.appendingPathComponent("agent.plist")
 let isExec: (String) -> Bool = { FileManager.default.isExecutableFile(atPath: $0) }
 
+let helper = bundle.appendingPathComponent("Contents/Helpers/agent-watch-bridge")
+try? FileManager.default.createDirectory(at: helper.deletingLastPathComponent(), withIntermediateDirectories: true)
+FileManager.default.createFile(atPath: helper.path, contents: Data("#!/bin/sh\n".utf8), attributes: [.posixPermissions: 0o755])
+
 let other = tmp.appendingPathComponent("plugin/agent-watch-bridge")
 try? FileManager.default.createDirectory(at: other.deletingLastPathComponent(), withIntermediateDirectories: true)
 FileManager.default.createFile(atPath: other.path, contents: Data("#!/bin/sh\n".utf8), attributes: [.posixPermissions: 0o755])
@@ -290,7 +294,9 @@ try! plistData.write(to: plistURL)
 check(locateBridgeBinary(launchAgent: plistURL, appBundle: bundle, isExecutable: isExec) == other.path, "binary from the LaunchAgent")
 
 try? FileManager.default.removeItem(at: other)
-check(locateBridgeBinary(launchAgent: plistURL, appBundle: bundle, isExecutable: isExec) == exe.path, "missing plist binary: sibling of the app")
+check(locateBridgeBinary(launchAgent: plistURL, appBundle: bundle, isExecutable: isExec) == helper.path, "missing plist binary: embedded helper of the app")
+try? FileManager.default.removeItem(at: helper)
+check(locateBridgeBinary(launchAgent: plistURL, appBundle: bundle, isExecutable: isExec) == exe.path, "missing helper: sibling of the app")
 try? FileManager.default.removeItem(at: exe)
 check(locateBridgeBinary(launchAgent: plistURL, appBundle: bundle, isExecutable: isExec) == nil, "nothing found: nil (no relative fallback)")
 

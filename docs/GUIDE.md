@@ -234,7 +234,9 @@ AW_ENV_FILE=agent-watch.env deploy/relay/publish-android.sh --phone
 | `./bin/agent-watch-bridge status` | Human status, including the relay's view; exit 1 when the bridge is not running |
 | `./bin/agent-watch-bridge status --json --local` | Local files only, no network: what the menu bar reads ([`contracts.md` §6.2](reference/contracts.md)) |
 | `sudo agent-watch-relay devices list` / `devices revoke <id>` | On the VPS ([`deploy/relay/README.md`](../deploy/relay/README.md) § Devices) |
-| `make bar` | Rebuild the menu bar app (quit the running one and `open "bin/Agent Watch.app"` again) |
+| `make bar` | Fast rebuild of the menu bar app (quit the running one and `open "bin/Agent Watch.app"` again) |
+| `make app` | Build self-contained `Agent Watch.app` with embedded universal bridge helper |
+| `make dist-mac` | Package the self-contained app into both `.zip` and `.dmg` in `bin/` |
 | `make check` | Format, vet and test the Go code (`make bar-test` for the menu bar logic) |
 
 ---
@@ -249,7 +251,7 @@ AW_ENV_FILE=agent-watch.env deploy/relay/publish-android.sh --phone
 
 The [release workflow](../.github/workflows/release.yml) publishes a GitHub release with:
 - `agent-watch-bridge` for macOS (arm64, amd64) and Linux (amd64, arm64), and `agent-watch-relay` for Linux (amd64, arm64), as static binaries;
-- `Agent Watch.app` (universal) as a zip (`AgentWatchBar_<version>_macos_universal.zip`);
+- `Agent Watch.app` (universal, self-contained with embedded bridge helper) as a DMG (`AgentWatchBar_<version>_macos_universal.dmg`) and a zip (`AgentWatchBar_<version>_macos_universal.zip`);
 - `SHA256SUMS`, and notes with each component's version and the commits since the previous tag.
 
 The Android apps (Wear OS and phone) are not attached: they need your own `google-services.json` and signing key, so build them from source (steps [3](#3-build-and-install-the-android-phone-app) and [4](#4-build-and-install-the-wear-os-app)). To update installed copies without USB, publish them to the relay ([Android updates](#android-updates-phone-and-watch)).
