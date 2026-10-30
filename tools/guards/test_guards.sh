@@ -74,6 +74,57 @@ cmd "python3 -c 'import socket; s=socket.socket(socket.AF_UNIX); s.connect(\"/x/
 # ── session-launch exception (pane run in an aw-session-* tab), with a fake herdr ──
 python3 "$DIR/test_session_launch.py" >/dev/null 2>&1; expect 0 $? "session launch exception unit tests"
 
+# ── hc (herdr-core) and herdr-app ──
+OWNER_TERM="$(python3 -c 'import sys; sys.path.insert(0, sys.argv[1]); import guards as g
+ls = g.hc_json(["ls"]) or {}
+for t in ls.get("terminals") or []:
+    addr = t.get("address")
+    info = g.hc_json(["get", addr]) or {}
+    if (info.get("labels") or {}).get("aw") != "sandbox":
+        print(addr); break
+' "$DIR" 2>/dev/null)"
+cmd 'hc send t999999 hi' 2 "hc unknown terminal refused"
+if [ -n "$OWNER_TERM" ]; then
+  cmd "hc send $OWNER_TERM 'hi'" 2 "hc owner terminal send refused"
+  cmd "hc keys $OWNER_TERM 1" 2 "hc owner terminal keys refused"
+  cmd "hc kill $OWNER_TERM" 2 "hc owner terminal kill refused"
+  cmd "hc interrupt $OWNER_TERM" 2 "hc owner terminal interrupt refused"
+  cmd "herdr-core send $OWNER_TERM 'hi'" 2 "herdr-core owner terminal send refused"
+  cmd "hc attach --observe $OWNER_TERM" 0 "hc attach --observe allowed"
+else
+  echo "note: hc not running, owner-terminal cases skipped"
+fi
+cmd 'hc kill' 2 "hc kill without target refused"
+cmd 'hc interrupt' 2 "hc interrupt without target refused"
+cmd 'hc attach' 2 "hc attach without target refused"
+cmd 'hc label t2 aw=sandbox' 2 "hc label setting aw=sandbox refused"
+cmd 'hc server stop' 2 "hc server stop refused"
+cmd 'hc server restart' 2 "hc server restart refused"
+cmd 'hc server status --json' 0 "hc server status allowed"
+cmd 'hc update' 2 "hc update refused"
+cmd 'hc machine rm home' 2 "hc machine rm refused"
+cmd 'hc machine rename home away' 2 "hc machine rename refused"
+cmd 'hc machine update home' 2 "hc machine update refused"
+cmd 'hc machine ls' 0 "hc machine ls allowed"
+cmd 'hc ls --json' 0 "hc ls allowed"
+cmd 'hc read t9 --lines 50' 0 "hc read allowed"
+cmd 'hc schema' 0 "hc schema allowed"
+cmd 'hc connect' 2 "hc connect on default session refused"
+cmd 'HC_SESSION=aw-sandbox hc send t1 hi' 0 "isolated HC_SESSION send allowed"
+cmd 'HC_SESSION=aw-sandbox hc server stop' 0 "isolated HC_SESSION server stop allowed"
+cmd $'python3 - <<\'EOF\'\ns.connect("default.sock"); send({"method":"terminal.send"})\nEOF' 2 "raw socket terminal.send refused"
+cmd $'python3 - <<\'EOF\'\ns.connect(os.environ["HC_TERMINAL_SOCKET"]); send({"method":"terminal.keys"})\nEOF' 2 "raw socket terminal.keys refused"
+cmd $'python3 - <<\'EOF\'\ns.connect("default.sock"); send({"method":"terminal.list"})\nEOF' 0 "raw socket terminal.list allowed"
+cmd 'herdr-app do space.close' 2 "herdr-app do space.close refused"
+cmd 'herdr-app do tab.close' 2 "herdr-app do tab.close refused"
+cmd 'herdr-app do pane.close' 2 "herdr-app do pane.close refused"
+cmd 'herdr-app do terminal.kill t2' 2 "herdr-app do terminal.kill refused"
+cmd 'herdr-app do app.quit' 2 "herdr-app do app.quit refused"
+cmd 'herdr-app ls' 0 "herdr-app ls allowed"
+cmd 'herdr-app status' 0 "herdr-app status allowed"
+cmd 'herdr-app commands' 0 "herdr-app commands allowed"
+cmd 'HERDR_APP_HOME=/tmp/aw-app-sbx herdr-app do space.close' 0 "isolated HERDR_APP_HOME allowed"
+
 # ── git ──
 cmd 'git add -A' 2 "add -A refused"
 cmd 'git add .' 2 "add . refused"

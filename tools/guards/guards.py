@@ -18,19 +18,25 @@ Wired from:
   .githooks/pre-commit                   (git, every tool and humans)
 
 What is blocked, and why:
-1. Input to live herdr panes. The development Mac runs the owner's REAL agent
-   sessions; sending "1" to one of them approves whatever it asked. Mutating
-   herdr commands are allowed only when the target pane belongs to the
-   workspace labelled "aw-sandbox" (checked live with `herdr pane get` +
-   `herdr workspace list`, so an env marker cannot bypass it). Renaming a
-   workspace to "aw-sandbox" (or a tab into "aw-session-*") is blocked, since it
-   would fake that check. One narrow exception launches new sessions: `herdr
-   pane run` into a pane of a tab labelled "aw-session-*" that has no agent and
-   only a shell in the foreground (create the tab with `herdr tab create
-   --label aw-session-<name>`; run e.g. `claude "<task>"` in it once).
-2. Raw writes to the herdr socket with mutating methods (including renames).
-3. Owner-only herdr operations: server stop, integration install/uninstall,
-   closing a non-sandbox workspace or a tab outside the sandbox.
+1. Input to live herdr-core (`hc`) terminals or legacy `herdr` panes. The
+   development Mac runs the owner's REAL agent sessions; sending "1" to one of
+   them approves whatever it asked.
+   - For `hc` / `herdr-core`: mutating terminal commands (`send`, `keys`,
+     `interrupt`, `kill`, `rm`, `keep`, `label`, `put`, `attach` without
+     `--observe`) are allowed only when the target terminal carries the label
+     `aw=sandbox` (checked live with `hc get --json`), or when the command runs
+     against an isolated `HC_SESSION` (not `default`). Setting `aw=sandbox` on
+     an existing terminal with `hc label` is blocked; set `--label aw=sandbox`
+     at creation time (`hc run --bg --label aw=sandbox ...`).
+   - For `herdr-app`: `do` commands that close spaces/tabs/panes, kill
+     terminals, quit/reset/update the app, or paste into terminals are blocked.
+   - For legacy `herdr`: mutating commands outside the `aw-sandbox` workspace
+     remain blocked while the migration is in progress.
+2. Raw writes to the herdr-core (`default.sock`, `HC_TERMINAL_SOCKET`) or
+   legacy herdr socket with mutating methods.
+3. Owner-only operations: `hc server stop/restart`, `hc update`, `hc machine
+   rm/rename/update`, and legacy `herdr server stop`, `integration
+   install/uninstall`, closing a non-sandbox workspace or tab.
 4. Unsafe git in a shared worktree: add -A/--all/-u/., commit -a/--amend/
    --no-verify, and push unless AW_OWNER_APPROVED_PUSH=1 (use it only when the
    owner asked; `push --dry-run` is fine).
@@ -48,11 +54,12 @@ import sys
 
 ROOT = os.environ.get("AW_REPO_ROOT") or os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 SANDBOX_LABEL = "aw-sandbox"
+HC_SANDBOX_KV = ("aw", "sandbox")
 # Tabs an agent creates to launch a new session (see session_launch_problem).
 SESSION_TAB_PREFIX = "aw-session-"
 SHELLS = {"zsh", "bash", "fish", "sh", "dash", "ksh", "tcsh", "nu"}
 
-# ─────────────────────────────── herdr ───────────────────────────────
+# ─────────────────────────────── herdr / hc ──────────────────────────
 
 TARGETED = {
     ("agent", "prompt"), ("agent", "send-keys"), ("agent", "start"), ("agent", "rename"),
@@ -68,13 +75,35 @@ OWNER_ONLY = {
     ("integration", "uninstall"): "removes hooks from the owner's agent configuration",
     ("workspace", "close"): "closes a workspace, possibly with the owner's agents in it",
 }
+HC_TARGETED = {"send", "keys", "interrupt", "kill", "rm", "keep", "label", "put", "attach"}
+HC_FLAGS_WITH_VALUE = {"--if", "--timeout", "--history", "--children", "--output", "--name",
+                       "--cwd", "--on", "--label", "--parent", "--version", "--from", "--via",
+                       "--old", "--new", "--offset", "--limit", "--env"}
+HERDR_APP_BLOCKED_DO = {
+    "space.close": "closes a space and ends the owner's terminals in it",
+    "tab.close": "closes a tab and ends the owner's terminals in it",
+    "pane.close": "closes a pane and ends the owner's terminal in it",
+    "terminal.kill": "kills a terminal in the owner's window",
+    "terminal.paste": "pastes into the focused terminal in the owner's window",
+    "terminal.paste_image": "pastes into the focused terminal in the owner's window",
+    "app.quit": "quits the owner's Herdr window",
+    "app.reset": "resets the owner's Herdr layout and keys",
+    "app.update": "restarts the owner's Herdr app for an update",
+    "app.update_core": "restarts the owner's herdr-core",
+    "window.close": "closes the owner's Herdr window",
+    "layout.reset": "resets the owner's layout",
+}
 MUTATING_SOCKET_METHODS = re.compile(
     r"agent\.(prompt|send_keys|start|rename|focus)|pane\.(send_|close|split|run|report_|release_agent)"
-    r"|server\.stop|workspace\.(close|rename)|tab\.(close|rename)|integration\.(install|uninstall)"
+    r"|server\.(stop|restart)|workspace\.(close|rename)|tab\.(close|rename)|integration\.(install|uninstall)"
+    r"|terminal\.(run|kill|rm|keep|label|attach|send|keys|interrupt|put)"
+    r"|machine\.(exec|add|rename|rm)|file\.(write|edit)|doc\.set"
 )
 # Programs that can write to a unix socket. `go` counts only as `go run`.
 CODE_RUNNERS = {"python", "python3", "node", "bun", "deno", "nc", "ncat", "socat", "ruby", "perl"}
-SOCKET_MENTION = re.compile(r"herdr\.sock|HERDR_SOCKET_PATH")
+SOCKET_MENTION = re.compile(
+    r"herdr\.sock|HERDR_SOCKET_PATH|default\.sock|HC_TERMINAL_SOCKET|herdr-core|herdr-app\.sock"
+)
 
 
 class Blocked(Exception):
@@ -262,6 +291,108 @@ def first_positional(args):
     return None
 
 
+def hc_json(args):
+    try:
+        out = subprocess.run(["hc", *args, "--json"], capture_output=True, text=True, timeout=5).stdout
+        return json.loads(out)
+    except Exception:
+        return None
+
+
+def hc_sandbox_problem(target):
+    """None if target is a sandbox terminal in herdr-core (labelled aw=sandbox), else the reason."""
+    info = hc_json(["get", target])
+    if not isinstance(info, dict) or "address" not in info:
+        return f"cannot resolve terminal {target!r} in hc"
+    labels = info.get("labels") or {}
+    k, v = HC_SANDBOX_KV
+    if labels.get(k) == v:
+        return None
+    return f"terminal {target!r} ({info.get('address')}) does not carry label {k}={v}"
+
+
+def hc_positionals(args):
+    """Positional arguments for an hc subcommand, accounting for flags that take a value."""
+    out, skip_next = [], False
+    for a in args:
+        if skip_next:
+            skip_next = False
+            continue
+        if a == "--":
+            continue
+        if a.startswith("--"):
+            name = a.split("=", 1)[0]
+            if "=" not in a and name in HC_FLAGS_WITH_VALUE:
+                skip_next = True
+            continue
+        if a.startswith("-") and len(a) > 1:
+            continue
+        out.append(a)
+    return out
+
+
+def hc_isolated_session(env):
+    """True when the command explicitly targets a non-default HC_SESSION or socket."""
+    sess = env.get("HC_SESSION", "").strip()
+    if sess and sess != "default":
+        return True
+    sock = env.get("HC_TERMINAL_SOCKET", "").strip()
+    if sock and "default.sock" not in sock:
+        return True
+    return False
+
+
+def check_hc(tokens, env):
+    if hc_isolated_session(env):
+        return
+    rest = [a for a in tokens[1:] if a != "--json"]
+    if not rest or any(a in ("--help", "-h", "help", "--version", "-V", "--skill", "--licenses") for a in rest):
+        return
+    sub = rest[0]
+    args = rest[1:]
+    if sub == "server" and args and args[0] in ("stop", "restart"):
+        raise Blocked(f"`hc server {args[0]}` stops or restarts the owner's herdr-core and affects every "
+                      "terminal. Ask the owner to run it himself (tests use an isolated HC_SESSION).")
+    if sub == "update":
+        raise Blocked("`hc update` updates and restarts the owner's herdr-core. Ask the owner to run it himself.")
+    if sub == "machine" and args and args[0] in ("rm", "rename", "update"):
+        raise Blocked(f"`hc machine {args[0]}` modifies the owner's configured machines. Ask the owner to run it.")
+    if sub == "attach" and ("--observe" in args):
+        return
+    if sub in HC_TARGETED:
+        pos = hc_positionals(args)
+        if sub == "label":
+            k, v = HC_SANDBOX_KV
+            for kv in pos[1:]:
+                if kv == f"{k}={v}":
+                    raise Blocked(f"`hc label` setting `{k}={v}` on an existing terminal would mark the owner's "
+                                  f"terminal as a sandbox. Start new sandbox terminals with "
+                                  f"`hc run --bg --label {k}={v} ...` instead.")
+        target = pos[0] if pos else None
+        if not target:
+            raise Blocked(f"`hc {sub}` without an explicit target terminal would hit the caller or focused "
+                          f"terminal. Pass a terminal with label {HC_SANDBOX_KV[0]}={HC_SANDBOX_KV[1]}, or use "
+                          f"an isolated `HC_SESSION=aw-sandbox`.")
+        reason = hc_sandbox_problem(target)
+        if reason:
+            raise Blocked(f"`hc {sub}` refused: {reason}. The owner's terminals run live agent sessions. "
+                          f"Start a sandbox terminal with `hc run --bg --label {HC_SANDBOX_KV[0]}={HC_SANDBOX_KV[1]} ...` "
+                          f"(or use an isolated `HC_SESSION=aw-sandbox`) and target that.")
+
+
+def check_herdr_app(tokens, env):
+    if env.get("HERDR_APP_HOME", "").strip():
+        return
+    rest = tokens[1:]
+    if not rest or any(a in ("--help", "-h", "help", "--version", "-V", "--skill") for a in rest):
+        return
+    if rest[0] == "do" and len(rest) >= 2:
+        cmd_name = rest[1]
+        if cmd_name in HERDR_APP_BLOCKED_DO:
+            raise Blocked(f"`herdr-app do {cmd_name}` {HERDR_APP_BLOCKED_DO[cmd_name]}. "
+                          "Ask the owner to do it in his window.")
+
+
 def check_herdr(tokens):
     rest = tokens[1:]
     while rest and rest[0].startswith("--"):
@@ -417,15 +548,23 @@ def check_command(command: str):
             continue
         text = " ".join(tok for cmd in pipe for tok in cmd)
         if SOCKET_MENTION.search(text) and MUTATING_SOCKET_METHODS.search(text):
-            raise Blocked("raw socket call with a mutating herdr method. Use the `herdr` CLI instead so the "
-                          "sandbox check can verify the target pane (read-only methods like ping/agent.list "
-                          "are fine; tests use pkg/herdrtest, never the real socket).")
+            raise Blocked("raw socket call with a mutating herdr/herdr-core method. Use the `hc` (or `herdr`) "
+                          "CLI instead so the sandbox check can verify the target terminal (read-only methods "
+                          "like hello/terminal.list/ping/agent.list are fine; tests use pkg/herdrtest, never "
+                          "the real socket).")
     for seg in segments(command):
         env, tokens = strip_env(seg)
         if not tokens:
             continue
         prog = os.path.basename(tokens[0])
-        if prog == "herdr":
+        if prog in ("hc", "herdr-core"):
+            if "connect" in tokens[1:] and not hc_isolated_session(env):
+                raise Blocked("`hc connect` opens the raw RPC stream to the owner's herdr-core. Use `hc` "
+                              "subcommands so the sandbox check can verify the target terminal.")
+            check_hc(tokens, env)
+        elif prog in ("herdr-app", "Herdr"):
+            check_herdr_app(tokens, env)
+        elif prog == "herdr":
             check_herdr(tokens)
         elif prog == "git":
             check_git(tokens, env)

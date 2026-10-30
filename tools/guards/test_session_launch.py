@@ -73,5 +73,48 @@ class SessionLaunch(unittest.TestCase):
         run(["herdr", "agent", "prompt", "w1:p2", "hi"], tab_label="notes", ws_label="aw-sandbox")
 
 
+def fake_hc(labels=None, resolvable=True):
+    def hc_json(args):
+        if args[:1] == ["get"]:
+            if not resolvable:
+                return None
+            return {"address": args[1], "labels": labels or {}}
+        return None
+    return hc_json
+
+
+def run_hc(tokens, env=None, **kw):
+    guards.hc_json = fake_hc(**kw)
+    guards.check_hc(tokens, env or {})
+
+
+class HcSandbox(unittest.TestCase):
+    def test_sandbox_labeled_terminal_allowed(self):
+        run_hc(["hc", "send", "t99", "hello"], labels={"aw": "sandbox"})
+        run_hc(["hc", "keys", "t99", "1", "enter"], labels={"aw": "sandbox"})
+        run_hc(["hc", "kill", "t99"], labels={"aw": "sandbox"})
+        run_hc(["hc", "rm", "t99"], labels={"aw": "sandbox"})
+        run_hc(["hc", "label", "t99", "foo=bar"], labels={"aw": "sandbox"})
+
+    def test_owner_terminal_blocked(self):
+        for cmd in (["hc", "send", "t2", "hi"], ["hc", "keys", "t2", "1"],
+                    ["hc", "interrupt", "t2"], ["hc", "kill", "t2"],
+                    ["hc", "rm", "t2"], ["hc", "keep", "t2", "--off"],
+                    ["hc", "put", "t2", "a.png"], ["hc", "attach", "t2"]):
+            with self.assertRaises(guards.Blocked, msg=cmd):
+                run_hc(cmd, labels={"where": "agent-watch / 1"})
+
+    def test_attach_observe_allowed_on_any_terminal(self):
+        run_hc(["hc", "attach", "--observe", "t2"], labels={"where": "agent-watch / 1"})
+
+    def test_setting_sandbox_label_on_existing_terminal_blocked(self):
+        with self.assertRaises(guards.Blocked):
+            run_hc(["hc", "label", "t2", "aw=sandbox"], labels={"aw": "sandbox"})
+
+    def test_isolated_hc_session_allowed(self):
+        run_hc(["hc", "send", "t2", "hi"], env={"HC_SESSION": "aw-sandbox"}, labels={})
+        run_hc(["hc", "server", "stop"], env={"HC_SESSION": "aw-sandbox"}, labels={})
+
+
 if __name__ == "__main__":
     unittest.main()

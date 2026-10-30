@@ -16,24 +16,19 @@ Codex, Cursor and any tool not in this table get **only** the git pre-commit hoo
 
 | Rule | Why |
 |---|---|
-| `herdr` input/pane commands whose target is outside the `aw-sandbox` workspace | The dev Mac runs the owner's real agent sessions. The target is resolved live with `herdr pane get` + `herdr workspace list` |
-| Renaming a workspace to `aw-sandbox`, or a tab into `aw-session-*` (CLI or raw socket) | Either would fake the checks above and open the owner's panes |
-| `herdr server stop`, `integration install/uninstall`, closing a workspace or a tab outside `aw-sandbox` | Owner-only: closing ends the owner's agent sessions in it (a tab's workspace is resolved live with `herdr tab get`) |
-| Raw socket scripts using mutating herdr methods: a pipeline that runs code (`python`, `node`, `socat`, `nc`, `go run`, …) and names both the socket and the method (heredoc bodies included) | They would bypass the sandbox check. A method merely mentioned elsewhere in the command (a `grep`, a `go test`) is fine |
+| `hc` / `herdr-core` terminal commands (`send`, `keys`, `interrupt`, `kill`, `rm`, `keep`, `label`, `put`, `attach` without `--observe`) whose target does not carry `aw=sandbox`, unless `HC_SESSION` is isolated (not `default`) | The dev Mac runs the owner's real agent sessions. The target's labels are checked live with `hc get --json` |
+| Setting `aw=sandbox` on an existing terminal with `hc label` | It would fake the sandbox check above and open an owner terminal to input; pass `--label aw=sandbox` when starting the terminal (`hc run --bg --label aw=sandbox ...`) |
+| `hc server stop/restart`, `hc update`, `hc machine rm/rename/update`, `hc connect` (on the default session), and `herdr-app do` commands that close spaces/tabs/panes, kill terminals, paste, or quit/reset/update the app | Owner-only: they affect every terminal or the owner's window |
+| Legacy `herdr` input/pane commands whose target is outside the `aw-sandbox` workspace, renaming into `aw-sandbox` / `aw-session-*`, `herdr server stop`, `integration install/uninstall`, closing a workspace or a tab outside `aw-sandbox` | Kept while the migration from legacy `herdr` to `herdr-core` completes |
+| Raw socket scripts using mutating `herdr-core` or legacy `herdr` methods: a pipeline that runs code (`python`, `node`, `socat`, `nc`, `go run`, …) and names both the socket (`default.sock`, `HC_TERMINAL_SOCKET`, `herdr.sock`, `HERDR_SOCKET_PATH`) and the method (heredoc bodies included) | They would bypass the sandbox check. A method merely mentioned elsewhere in the command (a `grep`, a `go test`) is fine |
 | `git add -A` / `-u` / `.`, `commit -a` / `.`, `commit --amend`, `commit --no-verify` (also after global options such as `git --no-pager` or `-c x=y`), `push` without `AW_OWNER_APPROVED_PUSH=1` | Shared worktree: stage paths by name; the owner decides when to publish (`push --dry-run` is allowed) |
 | Writes to `bridge/`, `claude-plugin/`, `.claude-plugin/`, `google-services.json`, `firebase-service-account*.json`, `.env`, `agent-watch.env` | Legacy code must not return; secrets are placed by hand (`agent-watch.env` by `make config`; its `.example` stays writable). Fixtures under a `testdata/` directory are exempt |
 | Commits with secrets, unformatted Go, or `pkg/model` changes without `contracts.md` + both client models | Permanent leaks; schema drift. Secret-named files (`.env`, `store.json`, …) under `testdata/` pass, their content is still scanned. Escape hatch for helper-only changes: `AW_CONTRACT_NO_JSON_CHANGE=1` |
 
-## Launching a new agent session (the one exception)
+## Sandboxes and launching a new agent session
 
-Input to panes outside `aw-sandbox` is blocked, but an agent may start a **new** session for the owner:
-
-```bash
-herdr tab create --workspace <ws> --label aw-session-<name> --cwd "$PWD" --no-focus   # → root pane id
-herdr pane run <that-pane> 'claude "<the whole task, including where to read the context>"'
-```
-
-`pane run` is allowed only when the pane's tab label starts with `aw-session-`, the pane has **no agent** yet, and only a **shell** is in its foreground (checked live, fail closed). Once the agent runs there, the pane is closed to further input (`agent prompt`, `send-*`, another `pane run`): the task must go in the launch command, and the owner talks to the new session.
+- **Isolated `herdr-core` session (preferred for tests and fixture captures):** run `hc` with `HC_SESSION=aw-sandbox` (or start a background terminal on the default core with `hc run --bg --label aw=sandbox ...`, which stays out of the owner's `herdr-app` window because it has no `herdr.space` label).
+- **Launching a new session for the owner:** `hc run --bg --name <name> --cwd "$PWD" <agent> "<the whole task>"` starts a new terminal without touching existing ones. (For legacy `herdr`, the `aw-session-<name>` tab exception remains in `guards.py` until legacy `herdr` is removed.)
 
 ## One-time setup per machine / clone
 

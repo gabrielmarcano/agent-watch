@@ -3,18 +3,24 @@ trigger: always_on
 description: "Safety and protocol rules for talking to herdr (live owner sessions)"
 ---
 
-# herdr integration rules
+# herdr-core (`hc`) and Herdr integration rules
 
-> Applies to: pkg/herdr, pkg/herdrtest, pkg/bridge, cmd/bridge, herdr-plugin.toml, and ANY herdr command you run.
+> Applies to: pkg/herdr, pkg/herdrtest, pkg/bridge, cmd/bridge, and ANY `hc` / `herdr-core` / `herdr-app` / `herdr` command you run.
 
-Full reference, with the herdr version it was verified on: `docs/reference/herdr-socket-api.md`.
+Full reference, with the version it was verified on: `docs/reference/herdr-socket-api.md`.
 
 ## Safety (non-negotiable)
-- The herdr on this Mac runs the **owner's real agent sessions**.
-- **Never, outside panes you created in the `aw-sandbox` workspace:** anything that types, starts, closes, moves or renames: `agent.prompt`, `agent.send_keys`, `agent.start`, `pane.send_*`, `pane.run`, `pane.close`, `tab.close` (and their CLI forms).
-- **Safe anywhere (read-only):** `ping`, `agent.list`, `agent.get`, `agent.read`, `pane.get`, `pane.list`, `session.snapshot`, `workspace.list`, `tab.list`, `events.subscribe` (listening only), and the CLI's `herdr --version`, `herdr api schema`, `herdr integration status`.
+- The `herdr-core` (`hc`) and `Herdr.app` (`herdr-app`) on this Mac run the **owner's real agent sessions**.
+- **Never, on the owner's terminals or window:** anything that types, interrupts, kills, removes, re-labels or closes:
+  - `hc`: `send`, `keys`, `interrupt`, `kill`, `rm`, `keep`, `label`, `put`, `attach` (without `--observe`), `server stop`, `server restart`, `update`, `machine rm/rename/update`, `connect` (on the default session).
+  - `herdr-app do`: `space.close`, `tab.close`, `pane.close`, `terminal.kill`, `terminal.paste`, `terminal.paste_image`, `app.quit`, `app.reset`, `app.update`, `app.update_core`, `window.close`, `layout.reset`.
+- **Safe anywhere (read-only):**
+  - `hc`: `ls`, `get`, `read`, `templates`, `schema`, `server status`, `machine ls`, `file read`, `attach --observe`, `events` (listening only), and `--version` / `--help` / `--skill`.
+  - Socket read-only methods: `hello`, `server.status`, `terminal.list`, `terminal.get`, `terminal.read`, `templates.list`, `machine.list`, `doc.get`, `rpc.discover`, `events.subscribe` (listening only).
+  - `herdr-app`: `ls`, `status`, `commands`, `shot`, `check`, `--version`, `--help`, `--skill`.
+- **Sandboxes for testing and fixture capture:**
+  - Either run an isolated core session with `HC_SESSION=aw-sandbox` (and a scratch `XDG_STATE_HOME` when testing server lifecycle), **or** start a background terminal labelled `aw=sandbox` (`hc run --bg --label aw=sandbox ...`), which stays invisible to the owner's `herdr-app` window because it has no `herdr.space` label.
 - What the guards enforce, and for which tools: `tools/guards/README.md`. Where they don't reach, these rules still apply.
-- To start a new agent session for the owner, create a tab labelled `aw-session-<name>` and `herdr pane run` the agent with its whole task once (`tools/guards/README.md`); after that the pane is closed to input.
 - Tests never touch the real socket: use `pkg/herdrtest`.
 
 ## Protocol facts that break code when forgotten (details: `herdr-socket-api.md`)
