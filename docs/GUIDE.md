@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/logo.png" width="100" height="100" alt="Agent Watch Logo" />
+</p>
+
 # Agent Watch — Full Guide
 
 How to set up, run and troubleshoot Agent Watch, in detail. The [README](../README.md) is the short version.
@@ -14,11 +18,12 @@ The minimums below come from the build files named with each one; those files wi
 2. **Go** 1.23 or later (`go.mod`) to build the bridge and the relay (static binaries).
 3. **Cloud relay:** a small **x86-64 (amd64)** Linux VPS (1 vCPU, 512 MB RAM) with a public domain (e.g. `relay.example.com`). For arm64: [`deploy/relay/README.md` § First-time setup](../deploy/relay/README.md#first-time-setup-once-per-vps).
    - **Any TLS reverse proxy** in front of it works if it passes WebSockets and unbuffered SSE (nginx, Caddy, Nginx Proxy Manager; Cloudflare optional): [`deploy/relay/README.md`](../deploy/relay/README.md).
-4. **Smartwatch:**
-   - **Wear OS** 3 or later (`minSdk` 30 in `android/app/build.gradle.kts`) — *primary; verified only on a Google Pixel Watch 2*.
-   - **watchOS** — *best-effort*, simulator-only ([status](STATUS.md)).
-   - **Network:** the watch needs only a path to the relay over HTTPS and to Firebase for push: Wi-Fi, LTE, or its phone's connection over Bluetooth (Wear OS routes it through the phone on its own; no companion app of ours is involved). Which paths have been checked: [STATUS](STATUS.md).
-5. **To build the Wear OS app:** JDK 17 (`android/app/build.gradle.kts`; Android Studio's bundled JBR works), the Android SDK, `adb`, and your own **Firebase project** for push.
+4. **Client Devices:**
+   - **Wear OS** 3 or later (`minSdk` 30 in `android/app/build.gradle.kts`) — verified on a Google Pixel Watch 2.
+   - **Android Phone:** Android 11 or later (`minSdk` 30 in `android/mobile/build.gradle.kts`) — verified on a Pixel 8 Pro.
+   - *(watchOS in `watchos-app/` is STOPPED / LEGACY, frozen in place: see [STATUS](STATUS.md)).*
+   - **Network:** Devices need only HTTPS to the relay and access to Firebase for push. A Wear OS watch can use Wi-Fi, LTE, or its Bluetooth connection routed through the phone.
+5. **To build the Android apps:** JDK 17 (`android/app/build.gradle.kts`; Android Studio's bundled JBR works), the Android SDK, `adb`, and your own **Firebase project** for push.
 
 ---
 
@@ -102,9 +107,13 @@ Each machine with herdr runs its own bridge, with **its own host token**; the wa
 
 1. On the VPS, register the machine and copy the token it prints once: `sudo agent-watch-relay hosts add <id> --name "<name>"` ([`deploy/relay/README.md` § Hosts](../deploy/relay/README.md#hosts-one-per-machine)).
 2. On that machine, clone the repo, create its `agent-watch.env` with `make config`, replace its `AW_HOST_TOKEN` with that token, and set `AW_HOST_ID=<id>`. Deploy and sync the relay only from the first machine: `make deploy-relay ARGS=--sync-env` refuses another machine's file, which would hand the relay its token.
-3. Install and start its bridge as in [step 2](#2-install-and-configure-the-host-bridge). Linux runs it as a `systemd --user` unit. Without Go on that machine, put a [release](#versions-and-releases)'s bridge for it in the checkout's `bin/` instead of `make bridge`; `herdr plugin link` and the plugin actions work the same.
+3. Install and start its bridge as in [step 2](#2-install-and-configure-the-host-bridge). Linux runs it as a `systemd --user` unit. Without Go on that machine, put a [release](#versions-and-releases)'s bridge for it in the checkout's `bin/` instead of `make bridge`.
 
 The first machine's token, `AW_HOST_TOKEN` in the relay's env file, keeps working as the host `AW_HOST_ID` (default `main`). The phone lists every machine too (one filter, not pages), and can start a session on any of them whose bridge is `0.9.0` and has session roots (below).
+
+### The Android Client Suite (`android/`)
+
+Both Android apps—the phone app (`:mobile`) and the Wear OS smartwatch app (`:app`)—share the **`:core`** module. `:core` contains the common data contracts, `RelayEngine` (real-time SSE synchronization, command queuing, error recovery), push parsing, and the cryptographic OTA update verifier. Each app builds upon this shared engine for its form factor.
 
 ### 3. Build and Install the Android Phone App
 
@@ -124,7 +133,7 @@ The phone is its own relay client, with its own device token: pairing it does no
    make configure-bridge ARGS="--session-root ~/Code --session-root ~/Documents --session-kind claude --session-kind opencode"
    make restart
    ```
-   With no `--session-root`, that machine starts no sessions and the phone says so. The folder browser cannot leave the roots, and a folder or kind outside them is refused (`not_allowed`, [`contracts.md` §2.1](reference/contracts.md)). The first session in a folder creates one herdr workspace for it; each session gets its own tab and agent, and nothing takes focus on that machine.
+   With no `--session-root`, that machine starts no sessions and the phone says so. The folder browser cannot leave the roots, and a folder or kind outside them is refused (`not_allowed`, [`contracts.md` §2.1](reference/contracts.md)). The first session in a folder creates one herdr workspace for it; each session gets its own tab and agent, and starting one does not change what the person at that machine is looking at.
 
 What the app does today: agents as chats, one list filterable by machine, "Needs you" first, unread dots; a chat shows the agent's turns as a conversation with the approval menu inline, typed replies, and the history reader; "+" starts a session on a chosen machine, agent kind and folder, then opens its chat as soon as herdr reports it. With `mobile/google-services.json` in place it also posts local notifications, one chat per agent, grouped like a messaging app: tapping one opens that chat, and replies and approvals can be sent from the notification. Notifications stay on the phone (Android does not mirror them to the watch); Allow and a question's answer need the phone unlocked, while Deny, Cancel and a reply do not. A newer published build appears as an update card at the top of the chat list ([Android updates](#android-updates-phone-and-watch)). No settings screen yet: [STATUS](STATUS.md). Release builds use the key in `android/keystore.properties` when it exists; without it they are debug-signed, and `make publish-android` refuses to publish them.
 
@@ -143,8 +152,6 @@ What the app does today: agents as chats, one list filterable by machine, "Needs
    - on the computer: `adb pair <ip>:<pair-port> <code>`, then `adb connect <ip>:<port>` (the connect port is shown on the Wireless debugging screen and changes after a reboot).
 4. **Install:** `./gradlew :app:installDebug`. For updates that install from the watch later, install a release-signed build once instead ([Android updates](#android-updates-phone-and-watch)); a debug build cannot be replaced by the release-signed APK.
 5. **Push on the relay:** copy the Firebase **service-account** JSON to the VPS only, as [`deploy/relay/README.md` § First-time setup](../deploy/relay/README.md#first-time-setup-once-per-vps) says, set `AW_FCM_CREDENTIALS` to its server path in `agent-watch.env`, and run `make deploy-relay ARGS=--sync-env`. Without it the relay runs with push disabled.
-
-**watchOS** ([status](STATUS.md)): `make watchos-config` writes the git-ignored `watchos-app/Config.generated.xcconfig` ([`contracts.md` §7](reference/contracts.md)).
 
 The release build (`assembleRelease`, R8 on) uses the key in `android/keystore.properties` when it exists; without it, it is debug-signed, which is fine for a throwaway build but cannot be updated by a published APK. See [Android updates](#android-updates-phone-and-watch).
 
@@ -203,15 +210,15 @@ AW_ENV_FILE=agent-watch.env deploy/relay/publish-android.sh --phone
 
 **4. Update from the device.** The phone checks when it starts and after pairing; the watch checks on start and from Settings → **Check for updates**. A newer build shows an update card: **Update** downloads it (the card shows progress and can be cancelled), verifies its size and SHA-256, then **Install** opens Android's installer. If Android asks to allow installs from Agent Watch, accept it; the card then offers **Install** again. The watch installer is not verified on a device yet: if a watch has no way to allow installs or no installer, update that watch over `adb` (and report it in [STATUS](STATUS.md)).
 
-### 5. Pair Your Smartwatch
+### 5. Pair Your Device (Watch or Phone)
 
 1. Get a short-lived pairing code:
    ```bash
    ./bin/agent-watch-bridge pair
    ```
-   It shows the code, its real expiry and the relay URL, and also posts a notification.
-2. On the watch, open Agent Watch, check the relay URL (`https://relay.<domain>`, prefilled from `agent-watch.env` at build time; `https://` is added if you leave it out) and enter the code.
-3. The watch exchanges the code for a device token (the relay stores only its SHA-256 hash) and registers for push. Your agents appear.
+   (Or click the menu bar app icon and select **Pair a Device** / press `⌘P` on macOS). It shows the code, its real expiry and the relay URL, and also posts a notification.
+2. Open Agent Watch on the watch or phone, check the relay URL (`https://relay.<domain>`, prefilled from `agent-watch.env` at build time; `https://` is added if you leave it out) and enter the code.
+3. The device exchanges the code for a device token (the relay stores only its SHA-256 hash) and registers for push. Your agents appear.
 
 **Only Notify When Away** (off by default; macOS only for now): turn it on in the menu bar app, or with `agent-watch-bridge presence on`. While you use the computer (input in the last 10 minutes by default, screen unlocked), the watch does not buzz; a prompt still waiting when you leave is pushed then. While it is on, the bridge sends your relay the input idle time and screen-lock state every 15 s. Rules and the relay setting: [`contracts.md` §4.3](reference/contracts.md).
 
@@ -308,7 +315,6 @@ How each agent's menus, keys and history work: [`docs/reference/agents.md`](refe
 ## Known Issues
 
 - **OpenCode approvals need the default focus.** If someone moves the focus in OpenCode's dialog at the computer (arrow keys or mouse hover), the watch's Allow is refused with nothing pressed: answer at the computer. Deny always works. Why: [`agents.md` §5.1](reference/agents.md).
-- **The watchOS app is not on the relay API yet** ([status](STATUS.md)).
 - **An approval answered at the computer can stay in the watch's or phone's notifications** until the app next sees the live state (e.g. when you open it). The `resolved` push that withdraws them is off by default (`AW_PUSH_RESOLVED`). The current apps handle it; whether the relay has it on yet is in [STATUS](STATUS.md).
 
 ---
@@ -327,7 +333,7 @@ How each agent's menus, keys and history work: [`docs/reference/agents.md`](refe
   - Existing history remains browsable on the watch.
   - When the computer wakes up, the bridge automatically reconnects and clears the banner without user intervention.
 - **"herdr stopped" indicator:**
-  - Indicates that the bridge is running but the herdr daemon is not responding on its UNIX socket. Start herdr to restore live monitoring.
+  - Indicates that the bridge is running but `herdr-core` is not answering on its UNIX socket. Start it with `hc server start`, or open Herdr.app, to restore live monitoring.
 - **"Relay offline" on the watch** (or "Can't reach the relay" after a tap): the watch has no internet path to the relay. On Bluetooth only, check the phone itself is online (the watch goes out through it). `curl https://relay.<domain>/v1/healthz` from any network tells whether the relay is up.
 - **`status` shows a relay error with "close 4000":** two bridges use the same host token (a foreground `run` beside the service, or a second machine given the first one's token) and replace each other in a loop. Stop one, or give the second machine its own token ([Another Machine](#another-machine-several-hosts)).
 - **Relay rejects the host token:** `status` shows the relay error. The relay and the bridge must hold the same `AW_HOST_TOKEN`: give both the one in `agent-watch.env` with `make deploy-relay ARGS=--sync-env` and `make configure-bridge && make restart`. If the relay log says `AW_HOST_TOKEN is the token of a registered host`, another machine's token reached the relay's env file: put the first machine's own token back in its `agent-watch.env` and sync from there.

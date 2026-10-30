@@ -151,7 +151,7 @@ commandErrorFeedback(error, surface)             // the message to show for a fa
 
 ### 4c. UX Rules
 
-- **Target agent** for Quick Dictate and tile across online hosts (§3a): pinned agent (set only with "Pin to tile"; host and pane), else latest `done`, else herdr's focused pane while at most one host is online, else none. With several online hosts the focused pane names none (the owner's decision, 2026-10-11): tile and Quick Dictate say no agent to dictate to. Never an arbitrary agent (`resolveTarget` in `model/AgentKey.kt`).
+- **Target agent** for Quick Dictate and tile across online hosts (§3a): pinned agent (set only with "Pin to tile"; host and pane), else latest `done`, else the focused pane, else none (`resolveTarget` in `model/AgentKey.kt`, `resolveTargetAgent` in `model/Contracts.kt`). **The focused step never fires today:** herdr-core reports no focus, so the bridge publishes `focused: false` always (`contracts.md` §1.2), and a relay round-trip cannot tell which pane the person is looking at. With several online hosts it is skipped anyway (the owner's decision, 2026-10-11), so tile and Quick Dictate say there is no agent to dictate to. Never an arbitrary agent.
 - **Prompt input** (Reply, Change, Quick Dictate): Wear's system RemoteInput, where the user picks voice, keyboard or handwriting. Not `ACTION_RECOGNIZE_SPEECH`: documented for voice only (`EXTRA_RESULTS`), and a prompt typed from the voice screen's keyboard never reached relay. RemoteInput has no voice-first option, so voice costs one tap. Never drop input silently (`ui/logic/InputResult.kt`): text in any known form goes to confirm screen; only backing out is silent; anything else shows a line and reject haptic. Logs carry result code and extra keys, never text.
 - **Approvals:** Deny · Allow with the positive action on the right (Wear convention), full-height buttons 8 dp apart; every other option sits apart under More options, and `allow_always` asks for confirmation. An `unknown` prompt shows the screen tail, a line asking to answer on the device, and Cancel only (`ui/screens/PromptSection.kt`).
 - **Waiting on background agents:** A `working` agent with `background_agents` > 0 (`contracts.md` §1.2) has finished its turn: row and screen show done icon, colour and word, with count on background line (`agentStatus`, `ui/logic/AgentSections.kt`). Stays in Working section, while complication, tile and notifications keep `working`.
@@ -200,7 +200,8 @@ commandErrorFeedback(error, surface)             // the message to show for a fa
   - `:core`: `RelayEngineTest`, `RelayEngineHistoryTest`, `RelayEngineAuthTest`, `UpdateControllerTest`, `CommandFeedbackTest`, `PrefsTest`, `KeyValueStoreTest`.
   - `:mobile`: `MobileChatStateTest`, `NewSessionTest`.
   - `:app`: `CommandFeedbackTest`, `AgentSectionsTest`.
-- **Full verification command:**
+- **Full verification** (per module; the root project has no aggregate `test`/`lint`/`assembleDebug` tasks), one Gradle build at a time:
   ```bash
-  cd android && ./gradlew test lint assembleDebug
+  cd android && ./gradlew :core:testDebugUnitTest :app:testDebugUnitTest :app:lintDebug \
+    :app:assembleDebug :mobile:testDebugUnitTest :mobile:lintDebug :mobile:assembleDebug
   ```

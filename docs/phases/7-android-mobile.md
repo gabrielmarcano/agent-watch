@@ -14,7 +14,7 @@
 
 ## Read first
 
-- `AGENTS.md`, `.agents/rules/wearos.md` (its process rules carry over).
+- `AGENTS.md`, `.agents/rules/android.md` (its process rules carry over).
 - `docs/reference/contracts.md` §1, §2 (API, error codes), §4 (push payloads, `resolved`).
 - `android/ARCHITECTURE.md`: the data layer this phase shares, and §4b, the UX rules (target agent, approvals) a phone copies.
 
@@ -33,8 +33,8 @@ The relay does not care what kind of client it serves. Any app that pairs (`POST
 
 | Decision | Proposal | Why |
 |---|---|---|
-| Code sharing | Gradle multi-module: `:core` (Android library: model, network, data, approval and notification logic), `:wear` (today's app), `:mobile` | The data layer and its JVM tests are reused, and the contracts keep one Kotlin copy |
-| Layout | Rename the Gradle root `wearos-app/` → `android/`, with `core/`, `wear/`, `mobile/` | A phone module inside `wearos-app/` would mislead. The rename is one mechanical commit |
+| Code sharing | Gradle multi-module: `:core` (Android library: model, network, data, approval and notification logic), `:app` (Wear OS app), `:mobile` | The data layer and its JVM tests are reused, and the contracts keep one Kotlin copy |
+| Layout | Rename the Gradle root `wearos-app/` → `android/`, with `core/`, `app/`, `mobile/` | A phone module inside `wearos-app/` would mislead. The rename is one mechanical commit |
 | Phone application id | Its own id (e.g. the watch's id + `.mobile`), in the **same Firebase project** | Keeps the apps independent. The alternative (same id for both) is tied to the bridging decision below |
 | UI | Compose Material 3 for phones | Reuse the watch's information architecture, not its layouts |
 | Notifications with two apps | Phone notifications local-only (next section) | Avoids duplicates on the wrist without relay changes |
@@ -58,27 +58,27 @@ The relay does not care what kind of client it serves. Any app that pairs (`POST
 
 ### Shared configuration
 
-- `:mobile` reads `agent-watch.env` like `:wear`: `BuildConfig.DEFAULT_RELAY_URL`, and `AW_ANDROID_APPLICATION_ID` (wiring that key is an open item in [`docs/STATUS.md`](../STATUS.md) § Code).
-- The reader in `app/build.gradle.kts` resolves `../agent-watch.env` and `../VERSIONS` against the Gradle root, which stays one level below the repo root after the rename: move it where `:wear` and `:mobile` can share it.
+- `:mobile` reads `agent-watch.env` like `:app`: `BuildConfig.DEFAULT_RELAY_URL`, and `AW_ANDROID_APPLICATION_ID` (wiring that key is an open item in [`docs/STATUS.md`](../STATUS.md) § Code).
+- The reader in `app/build.gradle.kts` resolves `../agent-watch.env` and `../VERSIONS` against the Gradle root, which stays one level below the repo root after the rename: move it where `:app` and `:mobile` can share it.
 
 ---
 
 ## Steps
 
 ### 1. Restructure into modules (alone)
-- Move to `android/{core,wear}`. `:core` gets `model/`, `network/`, `data/`, `approval/`, `util/` (markdown), the pure notification logic, and their tests. Wear-only code (UI, tiles, complications, Wear notification builders) stays in `:wear`.
+- Move to `android/{core,app}`. `:core` gets `model/`, `network/`, `data/`, `approval/`, `util/` (markdown), the pure notification logic, and their tests. Wear-only code (UI, tiles, complications, Wear notification builders) stays in `:app`.
 - `network/` is not Wear-free today; split these out first:
-  - `SurfaceUpdates.kt` imports the tile and complication services, and `RelayRepository` calls it (e.g. a callback interface that `:core` defines and `:wear` implements);
-  - `MyFirebaseMessagingService`, `NotificationActionReceiver`, `NotificationSupport` and `AgentNotifications` build and handle Wear notifications: keep their pure logic in `:core` and the Android parts in `:wear`.
+  - `SurfaceUpdates.kt` imports the tile and complication services, and `RelayRepository` calls it (e.g. a callback interface that `:core` defines and `:app` implements);
+  - `MyFirebaseMessagingService`, `NotificationActionReceiver`, `NotificationSupport` and `AgentNotifications` build and handle Wear notifications: keep their pure logic in `:core` and the Android parts in `:app`.
 - Update every path reference:
   - `tools/guards/guards.py` `CONTRACT_PEERS` (the Kotlin model path) and `tools/guards/test_guards.sh`, then run `bash tools/guards/test_guards.sh`;
-  - `.github/workflows/wearos.yml` (paths filter, working directory, the placeholder `google-services.json` it writes) and `release.yml`'s Wear OS line;
-  - `.agents/rules/wearos.md` and `.agents/rules/contracts.md`;
+  - `.github/workflows/android.yml` (paths filter, working directory, the placeholder `google-services.json` it writes) and `release.yml`'s Wear OS line;
+  - `.agents/rules/android.md` and `.agents/rules/contracts.md`;
   - the `schema-sync` and `wearos-deploy` skills, `AGENTS.md` layout, `README.md` and the docs (`.gitignore` needs nothing: its patterns are unanchored);
   - the Gradle reader of `agent-watch.env` (above).
 - Gate:
   - the same JVM test count as before the move (count it first), all green;
-  - `:wear:assembleRelease`;
+  - `:app:assembleRelease`;
   - installed on the Pixel Watch 2: pairing and push still work (same application id and signing key).
 - **Commit this step alone**, before any phone code.
 
@@ -119,7 +119,7 @@ Checklist (each row is a decision to take, not a promise):
 ## Tests
 
 - JVM tests for every new pure function (list ordering, the action authentication policy, notification ids…).
-- `:core` tests pass for both apps: `./gradlew :core:test :wear:testDebugUnitTest :mobile:testDebugUnitTest :wear:assembleRelease :mobile:assembleRelease`.
+- `:core` tests pass for both apps: `./gradlew :core:test :app:testDebugUnitTest :mobile:testDebugUnitTest :app:assembleRelease :mobile:assembleRelease`.
 
 ---
 
@@ -139,7 +139,7 @@ Checklist (each row is a decision to take, not a promise):
 - **A second copy of the contracts.** `:core` is the only Kotlin copy.
 - **Changing the watch app's application id or signing key in step 1** loses its pairing and push registration.
 - **Bridged notifications** and **lock-screen approvals** (see Decisions).
-- **One Gradle build at a time** on the Mac (`.agents/rules/wearos.md`).
+- **One Gradle build at a time** on the Mac (`.agents/rules/android.md`).
 - **Real agents:** only sandbox agents (`aw-sandbox`) are approved or prompted during development.
 
 ---

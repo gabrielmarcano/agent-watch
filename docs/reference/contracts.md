@@ -3,7 +3,7 @@
 Every JSON object that crosses a process boundary is defined here.
 
 - **The shapes the watch sends or receives (§1–§2)** must match this file exactly in the Go structs (`pkg/model/`), the Kotlin models (`android/`) and the Swift models (`watchos-app/`; the watchOS app's state: `docs/STATUS.md`). To change one, follow the `schema-sync` skill: it lists every copy.
-- **§3** exists only in Go (`pkg/model/wire.go`). **§4**'s data keys are read by `android/app/src/main/java/com/gabriel/agentwatch/network/AgentNotifications.kt`. **§5** is the relay's environment and data dir. **§6** (the bridge's config, local files and CLI output) is defined in `pkg/bridge` and `cmd/bridge`, not in `pkg/model`.
+- **§3** exists only in Go (`pkg/model/wire.go`). **§4**'s data keys are parsed by the shared Android `:core` layer (`android/core/src/main/java/com/gabriel/agentwatch/network/PushMessages.kt`). **§5** is the relay's environment and data dir. **§6** (the bridge's config, local files and CLI output) is defined in `pkg/bridge` and `cmd/bridge`, not in `pkg/model`.
 
 **Conventions (apply everywhere):**
 - JSON keys are `snake_case`.
@@ -56,18 +56,18 @@ type AgentState struct {
 
 | Field | Source (bridge side) | Rule |
 |---|---|---|
-| `pane_id` | herdr `pane_id` | Contains `:` (e.g. `w5:pAW`). Unique only within one host: every herdr numbers its own panes, so the key is `(host, pane_id)` |
+| `pane_id` | herdr-core `address` (`t2`, `t26`, …) | Unique only within one host: every core numbers its own terminals alike, so the key is `(host, pane_id)`. An older host's ids look like `w5:pAW` and need percent-encoding in a path (§2) |
 | `host` | **relay** | The id of the host whose connection sent the agent (§1.6), stamped by the relay from the connection's host token. The bridge leaves it empty. Clients key an agent by `(host, pane_id)`; an older relay omits it (one host) |
-| `agent` | herdr `agent` | Lowercase herdr id: `claude`, `agy`, `opencode`, `codex`, … Never empty: a pane whose herdr `agent` is null is not tracked (the relay gets `agent_removed`) |
-| `label` | computed | The name the owner gave, first non-empty of: herdr `name`; the tab's `label` from `labels["where"]`; `title`; `basename(cwd)`; `pane_id`. Agents that share a tab share its label |
-| `name` | herdr `name` | Explicit pane name or slug if set, otherwise omitted |
-| `title` | herdr `terminal_title_stripped` | The agent's own task title (e.g. the one Claude Code sets); omitted when empty or when it only names the program (`OpenCode`, `agy --conversation …`) |
-| `cwd` | herdr `foreground_cwd`, else `cwd` | Omit if both are null |
-| `workspace_id` | herdr `workspace_id` | Internal workspace ID |
-| `workspace` | herdr workspace label | Human workspace name (e.g. `my-project`), otherwise omitted |
-| `status` | herdr `agent_status` | |
-| `focused` | herdr `focused` | |
-| `state_change_seq` | herdr `state_change_seq` | Used as the optimistic-concurrency token for commands |
+| `agent` | the id `pkg/herdr` derives for the pane (`status.app`, else the foreground process) | Lowercase id: `claude`, `agy`, `opencode`, `codex`, … Never empty: a terminal that names no agent is not tracked (the relay gets `agent_removed`) |
+| `label` | computed | The name the owner gave, first non-empty of: herdr-core `name`; the tab's label from `labels["where"]` (never a bare number); `title`; `basename(cwd)`; `pane_id`. Agents that share a tab share its label |
+| `name` | herdr-core `name` | Explicit terminal name or slug if set, otherwise omitted |
+| `title` | herdr-core `title`, through the adapter's `TaskTitle` | The agent's own task title (e.g. the one Claude Code sets); omitted when empty or when it only names the program (`OpenCode`, `agy --conversation …`) |
+| `cwd` | herdr-core `foreground.cwd`, else `cwd` | Omit if both are empty |
+| `workspace_id` | herdr-core `labels["herdr.space"]` | Opaque workspace ID (`sp…`) |
+| `workspace` | `labels["where"]`'s first part, else `labels["herdr.workspace_label"]` | Human workspace name (e.g. `my-project`), otherwise omitted |
+| `status` | herdr-core `status.state`, with `error` published as `unknown` | |
+| `focused` | **nobody** | Always `false`: herdr-core reports no focus. Kept in the shape so older clients and the Wear OS tile need no branch |
+| `state_change_seq` | `status_ms + turn` when the core reports `status_ms`, else `turn` | Used as the optimistic-concurrency token for commands |
 | `prompt` | parsed by the adapter | Present **only** when `status == "blocked"`, otherwise omitted |
 | `background_agents` | the adapter's turn-end reader (Claude only: `agents.md` §3.4) | The background agents (sub-agents) the agent's last turn left running, **while the agent only waits on them**: its turn has ended, no newer turn has started, and herdr still reports `working`. Present **only** with `status == "working"` and a count > 0, otherwise omitted (0). Refreshed by the bridge's periodic turn check, so it can lag up to that interval (`agents.md` §1). Clients show such an agent as done with the count; `status` stays herdr's |
 | `background_shells` | the adapter's background-task reader (Claude only: `agents.md` §3.4) | The shell commands the agent still runs in the background, by its transcript. Informational: present with any status when the count is > 0, otherwise omitted (0); `status` stays herdr's, and clients do not show the agent as done for it. Read again on each `working` → `done`/`idle` transition and by the periodic turn check while `working`. A task stopped from the agent's own UI leaves no record and keeps counting until the agent's next turn moves it out of the read |
@@ -118,6 +118,8 @@ A Claude agent whose turn ended with a background shell and a monitor still runn
 ```
 
 The `fingerprint` above is the real `model.Fingerprint` of this prompt (§1.3); `TestFingerprintKnownAnswers` in `pkg/agents` checks it. The golden file `pkg/model/testdata/agent_state.json` carries the same value.
+
+The example's `pane_id` and `workspace_id` keep the older `w5:pAE` / `w5` shape because it is that golden file's test vector; a herdr-core address is `t2` and its space id `sp0123…` (§1.2).
 
 ### 1.3 `PendingPrompt` and `PromptOption`
 
@@ -244,7 +246,7 @@ Base URL: `https://relay.<domain>`. All paths are prefixed with `/v1`.
 
 Never accept a token in the query string.
 
-**`{pane_id}` in paths is percent-encoded by clients** (`w5:pAW` → `w5%3ApAW`). In Go, read it with `r.PathValue("pane_id")`, which returns it decoded.
+**`{pane_id}` in paths is percent-encoded by clients** (`w5:pAW` → `w5%3ApAW`; a herdr-core address such as `t2` needs none). In Go, read it with `r.PathValue("pane_id")`, which returns it decoded.
 
 ### 2.1 Endpoints
 
@@ -282,9 +284,9 @@ Never accept a token in the query string.
 **New sessions** (`POST /v1/hosts/{host}/sessions`, `GET …/sessions/options`, `GET …/folders`):
 
 - The bridge starts a session only for a `kind` in its `session_kinds` (§6) and a `cwd` inside one of its `session_roots`; otherwise it answers `not_allowed`, which the relay returns as `403 not_allowed`. With no `session_roots` configured, session creation is off on that host (`roots` is empty in the options).
-- One herdr workspace per folder: the bridge reuses the workspace that already has a pane in `cwd`, else creates one labelled with the folder's name. Each session gets its own tab and its own agent. The first session of a new workspace uses the tab and pane that workspace creation makes; later ones get a new tab. Nothing takes focus on the host (`focus: false`).
+- One herdr workspace per folder: the bridge reuses the workspace that already has a pane in `cwd`, else creates one labelled with the folder's name. Each session starts one agent in its own terminal, in that workspace and a tab of its own (the labels `herdr.space` and `where` make `Herdr.app` adopt it and assign `herdr.tab`), under a herdr-core terminal name unique across the host. `terminal.run` has no focus argument, so nothing on the host changes what the person is looking at.
 - `label` names the tab and the agent; default: the folder's name. When that name is already used in the workspace, the bridge appends ` 2`, ` 3`, … and returns the name it used.
-- **Never retry a create that timed out:** the session may exist. The budgets nest from the inside out: bridge 35 s < relay 40 s < phone 45 s (a `timeout` means the bridge has already given up). Inside the bridge's 35 s, `terminal.run` waits up to 25 s for the agent to become interactive.
+- **Never retry a create that timed out:** the session may exist. The budgets nest from the inside out: bridge 35 s < relay 40 s < phone 45 s (a `timeout` means the bridge has already given up). Inside the bridge's 35 s, the `terminal.run` call gets 27 s (`agentStartTimeoutMS` 25 s, its budget for the agent to become interactive, plus the calls around it).
 - `GET …/folders` without `path` lists the roots themselves (`path` is `""` and `entries` are the roots). A `path` must be equal to or under a root (symlinks resolved), else `not_allowed`. Only directories are listed, sorted by name, at most 500 (`truncated: true` when there are more); unreadable entries are skipped. `parent` is empty at a root.
 - These three endpoints need the host connected and its herdr reachable: `host_offline` / `herdr_offline`. They take the normal 7 s relay budget, except `POST …/sessions` (40 s).
 
@@ -396,7 +398,7 @@ type ErrorBody struct {
 | `option_id` | answer | An `id` from `prompt.options`. Not in the current prompt → `unknown_option` |
 | `fingerprint` | answer (required), cancel (optional) | The `prompt.fingerprint` the watch showed. A mismatch → `prompt_changed`. On cancel, when it is omitted the bridge compares against the prompt it published for `expected_seq` |
 
-**Example** (`POST /v1/agents/w5%3ApAE/cancel`):
+**Example** (`POST /v1/agents/t2/cancel`):
 
 ```json
 { "expected_seq": 334, "fingerprint": "fd6ff7388739252d" }
@@ -557,7 +559,7 @@ type ResyncMsg struct {
 
 **Pane commands and host requests:** `prompt`, `answer` and `cancel` name a pane; the bridge re-lists, re-reads and re-validates before acting (§4, `.agents/rules/herdr-integration.md`). `session.options`, `folders.list` and `session.create` are host-level: no `pane_id`, no `expected_seq`, and their result carries the payload in `options`, `folders` or `session`. They share the request ids, the per-host budget and the duplicate-request guard. The bridge serialises `session.create` calls on one host, so two creates cannot race for the same workspace.
 
-**Backfilled turns:** when the bridge first sees a pane, or a new `agent_session` in it, it reads the last finished turns from the transcript (`agents.md` §1) and sends them oldest first with `backfill: true`. The relay stores and broadcasts them like any other `history_item`, but never uses one as the reply of a pending `done` push (§4.3). A turn the live capture also sends carries the same `id`, so the relay drops one.
+**Backfilled turns:** when the bridge first sees a pane, or a new session reference in it, it reads the last finished turns from the transcript (`agents.md` §1) and sends them oldest first with `backfill: true`. The relay stores and broadcasts them like any other `history_item`, but never uses one as the reply of a pending `done` push (§4.3). A turn the live capture also sends carries the same `id`, so the relay drops one.
 
 **Sequence on connect:**
 1. The bridge sends `hello`.
@@ -592,7 +594,7 @@ Both Android clients parse these fields locally (`:core`'s `PushMessages`, `andr
 | Key | Example | Notes |
 |---|---|---|
 | `event` | `blocked` | `blocked` \| `done` \| `digest` (and `resolved`, below) |
-| `pane_id` | `w5:pAE` | Empty for `digest` |
+| `pane_id` | `t2` | Empty for `digest` |
 | `host` | `main` | The agent's host id (§1.6). Empty for `digest`; absent from a relay that predates hosts. The app keys the notification by `(host, pane_id)` |
 | `host_name` | `Mac` | The host's name. Empty for `digest`. `title` already carries it when more than one host is registered |
 | `agent` | `claude` | |
@@ -614,7 +616,7 @@ It carries **only** these keys (`host` since hosts), and never a notification bl
 
 ```json
 {"message":{"token":"<device fcm token>",
-            "data":{"event":"resolved","host":"main","pane_id":"w5:pAE","state_change_seq":"335"},
+            "data":{"event":"resolved","host":"main","pane_id":"t2","state_change_seq":"335"},
             "android":{"priority":"normal","ttl":"600s"}}}
 ```
 
@@ -622,7 +624,7 @@ It carries **only** these keys (`host` since hosts), and never a notification bl
 |---|---|---|
 | `event` | `resolved` | |
 | `host` | `main` | The pane's host (absent from a relay that predates hosts) |
-| `pane_id` | `w5:pAE` | The pane whose `blocked` notification the app removes |
+| `pane_id` | `t2` | The pane whose `blocked` notification the app removes |
 | `state_change_seq` | `335` | Seq of the update that left `blocked`, so greater than the `blocked` push's seq |
 
 - FCM does not guarantee delivery order. The app ignores a `blocked` for a pane whose `state_change_seq` is ≤ the last `resolved` seq it got for that `(host, pane_id)`.

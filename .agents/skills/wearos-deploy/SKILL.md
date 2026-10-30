@@ -16,7 +16,7 @@ export JAVA_HOME="$(/usr/libexec/java_home -v <JDK version, docs/GUIDE.md § Req
 ```
 
 - `google-services.json` must exist in `android/app/`. It is the owner's file and git-ignored. If it is missing, **ask the owner**. Never create or commit it.
-- One Gradle build at a time (`.agents/rules/wearos.md`).
+- One Gradle build at a time (`.agents/rules/android.md`).
 
 ## Emulator first
 
@@ -51,11 +51,13 @@ cd android
 adb shell am start -n com.gabriel.agentwatch/.MainActivity
 ```
 
-**Release signing:** the release build is signed with the Mac's debug key (`~/.android/debug.keystore`), like the debug build. Either one installs over the other and keeps the pairing. An app signed with any other key fails with `INSTALL_FAILED_UPDATE_INCOMPATIBLE`: it must be uninstalled first, which deletes the pairing, and the watch must be paired again. Check before installing:
+**Signing:** a release build (`:app:assembleRelease` / `installRelease`) is signed with the owner's release key when `android/keystore.properties` exists (it names `android/agent-watch-release.jks`; format in `docs/GUIDE.md` § Android updates), else with the Mac's debug key (`~/.android/debug.keystore`). Debug and release builds signed with the *same* key install over each other and keep the pairing; a build signed with another key fails with `INSTALL_FAILED_UPDATE_INCOMPATIBLE` and must be installed after uninstalling, which deletes the pairing. Check what the watch already has before installing:
 
 ```bash
 adb shell dumpsys package com.gabriel.agentwatch | grep -A1 signatures
 ```
+
+The watch currently runs the debug-signed `1.3.1`, so the first release-signed install needs an uninstall and a new pairing (`docs/STATUS.md`). `make publish-android` refuses a debug-signed APK, so only the release key's builds are ever published.
 
 After installing, open the app once. A force-stop cancels the complication's tap action until the app refreshes it (seen on the emulator; an update likely does the same).
 

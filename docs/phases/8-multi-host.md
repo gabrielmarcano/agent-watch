@@ -11,7 +11,7 @@ The owner runs herdr on more than one machine (herdr's saved SSH machines: the M
 - **One bridge per machine.** Each machine runs `agent-watch-bridge` against its own herdr and dials the relay. Not one bridge reaching the others with `herdr --machine`: that shells out to the herdr CLI (`AGENTS.md` §1.1), cannot read remote transcripts, and stops when the Mac sleeps.
 - **One host token per machine.** The relay knows which host a connection is from its token, never from what the bridge says; one machine can be revoked alone.
 - **The watch swipes between machines:** one page per machine with its agents; notifications name the machine.
-- **Presence stays global:** while the owner is at the Mac (quiet-at-mac, `contracts.md` §4.3), no machine's `blocked`/`done` buzzes. Linux hosts send no presence.
+- **Presence stays global:** while the owner is at the Mac (`contracts.md` §4.3), no machine's `blocked`/`done` buzzes. Linux hosts send no presence.
 
 ## Why it is not a small change
 

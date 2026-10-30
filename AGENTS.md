@@ -16,10 +16,10 @@ Rules for every AI agent working in this repository: Claude Code, Antigravity, O
 | Timeouts, limits and intervals | the doc of their layer: `contracts.md` (relay, bridge, watch protocol; pairing and history limits), `herdr-socket-api.md` (herdr side and the bridge's herdr policy), `agents.md` (transcript reads and screen captures), `android/ARCHITECTURE.md` (the watch app's own timers); other components: their README (`macos-bar/README.md`, `deploy/relay/README.md`) |
 | The herdr socket: methods, events, keys, verified behaviour, and the bridge's herdr policy | [`docs/reference/herdr-socket-api.md`](docs/reference/herdr-socket-api.md) |
 | Per agent: menus, option roles, keys, transcripts | [`docs/reference/agents.md`](docs/reference/agents.md) |
-| Wear OS internals, client rules, screens, notifications and UX decisions | [`android/ARCHITECTURE.md`](android/ARCHITECTURE.md) |
+| Android clients (:core, :app, :mobile) internals, client rules, screens, notifications and UX decisions | [`android/ARCHITECTURE.md`](android/ARCHITECTURE.md) |
 | Exact texts the watch shows | the code: `android/app/src/main/res/values/strings.xml`, `android/core/src/main/java/com/gabriel/agentwatch/approval/CommandFeedback.kt`, and the notification builders in `network/AgentNotifications.kt`, `MyFirebaseMessagingService.kt`, `NotificationActionReceiver.kt` |
 | The pitch and a quick start: a short version of `docs/GUIDE.md`'s setup, kept on purpose (the owner's decision) | [`README.md`](README.md) |
-| Installing, operating and troubleshooting the bridge and the watch app; the tool minimums users need; releases and CI; security model; known issues (symptom and workaround only) | [`docs/GUIDE.md`](docs/GUIDE.md) |
+| Installing, operating and troubleshooting the bridge and client apps; the tool minimums users need; releases and CI; security model; known issues (symptom and workaround only) | [`docs/GUIDE.md`](docs/GUIDE.md) |
 | Relay operations: VPS setup, deploys, rollback, the relay CLI, proxy, devices, backups | [`deploy/relay/README.md`](deploy/relay/README.md) |
 | macOS menu bar app | [`macos-bar/README.md`](macos-bar/README.md) |
 | What the guards block, their setup and tests | [`tools/guards/README.md`](tools/guards/README.md) |
@@ -148,7 +148,7 @@ agent-watch/                      # the Go module keeps its old name, github.com
 - **Tokens travel only in the `Authorization` header**, never in URLs or query strings (they end up in proxy logs).
 - **`******` where a credential-like string would be** (e.g. an `Authorization` header value) is your tool masking it on display; the file is fine. Don't "fix" it.
 - **Personal deployment details** (the owner's domain, SSH target, IPs, device ids, project names) never go into tracked files: use placeholders such as `relay.<domain>`.
-- **Deploys and the owner's machines (the owner's decision):** agents may deploy the relay, run commands on the VPS over SSH, roll it back, and install or uninstall the herdr detection overrides whenever their task needs it, and **must say so in their report** (and update `docs/STATUS.md` "Deployed"). "Deployed" names commits on `main`: PRs are squash-merged, so a branch commit never reaches `main`. A binary built from a branch (to try it before merging) is rebuilt and deployed again from `main` right after its PR merges, and "Deployed" is updated to `main`'s commit; until then, keep the branch. Still the owner's: `herdr server stop` and `herdr integration install`/`uninstall` (the guards refuse them), Cloudflare dashboard changes, revoking his watch, rebooting the host, and pausing shared infrastructure such as the proxy container.
+- **Deploys and the owner's machines (the owner's decision):** agents may deploy the relay, run commands on the VPS over SSH, and roll it back whenever their task needs it, and **must say so in their report** (and update `docs/STATUS.md` "Deployed"). "Deployed" names commits on `main`: PRs are squash-merged, so a branch commit never reaches `main`. A binary built from a branch (to try it before merging) is rebuilt and deployed again from `main` right after its PR merges, and "Deployed" is updated to `main`'s commit; until then, keep the branch. Still the owner's: `hc server stop` / `hc server restart` and `hc update` (the guards refuse them; they end or restart his sessions), Cloudflare dashboard changes, revoking his watch, rebooting the host, and pausing shared infrastructure such as the proxy container.
 - The security design (hashed tokens, pairing limits, the bridge's checks before pressing keys) is described in [`docs/GUIDE.md` § Security Model](docs/GUIDE.md#security-model); the rules that implement it are in `relay-security.md` and `herdr-integration.md`.
 
 ---
@@ -162,7 +162,7 @@ Each rule's first lines say what it applies to.
 - [`go-backend.md`](.agents/rules/go-backend.md): Go conventions and checks
 - [`agent-adapters.md`](.agents/rules/agent-adapters.md): `pkg/agents`
 - [`relay-security.md`](.agents/rules/relay-security.md): the relay, push and deploy
-- [`wearos.md`](.agents/rules/wearos.md): the Wear OS app
+- [`android.md`](.agents/rules/android.md): the Android clients (Wear OS `:app` and phone `:mobile`)
 - [`watchos.md`](.agents/rules/watchos.md): the watchOS app
 
 How they load:
@@ -188,7 +188,7 @@ How they load:
 
 ## 6. Before Claiming Done
 
-1. The checks of every area rule you touched pass (Go: `go-backend.md` § Before claiming done; Wear OS: `wearos.md`'s build line).
+1. The checks of every area rule you touched pass (Go: `go-backend.md` § Before claiming done; Android: `android.md`'s build line).
 2. No legacy reference (§1.1) came back.
 3. If you changed `tools/guards/`, `.agents/hooks.json`, `.opencode/`, `.claude/settings.json` or `.githooks/`: `bash tools/guards/test_guards.sh`.
 4. Every fact you changed is changed in its home (§0), and no copy of it is left elsewhere.
