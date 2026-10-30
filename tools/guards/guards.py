@@ -591,7 +591,7 @@ def check_write(path: str):
         return
     if LEGACY.search(rel):
         raise Blocked(f"{rel} is a legacy path removed by the herdr refactor (Node bridge, Claude plugin). "
-                      "See AGENTS.md §1.1: the replacement lives in cmd/, pkg/ and herdr-plugin.toml.")
+                      "See AGENTS.md §1.1: the replacement lives in cmd/ and pkg/.")
     if SECRET_PATH.search(rel) and not TESTDATA.search(rel):
         raise Blocked(f"{rel} holds secrets and is placed by the owner by hand, never written by an agent. "
                       "Use the *.example files for templates (agent-watch.env comes from `make config`); "
@@ -620,7 +620,6 @@ CONTRACT_GO = re.compile(r"^pkg/model/(?!.*_test\.go$)[^/]+\.go$")
 CONTRACT_PEERS = {
     "docs/reference/contracts.md": re.compile(r"^docs/reference/contracts\.md$"),
     "wearos-app model": re.compile(r"^wearos-app/core/src/main/java/com/gabriel/agentwatch/model/"),
-    "watchos-app Models": re.compile(r"^watchos-app/AgentWatch/Models/"),
 }
 
 
@@ -657,7 +656,7 @@ def precommit_problems():
         missing = [name for name, rx in CONTRACT_PEERS.items() if not any(rx.search(p) for p in staged)]
         if missing and os.environ.get("AW_CONTRACT_NO_JSON_CHANGE") != "1":
             problems.append(
-                "pkg/model changed without " + ", ".join(missing) + ". Keep the four contract copies in sync "
+                "pkg/model changed without " + ", ".join(missing) + ". Keep the contract copies in sync "
                 "(.agents/skills/schema-sync/SKILL.md). If the change touches no JSON field (e.g. a helper "
                 "function), commit with AW_CONTRACT_NO_JSON_CHANGE=1 and say so in the message.")
     return problems

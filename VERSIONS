@@ -3,9 +3,7 @@
 # Each component has its own version, and they may diverge: bump only the one
 # you change. Read by the Makefile (bridge and relay ldflags, `make bar`),
 # macos-bar/build.sh, deploy/relay/deploy.sh, the Android Gradle build (:app and
-# :mobile), herdr-plugin.toml's [[build]] and .github/workflows/release.yml. The
-# manifest's `version` field cannot read it: keep it equal to BRIDGE_VERSION
-# (`make check-versions` fails when they differ).
+# :mobile) and .github/workflows/release.yml.
 #
 # The Go binaries add the commit they were built from on their own (format:
 # docs/reference/contracts.md §3): never write a commit here.

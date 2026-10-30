@@ -15,7 +15,6 @@ on:
       - pkg/**
       - deploy/launchd/**
       - macos-bar/**
-      - herdr-plugin.toml
       - Makefile
       - .github/workflows/release.yml
   workflow_dispatch:

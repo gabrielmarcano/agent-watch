@@ -23,9 +23,8 @@ Rules for every AI agent working in this repository: Claude Code, Antigravity, O
 | Relay operations: VPS setup, deploys, rollback, the relay CLI, proxy, devices, backups | [`deploy/relay/README.md`](deploy/relay/README.md) |
 | macOS menu bar app | [`macos-bar/README.md`](macos-bar/README.md) |
 | What the guards block, their setup and tests | [`tools/guards/README.md`](tools/guards/README.md) |
-| The herdr dialog-detection gap and its temporary overrides | [`tools/herdr-overrides/README.md`](tools/herdr-overrides/README.md) |
 | Component versions and when to bump them | [`VERSIONS`](VERSIONS) |
-| Toolchain versions | the build files: `go.mod`, the Gradle files, `herdr-plugin.toml` (`min_herdr_version`) |
+| Toolchain versions | the build files: `go.mod`, the Gradle files |
 | Tool-specific env vars (`SSH_OPTS`, `APP_DIR`, guard escape hatches, `HERDR_*`) | the doc of that tool |
 | Repo layout | §2 |
 | Rules per area, with their build and test commands | `.agents/rules/*.md` (§4) |
@@ -83,17 +82,16 @@ Single-context layout (`GLOSSARY.md` + `docs/adr/`). See [`docs/agents/domain.md
 ### 1.3 Two Go binaries, one module
 - One Go module (`go.mod`; its name: §2).
 - `agent-watch-bridge`: static binary on the Mac/Linux host. Keep it thin: herdr ↔ relay translation, on-demand transcript reads, and (macOS only, opt-in, the owner's decisions of 2026-10-05 and 2026-10-06) the host's input idle time and screen lock, read with `ioreg`, for push presence (`contracts.md` §4.3).
-  - The herdr plugin (`herdr-plugin.toml`) only installs and controls this binary. Its actions are one-shot.
-  - The long-running process is `agent-watch-bridge run`, supervised by launchd (macOS) or systemd `--user` (Linux). Never rely on herdr to keep it alive: plugin actions are one-shot, and the service manager restarts the bridge after a crash or reboot and outlives herdr restarts.
+  - The long-running process is `agent-watch-bridge run`, supervised by launchd (macOS) or systemd `--user` (Linux).
 - `agent-watch-relay`: static Linux binary on the VPS. It owns state aggregation, history storage, push, pairing and auth. History lives on the relay so the watch can read it while the host sleeps.
 
 ### 1.4 Outbound relay, no VPN
 - Watches must **never** require Tailscale, a VPN or a LAN IP.
 - The bridge dials **outbound** to the relay; watches use HTTPS + SSE on the relay. No inbound ports on the host.
 
-### 1.5 Clients: Wear OS first, watchOS best-effort
-- **Wear OS is the primary client and the reference implementation.** Features ship there first and are verified on the owner's Google Pixel Watch 2. Say "verified on the watch" only when the owner confirmed it.
-- **watchOS is extra support**, verified only in the Xcode simulator; it never blocks a phase or a release. Never claim a watchOS feature works on a real device: say "verified in the simulator". Its current state is in `docs/STATUS.md`.
+### 1.5 Clients: Android (phone + Wear OS) active; watchOS stopped/legacy
+- **Android (`:mobile` phone and `:app` Wear OS) are the active clients.**
+- **watchOS (`watchos-app/`) is STOPPED / LEGACY:** frozen in place, not synced on contract changes, and never blocks a phase or release.
 
 ### 1.6 Scope
 - **No terminal emulator or SSH client** (Moshi covers that).
@@ -109,7 +107,6 @@ Single-context layout (`GLOSSARY.md` + `docs/adr/`). See [`docs/agents/domain.md
 agent-watch/                      # the Go module keeps its old name, github.com/gabrielmarcano/agent-monitor
 ├── go.mod · go.sum · Makefile    # build, test, configure and deploy targets
 ├── agent-watch.env.example       # the one deployment config file, documented; the real agent-watch.env is git-ignored (secret)
-├── herdr-plugin.toml             # herdr-agent-watch plugin manifest
 ├── VERSIONS                      # component versions
 ├── .github/workflows/            # CI and releases
 ├── cmd/
@@ -124,16 +121,15 @@ agent-watch/                      # the Go module keeps its old name, github.com
 │   ├── buildinfo/                # version + commit stamped into the binaries
 │   ├── relayclient/              # bridge side of the WSS link
 │   ├── relay/                    # relay server: hub, api, sse, auth, store
-│   └── push/                     # Dispatcher (a relay.Notifier) and senders: FCM v1 (Wear OS), ntfy (watchOS)
+│   └── push/                     # Dispatcher (a relay.Notifier) and senders: FCM v1 (Android/Wear OS), ntfy (legacy watchOS)
 ├── deploy/
 │   ├── launchd/                  # LaunchAgent template
 │   └── relay/                    # systemd unit, env/proxy examples, deploy.sh, Dockerfile, README.md (operations)
 ├── macos-bar/                    # macOS menu bar app over the bridge CLI (make bar, make bar-test)
 ├── tools/config/                 # awenv.sh: agent-watch.env reader for the Makefile and deploy.sh (+ test_awenv.sh)
 ├── tools/guards/                 # guard implementation (hooks, pre-commit)
-├── tools/herdr-overrides/        # TEMPORARY herdr detection override (claude); remove when upstream fixes it
 ├── wearos-app/                   # Android clients: :core (shared Kotlin data layer), :app (Wear OS), :mobile (phone)
-└── watchos-app/                  # watchOS client (Swift, SwiftUI)
+└── watchos-app/                  # STOPPED / LEGACY watchOS client (Swift)
 ```
 
 ---

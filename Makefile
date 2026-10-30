@@ -25,7 +25,6 @@ need-domain = $(call need-key,AW_RELAY_DOMAIN)$(if $(filter relay.example.com,$(
 
 build: bridge relay
 
-# herdr-plugin.toml's [[build]] runs the same build (BRIDGE_VERSION from VERSIONS).
 bridge:
 	@:$(call need-version,BRIDGE_VERSION)
 	CGO_ENABLED=0 go build -ldflags "$(BRIDGE_LDFLAGS)" -o bin/agent-watch-bridge ./cmd/bridge
@@ -117,10 +116,9 @@ vet:
 fmt:
 	gofmt -l -w cmd pkg
 
-# VERSIONS is well formed and herdr-plugin.toml's version equals BRIDGE_VERSION
-# (the manifest cannot read the file). Also part of `make test`.
+# VERSIONS is well formed. Also part of `make test`.
 check-versions:
-	go test -count=1 -run 'TestVersionsFile|TestPluginManifestMatchesVersions' ./pkg/buildinfo/
+	go test -count=1 -run 'TestVersionsFile' ./pkg/buildinfo/
 
 check: fmt vet check-versions test
 

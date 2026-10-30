@@ -43,11 +43,9 @@ Full reference, with the version it was verified on: `docs/reference/herdr-socke
   5. if the adapter implements `FocusGuard` (OpenCode) and the keys depend on focus, re-read with `format: "ansi"` and verify the focused button (`CheckFocus`).
 
   On mismatch, send nothing.
-- `agent.prompt` is never sent to `blocked` agents, nor while the adapter parses a menu on the screen (herdr can miss an open dialog: `tools/herdr-overrides/README.md`). Answers go through `send_keys`.
+- `agent.prompt` is never sent to `blocked` agents, nor while the adapter parses a menu on the screen. Answers go through `send_keys`.
 - `cancel` keys come from the menu on screen right now, never from a cached prompt. With no parseable menu, `cancel` only cancels a prompt the watch saw as `unknown` (the adapter's default keys); otherwise it returns `prompt_changed`.
 - **Each command acts at most once:** commands on one pane run one at a time; the prompt is claimed (pane, seq, fingerprint or prompt-text hash) before sending, because pressing twice is worse than not pressing; recent `request_id`s are remembered. The command's budget starts on arrival (`pkg/bridge/cmdguard.go`, `commands.go`).
 
-## Plugin and service
-- launchd provides no `HERDR_*` env or `PATH`: pass everything through the plist or `config.toml`.
-- `[[build]]` does not run on `herdr plugin link`: run `make bridge` first.
-- herdr runs plugin actions from the plugin root (hence `./bin/…` in the manifest) with `HERDR_SOCKET_PATH`, `HERDR_PLUGIN_CONFIG_DIR` and `HERDR_PLUGIN_STATE_DIR` set; `start` pins them into the service definition, so a later `start` from a terminal keeps them.
+## Service
+- launchd provides no `HC_*` / `HERDR_*` env or `PATH`: pass everything through the plist or `config.toml`.

@@ -13,7 +13,7 @@ The one place for the project's state: what is done, what is open, what comes ne
 | Phase | State | Claimed by |
 |---|---|---|
 | **[5 End-to-end](phases/5-e2e.md) (release gate)** | **open** | — |
-| [6 watchOS](phases/6-watchos.md) (best-effort) | not started; after 5 | — |
+| 6 watchOS | **STOPPED / LEGACY** (`watchos-app/` frozen, not synced on contract changes) | — |
 | [7 Android phone client](phases/7-android-mobile.md) | steps 1–2 on `main` (2026-10-20, commits `8e17ace`–`2bfdada`): `:core` extracted from the Wear OS app and the minimal phone app (`:mobile`: pair, live list, detail with approvals and reply, history). The conversation UI landed 2026-10-20 (`42b20d1`): the phone lists agents as chats (host chips, unread dots) and opens each as turns with an inline prompt and a composer; the old list and detail screens are gone. New sessions landed 2026-10-20 (`c2acdf1`, `c4df542`, `ad960d6`): the phone starts an agent on a chosen device, kind and folder, inside that bridge's configured roots. Conversation history landed 2026-10-20 (`15b48d8`): transcripts give `asked_at` and `completed_at`, the relay keeps 100 items per pane, and the bridge backfills 20 turns. Phone push landed 2026-10-20 (`e7af181`, `7961b48`): local-only chat notifications from the relay's data-only pushes, one per agent, with replies, approvals and `resolved`, and approving actions behind the phone lock; confirmed working on the owner's phone (2026-10-27). Relay-hosted OTA updates landed 2026-10-21 (`6a7e8de`, `46cbeb4`, `ab5c86f`, `0732f57`, `431e22d`): authenticated metadata and APK endpoints under `AW_UPDATE_DIR`, a shared `:core` checker/downloader that verifies size and SHA-256, update cards on both apps, release signing from git-ignored `keystore.properties`, and `make publish-android`. Builds, lints and passes its JVM tests (206 `:core` tests per variant, 79 `:app`, 27 `:mobile`); the phone app is release-signed and `0.5.10` (code 20) is published on the relay (`publish-android.sh --phone`); `0.5.10` was tested and approved on-device by the owner (2026-10-27); the watch still runs the debug-signed `1.3.1`. Relay `0.9.0` and bridge `0.9.0` are deployed from `main` (`c8c2073`, 2026-10-27; PR #32 merged). Next: resume UI/UX polish iterations and complete settings screen when continuing | — |
 | [8 Several hosts on one relay](phases/8-multi-host.md) | steps 1 (contract), 2a (relay `0.7.0`) and 2b (Wear OS `1.4.0`) done 2026-10-10 on branch `multi-host-contract` (PR #31), tests only; a review on 2026-10-11 fixed 7 relay findings (presence catch-up when the Mac drops, offline `hosts add` of the env host, a second machine's token synced as `AW_HOST_TOKEN`, legacy paths and offline hosts, revoked hosts' pushes, re-migration after a rollback) and 4 Wear OS ones (targets on offline hosts, focused pane across hosts, approvals and pins from before hosts); a local end-to-end run on 2026-10-11 passed (a test relay, four bridges: the Mac twice, two Linux machines; the debug app on the emulator): one page per host, two hosts with the same pane id kept apart in the list, history and notifications, commands reaching only their host, `host_required` on a legacy path, `host_offline` and the offline page, a revoked host's page gone, and pairing from a non-first host; step 3 started 2026-10-21: the `home` host (the owner's Ubuntu server with herdr) is registered and its bridge runs as a `systemd --user` unit (bridge `0.9.0`, its own token, session root `~/projects`, the kinds claude, agy and opencode), so the relay and the phone see its 3 agents; the `bazzite` host is registered but has never connected; step 4 (on the watch) not started | — |
 
@@ -25,11 +25,10 @@ One line per app: what runs today and what is left. The versions live in [`VERSI
 |---|---|---|
 | **Phone (`:mobile`)** | Release-signed, paired, OTA updates work, push arrives and `0.5.10` was checked and approved on device by the owner (2026-10-27). The chat list, the conversation, the approval card, the new-session form and the update banner are in place. | The settings screen, and continuing the UI/UX pass ([`docs/phases/7-android-mobile.md`](phases/7-android-mobile.md) § step 6) at a later time. |
 | **Watch (`:app`)** | Runs on the Pixel Watch 2 as a debug-signed build; the several-hosts work is in the code but not on the wrist. | Its own release build, its update card, the unknown-sources screen and the pending watch checks (the owner's watch day). |
-| **watchOS** | Not started (phase 6); the Swift models mirror `pkg/model`. | After phase 5. |
-| **Bridge** | Runs on the owner's Mac: the relay link, the transcript reads, the host sessions and the presence switch. | The "Only Notify When Away" checks. |
+| **watchOS** | **STOPPED / LEGACY** (frozen in `watchos-app/`). | None (stopped). |
+| **Bridge** | Runs on the owner's Mac: the relay link, the transcript reads, the host sessions and the presence switch. | Migration to `herdr-core` (`hc`). |
 | **Relay** | Runs on the VPS: the snapshots, the SSE stream, the commands and the phone's update. | Phase 8 steps 3–4 (the other hosts). |
 | **macOS menu bar** | Released; the presence switch lives in it. | The single-app packaging idea, later. |
-| **herdr overrides** | The Claude override is still installed and still needed (upstream #5004). | Drop it when upstream detects the dialogs and the background-agent wait. |
 
 **Deployed** (2026-10-27): the relay `0.9.0` (on Google Cloud `general-vps`) and, on the owner's Mac, the bridge `0.9.0` (Only Notify When Away on), both rebuilt and deployed from `main` (`c8c2073`, after squash-merging PR #32). The menu bar `0.6.0` (rebuilt from `main` on 2026-10-07) and the Wear OS app `1.3.1` (release build, version code 12, 2026-10-07) are unchanged. The phone app `0.5.10` (version code 20) is release-signed, installed and paired on the owner's phone and published to the relay's update directory (2026-10-22); the watch app was neither rebuilt nor published (its release build comes with the watch's own day). The component versions are in `VERSIONS`.
 
@@ -152,21 +151,13 @@ Only changes that affect what the system does (the owner's rule, 2026-10-07): a 
 
 ---
 
-## Blocked / waiting on upstream
-
-- **herdr misses some Claude dialogs:** mitigated by the temporary override in [`tools/herdr-overrides/`](../tools/herdr-overrides/README.md), which explains the causes: a dialog after a relaunch in the same pane, and any dialog in a **named** conversation (the divider Claude draws under the dialog leaves the region upstream's `after_last_horizontal_rule` rules read empty). Last check (`herdr-overrides.sh check`), 2026-10-16 with herdr 0.9.5: the override is based on the current upstream manifest `2026.10.11.1` and is still needed for claude (upstream alone misses the WebFetch and stale-input-box dialogs). On 2026-10-15 it had been left on upstream manifest `2026.09.11.1`, shadowing the newer `2026.10.11.1` and making the live herdr report every such dialog as `idle` (no prompt reached the watch); it was then rebased on `2026.10.11.1` and its rule moved to `whole_recent`. agy's override was uninstalled on 2026-10-05 (upstream fixed it). The upstream issue is drafted (`tools/herdr-overrides/UPSTREAM-ISSUES.md`) and, by the owner's decision, not being filed for now.
-- **herdr misses a Claude pane waiting on background subagents:** with subagents still running after a turn ends, herdr falls to `idle`/`done` about ten seconds later (upstream `background_agents_working` needs its line to be the last above the prompt box; Claude Code 2.1.301 writes more lines after it; herdr issue **#5004**), so the bridge's turn-end watch, which runs only for `working` panes, stops running (sandbox-observed 2026-10-16: `done` while a subagent ran, no `background agents changed` in the bridge log). The claude override now carries a second rule (`aw_background_agents_working`), installed 2026-10-16 and verified live: the pane stayed `working` through a two-minute subagent wait and the turn watch published again. The published count can still lag behind a chatty wait (`agents.md` §3.4). Related upstream issue: **#5261** (`claude --bg` background sessions are recorded as another pane's agent session; our reads resolve by pane title, `agents.md` §3.3, so only herdr's own bookkeeping is affected).
-
----
-
 ## Next steps
 
-1. **The phone's UI and UX pass** (phase 7, step 6): the owner's list of what to change on the device, one change at a time, published with `publish-android.sh --phone` and checked on the phone.
-2. **Phase 7's rest**: the settings screen, push (owner action), the step-5 device checks with sandbox agents.
-3. **Phase 5**, above (the release gate).
-4. **Drop the claude herdr override** once herdr detects the dialogs and the background-agent wait (#5004) by itself (the drafted upstream issue for the dialogs stays unfiled for now).
+1. **Migrate to `herdr-core` (`hc`):** replace legacy `herdr` socket assumptions with `herdr-core` (`hc`) and prune obsolete bridge complexity.
+2. **The phone's UI and UX pass** (phase 7, step 6): the owner's list of what to change on the device, one change at a time, published with `publish-android.sh --phone` and checked on the phone.
+3. **Phase 7's rest**: the settings screen, push (owner action), the step-5 device checks with sandbox agents.
+4. **Phase 5**, above (the release gate).
 5. **Phase 8** steps 3–4: the other hosts on the relay, and the watch.
-6. **Phase 6**, the watchOS client.
 7. **Later ideas:**
    - a Telegram bot with inline approval buttons, for when the watch is charging;
    - Discord webhook summaries;
