@@ -43,7 +43,7 @@ func (m *systemdManager) Render(spec ServiceSpec) (string, error) {
 	b.WriteString("[Unit]\nDescription=Agent Watch Bridge\nAfter=network.target\n\n[Service]\n")
 	fmt.Fprintf(&b, "ExecStart=%s run --config %s\n", systemdQuote(spec.Binary, true), systemdQuote(spec.ConfigPath, true))
 	fmt.Fprintf(&b, "Environment=%s\n", systemdQuote("HERDR_SOCKET_PATH="+spec.SocketPath, false))
-	fmt.Fprintf(&b, "Environment=%s\n", systemdQuote("HERDR_PLUGIN_STATE_DIR="+spec.StateDir, false))
+	fmt.Fprintf(&b, "Environment=%s\n", systemdQuote("AW_STATE_DIR="+spec.StateDir, false))
 	b.WriteString("Restart=always\nRestartSec=5\n\n[Install]\nWantedBy=default.target\n")
 	return b.String(), nil
 }
@@ -143,7 +143,7 @@ func (m *systemdManager) Parse(data []byte) (ServiceSpec, error) {
 				switch k {
 				case "HERDR_SOCKET_PATH":
 					spec.SocketPath = v
-				case "HERDR_PLUGIN_STATE_DIR":
+				case "AW_STATE_DIR":
 					spec.StateDir = v
 				}
 			}

@@ -15,14 +15,14 @@ import (
 // socket, whatever binary it was run from). It must reuse the installed values.
 func TestStart_FromOutsideHerdrKeepsInstalledDefinition(t *testing.T) {
 	ta := newTestApp(t, "launchd")
-	pluginBin := writeExecutable(t, filepath.Join(ta.home, "plugin", "bin", "agent-watch-bridge"))
-	cfg := filepath.Join(ta.home, ".config", "herdr", "plugins", "config", "herdr-agent-watch", "config.toml")
+	customBin := writeExecutable(t, filepath.Join(ta.home, "custom", "bin", "agent-watch-bridge"))
+	cfg := filepath.Join(ta.home, ".config", "agent-watch", "config.toml")
 	writeConfig(t, cfg, "wss://relay.example.com")
 	installedSpecV := ServiceSpec{
-		Binary:     pluginBin,
+		Binary:     customBin,
 		ConfigPath: cfg,
-		SocketPath: filepath.Join(ta.home, ".config", "herdr", "herdr.sock"),
-		StateDir:   filepath.Join(ta.home, ".local", "state", "herdr", "plugins", "herdr-agent-watch"),
+		SocketPath: filepath.Join(ta.home, ".local", "state", "herdr-core", "default", "default.sock"),
+		StateDir:   filepath.Join(ta.home, ".local", "state", "agent-watch"),
 		LogPath:    filepath.Join(ta.home, "Library", "Logs", "agent-watch-bridge.log"),
 	}
 	install(t, ta, installedSpecV)
@@ -46,11 +46,10 @@ func TestStart_FromOutsideHerdrKeepsInstalledDefinition(t *testing.T) {
 	}
 }
 
-// Run as the herdr plugin action, start takes herdr's directories and the
-// plugin's binary even over an older definition.
-func TestStart_FromHerdrPluginActionUsesItsEnvironment(t *testing.T) {
+// When environment variables are set, start uses them even over an older definition.
+func TestStart_FromEnvironmentOverridesConfigAndState(t *testing.T) {
 	ta := newTestApp(t, "launchd")
-	plugCfgDir := filepath.Join(ta.home, "herdr-config")
+	plugCfgDir := filepath.Join(ta.home, "custom-config")
 	writeConfig(t, filepath.Join(plugCfgDir, "config.toml"), "wss://relay.example.com")
 	install(t, ta, ServiceSpec{
 		Binary:     "/gone/agent-watch-bridge",
@@ -60,9 +59,9 @@ func TestStart_FromHerdrPluginActionUsesItsEnvironment(t *testing.T) {
 		LogPath:    filepath.Join(ta.home, "Library", "Logs", "agent-watch-bridge.log"),
 	})
 	ta.env = map[string]string{
-		"HERDR_PLUGIN_CONFIG_DIR": plugCfgDir,
-		"HERDR_PLUGIN_STATE_DIR":  filepath.Join(ta.home, "herdr-state"),
-		"HERDR_SOCKET_PATH":       filepath.Join(ta.home, "herdr.sock"),
+		"AW_CONFIG_DIR":      plugCfgDir,
+		"AW_STATE_DIR":       filepath.Join(ta.home, "custom-state"),
+		"HC_TERMINAL_SOCKET": filepath.Join(ta.home, "hc.sock"),
 	}
 
 	if err := ta.cmdStart(nil); err != nil {
@@ -71,8 +70,8 @@ func TestStart_FromHerdrPluginActionUsesItsEnvironment(t *testing.T) {
 	want := ServiceSpec{
 		Binary:     ta.exe,
 		ConfigPath: filepath.Join(plugCfgDir, "config.toml"),
-		SocketPath: filepath.Join(ta.home, "herdr.sock"),
-		StateDir:   filepath.Join(ta.home, "herdr-state"),
+		SocketPath: filepath.Join(ta.home, "hc.sock"),
+		StateDir:   filepath.Join(ta.home, "custom-state"),
 		LogPath:    filepath.Join(ta.home, "Library", "Logs", "agent-watch-bridge.log"),
 	}
 	if got := installedSpec(t, ta); got != want {
@@ -120,7 +119,7 @@ func TestStart_FreshInstallUsesDefaults(t *testing.T) {
 	}
 	want := ServiceSpec{
 		Binary:     ta.exe,
-		ConfigPath: filepath.Join(ta.home, ".config", "herdr", "plugins", "config", "herdr-agent-watch", "config.toml"),
+		ConfigPath: filepath.Join(ta.home, ".config", "agent-watch", "config.toml"),
 		SocketPath: filepath.Join(ta.home, ".local", "state", "herdr-core", "default", "default.sock"),
 		StateDir:   filepath.Join(ta.home, ".local", "state", "agent-watch"),
 		LogPath:    filepath.Join(ta.home, "Library", "Logs", "agent-watch-bridge.log"),

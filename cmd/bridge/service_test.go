@@ -48,11 +48,11 @@ func TestLaunchd_RenderEscapesAndRoundTrips(t *testing.T) {
 		t.Fatalf("plutil -lint: %v: %s", err, out)
 	}
 	for key, want := range map[string]string{
-		"ProgramArguments.0":                          awkwardSpec.Binary,
-		"ProgramArguments.3":                          awkwardSpec.ConfigPath,
-		"EnvironmentVariables.HERDR_SOCKET_PATH":      awkwardSpec.SocketPath,
-		"EnvironmentVariables.HERDR_PLUGIN_STATE_DIR": awkwardSpec.StateDir,
-		"StandardErrorPath":                           awkwardSpec.LogPath,
+		"ProgramArguments.0":                     awkwardSpec.Binary,
+		"ProgramArguments.3":                     awkwardSpec.ConfigPath,
+		"EnvironmentVariables.HERDR_SOCKET_PATH": awkwardSpec.SocketPath,
+		"EnvironmentVariables.AW_STATE_DIR":      awkwardSpec.StateDir,
+		"StandardErrorPath":                      awkwardSpec.LogPath,
 	} {
 		out, err := exec.Command(plutil, "-extract", key, "raw", "-o", "-", path).Output()
 		if err != nil {
@@ -68,9 +68,9 @@ func TestLaunchd_RenderHasEveryKey(t *testing.T) {
 	m := &launchdManager{home: t.TempDir(), uid: 501}
 	spec := ServiceSpec{
 		Binary:     "/usr/local/bin/agent-watch-bridge",
-		ConfigPath: "/Users/test/.config/herdr/plugins/config/herdr-agent-watch/config.toml",
-		SocketPath: "/Users/test/.config/herdr/herdr.sock",
-		StateDir:   "/Users/test/.local/state/herdr/plugins/herdr-agent-watch",
+		ConfigPath: "/Users/test/.config/agent-watch/config.toml",
+		SocketPath: "/Users/test/.local/state/herdr-core/default/default.sock",
+		StateDir:   "/Users/test/.local/state/agent-watch",
 		LogPath:    "/Users/test/Library/Logs/agent-watch-bridge.log",
 	}
 	rendered, err := m.Render(spec)
@@ -84,7 +84,7 @@ func TestLaunchd_RenderHasEveryKey(t *testing.T) {
 		"<string>--config</string>",
 		"<string>" + spec.ConfigPath + "</string>",
 		"<key>HERDR_SOCKET_PATH</key><string>" + spec.SocketPath + "</string>",
-		"<key>HERDR_PLUGIN_STATE_DIR</key><string>" + spec.StateDir + "</string>",
+		"<key>AW_STATE_DIR</key><string>" + spec.StateDir + "</string>",
 		"<key>RunAtLoad</key><true/>",
 		"<key>KeepAlive</key><true/>",
 		"<key>ThrottleInterval</key><integer>10</integer>",
@@ -98,7 +98,7 @@ func TestLaunchd_RenderHasEveryKey(t *testing.T) {
 	}
 }
 
-// The format installed by earlier versions (unescaped template) parses.
+// The format installed by earlier versions parses.
 func TestLaunchd_ParsesPreviouslyInstalledPlist(t *testing.T) {
 	const installed = `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -110,12 +110,12 @@ func TestLaunchd_ParsesPreviouslyInstalledPlist(t *testing.T) {
     <string>/Users/u/Code/agent-watch/bin/agent-watch-bridge</string>
     <string>run</string>
     <string>--config</string>
-    <string>/Users/u/.config/herdr/plugins/config/herdr-agent-watch/config.toml</string>
+    <string>/Users/u/.config/agent-watch/config.toml</string>
   </array>
   <key>EnvironmentVariables</key>
   <dict>
-    <key>HERDR_SOCKET_PATH</key><string>/Users/u/.config/herdr/herdr.sock</string>
-    <key>HERDR_PLUGIN_STATE_DIR</key><string>/Users/u/.local/state/herdr/plugins/herdr-agent-watch</string>
+    <key>HERDR_SOCKET_PATH</key><string>/Users/u/.local/state/herdr-core/default/default.sock</string>
+    <key>AW_STATE_DIR</key><string>/Users/u/.local/state/agent-watch</string>
   </dict>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>
@@ -131,9 +131,9 @@ func TestLaunchd_ParsesPreviouslyInstalledPlist(t *testing.T) {
 	}
 	want := ServiceSpec{
 		Binary:     "/Users/u/Code/agent-watch/bin/agent-watch-bridge",
-		ConfigPath: "/Users/u/.config/herdr/plugins/config/herdr-agent-watch/config.toml",
-		SocketPath: "/Users/u/.config/herdr/herdr.sock",
-		StateDir:   "/Users/u/.local/state/herdr/plugins/herdr-agent-watch",
+		ConfigPath: "/Users/u/.config/agent-watch/config.toml",
+		SocketPath: "/Users/u/.local/state/herdr-core/default/default.sock",
+		StateDir:   "/Users/u/.local/state/agent-watch",
 		LogPath:    "/Users/u/Library/Logs/agent-watch-bridge.log",
 	}
 	if got != want {
@@ -171,28 +171,27 @@ func TestSystemd_RenderQuotesAndRoundTrips(t *testing.T) {
 // Units written by earlier versions (unquoted) still parse.
 func TestSystemd_ParsesUnquotedUnit(t *testing.T) {
 	unit := "[Service]\nExecStart=/opt/aw/agent-watch-bridge run --config /home/u/.config/aw/config.toml\n" +
-		"Environment=HERDR_SOCKET_PATH=/home/u/.config/herdr/herdr.sock\n" +
-		"Environment=HERDR_PLUGIN_STATE_DIR=/home/u/.local/state/aw\n"
+		"Environment=HERDR_SOCKET_PATH=/home/u/.local/state/herdr-core/default/default.sock\n" +
+		"Environment=AW_STATE_DIR=/home/u/.local/state/aw\n"
 	got, err := (&systemdManager{}).Parse([]byte(unit))
 	if err != nil {
 		t.Fatal(err)
 	}
 	want := ServiceSpec{
 		Binary: "/opt/aw/agent-watch-bridge", ConfigPath: "/home/u/.config/aw/config.toml",
-		SocketPath: "/home/u/.config/herdr/herdr.sock", StateDir: "/home/u/.local/state/aw",
+		SocketPath: "/home/u/.local/state/herdr-core/default/default.sock", StateDir: "/home/u/.local/state/aw",
 	}
 	if got != want {
 		t.Errorf("got %+v\nwant %+v", got, want)
 	}
 }
 
-// start resolves each value from, in order: flag, herdr's environment,
-// the installed definition, the default. The binary counts the plugin
-// action (HERDR_PLUGIN_* set) as explicit; an installed binary that no
+// start resolves each value from, in order: flag, environment,
+// the installed definition, the default. An installed binary that no
 // longer exists is not reused.
 func TestResolveForStart(t *testing.T) {
 	ta := newTestApp(t, "launchd")
-	otherBin := writeExecutable(t, filepath.Join(ta.home, "plugin", "bin", "agent-watch-bridge"))
+	otherBin := writeExecutable(t, filepath.Join(ta.home, "bin", "agent-watch-bridge"))
 	installedAll := ServiceSpec{
 		Binary:     otherBin,
 		ConfigPath: "/inst/config.toml",
@@ -225,19 +224,19 @@ func TestResolveForStart(t *testing.T) {
 			want:      ServiceSpec{Binary: otherBin, ConfigPath: "/inst/config.toml", SocketPath: "/pane/herdr.sock", StateDir: "/inst/state", LogPath: "/inst/bridge.log"},
 		},
 		{
-			name:      "the herdr plugin action pins its dirs and its binary",
+			name:      "AW_* environment overrides config and state",
 			installed: &installedAll,
 			env: map[string]string{
-				"HERDR_PLUGIN_CONFIG_DIR": "/plug/config",
-				"HERDR_PLUGIN_STATE_DIR":  "/plug/state",
-				"HERDR_SOCKET_PATH":       "/plug/herdr.sock",
+				"AW_CONFIG_DIR":      "/custom/config",
+				"AW_STATE_DIR":       "/custom/state",
+				"HC_TERMINAL_SOCKET": "/custom/hc.sock",
 			},
-			want: ServiceSpec{Binary: ta.exe, ConfigPath: "/plug/config/config.toml", SocketPath: "/plug/herdr.sock", StateDir: "/plug/state", LogPath: "/inst/bridge.log"},
+			want: ServiceSpec{Binary: otherBin, ConfigPath: "/custom/config/config.toml", SocketPath: "/custom/hc.sock", StateDir: "/custom/state", LogPath: "/inst/bridge.log"},
 		},
 		{
 			name:      "flags win",
 			installed: &installedAll,
-			env:       map[string]string{"HERDR_PLUGIN_STATE_DIR": "/plug/state"},
+			env:       map[string]string{"AW_STATE_DIR": "/custom/state"},
 			flags:     ServiceSpec{Binary: otherBin, ConfigPath: "/f/c.toml", SocketPath: "/f/s.sock", StateDir: "/f/state", LogPath: "/f/l.log"},
 			want:      ServiceSpec{Binary: otherBin, ConfigPath: "/f/c.toml", SocketPath: "/f/s.sock", StateDir: "/f/state", LogPath: "/f/l.log"},
 		},

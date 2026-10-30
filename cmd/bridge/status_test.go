@@ -81,8 +81,8 @@ func TestStatusLocal_ReadsInstalledStateDir(t *testing.T) {
 
 func TestStatusLocal_NotInstalledFallsBackToEnvironment(t *testing.T) {
 	ta := newTestApp(t, "launchd")
-	stateDir := filepath.Join(ta.home, "herdr-state")
-	ta.env["HERDR_PLUGIN_STATE_DIR"] = stateDir
+	stateDir := filepath.Join(ta.home, "aw-state")
+	ta.env["AW_STATE_DIR"] = stateDir
 	writeStatus(t, stateDir, bridge.StoppedStatus("0.2.0", ""))
 
 	ls := localStatus(t, ta)

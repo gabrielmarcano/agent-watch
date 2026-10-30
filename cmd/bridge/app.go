@@ -12,8 +12,6 @@ import (
 	"github.com/gabrielmarcano/agent-monitor/pkg/bridge"
 )
 
-const pluginID = bridge.PluginID
-
 // realRunner runs launchctl/systemctl. Tests replace it with one that fails.
 var realRunner commandRunner = execRunner
 
@@ -77,24 +75,20 @@ func (a *app) defaults() ServiceSpec {
 	return spec
 }
 
-// inPluginAction reports whether herdr runs this process as a plugin action:
-// herdr sets the plugin dirs only then (a pane shell has HERDR_SOCKET_PATH).
-func (a *app) inPluginAction() bool {
-	return a.getenv("HERDR_PLUGIN_CONFIG_DIR") != "" || a.getenv("HERDR_PLUGIN_STATE_DIR") != ""
-}
-
-// envSpec holds the values herdr's environment pins explicitly.
+// envSpec holds explicit environment overrides (AW_CONFIG_FILE, AW_CONFIG_DIR, HC_TERMINAL_SOCKET, HERDR_SOCKET_PATH, AW_STATE_DIR).
 func (a *app) envSpec() ServiceSpec {
 	var s ServiceSpec
-	if d := a.getenv("HERDR_PLUGIN_CONFIG_DIR"); d != "" {
+	if p := a.getenv("AW_CONFIG_FILE"); p != "" {
+		s.ConfigPath = p
+	} else if d := a.getenv("AW_CONFIG_DIR"); d != "" {
 		s.ConfigPath = filepath.Join(d, "config.toml")
 	}
-	s.SocketPath = a.getenv("HERDR_SOCKET_PATH")
-	s.StateDir = a.getenv("HERDR_PLUGIN_STATE_DIR")
-	if a.inPluginAction() {
-		// A plugin action runs the plugin's own ./bin/agent-watch-bridge.
-		s.Binary = a.exe
+	if p := a.getenv("HC_TERMINAL_SOCKET"); p != "" {
+		s.SocketPath = p
+	} else {
+		s.SocketPath = a.getenv("HERDR_SOCKET_PATH")
 	}
+	s.StateDir = a.getenv("AW_STATE_DIR")
 	return s
 }
 
@@ -144,12 +138,10 @@ func (a *app) loadInstalled() (*ServiceSpec, error) {
 }
 
 // resolveForStart picks what `start` installs, per value: an explicit flag,
-// else herdr's environment, else the installed definition, else the
-// default. Running `start` from a terminal or the menu bar therefore keeps
-// the definition herdr installed instead of rewriting it with the caller's
-// environment. The binary follows the same order, where "environment" means
-// running as the herdr plugin action; an installed binary that no longer
-// exists is replaced by this one.
+// else the environment, else the installed definition, else the default.
+// Running `start` from a terminal or the menu bar therefore keeps the
+// definition installed instead of rewriting it with the caller's environment.
+// An installed binary that no longer exists is replaced by this one.
 func (a *app) resolveForStart(flags ServiceSpec) resolution {
 	var r resolution
 	r.installed, r.installErr = a.loadInstalled()

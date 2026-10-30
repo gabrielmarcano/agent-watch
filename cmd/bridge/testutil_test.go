@@ -30,8 +30,9 @@ func TestMain(m *testing.M) {
 	}
 	os.Setenv("HOME", home)
 	os.Setenv("HERDR_SOCKET_PATH", filepath.Join(home, "no-herdr.sock"))
-	os.Unsetenv("HERDR_PLUGIN_CONFIG_DIR")
-	os.Unsetenv("HERDR_PLUGIN_STATE_DIR")
+	os.Unsetenv("AW_CONFIG_FILE")
+	os.Unsetenv("AW_CONFIG_DIR")
+	os.Unsetenv("AW_STATE_DIR")
 	realRunner = func(ctx context.Context, name string, args ...string) ([]byte, error) {
 		return nil, fmt.Errorf("test tried to run the real %s %v", name, args)
 	}

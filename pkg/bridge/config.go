@@ -57,14 +57,14 @@ type StatusFile struct {
 	UpdatedAt    string `json:"updated_at"`
 }
 
-// PluginID is herdr's identifier for the agent-watch bridge plugin.
-const PluginID = "herdr-agent-watch"
-
 // DefaultConfigPathFor computes the config path given an optional home directory
 // and an environment lookup function.
 func DefaultConfigPathFor(home string, getenv func(string) string) string {
 	if getenv != nil {
-		if p := getenv("HERDR_PLUGIN_CONFIG_DIR"); p != "" {
+		if p := getenv("AW_CONFIG_FILE"); p != "" {
+			return p
+		}
+		if p := getenv("AW_CONFIG_DIR"); p != "" {
 			return filepath.Join(p, "config.toml")
 		}
 	}
@@ -72,7 +72,7 @@ func DefaultConfigPathFor(home string, getenv func(string) string) string {
 		home, _ = os.UserHomeDir()
 	}
 	if home != "" {
-		return filepath.Join(home, ".config", "herdr", "plugins", "config", PluginID, "config.toml")
+		return filepath.Join(home, ".config", "agent-watch", "config.toml")
 	}
 	return "config.toml"
 }
@@ -81,7 +81,7 @@ func DefaultConfigPathFor(home string, getenv func(string) string) string {
 // and an environment lookup function.
 func DefaultStateDirFor(home string, getenv func(string) string) string {
 	if getenv != nil {
-		if p := getenv("HERDR_PLUGIN_STATE_DIR"); p != "" {
+		if p := getenv("AW_STATE_DIR"); p != "" {
 			return p
 		}
 	}
@@ -114,14 +114,14 @@ func DefaultSocketPathFor(home string, getenv func(string) string) string {
 	return "default.sock"
 }
 
-// DefaultConfigPath returns the config file path according to herdr conventions:
-// $HERDR_PLUGIN_CONFIG_DIR/config.toml, or ~/.config/herdr/plugins/config/herdr-agent-watch/config.toml.
+// DefaultConfigPath returns the default config file path:
+// $AW_CONFIG_FILE, $AW_CONFIG_DIR/config.toml, or ~/.config/agent-watch/config.toml.
 func DefaultConfigPath() string {
 	return DefaultConfigPathFor("", os.Getenv)
 }
 
 // DefaultStateDir returns the directory where status.json should be written:
-// $HERDR_PLUGIN_STATE_DIR, or ~/.local/state/agent-watch.
+// $AW_STATE_DIR, or ~/.local/state/agent-watch.
 func DefaultStateDir() string {
 	return DefaultStateDirFor("", os.Getenv)
 }

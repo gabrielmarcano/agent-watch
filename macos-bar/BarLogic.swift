@@ -421,10 +421,10 @@ func locateBridgeBinary(launchAgent: URL, appBundle: URL, isExecutable: (String)
     return isExecutable(sibling) ? sibling : nil
 }
 
-/// The environment for CLI calls: herdr's variables are removed so the CLI
+/// The environment for CLI calls: herdr and AW override variables are removed so the CLI
 /// resolves everything from the installed service definition.
 func childEnvironment(_ base: [String: String]) -> [String: String] {
-    base.filter { !$0.key.hasPrefix("HERDR_") }
+    base.filter { !$0.key.hasPrefix("HERDR_") && !$0.key.hasPrefix("AW_") && !$0.key.hasPrefix("HC_") }
 }
 
 // MARK: - Running the CLI

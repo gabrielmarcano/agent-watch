@@ -91,7 +91,7 @@ func (m *launchdManager) Parse(data []byte) (ServiceSpec, error) {
 	}
 	if env, ok := dict["EnvironmentVariables"].(map[string]any); ok {
 		spec.SocketPath, _ = env["HERDR_SOCKET_PATH"].(string)
-		spec.StateDir, _ = env["HERDR_PLUGIN_STATE_DIR"].(string)
+		spec.StateDir, _ = env["AW_STATE_DIR"].(string)
 	}
 	spec.LogPath, _ = dict["StandardOutPath"].(string)
 	if spec.Binary == "" {

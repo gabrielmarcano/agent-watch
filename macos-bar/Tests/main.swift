@@ -51,9 +51,9 @@ let full = """
   "relay_version": "0.3.0 (5a32851)", "service": "launchd",
   "definition_path": "/Users/u/Library/LaunchAgents/com.gabrielmarcano.agent-watch-bridge.plist",
   "binary": "/Users/u/agent-watch/bin/agent-watch-bridge",
-  "config_path": "/Users/u/.config/herdr/plugins/config/herdr-agent-watch/config.toml",
-  "state_dir": "/Users/u/.local/state/herdr/plugins/herdr-agent-watch",
-  "status_path": "/Users/u/.local/state/herdr/plugins/herdr-agent-watch/status.json",
+  "config_path": "/Users/u/.config/agent-watch/config.toml",
+  "state_dir": "/Users/u/.local/state/agent-watch",
+  "status_path": "/Users/u/.local/state/agent-watch/status.json",
   "log_path": "/Users/u/Library/Logs/agent-watch-bridge.log",
   "relay_status": {"host_online": true}
 }
@@ -294,7 +294,7 @@ check(locateBridgeBinary(launchAgent: plistURL, appBundle: bundle, isExecutable:
 try? FileManager.default.removeItem(at: exe)
 check(locateBridgeBinary(launchAgent: plistURL, appBundle: bundle, isExecutable: isExec) == nil, "nothing found: nil (no relative fallback)")
 
-check(childEnvironment(["HERDR_SOCKET_PATH": "x", "HERDR_PLUGIN_STATE_DIR": "y", "PATH": "/bin"]) == ["PATH": "/bin"], "HERDR_* stripped")
+check(childEnvironment(["HERDR_SOCKET_PATH": "x", "AW_STATE_DIR": "y", "HC_TERMINAL_SOCKET": "z", "PATH": "/bin"]) == ["PATH": "/bin"], "HERDR_*, AW_*, HC_* stripped")
 
 // MARK: process runner
 

@@ -79,9 +79,9 @@ func (a *app) cmdConfigure(args []string) error {
 func (a *app) specFlags(fs *flag.FlagSet) *ServiceSpec {
 	var s ServiceSpec
 	fs.StringVar(&s.Binary, "binary", "", "bridge binary the service runs (default: installed, else this one)")
-	fs.StringVar(&s.ConfigPath, "config", "", "config file (default: $HERDR_PLUGIN_CONFIG_DIR, installed, default)")
-	fs.StringVar(&s.SocketPath, "socket", "", "herdr socket (default: $HERDR_SOCKET_PATH, installed, default)")
-	fs.StringVar(&s.StateDir, "state-dir", "", "status.json directory (default: $HERDR_PLUGIN_STATE_DIR, installed, default)")
+	fs.StringVar(&s.ConfigPath, "config", "", "config file (default: installed, else default)")
+	fs.StringVar(&s.SocketPath, "socket", "", "herdr socket (default: installed, else default)")
+	fs.StringVar(&s.StateDir, "state-dir", "", "status.json directory (default: installed, else default)")
 	fs.StringVar(&s.LogPath, "log", "", "log file (default: installed, else the platform default)")
 	return &s
 }

@@ -252,3 +252,38 @@ func TestConfig_PushPresence(t *testing.T) {
 		t.Fatalf("LoadConfig = %+v, %v; want push_presence true", got, err)
 	}
 }
+
+func TestDefaultPaths(t *testing.T) {
+	home := "/home/testuser"
+	getenv := func(k string) string { return "" }
+	if got := DefaultConfigPathFor(home, getenv); got != "/home/testuser/.config/agent-watch/config.toml" {
+		t.Errorf("DefaultConfigPathFor = %q, want /home/testuser/.config/agent-watch/config.toml", got)
+	}
+	if got := DefaultStateDirFor(home, getenv); got != "/home/testuser/.local/state/agent-watch" {
+		t.Errorf("DefaultStateDirFor = %q, want /home/testuser/.local/state/agent-watch", got)
+	}
+	if got := DefaultSocketPathFor(home, getenv); got != "/home/testuser/.local/state/herdr-core/default/default.sock" {
+		t.Errorf("DefaultSocketPathFor = %q, want /home/testuser/.local/state/herdr-core/default/default.sock", got)
+	}
+
+	envLookup := func(k string) string {
+		switch k {
+		case "AW_CONFIG_FILE":
+			return "/custom/c.toml"
+		case "AW_STATE_DIR":
+			return "/custom/state"
+		case "HC_TERMINAL_SOCKET":
+			return "/custom/hc.sock"
+		}
+		return ""
+	}
+	if got := DefaultConfigPathFor(home, envLookup); got != "/custom/c.toml" {
+		t.Errorf("DefaultConfigPathFor with env = %q, want /custom/c.toml", got)
+	}
+	if got := DefaultStateDirFor(home, envLookup); got != "/custom/state" {
+		t.Errorf("DefaultStateDirFor with env = %q, want /custom/state", got)
+	}
+	if got := DefaultSocketPathFor(home, envLookup); got != "/custom/hc.sock" {
+		t.Errorf("DefaultSocketPathFor with env = %q, want /custom/hc.sock", got)
+	}
+}
