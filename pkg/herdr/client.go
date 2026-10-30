@@ -3,389 +3,377 @@ package herdr
 import (
 	"bufio"
 	"context"
-	crand "crypto/rand"
-	"encoding/binary"
+	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
-	mrand "math/rand/v2"
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"time"
 )
 
-var (
-	idCounter uint64
-	idPrefix  = randomIDPrefix()
-)
+// ErrUnavailable indicates that the herdr-core socket could not be reached.
+var ErrUnavailable = errors.New("herdr unavailable")
 
-// randomIDPrefix returns 16 hex characters chosen once per process, so ids
-// from two bridge processes (or a restart) never collide.
-func randomIDPrefix() string {
-	var b [8]byte
-	if _, err := crand.Read(b[:]); err != nil {
-		binary.BigEndian.PutUint64(b[:], mrand.Uint64())
+// Error represents a JSON-RPC 2.0 error returned by herdr-core.
+type Error struct {
+	Code    string `json:"code"`
+	Message string `json:"message"`
+	Hint    string `json:"hint,omitempty"`
+}
+
+// UnmarshalJSON decodes both herdr-core's JSON-RPC 2.0 error object
+// ({"code":-32000,"message":"...","data":{"kind":"not_found","hint":"..."}})
+// and string-coded errors ({"code":"not_found","message":"..."}).
+func (e *Error) UnmarshalJSON(b []byte) error {
+	var wire struct {
+		Code    any    `json:"code"`
+		Message string `json:"message"`
+		Data    *struct {
+			Kind string `json:"kind"`
+			Hint string `json:"hint"`
+		} `json:"data"`
 	}
-	return hex.EncodeToString(b[:])
-}
-
-// nextID returns a request id: the random process prefix plus a counter,
-// formatted as a string (herdr rejects numeric ids).
-func nextID() string {
-	return fmt.Sprintf("%s-%d", idPrefix, atomic.AddUint64(&idCounter, 1))
-}
-
-// Client communicates with the herdr socket over NDJSON RPC.
-type Client struct {
-	SocketPath string        // path to herdr.sock
-	Timeout    time.Duration // per call; default 5s when zero
-}
-
-// NewClient resolves the socket path: explicit arg, else $HERDR_SOCKET_PATH, else ~/.config/herdr/herdr.sock.
-func NewClient(socketPath string) *Client {
-	p := socketPath
-	if p == "" {
-		p = os.Getenv("HERDR_SOCKET_PATH")
+	if err := json.Unmarshal(b, &wire); err != nil {
+		return err
 	}
-	if p == "" {
-		home, err := os.UserHomeDir()
-		if err == nil {
-			p = filepath.Join(home, ".config", "herdr", "herdr.sock")
-		} else {
-			p = "/tmp/herdr.sock"
+	e.Message = wire.Message
+	if wire.Data != nil {
+		e.Code = wire.Data.Kind
+		e.Hint = wire.Data.Hint
+	}
+	if e.Code == "" {
+		if s, ok := wire.Code.(string); ok {
+			e.Code = s
+		} else if wire.Message != "" {
+			e.Code = wire.Message
 		}
 	}
+	return nil
+}
+
+func (e *Error) Error() string {
+	return fmt.Sprintf("herdr error (%s): %s", e.Code, e.Message)
+}
+
+// IsCode reports whether err is a *herdr.Error with the given code.
+func IsCode(err error, code string) bool {
+	var hErr *Error
+	if errors.As(err, &hErr) {
+		return hErr.Code == code
+	}
+	return false
+}
+
+// Client is a JSON-RPC 2.0 client over a Unix domain socket for herdr-core.
+type Client struct {
+	SocketPath string
+	Timeout    time.Duration
+}
+
+// DefaultSocketPath resolves the herdr-core Unix socket path from the
+// environment ($HC_TERMINAL_SOCKET, $HERDR_SOCKET_PATH, $XDG_STATE_HOME,
+// $HC_SESSION) or ~/.local/state/herdr-core/default/default.sock.
+// If $HERDR_SOCKET_PATH points to the legacy ~/.config/herdr/herdr.sock path
+// (e.g. from an older LaunchAgent plist) and the herdr-core socket exists,
+// the herdr-core socket is preferred.
+func DefaultSocketPath() string {
+	if p := strings.TrimSpace(os.Getenv("HC_TERMINAL_SOCKET")); p != "" {
+		return p
+	}
+	session := strings.TrimSpace(os.Getenv("HC_SESSION"))
+	if session == "" {
+		session = "default"
+	}
+	stateDir := strings.TrimSpace(os.Getenv("XDG_STATE_HOME"))
+	if stateDir == "" {
+		home, _ := os.UserHomeDir()
+		stateDir = filepath.Join(home, ".local", "state")
+	}
+	coreSock := filepath.Join(stateDir, "herdr-core", session, "default.sock")
+	if p := strings.TrimSpace(os.Getenv("HERDR_SOCKET_PATH")); p != "" {
+		if strings.HasSuffix(p, filepath.Join(".config", "herdr", "herdr.sock")) {
+			if _, err := os.Stat(coreSock); err == nil {
+				return coreSock
+			}
+		}
+		return p
+	}
+	return coreSock
+}
+
+// NewClient creates a new herdr-core client. If socketPath is empty, it falls
+// back to DefaultSocketPath().
+func NewClient(socketPath string) *Client {
+	if socketPath == "" {
+		socketPath = DefaultSocketPath()
+	}
 	return &Client{
-		SocketPath: p,
+		SocketPath: socketPath,
 		Timeout:    5 * time.Second,
 	}
 }
 
-// Call executes a single JSON-RPC method call on the herdr socket.
-// Follows the one-connection-per-call contract. It is bounded by ctx's
-// deadline, or by Timeout when ctx has none, and cancelling ctx abandons the
-// call at once; either way the error wraps ctx's error (context.Canceled or
-// context.DeadlineExceeded), never ErrUnavailable.
-func (c *Client) Call(ctx context.Context, method string, params, out any) error {
+var (
+	reqPrefix  = randomPrefix()
+	reqCounter atomic.Uint64
+)
+
+func randomPrefix() string {
+	var b [8]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return fmt.Sprintf("%016x", uint64(os.Getpid()))
+	}
+	return hex.EncodeToString(b[:])
+}
+
+func nextID() string {
+	seq := reqCounter.Add(1)
+	return fmt.Sprintf("%s-%d", reqPrefix, seq)
+}
+
+// checkResponseID rejects a reply whose id does not match reqID, except when
+// herdr-core returns a parse/request error with an empty id.
+func checkResponseID(method, reqID, respID string, respErr *Error) error {
+	if respID == reqID {
+		return nil
+	}
+	if respID == "" && respErr != nil {
+		return respErr
+	}
+	return fmt.Errorf("herdr %s: response id %q does not match request id %q", method, respID, reqID)
+}
+
+// Call executes a single request/response cycle over a new Unix socket connection.
+func (c *Client) Call(ctx context.Context, method string, params any, out any) error {
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("herdr %s: %w", method, err)
+	}
 	timeout := c.Timeout
 	if timeout <= 0 {
 		timeout = 5 * time.Second
 	}
-
-	callCtx := ctx
-	var cancel context.CancelFunc
-	if _, hasDeadline := ctx.Deadline(); !hasDeadline {
-		callCtx, cancel = context.WithTimeout(ctx, timeout)
-		defer cancel()
-	}
-	if err := callCtx.Err(); err != nil {
-		return fmt.Errorf("herdr %s: %w", method, err)
+	deadline := time.Now().Add(timeout)
+	if dl, ok := ctx.Deadline(); ok && dl.Before(deadline) {
+		deadline = dl
 	}
 
 	var d net.Dialer
-	conn, err := d.DialContext(callCtx, "unix", c.SocketPath)
+	dialCtx, cancelDial := context.WithDeadline(ctx, deadline)
+	conn, err := d.DialContext(dialCtx, "unix", c.SocketPath)
+	dialExpired := dialCtx.Err() != nil
+	cancelDial()
 	if err != nil {
-		if ctxErr := callCtx.Err(); ctxErr != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
 			return fmt.Errorf("herdr %s: %w", method, ctxErr)
+		}
+		if dialExpired {
+			return fmt.Errorf("herdr %s: %w: dial %s: %w", method, context.DeadlineExceeded, c.SocketPath, err)
 		}
 		return fmt.Errorf("%w: dial %s: %w", ErrUnavailable, c.SocketPath, err)
 	}
 	defer conn.Close()
 
-	// Closing the connection is what unblocks a pending write or read when
-	// ctx is cancelled before its deadline.
 	stop := make(chan struct{})
 	defer close(stop)
 	go func() {
 		select {
-		case <-callCtx.Done():
+		case <-ctx.Done():
 			_ = conn.Close()
 		case <-stop:
 		}
 	}()
-	// ioErr maps an I/O failure to ctx's error when ctx caused it. The
-	// connection deadline equals callCtx's, and can fire an instant before
-	// callCtx notices its own.
-	ioErr := func(op string, err error) error {
-		if ctxErr := callCtx.Err(); ctxErr != nil {
-			return fmt.Errorf("herdr %s %s: %w", method, op, ctxErr)
+	wrapErr := func(stage string, err error) error {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return fmt.Errorf("herdr %s %s: %w", stage, method, ctxErr)
 		}
 		if errors.Is(err, os.ErrDeadlineExceeded) {
-			return fmt.Errorf("herdr %s %s: %w: %w", method, op, context.DeadlineExceeded, err)
+			return fmt.Errorf("herdr %s %s: %w: %w", stage, method, context.DeadlineExceeded, err)
 		}
-		return fmt.Errorf("herdr %s: %w", op, err)
+		return fmt.Errorf("herdr %s %s: %w", stage, method, err)
 	}
 
-	if dl, ok := callCtx.Deadline(); ok {
-		_ = conn.SetDeadline(dl)
+	if err := conn.SetDeadline(deadline); err != nil {
+		return fmt.Errorf("herdr set deadline: %w", err)
 	}
 
 	if params == nil {
-		params = struct{}{}
+		params = map[string]any{}
 	}
 
 	reqID := nextID()
 	req := map[string]any{
-		"id":     reqID,
-		"method": method,
-		"params": params,
+		"jsonrpc": "2.0",
+		"id":      reqID,
+		"method":  method,
+		"params":  params,
 	}
 
 	if err := json.NewEncoder(conn).Encode(req); err != nil {
-		return ioErr("write", err)
+		return wrapErr("write", err)
 	}
 
-	line, err := bufio.NewReader(conn).ReadBytes('\n')
-	if err != nil && len(line) == 0 {
-		return ioErr("read", err)
+	reader := bufio.NewReader(conn)
+	line, err := reader.ReadBytes('\n')
+	if err != nil {
+		return wrapErr("read", err)
 	}
 
 	var resp struct {
-		ID     string          `json:"id"`
-		Result json.RawMessage `json:"result"`
-		Error  *Error          `json:"error"`
+		ID     string           `json:"id"`
+		Result *json.RawMessage `json:"result"`
+		Error  *Error           `json:"error"`
 	}
 	if err := json.Unmarshal(line, &resp); err != nil {
-		return fmt.Errorf("herdr decode: %w", err)
+		return fmt.Errorf("herdr decode %s: %w", method, err)
 	}
 	if err := checkResponseID(method, reqID, resp.ID, resp.Error); err != nil {
 		return err
 	}
-
 	if resp.Error != nil {
 		return resp.Error
 	}
-	if len(resp.Result) == 0 {
-		return fmt.Errorf("herdr %s: response has neither result nor error", method)
+	if resp.Result == nil || string(*resp.Result) == "null" {
+		return fmt.Errorf("herdr %s: response had neither result nor error", method)
 	}
 
 	if out != nil {
-		if err := json.Unmarshal(resp.Result, out); err != nil {
-			return fmt.Errorf("herdr %s: decode result: %w", method, err)
+		if err := json.Unmarshal(*resp.Result, out); err != nil {
+			return fmt.Errorf("herdr unmarshal result %s: %w", method, err)
 		}
 	}
 
 	return nil
 }
 
-// checkResponseID rejects an answer to some other request. herdr answers a
-// request it could not parse with id "" and an error; that error is kept,
-// since it says what was wrong.
-func checkResponseID(method, reqID, respID string, herdrErr *Error) error {
-	if respID == reqID || (respID == "" && herdrErr != nil) {
-		return nil
-	}
-	return fmt.Errorf("herdr %s: response id %q does not match request id %q", method, respID, reqID)
-}
-
-// callResult calls method and decodes its result into out, after checking
-// that the result's type is want.
-func (c *Client) callResult(ctx context.Context, method string, params any, want string, out any) error {
-	var raw json.RawMessage
-	if err := c.Call(ctx, method, params, &raw); err != nil {
-		return err
-	}
-	var head struct {
-		Type string `json:"type"`
-	}
-	if err := json.Unmarshal(raw, &head); err != nil {
-		return fmt.Errorf("herdr %s: decode result: %w", method, err)
-	}
-	if head.Type != want {
-		return fmt.Errorf("herdr %s: unexpected result type %q (want %q)", method, head.Type, want)
-	}
-	if err := json.Unmarshal(raw, out); err != nil {
-		return fmt.Errorf("herdr %s: decode result: %w", method, err)
-	}
-	return nil
-}
-
-// Ping queries herdr's health, protocol, and version.
+// Ping calls herdr-core's "hello" method and returns its version and generation.
 func (c *Client) Ping(ctx context.Context) (Pong, error) {
-	var pong Pong
-	if err := c.callResult(ctx, "ping", nil, "pong", &pong); err != nil {
+	var res struct {
+		Version    string `json:"version"`
+		Generation int    `json:"generation"`
+	}
+	if err := c.Call(ctx, "hello", map[string]any{}, &res); err != nil {
 		return Pong{}, err
 	}
-	return pong, nil
+	if res.Version == "" {
+		return Pong{}, fmt.Errorf("herdr hello: missing version in result")
+	}
+	return Pong{
+		Version:  res.Version,
+		Protocol: res.Generation,
+	}, nil
 }
 
-// ListAgents retrieves the authoritative list of agents from herdr.
-func (c *Client) ListAgents(ctx context.Context) ([]AgentInfo, error) {
+// ListTerminals calls "terminal.list" and returns all terminals reported by herdr-core.
+func (c *Client) ListTerminals(ctx context.Context) ([]Terminal, error) {
 	var res struct {
-		Agents *[]AgentInfo `json:"agents"`
+		Terminals []Terminal `json:"terminals"`
 	}
-	if err := c.callResult(ctx, "agent.list", nil, "agent_list", &res); err != nil {
+	if err := c.Call(ctx, "terminal.list", map[string]any{}, &res); err != nil {
 		return nil, err
 	}
-	// An empty herd is "agents": []. A missing list must not read as
-	// "every agent is gone".
-	if res.Agents == nil {
-		return nil, fmt.Errorf("herdr agent.list: result has no agents list")
+	if res.Terminals == nil {
+		return nil, fmt.Errorf("herdr terminal.list: missing terminals list")
 	}
-	return *res.Agents, nil
+	return res.Terminals, nil
 }
 
-// Read extracts text from a pane's screen buffer.
-func (c *Client) Read(ctx context.Context, paneID string, src ReadSource, lines int) (string, error) {
-	return c.read(ctx, paneID, src, lines, "text")
+// ListAgents calls "terminal.list" and converts local live terminals into AgentInfo.
+func (c *Client) ListAgents(ctx context.Context) ([]AgentInfo, error) {
+	terminals, err := c.ListTerminals(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	childCounts := make(map[string]int)
+	for _, t := range terminals {
+		if strings.Contains(t.Address, "/") {
+			continue
+		}
+		if t.State != "" && t.State != "live" {
+			continue
+		}
+		if t.Parent != nil && *t.Parent != "" {
+			childCounts[*t.Parent]++
+		}
+	}
+
+	agents := make([]AgentInfo, 0, len(terminals))
+	for _, t := range terminals {
+		if strings.Contains(t.Address, "/") {
+			continue
+		}
+		if t.State != "" && t.State != "live" {
+			continue
+		}
+		// Background sub-agent terminals spawned via hc run --bg have a parent
+		// and no herdr.space label; they count toward their parent's subagent_count.
+		if t.Parent != nil && *t.Parent != "" && t.Labels["herdr.space"] == "" {
+			continue
+		}
+		info := t.ToAgentInfo()
+		if n := childCounts[t.Address]; n > 0 && info.SubagentCount == nil {
+			count := n
+			info.SubagentCount = &count
+		}
+		agents = append(agents, info)
+	}
+	return agents, nil
 }
 
-// ReadANSI reads a pane's screen buffer with its styling: herdr's "ansi"
-// format, where every styled span starts with ESC[0m followed by one SGR
-// sequence per attribute (e.g. ESC[38;2;r;g;bm, ESC[48;5;nm) and rows end
-// with "\r\n". It asks exactly what `herdr agent read --format ansi` asks
-// (strip_ansi false; agent.read ignores it). A result in any other format is
-// an error, never silently plain text.
-func (c *Client) ReadANSI(ctx context.Context, paneID string, src ReadSource, lines int) (string, error) {
-	return c.read(ctx, paneID, src, lines, "ansi")
-}
-
-func (c *Client) read(ctx context.Context, paneID string, src ReadSource, lines int, format string) (string, error) {
+// Read calls "terminal.read" to fetch screen or scrollback text for target.
+func (c *Client) Read(ctx context.Context, target string, source ReadSource, lines int) (string, error) {
 	params := map[string]any{
-		"target": paneID,
-		"source": string(src),
-		"format": format,
-	}
-	if format == "ansi" {
-		params["strip_ansi"] = false
+		"terminal": target,
 	}
 	if lines > 0 {
 		params["lines"] = lines
+	} else if source == SourceRecentUnwrapped {
+		params["lines"] = 120
 	}
 
 	var res struct {
-		Read *struct {
-			Text   string `json:"text"`
-			Format string `json:"format"`
-		} `json:"read"`
+		Text *string `json:"text"`
 	}
-	if err := c.callResult(ctx, "agent.read", params, "pane_read", &res); err != nil {
+	if err := c.Call(ctx, "terminal.read", params, &res); err != nil {
 		return "", err
 	}
-	if res.Read == nil {
-		return "", fmt.Errorf("herdr agent.read: result has no read")
+	if res.Text == nil {
+		return "", fmt.Errorf("herdr terminal.read: missing text in result")
 	}
-	if format == "ansi" && res.Read.Format != format {
-		return "", fmt.Errorf("herdr agent.read: result format %q, want %q", res.Read.Format, format)
-	}
-	return res.Read.Text, nil
+	return *res.Text, nil
 }
 
-// SendKeys dispatches keystrokes to an agent pane.
-func (c *Client) SendKeys(ctx context.Context, paneID string, keys []string) error {
+// Prompt sends text and Enter to target via "terminal.send".
+func (c *Client) Prompt(ctx context.Context, target, text string) error {
 	params := map[string]any{
-		"target": paneID,
-		"keys":   keys,
+		"terminal": target,
+		"text":     text,
 	}
-	return c.Call(ctx, "agent.send_keys", params, nil)
+	return c.Call(ctx, "terminal.send", params, nil)
 }
 
-// Prompt submits user input to an agent pane. Never passes the blocking "wait" parameter.
-func (c *Client) Prompt(ctx context.Context, paneID, text string) error {
+// SendKeys sends named keystrokes to target via "terminal.keys".
+func (c *Client) SendKeys(ctx context.Context, target string, keys []string) error {
 	params := map[string]any{
-		"target": paneID,
-		"text":   text,
+		"terminal": target,
+		"keys":     keys,
 	}
-	return c.Call(ctx, "agent.prompt", params, nil)
+	return c.Call(ctx, "terminal.keys", params, nil)
 }
 
-// ListWorkspaces retrieves the list of workspaces from herdr.
-func (c *Client) ListWorkspaces(ctx context.Context) ([]WorkspaceInfo, error) {
-	var res struct {
-		Type       string          `json:"type"`
-		Workspaces []WorkspaceInfo `json:"workspaces"`
+// RunTerminal starts a new terminal in herdr-core via "terminal.run".
+func (c *Client) RunTerminal(ctx context.Context, p RunParams) (Terminal, error) {
+	var t Terminal
+	if err := c.Call(ctx, "terminal.run", p, &t); err != nil {
+		return Terminal{}, err
 	}
-	if err := c.Call(ctx, "workspace.list", nil, &res); err != nil {
-		return nil, err
+	if t.Address == "" {
+		return Terminal{}, fmt.Errorf("herdr terminal.run: missing address in result")
 	}
-	return res.Workspaces, nil
-}
-
-// ListTabs retrieves every tab of every workspace from herdr.
-func (c *Client) ListTabs(ctx context.Context) ([]TabInfo, error) {
-	var res struct {
-		Type string    `json:"type"`
-		Tabs []TabInfo `json:"tabs"`
-	}
-	if err := c.Call(ctx, "tab.list", nil, &res); err != nil {
-		return nil, err
-	}
-	return res.Tabs, nil
-}
-
-// ListPanes retrieves every pane of every workspace, with its cwd. The bridge
-// uses it to find the workspace that already serves a folder.
-func (c *Client) ListPanes(ctx context.Context) ([]PaneInfo, error) {
-	var res struct {
-		Type  string     `json:"type"`
-		Panes []PaneInfo `json:"panes"`
-	}
-	if err := c.callResult(ctx, "pane.list", nil, "pane_list", &res); err != nil {
-		return nil, err
-	}
-	return res.Panes, nil
-}
-
-// CreateWorkspace creates a workspace (its root tab and pane included) at cwd
-// without taking focus, and returns the three.
-func (c *Client) CreateWorkspace(ctx context.Context, cwd, label string) (WorkspaceInfo, TabInfo, PaneInfo, error) {
-	params := map[string]any{
-		"cwd":   cwd,
-		"label": label,
-		"focus": false,
-	}
-	var res struct {
-		Type      string        `json:"type"`
-		Workspace WorkspaceInfo `json:"workspace"`
-		Tab       TabInfo       `json:"tab"`
-		RootPane  PaneInfo      `json:"root_pane"`
-	}
-	if err := c.callResult(ctx, "workspace.create", params, "workspace_created", &res); err != nil {
-		return WorkspaceInfo{}, TabInfo{}, PaneInfo{}, err
-	}
-	return res.Workspace, res.Tab, res.RootPane, nil
-}
-
-// CreateTab creates a tab (its root pane included) in workspaceID at cwd
-// without taking focus.
-func (c *Client) CreateTab(ctx context.Context, workspaceID, cwd, label string) (TabInfo, PaneInfo, error) {
-	params := map[string]any{
-		"workspace_id": workspaceID,
-		"cwd":          cwd,
-		"label":        label,
-		"focus":        false,
-	}
-	var res struct {
-		Type     string   `json:"type"`
-		Tab      TabInfo  `json:"tab"`
-		RootPane PaneInfo `json:"root_pane"`
-	}
-	if err := c.callResult(ctx, "tab.create", params, "tab_created", &res); err != nil {
-		return TabInfo{}, PaneInfo{}, err
-	}
-	return res.Tab, res.RootPane, nil
-}
-
-// StartAgent starts kind in paneID and waits up to timeoutMS for it to become
-// interactive. It returns herdr's view of the started agent.
-func (c *Client) StartAgent(ctx context.Context, paneID, kind, name string, timeoutMS int) (AgentInfo, error) {
-	params := map[string]any{
-		"pane_id": paneID,
-		"kind":    kind,
-		"name":    name,
-	}
-	if timeoutMS > 0 {
-		params["timeout_ms"] = timeoutMS
-	}
-	var res struct {
-		Type  string    `json:"type"`
-		Agent AgentInfo `json:"agent"`
-	}
-	if err := c.callResult(ctx, "agent.start", params, "agent_started", &res); err != nil {
-		return AgentInfo{}, err
-	}
-	return res.Agent, nil
+	return t, nil
 }

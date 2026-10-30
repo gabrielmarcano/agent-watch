@@ -16,18 +16,14 @@ import (
 	"github.com/gabrielmarcano/agent-monitor/pkg/herdrtest"
 )
 
-// rawServer is a one-connection unix socket server that answers the first
-// request line with reply, verbatim, and then keeps the connection open until
-// the test ends. It covers byte-level cases herdrtest cannot express.
 func rawServer(t *testing.T, reply string) string {
 	t.Helper()
 	return rawServerFunc(t, func(string) string { return reply })
 }
 
-// rawServerFunc is rawServer with a reply built from the request's id.
 func rawServerFunc(t *testing.T, reply func(reqID string) string) string {
 	t.Helper()
-	dir, err := os.MkdirTemp("", "hr") // short path: unix socket paths are limited
+	dir, err := os.MkdirTemp("", "hr")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -59,13 +55,11 @@ func rawServerFunc(t *testing.T, reply func(reqID string) string) string {
 	return sock
 }
 
-// subscribeAsync runs Subscribe in a goroutine and returns its outcome, or
-// fails the test if it does not return within limit.
 func subscribeAsync(t *testing.T, client *herdr.Client, ctx context.Context, limit time.Duration) error {
 	t.Helper()
 	errCh := make(chan error, 1)
 	go func() {
-		_, err := client.Subscribe(ctx, []herdr.Subscription{{Type: "pane.created"}})
+		_, err := client.Subscribe(ctx)
 		errCh <- err
 	}()
 	select {
@@ -79,7 +73,7 @@ func subscribeAsync(t *testing.T, client *herdr.Client, ctx context.Context, lim
 
 func TestSubscribeHonoursDeadlineWhileWaitingForAck(t *testing.T) {
 	srv := herdrtest.New(t)
-	srv.HoldNext("events.subscribe") // accepted, never answered
+	srv.HoldNext("events.subscribe")
 	client := &herdr.Client{SocketPath: srv.SocketPath, Timeout: time.Minute}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
@@ -96,7 +90,7 @@ func TestSubscribeHonoursCancelWhileWaitingForAck(t *testing.T) {
 	hold := srv.HoldNext("events.subscribe")
 	client := &herdr.Client{SocketPath: srv.SocketPath, Timeout: time.Minute}
 
-	ctx, cancel := context.WithCancel(context.Background()) // no deadline
+	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go func() {
 		<-hold.Received()
@@ -126,12 +120,11 @@ func TestSubscribeClearsHandshakeDeadline(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	stream, err := client.Subscribe(ctx, []herdr.Subscription{{Type: "pane.agent_status_changed", PaneID: "w1:p1"}})
+	stream, err := client.Subscribe(ctx)
 	if err != nil {
 		t.Fatalf("Subscribe: %v", err)
 	}
 
-	// Wait past the handshake timeout: the stream must not time out.
 	select {
 	case _, ok := <-stream:
 		if !ok {
@@ -143,7 +136,7 @@ func TestSubscribeClearsHandshakeDeadline(t *testing.T) {
 	srv.EmitStatusChanged("w1:p1", "working")
 	select {
 	case ev, ok := <-stream:
-		if !ok || ev.Name != "pane.agent_status_changed" {
+		if !ok || ev.Name != "event" {
 			t.Fatalf("got %+v, %v", ev, ok)
 		}
 	case <-time.After(2 * time.Second):
@@ -154,7 +147,6 @@ func TestSubscribeClearsHandshakeDeadline(t *testing.T) {
 	select {
 	case _, ok := <-stream:
 		if ok {
-			// Drain anything already buffered, then require the close.
 			for range stream {
 			}
 		}
@@ -163,18 +155,16 @@ func TestSubscribeClearsHandshakeDeadline(t *testing.T) {
 	}
 }
 
-// An event written in the same packet as the ack is buffered by the reader
-// that parsed the ack; it must still be delivered.
 func TestSubscribeKeepsEventBufferedWithAck(t *testing.T) {
 	sock := rawServerFunc(t, func(id string) string {
-		return `{"id":"` + id + `","result":{"type":"subscription_started"}}` + "\n" +
-			`{"event":"pane.agent_status_changed","data":{"pane_id":"w1:p1","agent_status":"working"}}` + "\n"
+		return `{"jsonrpc":"2.0","id":"` + id + `","result":{"seq":1,"terminals":[]}}` + "\n" +
+			`{"jsonrpc":"2.0","method":"event","params":{"kind":"status","terminal":"w1:p1","state":"working"}}` + "\n"
 	})
 	client := &herdr.Client{SocketPath: sock, Timeout: 2 * time.Second}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	stream, err := client.Subscribe(ctx, []herdr.Subscription{{Type: "pane.agent_status_changed", PaneID: "w1:p1"}})
+	stream, err := client.Subscribe(ctx)
 	if err != nil {
 		t.Fatalf("Subscribe: %v", err)
 	}
@@ -183,7 +173,7 @@ func TestSubscribeKeepsEventBufferedWithAck(t *testing.T) {
 		if !ok {
 			t.Fatal("stream closed; the event buffered with the ack was lost")
 		}
-		if ev.Name != "pane.agent_status_changed" || !strings.Contains(string(ev.Data), "w1:p1") {
+		if ev.Name != "event" || !strings.Contains(string(ev.Data), "w1:p1") {
 			t.Errorf("unexpected event %+v", ev)
 		}
 	case <-time.After(2 * time.Second):
@@ -191,25 +181,25 @@ func TestSubscribeKeepsEventBufferedWithAck(t *testing.T) {
 	}
 }
 
-func TestSubscribeRejectsUnexpectedAckType(t *testing.T) {
+func TestSubscribeRejectsUnexpectedAckShape(t *testing.T) {
 	sock := rawServerFunc(t, func(id string) string {
-		return `{"id":"` + id + `","result":{"type":"pong"}}` + "\n"
+		return `{"jsonrpc":"2.0","id":"` + id + `","result":{"type":"pong"}}` + "\n"
 	})
 	client := &herdr.Client{SocketPath: sock, Timeout: 2 * time.Second}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	if _, err := client.Subscribe(ctx, []herdr.Subscription{{Type: "pane.created"}}); err == nil {
-		t.Fatal("Subscribe accepted an ack whose result.type is not subscription_started")
+	if _, err := client.Subscribe(ctx); err == nil {
+		t.Fatal("Subscribe accepted an ack without terminals")
 	}
 }
 
 func TestSubscribeMapsHerdrError(t *testing.T) {
 	srv := herdrtest.New(t)
+	srv.FailNext("events.subscribe", "invalid_request", "rejected")
 	client := &herdr.Client{SocketPath: srv.SocketPath, Timeout: 2 * time.Second}
 
-	// pane.agent_status_changed without pane_id is rejected by herdr.
-	_, err := client.Subscribe(context.Background(), []herdr.Subscription{{Type: "pane.agent_status_changed"}})
+	_, err := client.Subscribe(context.Background())
 	if !herdr.IsCode(err, "invalid_request") {
 		t.Fatalf("err = %v, want herdr invalid_request", err)
 	}

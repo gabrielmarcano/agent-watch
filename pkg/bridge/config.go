@@ -94,10 +94,13 @@ func DefaultStateDirFor(home string, getenv func(string) string) string {
 	return "."
 }
 
-// DefaultSocketPathFor computes the herdr socket path given an optional home directory
-// and an environment lookup function.
+// DefaultSocketPathFor computes the herdr-core socket path given an optional
+// home directory and an environment lookup function.
 func DefaultSocketPathFor(home string, getenv func(string) string) string {
 	if getenv != nil {
+		if p := getenv("HC_TERMINAL_SOCKET"); p != "" {
+			return p
+		}
 		if p := getenv("HERDR_SOCKET_PATH"); p != "" {
 			return p
 		}
@@ -106,9 +109,9 @@ func DefaultSocketPathFor(home string, getenv func(string) string) string {
 		home, _ = os.UserHomeDir()
 	}
 	if home != "" {
-		return filepath.Join(home, ".config", "herdr", "herdr.sock")
+		return filepath.Join(home, ".local", "state", "herdr-core", "default", "default.sock")
 	}
-	return "herdr.sock"
+	return "default.sock"
 }
 
 // DefaultConfigPath returns the config file path according to herdr conventions:

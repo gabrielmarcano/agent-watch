@@ -167,7 +167,7 @@ func (g *commandGuard) AcquireSession(ctx context.Context, requestID string) (re
 
 // DoClaim atomically claims (paneID, seq, claim), runs fn(), and automatically
 // rolls back the claim if fn() fails with errors.Is(err, herdr.ErrUnavailable)
-// or herdr.IsCode(err, "agent_blocked").
+// or herdr.IsCode(err, "blocked") / herdr.IsCode(err, "agent_blocked").
 func (g *commandGuard) DoClaim(paneID string, seq uint64, claim string, fn func() error) (alreadyClaimed bool, err error) {
 	g.mu.Lock()
 	if g.consumed == nil {
@@ -191,7 +191,7 @@ func (g *commandGuard) DoClaim(paneID string, seq uint64, claim string, fn func(
 	g.mu.Unlock()
 
 	err = fn()
-	if err != nil && (errors.Is(err, herdr.ErrUnavailable) || herdr.IsCode(err, "agent_blocked")) {
+	if err != nil && (errors.Is(err, herdr.ErrUnavailable) || herdr.IsCode(err, "blocked") || herdr.IsCode(err, "agent_blocked")) {
 		g.mu.Lock()
 		if cur, ok := g.consumed[paneID]; ok && cur.seq == seq {
 			for i, f := range cur.fingerprints {

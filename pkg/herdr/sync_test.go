@@ -16,8 +16,6 @@ import (
 	"github.com/gabrielmarcano/agent-monitor/pkg/herdrtest"
 )
 
-// never is a poll interval that no test reaches: it proves an update came
-// through the event path, not through polling.
 const never = time.Hour
 
 type testListener struct {
@@ -27,7 +25,7 @@ type testListener struct {
 	pongs   []herdr.Pong
 
 	inFlight atomic.Int32
-	overlap  atomic.Bool // set if two callbacks ever ran at once
+	overlap  atomic.Bool
 }
 
 func (l *testListener) enter() func() {
@@ -102,7 +100,6 @@ func testClient(srv *herdrtest.Server) *herdr.Client {
 	return &herdr.Client{SocketPath: srv.SocketPath, Timeout: 2 * time.Second}
 }
 
-// runSyncer starts Run and, at cleanup, cancels it and requires it to return.
 func runSyncer(t *testing.T, s *herdr.Syncer) {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
@@ -135,41 +132,18 @@ func callsOf(srv *herdrtest.Server, method string) int {
 	return n
 }
 
-// subscribedPanes returns the pane ids of the status subscriptions in a call.
-func subscribedPanes(c herdrtest.Call) []string {
-	var out []string
-	raw, _ := c.Params["subscriptions"].([]any)
-	for _, r := range raw {
-		if m, ok := r.(map[string]any); ok {
-			if p, _ := m["pane_id"].(string); p != "" {
-				out = append(out, p)
-			}
-		}
-	}
-	return out
-}
-
-// subscribedTo reports whether herdr got a subscribe covering paneID.
-func subscribedTo(srv *herdrtest.Server, paneID string) bool {
-	for _, c := range srv.Calls() {
-		if c.Method == "events.subscribe" && slices.Contains(subscribedPanes(c), paneID) {
-			return true
-		}
-	}
-	return false
-}
-
-// listedAfterSubscribeTo reports whether herdr got a subscribe covering
-// paneID and, after it, an agent.list: the stream is up and the list that
-// follows every (re)subscribe is done, so any later list is event-driven.
-func listedAfterSubscribeTo(srv *herdrtest.Server, paneID string) bool {
+// listedAfterSubscribe reports whether herdr-core got an events.subscribe and,
+// after it, a terminal.list: the stream is up and the catch-up list is done.
+func listedAfterSubscribe(srv *herdrtest.Server) bool {
 	subscribed := false
 	for _, c := range srv.Calls() {
-		switch {
-		case c.Method == "events.subscribe" && slices.Contains(subscribedPanes(c), paneID):
+		switch c.Method {
+		case "events.subscribe":
 			subscribed = true
-		case c.Method == "agent.list" && subscribed:
-			return true
+		case "terminal.list":
+			if subscribed {
+				return true
+			}
 		}
 	}
 	return false
@@ -195,14 +169,12 @@ func TestSyncerAddUpdateRemove(t *testing.T) {
 	srv.SetAgents([]map[string]any{agentRow("w1:p1", "idle", 1)})
 	runSyncer(t, syncer)
 
-	// 1. Initial list → Added.
 	waitUntil(t, 2*time.Second, func() bool {
 		changes := listener.allChanges()
 		return len(changes) == 1 && changes[0].Kind == herdr.Added && changes[0].Agent.PaneID == "w1:p1"
 	})
-	waitUntil(t, 2*time.Second, func() bool { return listedAfterSubscribeTo(srv, "w1:p1") })
+	waitUntil(t, 2*time.Second, func() bool { return listedAfterSubscribe(srv) })
 
-	// 2. Status change → the event triggers a re-list → Updated.
 	srv.SetAgents([]map[string]any{agentRow("w1:p1", "working", 2)})
 	srv.EmitStatusChanged("w1:p1", "working")
 	waitUntil(t, 2*time.Second, func() bool {
@@ -211,70 +183,13 @@ func TestSyncerAddUpdateRemove(t *testing.T) {
 		return last.Kind == herdr.Updated && last.Agent.AgentStatus == "working" && last.Prev != nil && last.Prev.AgentStatus == "idle"
 	})
 
-	// 3. Pane closed → event → Removed.
 	srv.SetAgents([]map[string]any{})
-	srv.EmitGlobal("pane.closed", map[string]any{"pane_id": "w1:p1"})
+	srv.EmitGlobal("removed", map[string]any{"terminal": "w1:p1"})
 	waitUntil(t, 2*time.Second, func() bool {
 		changes := listener.allChanges()
 		last := changes[len(changes)-1]
 		return last.Kind == herdr.Removed && last.Agent.PaneID == "w1:p1"
 	})
-}
-
-func TestSyncerResubscribesOnNewPane(t *testing.T) {
-	srv := herdrtest.New(t)
-	listener := &testListener{}
-	syncer := &herdr.Syncer{
-		Client:       testClient(srv),
-		Listener:     listener,
-		Debounce:     10 * time.Millisecond,
-		PollHealthy:  never,
-		PollDegraded: never,
-	}
-
-	srv.SetAgents([]map[string]any{agentRow("w1:p1", "idle", 1)})
-	runSyncer(t, syncer)
-	waitUntil(t, 2*time.Second, func() bool { return listedAfterSubscribeTo(srv, "w1:p1") })
-
-	// A second agent pane appears; only the pane.created event can reveal it.
-	srv.SetAgents([]map[string]any{agentRow("w1:p1", "idle", 1), agentRow("w1:p2", "idle", 1)})
-	srv.EmitGlobal("pane.created", map[string]any{"pane_id": "w1:p2"})
-
-	waitUntil(t, 2*time.Second, func() bool { return subscribedTo(srv, "w1:p2") })
-}
-
-// A pane first seen by somebody else's Refresh (the bridge re-lists after
-// every command) must still get its status subscription.
-func TestSyncerSubscribesPaneFoundByAnotherRefresh(t *testing.T) {
-	srv := herdrtest.New(t)
-	listener := &testListener{}
-	syncer := &herdr.Syncer{
-		Client:       testClient(srv),
-		Listener:     listener,
-		Debounce:     10 * time.Millisecond,
-		PollHealthy:  never,
-		PollDegraded: never,
-	}
-
-	srv.SetAgents([]map[string]any{agentRow("w1:p1", "idle", 1)})
-	runSyncer(t, syncer)
-	waitUntil(t, 2*time.Second, func() bool { return listedAfterSubscribeTo(srv, "w1:p1") })
-
-	// herdr says nothing; an external Refresh discovers w1:p2.
-	srv.SetAgents([]map[string]any{agentRow("w1:p1", "idle", 1), agentRow("w1:p2", "idle", 1)})
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-	if _, err := syncer.Refresh(ctx); err != nil {
-		t.Fatalf("Refresh: %v", err)
-	}
-
-	waitUntilMsg(t, 2*time.Second, func() bool { return listedAfterSubscribeTo(srv, "w1:p2") },
-		func() string { return "(w1:p2 never got a pane.agent_status_changed subscription)" })
-
-	// Its status events now reach the Syncer.
-	srv.SetAgents([]map[string]any{agentRow("w1:p1", "idle", 1), agentRow("w1:p2", "working", 2)})
-	srv.EmitStatusChanged("w1:p2", "working")
-	waitUntil(t, 2*time.Second, func() bool { return listener.hasChange(herdr.Updated, "w1:p2", "working") })
 }
 
 func TestSyncerIgnoresPlainShells(t *testing.T) {
@@ -290,7 +205,7 @@ func TestSyncerIgnoresPlainShells(t *testing.T) {
 
 	srv.SetAgents([]map[string]any{
 		agentRow("w1:p1", "idle", 1),
-		{"pane_id": "w1:shell", "agent": nil, "agent_status": "unknown"}, // plain shell
+		{"pane_id": "w1:shell", "agent": nil, "agent_status": "unknown"},
 	})
 	runSyncer(t, syncer)
 
@@ -304,11 +219,6 @@ func TestSyncerIgnoresPlainShells(t *testing.T) {
 	snap := syncer.Snapshot()
 	if len(snap) != 1 || snap[0].PaneID != "w1:p1" {
 		t.Errorf("expected snapshot to contain only w1:p1, got: %v", snap)
-	}
-	for _, c := range srv.Calls() {
-		if slices.Contains(subscribedPanes(c), "w1:shell") {
-			t.Errorf("subscribed to status events of a plain shell: %v", c.Params)
-		}
 	}
 }
 
@@ -331,7 +241,6 @@ func TestSyncerOfflineOnline(t *testing.T) {
 		return slices.Equal(listener.onlinesList(), []bool{true}) && listener.hasChange(herdr.Added, "w1:p1", "")
 	})
 
-	// herdr goes away: the stream drops, the re-list fails, Ping fails.
 	srv.Stop()
 	onlines := func() string { return fmt.Sprintf("(onlines %v)", listener.onlinesList()) }
 	waitArmed(t, clk, 500*time.Millisecond, onlines)
@@ -339,7 +248,6 @@ func TestSyncerOfflineOnline(t *testing.T) {
 		t.Fatalf("onlines = %v, want [true false]", got)
 	}
 
-	// Two more failed pings (backoff 500ms, then 1s): still exactly one false.
 	clk.Advance(500 * time.Millisecond)
 	waitArmed(t, clk, time.Second, onlines)
 	clk.Advance(time.Second)
@@ -348,9 +256,8 @@ func TestSyncerOfflineOnline(t *testing.T) {
 		t.Fatalf("onlines = %v after repeated failed pings, want exactly one false", got)
 	}
 
-	// herdr comes back with a different herd.
 	srv.SetAgents([]map[string]any{agentRow("w1:p2", "working", 5)})
-	listsBefore := callsOf(srv, "agent.list")
+	listsBefore := callsOf(srv, "terminal.list")
 	srv.Start()
 	clk.Advance(2 * time.Second)
 
@@ -362,14 +269,13 @@ func TestSyncerOfflineOnline(t *testing.T) {
 		return fmt.Sprintf("(onlines %v, changes %d)", listener.onlinesList(), len(listener.allChanges()))
 	})
 
-	if callsOf(srv, "agent.list") <= listsBefore {
-		t.Error("no agent.list after herdr came back")
+	if callsOf(srv, "terminal.list") <= listsBefore {
+		t.Error("no terminal.list after herdr came back")
 	}
 	snap := syncer.Snapshot()
 	if len(snap) != 1 || snap[0].PaneID != "w1:p2" {
 		t.Errorf("snapshot after reconnect = %v, want exactly w1:p2", snap)
 	}
-	waitUntil(t, 2*time.Second, func() bool { return subscribedTo(srv, "w1:p2") })
 	if listener.overlap.Load() {
 		t.Error("listener callbacks overlapped")
 	}
@@ -377,7 +283,7 @@ func TestSyncerOfflineOnline(t *testing.T) {
 
 func TestSyncerReportsOfflineAtStartup(t *testing.T) {
 	srv := herdrtest.New(t)
-	srv.Stop() // herdr is not running when the bridge starts
+	srv.Stop()
 	listener := &testListener{}
 	clk := herdr.NewFakeClock()
 	syncer := &herdr.Syncer{
@@ -406,8 +312,6 @@ func TestSyncerReportsOfflineAtStartup(t *testing.T) {
 	})
 }
 
-// A stream that herdr acks and closes at once must not be resubscribed in a
-// hot loop: every drop re-lists, then waits 500ms, 1s, 2s … capped at 30s.
 func TestSyncerStreamDropRelistsThenBacksOff(t *testing.T) {
 	srv := herdrtest.New(t)
 	srv.SetAgents([]map[string]any{agentRow("w1:p1", "idle", 1)})
@@ -434,8 +338,8 @@ func TestSyncerStreamDropRelistsThenBacksOff(t *testing.T) {
 		if n := callsOf(srv, "events.subscribe"); n != i+1 {
 			t.Fatalf("before backoff step %d (%v): %d subscribes, want %d", i, d, n, i+1)
 		}
-		if last := calls[len(calls)-1]; last.Method != "agent.list" {
-			t.Fatalf("after drop %d the last call was %s; want the agent.list re-list", i+1, last.Method)
+		if last := calls[len(calls)-1]; last.Method != "terminal.list" {
+			t.Fatalf("after drop %d the last call was %s; want the terminal.list re-list", i+1, last.Method)
 		}
 		clk.Advance(d)
 	}
@@ -445,8 +349,6 @@ func TestSyncerStreamDropRelistsThenBacksOff(t *testing.T) {
 	}
 }
 
-// While the stream is down, agent.list is polled every PollDegraded and the
-// stream is retried only when its backoff elapses.
 func TestSyncerPollsDegradedWhileStreamDown(t *testing.T) {
 	srv := herdrtest.New(t)
 	srv.SetAgents([]map[string]any{agentRow("w1:p1", "idle", 1)})
@@ -465,31 +367,27 @@ func TestSyncerPollsDegradedWhileStreamDown(t *testing.T) {
 	runSyncer(t, syncer)
 
 	subs := func() string { return fmt.Sprintf("(%d subscribes)", callsOf(srv, "events.subscribe")) }
-	waitArmed(t, clk, 500*time.Millisecond, subs) // first drop: retry in 500ms
+	waitArmed(t, clk, 500*time.Millisecond, subs)
 	waitArmed(t, clk, degraded, subs)
-	lists := callsOf(srv, "agent.list")
+	lists := callsOf(srv, "terminal.list")
 
-	// Four degraded polls fit before the retry is due.
 	for i := 1; i <= 4; i++ {
 		clk.Advance(degraded)
 		waitUntilMsg(t, 2*time.Second, func() bool {
-			return callsOf(srv, "agent.list") == lists+i && slices.Contains(clk.Armed(), degraded)
+			return callsOf(srv, "terminal.list") == lists+i && slices.Contains(clk.Armed(), degraded)
 		}, subs)
 		if n := callsOf(srv, "events.subscribe"); n != 1 {
 			t.Fatalf("poll %d: %d subscribes, want 1 until the 500ms backoff elapses", i, n)
 		}
 	}
 
-	// A change made while degraded is picked up by the next poll.
 	srv.SetAgents([]map[string]any{agentRow("w1:p1", "blocked", 2)})
-	clk.Advance(degraded) // t=500ms: the poll and the stream retry are both due
+	clk.Advance(degraded)
 	waitUntilMsg(t, 2*time.Second, func() bool {
 		return listener.hasChange(herdr.Updated, "w1:p1", "blocked") && callsOf(srv, "events.subscribe") == 2
 	}, subs)
 }
 
-// A subscribe that herdr accepts but never acks must not keep Run from
-// returning when ctx is cancelled.
 func TestSyncerShutdownWithHungSubscribe(t *testing.T) {
 	srv := herdrtest.New(t)
 	srv.SetAgents([]map[string]any{agentRow("w1:p1", "idle", 1)})
@@ -520,8 +418,6 @@ func TestSyncerShutdownWithHungSubscribe(t *testing.T) {
 	}
 }
 
-// Overlapping Refresh calls must apply lists in the order they were fetched:
-// an older list can never overwrite a newer one.
 func TestRefreshAppliesListsInFetchOrder(t *testing.T) {
 	srv := herdrtest.New(t)
 	listener := &testListener{}
@@ -545,9 +441,8 @@ func TestRefreshAppliesListsInFetchOrder(t *testing.T) {
 		return ch
 	}
 
-	// A lists while the pane is blocked; its answer is held in flight.
 	srv.SetAgents([]map[string]any{agentRow("w1:p1", "blocked", 1)})
-	hold := srv.HoldNext("agent.list")
+	hold := srv.HoldNext("terminal.list")
 	aDone := refresh()
 	select {
 	case <-hold.Received():
@@ -555,11 +450,9 @@ func TestRefreshAppliesListsInFetchOrder(t *testing.T) {
 		t.Fatal("first Refresh never reached herdr")
 	}
 
-	// The pane moves on; B starts after A was fetched.
 	srv.SetAgents([]map[string]any{agentRow("w1:p1", "working", 2)})
 	bDone := refresh()
 
-	// Give an unserialized implementation the chance to finish B first.
 	var b result
 	bFinished := false
 	select {
@@ -577,7 +470,6 @@ func TestRefreshAppliesListsInFetchOrder(t *testing.T) {
 		t.Fatalf("Refresh errors: a=%v b=%v", a.err, b.err)
 	}
 
-	// Each Refresh returns the list it applied.
 	if len(a.agents) != 1 || a.agents[0].AgentStatus != "blocked" {
 		t.Errorf("first Refresh returned %+v, want its own list (blocked)", a.agents)
 	}
@@ -609,7 +501,7 @@ func TestRefreshWaitingForAnotherHonoursContext(t *testing.T) {
 		Listener: &testListener{},
 	}
 
-	hold := srv.HoldNext("agent.list")
+	hold := srv.HoldNext("terminal.list")
 	aDone := make(chan error, 1)
 	go func() {
 		_, err := syncer.Refresh(context.Background())
@@ -623,8 +515,8 @@ func TestRefreshWaitingForAnotherHonoursContext(t *testing.T) {
 	if !errors.Is(err, context.DeadlineExceeded) {
 		t.Errorf("Refresh behind an in-flight one: err = %v, want context.DeadlineExceeded", err)
 	}
-	if n := callsOf(srv, "agent.list"); n != 1 {
-		t.Errorf("%d agent.list calls; the second Refresh must wait for the first", n)
+	if n := callsOf(srv, "terminal.list"); n != 1 {
+		t.Errorf("%d terminal.list calls; the second Refresh must wait for the first", n)
 	}
 
 	hold.Release()
@@ -692,7 +584,6 @@ func (r *logRecorder) count(level slog.Level, substr string) int {
 	return n
 }
 
-// A failing agent.list is logged once per streak, not on every retry.
 func TestRefreshLogsFailuresOncePerStreak(t *testing.T) {
 	srv := herdrtest.New(t)
 	rec := &logRecorder{}
@@ -700,13 +591,13 @@ func TestRefreshLogsFailuresOncePerStreak(t *testing.T) {
 	ctx := context.Background()
 
 	for i := 0; i < 3; i++ {
-		srv.FailNext("agent.list", "server_error", "boom")
+		srv.FailNext("terminal.list", "server_error", "boom")
 		if _, err := syncer.Refresh(ctx); err == nil {
 			t.Fatal("Refresh succeeded despite FailNext")
 		}
 	}
 	if n := rec.count(slog.LevelWarn, ""); n != 1 {
-		t.Errorf("%d warnings for a streak of 3 agent.list failures, want 1", n)
+		t.Errorf("%d warnings for a streak of 3 terminal.list failures, want 1", n)
 	}
 
 	if _, err := syncer.Refresh(ctx); err != nil {
@@ -716,7 +607,7 @@ func TestRefreshLogsFailuresOncePerStreak(t *testing.T) {
 		t.Errorf("%d recovery logs, want 1", n)
 	}
 
-	srv.FailNext("agent.list", "server_error", "boom")
+	srv.FailNext("terminal.list", "server_error", "boom")
 	_, _ = syncer.Refresh(ctx)
 	if n := rec.count(slog.LevelWarn, ""); n != 2 {
 		t.Errorf("a new streak after recovery should warn again: %d warnings, want 2", n)

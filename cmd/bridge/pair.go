@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/gabrielmarcano/agent-monitor/pkg/bridge"
-	"github.com/gabrielmarcano/agent-monitor/pkg/herdr"
 	"github.com/gabrielmarcano/agent-monitor/pkg/relayclient"
 )
 
@@ -81,20 +80,6 @@ func (a *app) cmdPair(args []string) error {
 		fmt.Fprintf(a.stdout, "Relay URL:     %s\n", cfg.RelayURL)
 		fmt.Fprintln(a.stdout)
 	}
-
-	// A herdr action's stdout may not be visible: also show a notification.
-	notice := "Enter it on your watch."
-	if expErr == nil {
-		notice = fmt.Sprintf("Enter it on your watch. Expires at %s (in %s).",
-			expires.Local().Format("15:04"), humanMinutes(remaining))
-	}
-	nctx, ncancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer ncancel()
-	_ = herdr.NewClient(r.spec.SocketPath).Call(nctx, "notification.show", map[string]any{
-		"title": "Agent Watch pairing code " + pc.Code,
-		"body":  notice,
-		"sound": "request",
-	}, nil)
 	return nil
 }
 
@@ -104,12 +89,4 @@ func spacedCode(code string) string {
 		return code
 	}
 	return fmt.Sprintf("%c %c %c · %c %c %c", code[0], code[1], code[2], code[3], code[4], code[5])
-}
-
-// humanMinutes renders a short duration for a notification: "5 min", "40 s".
-func humanMinutes(d time.Duration) string {
-	if d >= time.Minute {
-		return fmt.Sprintf("%d min", int((d+30*time.Second)/time.Minute))
-	}
-	return fmt.Sprintf("%d s", int(d/time.Second))
 }

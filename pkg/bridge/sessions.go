@@ -2,6 +2,8 @@ package bridge
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
@@ -316,7 +318,7 @@ func (e *Engine) executeSessionCreate(ctx context.Context, cmd model.CommandMsg)
 		return
 	}
 
-	workspaceID, tabID, paneID, name, err := e.placeSession(ctx, cwd, base)
+	workspaceID, wsLabel, name, err := e.planSession(ctx, cwd, base)
 	if err != nil {
 		code, msg := sessionError(ctx, err)
 		e.replyHost(cmd, false, code, msg, nil)
@@ -324,21 +326,31 @@ func (e *Engine) executeSessionCreate(ctx context.Context, cmd model.CommandMsg)
 	}
 
 	startCtx, cancel := context.WithTimeout(ctx, time.Duration(agentStartTimeoutMS+2000)*time.Millisecond)
-	started, err := e.Herdr.StartAgent(startCtx, paneID, kind, name, agentStartTimeoutMS)
+	started, err := e.Herdr.RunTerminal(startCtx, herdr.RunParams{
+		Argv:     []string{kind},
+		CWD:      cwd,
+		Name:     name,
+		Keep:     true,
+		NoParent: true,
+		NoNotify: true,
+		Labels: map[string]string{
+			"herdr.space": workspaceID,
+			"where":       wsLabel + " / " + name,
+		},
+	})
 	cancel()
 	if err != nil {
 		code, msg := sessionError(ctx, err)
 		e.replyHost(cmd, false, code, "start agent: "+msg, nil)
 		return
 	}
-	if started.PaneID != "" {
-		paneID = started.PaneID
+	paneID := started.Address
+	if started.Labels != nil && started.Labels["herdr.space"] != "" {
+		workspaceID = started.Labels["herdr.space"]
 	}
-	if started.WorkspaceID != "" {
-		workspaceID = started.WorkspaceID
-	}
-	if started.TabID != "" {
-		tabID = started.TabID
+	tabID := ""
+	if started.Labels != nil {
+		tabID = started.Labels["herdr.tab"]
 	}
 
 	// The phone opens the chat right away; let the syncer publish the pane.
@@ -354,81 +366,64 @@ func (e *Engine) executeSessionCreate(ctx context.Context, cmd model.CommandMsg)
 	})
 }
 
-// placeSession finds the workspace that already serves cwd (else creates one
-// named after the folder) and returns the pane a new agent can start in: the
-// root pane of a new workspace, or of a new tab in a reused one. It also
-// returns the unique agent/tab name it picked.
-func (e *Engine) placeSession(ctx context.Context, cwd, base string) (workspaceID, tabID, paneID, name string, err error) {
+// planSession finds an existing space serving cwd (or allocates a new space ID
+// that Herdr.app will adopt into a new space) and returns the space ID, space
+// label, and unique session name.
+func (e *Engine) planSession(ctx context.Context, cwd, base string) (workspaceID, wsLabel, name string, err error) {
 	callCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
-	workspaces, err := e.Herdr.ListWorkspaces(callCtx)
-	cancel()
-	if err != nil {
-		return "", "", "", "", err
-	}
-	callCtx, cancel = context.WithTimeout(ctx, 3*time.Second)
-	panes, err := e.Herdr.ListPanes(callCtx)
-	cancel()
-	if err != nil {
-		return "", "", "", "", err
-	}
-	callCtx, cancel = context.WithTimeout(ctx, 3*time.Second)
 	agentsList, err := e.Herdr.ListAgents(callCtx)
 	cancel()
 	if err != nil {
-		return "", "", "", "", err
+		return "", "", "", err
 	}
 
-	known := make(map[string]bool, len(workspaces))
-	for _, ws := range workspaces {
-		known[ws.WorkspaceID] = true
-	}
-
-	workspaceID = workspaceForFolder(cwd, panes, known)
+	workspaceID, wsLabel = workspaceForFolder(cwd, agentsList)
 	if workspaceID == "" {
-		label := uniqueName(filepath.Base(cwd), workspaceLabels(workspaces))
-		ws, tab, pane, err := e.Herdr.CreateWorkspace(ctx, cwd, label)
-		if err != nil {
-			return "", "", "", "", err
-		}
-		return ws.WorkspaceID, tab.TabID, pane.PaneID, uniqueName(base, map[string]bool{}), nil
+		workspaceID = newSpaceID()
+		wsLabel = uniqueName(filepath.Base(cwd), workspaceLabelsFromAgents(agentsList))
+		return workspaceID, wsLabel, uniqueName(base, map[string]bool{}), nil
 	}
-
+	if wsLabel == "" {
+		wsLabel = filepath.Base(cwd)
+	}
 	name = uniqueName(base, agentNamesIn(agentsList, workspaceID))
-	tab, pane, err := e.Herdr.CreateTab(ctx, workspaceID, cwd, name)
-	if err != nil {
-		return "", "", "", "", err
-	}
-	return workspaceID, tab.TabID, pane.PaneID, name, nil
+	return workspaceID, wsLabel, name, nil
 }
 
-// workspaceForFolder returns the workspace of a pane whose cwd is path, or "".
-func workspaceForFolder(path string, panes []herdr.PaneInfo, known map[string]bool) string {
+func newSpaceID() string {
+	var b [16]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return fmt.Sprintf("sp%x", time.Now().UnixNano())
+	}
+	return "sp" + hex.EncodeToString(b[:])
+}
+
+// workspaceForFolder returns the workspace ID and label of an agent whose cwd matches path.
+func workspaceForFolder(path string, agents []herdr.AgentInfo) (string, string) {
 	want := filepath.Clean(path)
 	if resolved, err := filepath.EvalSymlinks(want); err == nil {
 		want = resolved
 	}
-	for _, pane := range panes {
-		if pane.CWD == nil || *pane.CWD == "" || !known[pane.WorkspaceID] {
+	for _, a := range agents {
+		if a.CWD == nil || *a.CWD == "" || a.WorkspaceID == "" {
 			continue
 		}
-		got := filepath.Clean(*pane.CWD)
+		got := filepath.Clean(*a.CWD)
 		if resolved, err := filepath.EvalSymlinks(got); err == nil {
 			got = resolved
 		}
 		if got == want {
-			return pane.WorkspaceID
+			return a.WorkspaceID, a.WorkspaceLabel
 		}
 	}
-	return ""
+	return "", ""
 }
 
-// workspaceLabels is the set of workspace labels in use, so a new workspace
-// does not share one.
-func workspaceLabels(workspaces []herdr.WorkspaceInfo) map[string]bool {
-	out := make(map[string]bool, len(workspaces))
-	for _, ws := range workspaces {
-		if ws.Label != "" {
-			out[ws.Label] = true
+func workspaceLabelsFromAgents(agents []herdr.AgentInfo) map[string]bool {
+	out := make(map[string]bool, len(agents))
+	for _, a := range agents {
+		if a.WorkspaceLabel != "" {
+			out[a.WorkspaceLabel] = true
 		}
 	}
 	return out
@@ -472,7 +467,7 @@ func sessionError(ctx context.Context, err error) (string, string) {
 	switch {
 	case errors.Is(err, herdr.ErrUnavailable):
 		return string(model.ErrHerdrOffline), "herdr is offline"
-	case ctx.Err() != nil:
+	case ctx.Err() != nil || errors.Is(err, context.DeadlineExceeded):
 		return string(model.ErrTimeout), "the host ran out of time"
 	default:
 		return string(model.ErrInternal), err.Error()

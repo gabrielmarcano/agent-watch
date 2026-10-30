@@ -24,26 +24,24 @@ Full reference, with the version it was verified on: `docs/reference/herdr-socke
 - Tests never touch the real socket: use `pkg/herdrtest`.
 
 ## Protocol facts that break code when forgotten (details: `herdr-socket-api.md`)
-- **One request per connection;** only `events.subscribe` stays open (§1).
+- **JSON-RPC 2.0 over NDJSON; one request per connection,** except `events.subscribe` which stays open (§1).
 - **The request `id` is a string** (§1).
-- **`agent.read` source is `recent_unwrapped`** on the socket, not the CLI's `recent-unwrapped` (§2.1).
-- **`pane.agent_status_changed` needs a `pane_id`** per subscription: re-subscribe when the agent panes change (§5).
-- **Events only trigger a debounced `agent.list`;** the list is authoritative (§5).
-- **Key agents by `pane_id`**, never by session id (session ids change when a session restarts, can be missing or stale, and some agents report a path). Trust `agent_session` only when `agent_session.agent == agent` (§3.1).
-- **Use `state_change_seq`** as the change counter, not `revision` (§3).
-- **An ack from `send_keys` / `prompt` means herdr took the bytes**, not that the TUI acted (§4).
+- **`events.subscribe` takes `{}` and streams all terminal events globally** (no per-pane resubscription needed; ignore `"heartbeat"` notifications) (§5).
+- **Events only trigger a debounced `terminal.list`;** the list is authoritative (§5).
+- **Key agents by `address` (`pane_id`)**, never by session id (session ids change when a session restarts or can be missing).
+- **Use `state_change_seq`** (derived from `*status_ms + turn`) as the change counter (§3).
+- **An ack from `terminal.keys` / `terminal.send` means `herdr-core` took the bytes**, not that the TUI acted (§4).
 
 ## Command safety (bridge)
 - The watch never supplies keys. Keys come only from `pkg/agents` for a parsed option id.
 - Right before any key press:
-  1. re-list with the command's own `agent.list`, never the shared snapshot (a concurrent, older refresh can overwrite it);
+  1. re-list with the command's own `terminal.list`, never the shared snapshot (a concurrent, older refresh can overwrite it);
   2. check `expected_seq`;
-  3. re-read the screen;
-  4. re-parse it and compare the fingerprint;
-  5. if the adapter implements `FocusGuard` (OpenCode) and the keys depend on focus, re-read with `format: "ansi"` and verify the focused button (`CheckFocus`).
+  3. re-read the screen (`terminal.read`);
+  4. re-parse it and compare the fingerprint.
 
   On mismatch, send nothing.
-- `agent.prompt` is never sent to `blocked` agents, nor while the adapter parses a menu on the screen. Answers go through `send_keys`.
+- `terminal.send` (`Prompt`) is never sent to `blocked` agents, nor while the adapter parses a menu on the screen. Answers go through `terminal.keys` (`SendKeys`).
 - `cancel` keys come from the menu on screen right now, never from a cached prompt. With no parseable menu, `cancel` only cancels a prompt the watch saw as `unknown` (the adapter's default keys); otherwise it returns `prompt_changed`.
 - **Each command acts at most once:** commands on one pane run one at a time; the prompt is claimed (pane, seq, fingerprint or prompt-text hash) before sending, because pressing twice is worse than not pressing; recent `request_id`s are remembered. The command's budget starts on arrival (`pkg/bridge/cmdguard.go`, `commands.go`).
 

@@ -11,11 +11,11 @@ import (
 	"github.com/gabrielmarcano/agent-monitor/pkg/model"
 )
 
-// promptTexts returns the text of every agent.prompt call after index from.
+// promptTexts returns the text of every terminal.send call after index from.
 func promptTexts(h *testHarness, from int) []string {
 	var out []string
 	for _, c := range h.server.Calls()[from:] {
-		if c.Method == "agent.prompt" {
+		if c.Method == "terminal.send" {
 			s, _ := c.Params["text"].(string)
 			out = append(out, s)
 		}
@@ -80,14 +80,14 @@ func TestCommands_DuplicatePromptRejected(t *testing.T) {
 	}
 }
 
-// When herdr refuses a prompt without typing it (agent_blocked), the
+// When herdr refuses a prompt without typing it (blocked), the
 // duplicate guard must not hold it against a retry.
 func TestCommands_RefusedPromptCanBeRetried(t *testing.T) {
 	h := newTestHarness(t)
 	h.server.SetAgents([]map[string]any{agentRow("w1:p1", "claude", "idle", 12)})
 	h.engine.OnHerdrOnline(true, herdr.Pong{Version: "0.9.1", Protocol: 22})
 
-	h.server.FailNext("agent.prompt", "agent_blocked", "agent is blocked")
+	h.server.FailNext("terminal.send", "blocked", "agent is blocked")
 	if res, _ := runCmd(t, h, promptCmd("req-r1", "w1:p1", 12, "retry me")); res.OK || res.ErrorCode != "agent_blocked" {
 		t.Fatalf("refused prompt: ok=%v code=%q, want agent_blocked", res.OK, res.ErrorCode)
 	}
@@ -96,7 +96,7 @@ func TestCommands_RefusedPromptCanBeRetried(t *testing.T) {
 	}
 }
 
-// herdr answers agent_not_found when the pane closed between the list and
+// herdr answers not_found when the pane closed between the list and
 // the read or the send: that is unknown_pane, not herdr_offline or internal.
 func TestCommands_AgentNotFoundIsUnknownPane(t *testing.T) {
 	bash := func(t *testing.T) string { return loadFixture(t, "claude", "permission-bash.txt") }
@@ -104,22 +104,22 @@ func TestCommands_AgentNotFoundIsUnknownPane(t *testing.T) {
 	cases := []struct {
 		name   string
 		status string
-		fail   string // herdr method that answers agent_not_found
+		fail   string // herdr method that answers not_found
 		cmd    func(fp string) model.CommandMsg
 	}{
-		{"prompt read", "idle", "agent.read", func(string) model.CommandMsg {
+		{"prompt read", "idle", "terminal.read", func(string) model.CommandMsg {
 			return promptCmd("req-nf-1", "w1:p1", 10, "hi")
 		}},
-		{"prompt send", "idle", "agent.prompt", func(string) model.CommandMsg {
+		{"prompt send", "idle", "terminal.send", func(string) model.CommandMsg {
 			return promptCmd("req-nf-2", "w1:p1", 10, "hi")
 		}},
-		{"answer read", "blocked", "agent.read", func(fp string) model.CommandMsg {
+		{"answer read", "blocked", "terminal.read", func(fp string) model.CommandMsg {
 			return model.CommandMsg{RequestID: "req-nf-3", Action: "answer", PaneID: "w1:p1", ExpectedSeq: 10, OptionID: "opt-1", Fingerprint: fp}
 		}},
-		{"answer send", "blocked", "agent.send_keys", func(fp string) model.CommandMsg {
+		{"answer send", "blocked", "terminal.keys", func(fp string) model.CommandMsg {
 			return model.CommandMsg{RequestID: "req-nf-4", Action: "answer", PaneID: "w1:p1", ExpectedSeq: 10, OptionID: "opt-1", Fingerprint: fp}
 		}},
-		{"cancel read", "blocked", "agent.read", func(fp string) model.CommandMsg {
+		{"cancel read", "blocked", "terminal.read", func(fp string) model.CommandMsg {
 			return model.CommandMsg{RequestID: "req-nf-5", Action: "cancel", PaneID: "w1:p1", ExpectedSeq: 10, Fingerprint: fp}
 		}},
 	}
@@ -138,7 +138,7 @@ func TestCommands_AgentNotFoundIsUnknownPane(t *testing.T) {
 				fp = fingerprintOf(t, h, "claude", screen)
 			}
 
-			h.server.FailNext(tc.fail, "agent_not_found", "agent target w1:p1 not found")
+			h.server.FailNext(tc.fail, "not_found", "no terminal \"w1:p1\"")
 			res, _ := runCmd(t, h, tc.cmd(fp))
 			if res.OK || res.ErrorCode != "unknown_pane" {
 				t.Errorf("ok=%v code=%q msg=%q, want unknown_pane", res.OK, res.ErrorCode, res.Message)
@@ -181,10 +181,10 @@ func TestCommands_QueuedCommandExpiresAtDeadline(t *testing.T) {
 	pollUntil(t, 2*time.Second, "pane lock released", func() bool {
 		return h.engine.guard.ActiveLocks() == 0
 	})
-	if n := callsSince(h, before, "agent.send_keys"); n != 0 {
+	if n := callsSince(h, before, "terminal.keys"); n != 0 {
 		t.Errorf("expired command sent keys %d time(s)", n)
 	}
-	if n := callsSince(h, before, "agent.list"); n != 0 {
+	if n := callsSince(h, before, "terminal.list"); n != 0 {
 		t.Errorf("expired command still listed herdr %d time(s)", n)
 	}
 }

@@ -267,7 +267,7 @@ func TestSessionCreate_NewWorkspace(t *testing.T) {
 	root, _ := newFolder(t, base, "work")
 	_, resolvedProject := newFolder(t, root, "project")
 	h.engine.SessionRoots = []string{root}
-	h.engine.OnHerdrOnline(true, herdr.Pong{Version: "0.9.1", Protocol: 22})
+	h.engine.OnHerdrOnline(true, herdr.Pong{Version: "0.1.14"})
 
 	before := len(h.server.Calls())
 	res := runHostCmd(t, h, model.CommandMsg{
@@ -289,43 +289,33 @@ func TestSessionCreate_NewWorkspace(t *testing.T) {
 	if s.Label != "project" {
 		t.Errorf("label = %q, want the folder name", s.Label)
 	}
-	if s.WorkspaceID == "" || s.TabID == "" || s.PaneID == "" {
+	if s.PaneID == "" {
 		t.Errorf("incomplete session: %+v", s)
 	}
 
 	calls := h.server.Calls()
-	created := callsFrom(calls, before, "workspace.create")
-	if len(created) != 1 {
-		t.Fatalf("workspace.create calls = %d, want 1", len(created))
-	}
-	if got, _ := created[0].Params["cwd"].(string); got != resolvedProject {
-		t.Errorf("workspace.create cwd = %q, want %q", got, resolvedProject)
-	}
-	if got, _ := created[0].Params["label"].(string); got != "project" {
-		t.Errorf("workspace.create label = %q, want project", got)
-	}
-	if focus, ok := created[0].Params["focus"].(bool); !ok || focus {
-		t.Errorf("workspace.create focus = %v, want false", created[0].Params["focus"])
-	}
-	if tabs := callsFrom(calls, before, "tab.create"); len(tabs) != 0 {
-		t.Errorf("tab.create calls = %d, want 0 for a new workspace", len(tabs))
-	}
-
-	started := callsFrom(calls, before, "agent.start")
+	started := callsFrom(calls, before, "terminal.run")
 	if len(started) != 1 {
-		t.Fatalf("agent.start calls = %d, want 1", len(started))
+		t.Fatalf("terminal.run calls = %d, want 1", len(started))
 	}
-	if got, _ := started[0].Params["kind"].(string); got != "claude" {
-		t.Errorf("agent.start kind = %q, want claude", got)
+	argv, _ := started[0].Params["argv"].([]any)
+	if len(argv) != 1 || argv[0] != "claude" {
+		t.Errorf("terminal.run argv = %v, want [claude]", argv)
+	}
+	if got, _ := started[0].Params["cwd"].(string); got != resolvedProject {
+		t.Errorf("terminal.run cwd = %q, want %q", got, resolvedProject)
 	}
 	if got, _ := started[0].Params["name"].(string); got != "project" {
-		t.Errorf("agent.start name = %q, want project", got)
+		t.Errorf("terminal.run name = %q, want project", got)
 	}
-	if got, _ := started[0].Params["pane_id"].(string); got != s.PaneID {
-		t.Errorf("agent.start pane = %q, want %q", got, s.PaneID)
+	if keep, _ := started[0].Params["keep"].(bool); !keep {
+		t.Errorf("terminal.run keep = %v, want true", started[0].Params["keep"])
 	}
-	if got, _ := started[0].Params["timeout_ms"].(float64); got != agentStartTimeoutMS {
-		t.Errorf("agent.start timeout_ms = %v, want %d", started[0].Params["timeout_ms"], agentStartTimeoutMS)
+	if noParent, _ := started[0].Params["no_parent"].(bool); !noParent {
+		t.Errorf("terminal.run no_parent = %v, want true", started[0].Params["no_parent"])
+	}
+	if noNotify, _ := started[0].Params["no_notify"].(bool); !noNotify {
+		t.Errorf("terminal.run no_notify = %v, want true", started[0].Params["no_notify"])
 	}
 }
 
@@ -335,17 +325,12 @@ func TestSessionCreate_ReusesWorkspaceAndSuffixesName(t *testing.T) {
 	root, _ := newFolder(t, base, "work")
 	_, resolvedProject := newFolder(t, root, "project")
 	h.engine.SessionRoots = []string{root}
-	h.engine.OnHerdrOnline(true, herdr.Pong{Version: "0.9.1", Protocol: 22})
+	h.engine.OnHerdrOnline(true, herdr.Pong{Version: "0.1.14"})
 
-	h.server.SetWorkspaces([]map[string]any{
-		{"workspace_id": "w1", "number": 1, "label": "project"},
-	})
-	h.server.SetPanes([]map[string]any{
-		{"pane_id": "w1:p1", "workspace_id": "w1", "tab_id": "t1", "cwd": resolvedProject},
-	})
 	h.server.SetAgents([]map[string]any{
 		{
-			"pane_id": "w1:p1", "workspace_id": "w1", "tab_id": "t1",
+			"pane_id": "w1:p1", "workspace_id": "w1", "workspace_label": "project",
+			"tab_id": "t1", "cwd": resolvedProject,
 			"agent": "claude", "agent_status": "idle", "state_change_seq": 1,
 			"name": "project",
 		},
@@ -372,29 +357,19 @@ func TestSessionCreate_ReusesWorkspaceAndSuffixesName(t *testing.T) {
 	}
 
 	calls := h.server.Calls()
-	if ws := callsFrom(calls, before, "workspace.create"); len(ws) != 0 {
-		t.Errorf("workspace.create calls = %d, want 0 when the folder already has one", len(ws))
-	}
-	tabs := callsFrom(calls, before, "tab.create")
-	if len(tabs) != 1 {
-		t.Fatalf("tab.create calls = %d, want 1", len(tabs))
-	}
-	if got, _ := tabs[0].Params["workspace_id"].(string); got != "w1" {
-		t.Errorf("tab.create workspace = %q, want w1", got)
-	}
-	if got, _ := tabs[0].Params["cwd"].(string); got != resolvedProject {
-		t.Errorf("tab.create cwd = %q, want %q", got, resolvedProject)
-	}
-	if got, _ := tabs[0].Params["label"].(string); got != "project 2" {
-		t.Errorf("tab.create label = %q, want %q", got, "project 2")
-	}
-
-	started := callsFrom(calls, before, "agent.start")
+	started := callsFrom(calls, before, "terminal.run")
 	if len(started) != 1 {
-		t.Fatalf("agent.start calls = %d, want 1", len(started))
+		t.Fatalf("terminal.run calls = %d, want 1", len(started))
 	}
 	if got, _ := started[0].Params["name"].(string); got != "project 2" {
-		t.Errorf("agent.start name = %q, want %q", got, "project 2")
+		t.Errorf("terminal.run name = %q, want %q", got, "project 2")
+	}
+	labels, _ := started[0].Params["labels"].(map[string]any)
+	if got, _ := labels["herdr.space"].(string); got != "w1" {
+		t.Errorf("terminal.run labels[herdr.space] = %q, want w1", got)
+	}
+	if got, _ := labels["where"].(string); got != "project / project 2" {
+		t.Errorf("terminal.run labels[where] = %q, want %q", got, "project / project 2")
 	}
 }
 
@@ -494,7 +469,7 @@ func TestSessionCreate_RefusalsNeverTouchHerdr(t *testing.T) {
 		if res.OK || res.ErrorCode != tc.code {
 			t.Errorf("%s: ok=%v code=%s, want %s", tc.name, res.OK, res.ErrorCode, tc.code)
 		}
-		for _, method := range []string{"workspace.create", "tab.create", "agent.start"} {
+		for _, method := range []string{"terminal.list", "terminal.run"} {
 			if got := callsFrom(h.server.Calls(), before, method); len(got) != 0 {
 				t.Errorf("%s: herdr %s was called %d times on a refused request", tc.name, method, len(got))
 			}
@@ -520,8 +495,8 @@ func TestSessionCreate_HerdrOffline(t *testing.T) {
 	if res.OK || res.ErrorCode != string(model.ErrHerdrOffline) {
 		t.Fatalf("ok=%v code=%s, want herdr_offline", res.OK, res.ErrorCode)
 	}
-	if got := callsFrom(h.server.Calls(), before, "workspace.create"); len(got) != 0 {
-		t.Errorf("workspace.create called while herdr was offline")
+	if got := callsFrom(h.server.Calls(), before, "terminal.run"); len(got) != 0 {
+		t.Errorf("terminal.run called while herdr was offline")
 	}
 }
 
@@ -531,7 +506,7 @@ func TestSessionCreate_DuplicateRequestRunsOnce(t *testing.T) {
 	root, _ := newFolder(t, base, "work")
 	_, resolvedProject := newFolder(t, root, "project")
 	h.engine.SessionRoots = []string{root}
-	h.engine.OnHerdrOnline(true, herdr.Pong{Version: "0.9.1", Protocol: 22})
+	h.engine.OnHerdrOnline(true, herdr.Pong{Version: "0.1.14"})
 
 	before := len(h.server.Calls())
 	cmd := model.CommandMsg{
@@ -547,8 +522,8 @@ func TestSessionCreate_DuplicateRequestRunsOnce(t *testing.T) {
 	if second.OK || second.ErrorCode != string(model.ErrStaleState) {
 		t.Errorf("replay: ok=%v code=%s, want stale_state", second.OK, second.ErrorCode)
 	}
-	if got := callsFrom(h.server.Calls(), before, "workspace.create"); len(got) != 1 {
-		t.Errorf("workspace.create calls = %d, want 1 for a replayed request", len(got))
+	if got := callsFrom(h.server.Calls(), before, "terminal.run"); len(got) != 1 {
+		t.Errorf("terminal.run calls = %d, want 1 for a replayed request", len(got))
 	}
 }
 
@@ -558,8 +533,8 @@ func TestSessionCreate_AgentStartFailureIsInternal(t *testing.T) {
 	root, _ := newFolder(t, base, "work")
 	_, resolvedProject := newFolder(t, root, "project")
 	h.engine.SessionRoots = []string{root}
-	h.engine.OnHerdrOnline(true, herdr.Pong{Version: "0.9.1", Protocol: 22})
-	h.server.FailNext("agent.start", "invalid_request", "kind not installed")
+	h.engine.OnHerdrOnline(true, herdr.Pong{Version: "0.1.14"})
+	h.server.FailNext("terminal.run", "invalid_params", "kind not installed")
 
 	res := runHostCmd(t, h, model.CommandMsg{
 		RequestID: "req-create-start-fails",
@@ -582,12 +557,9 @@ func TestSessionCreate_Timeout(t *testing.T) {
 	_, resolvedProject := newFolder(t, root, "project")
 	h.engine.SessionRoots = []string{root}
 	h.engine.SessionTimeout = 200 * time.Millisecond
-	h.engine.OnHerdrOnline(true, herdr.Pong{Version: "0.9.1", Protocol: 22})
-	pollUntil(t, 3*time.Second, "initial workspace list", func() bool {
-		return callsSince(h, 0, "workspace.list") >= 1
-	})
+	h.engine.OnHerdrOnline(true, herdr.Pong{Version: "0.1.14"})
 
-	hold := h.server.HoldNext("workspace.list")
+	hold := h.server.HoldNext("terminal.list")
 	t.Cleanup(hold.Release)
 
 	res := runHostCmd(t, h, model.CommandMsg{
@@ -640,17 +612,16 @@ func TestUniqueName(t *testing.T) {
 func TestWorkspaceForFolder(t *testing.T) {
 	dir := t.TempDir()
 	other := t.TempDir()
-	known := map[string]bool{"w1": true, "w2": true, "w3": true}
-	panes := []herdr.PaneInfo{
-		{PaneID: "w1:p1", WorkspaceID: "w1", CWD: &other},
-		{PaneID: "w2:p1", WorkspaceID: "w2"},              // no cwd
-		{PaneID: "w3:p1", WorkspaceID: "w3", CWD: &dir},   // a match
-		{PaneID: "w9:p1", WorkspaceID: "w9", CWD: &other}, // unknown workspace
+	list := []herdr.AgentInfo{
+		{PaneID: "w1:p1", WorkspaceID: "w1", WorkspaceLabel: "Work", CWD: &other},
+		{PaneID: "w2:p1", WorkspaceID: "w2", WorkspaceLabel: "Empty"},             // no cwd
+		{PaneID: "w3:p1", WorkspaceID: "w3", WorkspaceLabel: "Target", CWD: &dir}, // a match
 	}
-	if got := workspaceForFolder(dir, panes, known); got != "w3" {
-		t.Errorf("workspaceForFolder = %q, want w3", got)
+	wsID, wsLabel := workspaceForFolder(dir, list)
+	if wsID != "w3" || wsLabel != "Target" {
+		t.Errorf("workspaceForFolder = (%q, %q), want (w3, Target)", wsID, wsLabel)
 	}
-	if got := workspaceForFolder(filepath.Join(dir, "sub"), panes, known); got != "" {
-		t.Errorf("workspaceForFolder for an unknown folder = %q, want empty", got)
+	if id, label := workspaceForFolder(filepath.Join(dir, "sub"), list); id != "" || label != "" {
+		t.Errorf("workspaceForFolder for an unknown folder = (%q, %q), want empty", id, label)
 	}
 }

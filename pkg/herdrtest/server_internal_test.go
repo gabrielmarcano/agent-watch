@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-func writeSubscribe(t *testing.T, sockPath, paneID string) (net.Conn, *bufio.Reader) {
+func writeSubscribe(t *testing.T, sockPath string) (net.Conn, *bufio.Reader) {
 	t.Helper()
 	conn, err := net.Dial("unix", sockPath)
 	if err != nil {
@@ -19,11 +19,10 @@ func writeSubscribe(t *testing.T, sockPath, paneID string) (net.Conn, *bufio.Rea
 	}
 	t.Cleanup(func() { _ = conn.Close() })
 	data, _ := json.Marshal(map[string]any{
-		"id":     "sub-1",
-		"method": "events.subscribe",
-		"params": map[string]any{"subscriptions": []map[string]any{
-			{"type": "pane.agent_status_changed", "pane_id": paneID},
-		}},
+		"jsonrpc": "2.0",
+		"id":      "sub-1",
+		"method":  "events.subscribe",
+		"params":  map[string]any{},
 	})
 	if _, err := conn.Write(append(data, '\n')); err != nil {
 		t.Fatalf("write: %v", err)
@@ -40,7 +39,7 @@ func TestSubscribeRegisteredBeforeAck(t *testing.T) {
 	s.testHookAfterAck = func() { <-emitted } // park the handler right after the ack
 	s.mu.Unlock()
 
-	conn, reader := writeSubscribe(t, s.SocketPath, "w1:p1")
+	conn, reader := writeSubscribe(t, s.SocketPath)
 	_ = conn.SetReadDeadline(time.Now().Add(2 * time.Second))
 	if _, err := reader.ReadBytes('\n'); err != nil {
 		close(emitted)
@@ -54,7 +53,7 @@ func TestSubscribeRegisteredBeforeAck(t *testing.T) {
 	if err != nil {
 		t.Fatalf("event emitted right after the ack was lost: %v", err)
 	}
-	if !strings.Contains(string(line), "pane.agent_status_changed") {
+	if !strings.Contains(string(line), `"method":"event"`) || !strings.Contains(string(line), `"w1:p1"`) {
 		t.Errorf("unexpected line %s", line)
 	}
 }
@@ -67,20 +66,9 @@ func TestEmitDoesNotBlockOnNonReadingSubscriber(t *testing.T) {
 	s.emitTimeout = 50 * time.Millisecond
 	s.mu.Unlock()
 
-	conn, err := net.Dial("unix", s.SocketPath)
-	if err != nil {
-		t.Fatalf("dial: %v", err)
-	}
-	t.Cleanup(func() { _ = conn.Close() })
-	req, _ := json.Marshal(map[string]any{
-		"id": "sub-1", "method": "events.subscribe",
-		"params": map[string]any{"subscriptions": []map[string]any{{"type": "pane.created"}}},
-	})
-	if _, err := conn.Write(append(req, '\n')); err != nil {
-		t.Fatalf("write: %v", err)
-	}
+	conn, reader := writeSubscribe(t, s.SocketPath)
 	_ = conn.SetReadDeadline(time.Now().Add(2 * time.Second))
-	if _, err := bufio.NewReader(conn).ReadBytes('\n'); err != nil {
+	if _, err := reader.ReadBytes('\n'); err != nil {
 		t.Fatalf("read ack: %v", err)
 	}
 	// From here on the client never reads.
@@ -90,7 +78,7 @@ func TestEmitDoesNotBlockOnNonReadingSubscriber(t *testing.T) {
 	go func() {
 		defer close(done)
 		for i := 0; i < 64; i++ { // 16 MB: far more than any socket buffer
-			s.EmitGlobal("pane.created", map[string]any{"blob": blob})
+			s.EmitGlobal("created", map[string]any{"blob": blob})
 		}
 	}()
 	select {
@@ -127,7 +115,7 @@ func TestSubscribeDuringStopIsClosed(t *testing.T) {
 	s.testHookBeforeRegister = func() { s.Stop() }
 	s.mu.Unlock()
 
-	conn, reader := writeSubscribe(t, s.SocketPath, "w1:p1")
+	conn, reader := writeSubscribe(t, s.SocketPath)
 	_ = conn.SetReadDeadline(time.Now().Add(2 * time.Second))
 	line, err := reader.ReadBytes('\n')
 	if !errors.Is(err, io.EOF) {

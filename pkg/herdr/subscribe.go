@@ -11,24 +11,19 @@ import (
 	"time"
 )
 
-// Event is an incoming notification from herdr's events.subscribe stream.
+// Event is an incoming JSON-RPC 2.0 notification from herdr-core's
+// events.subscribe stream (method "event" or "missed").
 type Event struct {
-	Name string // as herdr streams it: "pane.agent_status_changed" (dot form), "pane_created" (snake_case)
+	Name string
 	Data json.RawMessage
 }
 
-// Subscription defines an event category to subscribe to.
-type Subscription struct {
-	Type   string `json:"type"`
-	PaneID string `json:"pane_id,omitempty"`
-}
-
-// Subscribe opens a long-lived events.subscribe stream.
-// Returns only after receiving the "subscription_started" ack from herdr, or
-// an error. The handshake (dial, request, ack) is bounded by ctx and by the
-// client's Timeout; the stream itself has no deadline.
+// Subscribe opens a long-lived events.subscribe stream to herdr-core.
+// Returns only after receiving the initial SubscribeResult ack (containing
+// seq and terminals), or an error. The handshake (dial, request, ack) is
+// bounded by ctx and by the client's Timeout; the stream itself has no deadline.
 // The returned channel closes when ctx is cancelled or the connection drops.
-func (c *Client) Subscribe(ctx context.Context, subs []Subscription) (<-chan Event, error) {
+func (c *Client) Subscribe(ctx context.Context) (<-chan Event, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, fmt.Errorf("herdr subscribe: %w", err)
 	}
@@ -74,8 +69,6 @@ func (c *Client) Subscribe(ctx context.Context, subs []Subscription) (<-chan Eve
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return nil, fmt.Errorf("herdr subscribe: %w", ctxErr)
 		}
-		// The connection deadline can fire an instant before ctx notices
-		// its own, identical deadline.
 		if deadlineFromCtx && errors.Is(err, os.ErrDeadlineExceeded) {
 			return nil, fmt.Errorf("herdr subscribe: %w: %w", context.DeadlineExceeded, err)
 		}
@@ -88,18 +81,17 @@ func (c *Client) Subscribe(ctx context.Context, subs []Subscription) (<-chan Eve
 
 	reqID := nextID()
 	req := map[string]any{
-		"id":     reqID,
-		"method": "events.subscribe",
-		"params": map[string]any{
-			"subscriptions": subs,
-		},
+		"jsonrpc": "2.0",
+		"id":      reqID,
+		"method":  "events.subscribe",
+		"params":  map[string]any{},
 	}
 	if err := json.NewEncoder(conn).Encode(req); err != nil {
 		return fail(fmt.Errorf("herdr write subscribe: %w", err))
 	}
 
-	// Events are read through this same reader: it may already hold bytes
-	// that arrived together with the ack.
+	// Notifications are read through this same reader: it may already hold
+	// bytes that arrived together with the ack.
 	reader := bufio.NewReader(conn)
 	line, err := reader.ReadBytes('\n')
 	if err != nil {
@@ -109,7 +101,7 @@ func (c *Client) Subscribe(ctx context.Context, subs []Subscription) (<-chan Eve
 	var resp struct {
 		ID     string `json:"id"`
 		Result *struct {
-			Type string `json:"type"`
+			Terminals []json.RawMessage `json:"terminals"`
 		} `json:"result"`
 		Error *Error `json:"error"`
 	}
@@ -122,12 +114,8 @@ func (c *Client) Subscribe(ctx context.Context, subs []Subscription) (<-chan Eve
 	if resp.Error != nil {
 		return fail(resp.Error)
 	}
-	if resp.Result == nil || resp.Result.Type != "subscription_started" {
-		got := ""
-		if resp.Result != nil {
-			got = resp.Result.Type
-		}
-		return fail(fmt.Errorf("herdr subscribe: unexpected ack type %q", got))
+	if resp.Result == nil || resp.Result.Terminals == nil {
+		return fail(fmt.Errorf("herdr subscribe: missing terminals in ack"))
 	}
 
 	// The stream has no deadline.
@@ -152,20 +140,18 @@ func (c *Client) Subscribe(ctx context.Context, subs []Subscription) (<-chan Eve
 			}
 
 			var raw struct {
-				Event string          `json:"event"`
-				Data  json.RawMessage `json:"data"`
+				Method string          `json:"method"`
+				Params json.RawMessage `json:"params"`
 			}
 			if err := json.Unmarshal(line, &raw); err != nil {
 				continue
 			}
-			if raw.Event == "" {
+			if raw.Method == "" || raw.Method == "heartbeat" {
 				continue
 			}
 
-			// scanner.Bytes is reused by the next Scan; json.RawMessage
-			// from Unmarshal is already a copy.
 			select {
-			case events <- Event{Name: raw.Event, Data: raw.Data}:
+			case events <- Event{Name: raw.Method, Data: raw.Params}:
 			case <-ctx.Done():
 				return
 			}

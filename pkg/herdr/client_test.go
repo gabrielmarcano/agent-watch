@@ -28,7 +28,6 @@ func TestCallStringID(t *testing.T) {
 	if len(calls) != 2 {
 		t.Fatalf("expected 2 calls, got %d", len(calls))
 	}
-	// A counter plus a random per-process prefix (not a clock reading).
 	idRE := regexp.MustCompile(`^([0-9a-f]{16})-([0-9]+)$`)
 	var prefixes, counters []string
 	for _, c := range calls {
@@ -47,10 +46,11 @@ func TestCallStringID(t *testing.T) {
 	}
 }
 
-func TestReadUsesUnderscoreSource(t *testing.T) {
+func TestReadLinesAndVisible(t *testing.T) {
 	srv := herdrtest.New(t)
 	client := herdr.NewClient(srv.SocketPath)
 
+	srv.SetScreen("w1:p1", "visible", "visible line")
 	srv.SetScreen("w1:p1", "recent_unwrapped", "screen content line 1\nline 2")
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
@@ -66,57 +66,26 @@ func TestReadUsesUnderscoreSource(t *testing.T) {
 
 	calls := srv.Calls()
 	lastCall := calls[len(calls)-1]
-	if lastCall.Method != "agent.read" {
-		t.Fatalf("expected agent.read call, got %s", lastCall.Method)
+	if lastCall.Method != "terminal.read" {
+		t.Fatalf("expected terminal.read call, got %s", lastCall.Method)
 	}
-	if source, _ := lastCall.Params["source"].(string); source != "recent_unwrapped" {
-		t.Errorf("expected source recent_unwrapped, got %s", source)
+	if term, _ := lastCall.Params["terminal"].(string); term != "w1:p1" {
+		t.Errorf("expected terminal w1:p1, got %s", term)
+	}
+	if lines, _ := lastCall.Params["lines"].(float64); int(lines) != 100 {
+		t.Errorf("expected lines 100, got %v", lastCall.Params["lines"])
+	}
+
+	vText, err := client.Read(ctx, "w1:p1", herdr.SourceVisible, 0)
+	if err != nil {
+		t.Fatalf("Read visible failed: %v", err)
+	}
+	if vText != "visible line" {
+		t.Errorf("Read visible got %q, want 'visible line'", vText)
 	}
 }
 
-// ReadANSI asks herdr for the styled screen, as `herdr agent read --format
-// ansi` does (format "ansi", strip_ansi false); Read keeps asking for text.
-func TestReadANSIAsksForANSIFormat(t *testing.T) {
-	srv := herdrtest.New(t)
-	client := herdr.NewClient(srv.SocketPath)
-
-	const styled = "\x1b[0m\x1b[38;2;245;167;66m\x1b[48;2;20;20;20m┃\x1b[0m Allow once\r\n"
-	srv.SetScreen("w1:p1", "visible", "┃ Allow once")
-	srv.SetANSIScreen("w1:p1", "visible", styled)
-
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-
-	got, err := client.ReadANSI(ctx, "w1:p1", herdr.SourceVisible, 0)
-	if err != nil {
-		t.Fatalf("ReadANSI failed: %v", err)
-	}
-	if got != styled {
-		t.Errorf("ReadANSI got %q, want %q", got, styled)
-	}
-	calls := srv.Calls()
-	p := calls[len(calls)-1].Params
-	if p["format"] != "ansi" || p["strip_ansi"] != false || p["source"] != "visible" || p["target"] != "w1:p1" {
-		t.Errorf("ReadANSI params = %v, want target w1:p1, source visible, format ansi, strip_ansi false", p)
-	}
-	if _, ok := p["lines"]; ok {
-		t.Errorf("ReadANSI sent lines=%v for lines=0", p["lines"])
-	}
-
-	text, err := client.Read(ctx, "w1:p1", herdr.SourceVisible, 0)
-	if err != nil {
-		t.Fatalf("Read failed: %v", err)
-	}
-	if text != "┃ Allow once" {
-		t.Errorf("Read got %q, want the text screen", text)
-	}
-	calls = srv.Calls()
-	if f := calls[len(calls)-1].Params["format"]; f != "text" {
-		t.Errorf("Read sent format %v, want text", f)
-	}
-}
-
-func TestPromptOmitsWait(t *testing.T) {
+func TestPromptCallsTerminalSend(t *testing.T) {
 	srv := herdrtest.New(t)
 	client := herdr.NewClient(srv.SocketPath)
 
@@ -134,11 +103,11 @@ func TestPromptOmitsWait(t *testing.T) {
 
 	calls := srv.Calls()
 	lastCall := calls[len(calls)-1]
-	if lastCall.Method != "agent.prompt" {
-		t.Fatalf("expected agent.prompt call, got %s", lastCall.Method)
+	if lastCall.Method != "terminal.send" {
+		t.Fatalf("expected terminal.send call, got %s", lastCall.Method)
 	}
-	if val, ok := lastCall.Params["wait"]; ok && val != nil {
-		t.Errorf("expected wait to be omitted or nil, got: %v", val)
+	if lastCall.Params["terminal"] != "w1:p1" || lastCall.Params["text"] != "say hello" {
+		t.Errorf("unexpected terminal.send params: %v", lastCall.Params)
 	}
 }
 
@@ -146,7 +115,7 @@ func TestErrorMapping(t *testing.T) {
 	srv := herdrtest.New(t)
 	client := herdr.NewClient(srv.SocketPath)
 
-	srv.FailNext("agent.prompt", "agent_blocked", "agent is blocked")
+	srv.FailNext("terminal.send", "blocked", "terminal is blocked")
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
@@ -156,8 +125,8 @@ func TestErrorMapping(t *testing.T) {
 		t.Fatalf("expected error from FailNext, got nil")
 	}
 
-	if !herdr.IsCode(err, "agent_blocked") {
-		t.Errorf("expected IsCode(err, agent_blocked) = true, got err: %v", err)
+	if !herdr.IsCode(err, "blocked") {
+		t.Errorf("expected IsCode(err, blocked) = true, got err: %v", err)
 	}
 }
 
@@ -187,11 +156,7 @@ func TestSubscribeAck(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
-	subs := []herdr.Subscription{
-		{Type: "pane.agent_status_changed", PaneID: "w1:p1"},
-	}
-
-	stream, err := client.Subscribe(ctx, subs)
+	stream, err := client.Subscribe(ctx)
 	if err != nil {
 		t.Fatalf("Subscribe failed: %v", err)
 	}
@@ -203,84 +168,128 @@ func TestSubscribeAck(t *testing.T) {
 		if !ok {
 			t.Fatalf("stream closed unexpectedly")
 		}
-		if evt.Name != "pane.agent_status_changed" {
-			t.Errorf("expected event pane.agent_status_changed, got %s", evt.Name)
+		if evt.Name != "event" {
+			t.Errorf("expected event notification, got %s", evt.Name)
 		}
 	case <-time.After(500 * time.Millisecond):
 		t.Fatalf("timed out waiting for event on stream")
 	}
 }
 
-func TestSessionCalls(t *testing.T) {
+func TestRunTerminal(t *testing.T) {
 	srv := herdrtest.New(t)
 	client := herdr.NewClient(srv.SocketPath)
-
-	srv.SetWorkspaces([]map[string]any{
-		{"workspace_id": "w1", "number": 1, "label": "proj"},
-	})
-	srv.SetPanes([]map[string]any{
-		{"pane_id": "w1:p1", "workspace_id": "w1", "tab_id": "t1", "cwd": "/tmp/proj"},
-	})
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
-	panes, err := client.ListPanes(ctx)
+	started, err := client.RunTerminal(ctx, herdr.RunParams{
+		Argv:     []string{"claude"},
+		CWD:      "/tmp/proj",
+		Name:     "proj",
+		Keep:     true,
+		NoParent: true,
+		NoNotify: true,
+		Labels: map[string]string{
+			"herdr.space": "sp1",
+			"where":       "proj / 1",
+		},
+	})
 	if err != nil {
-		t.Fatalf("ListPanes: %v", err)
+		t.Fatalf("RunTerminal: %v", err)
 	}
-	if len(panes) != 1 || panes[0].PaneID != "w1:p1" || panes[0].CWD == nil || *panes[0].CWD != "/tmp/proj" {
-		t.Fatalf("ListPanes = %+v", panes)
+	if started.Address == "" || started.Name == nil || *started.Name != "proj" {
+		t.Fatalf("RunTerminal = %+v", started)
 	}
+	if started.Labels["herdr.space"] != "sp1" || started.Labels["herdr.tab"] == "" {
+		t.Errorf("RunTerminal labels = %v, want herdr.space=sp1 and herdr.tab populated", started.Labels)
+	}
+}
 
-	ws, tab, pane, err := client.CreateWorkspace(ctx, "/tmp/proj", "proj")
+func TestListAgentsNormalizesHerdrCoreTerminals(t *testing.T) {
+	srv := herdrtest.New(t)
+	client := herdr.NewClient(srv.SocketPath)
+
+	srv.SetTerminals([]map[string]any{
+		{
+			"address":   "t2",
+			"state":     "live",
+			"title":     "Fix login bug",
+			"turn":      12,
+			"status_ms": 1000,
+			"status": map[string]any{
+				"app":   "claude-code",
+				"state": "blocked",
+				"kind":  "permission",
+				"msg":   "Run bash command",
+			},
+			"foreground": map[string]any{
+				"pid":  54192,
+				"name": "2.1.314",
+				"argv": []string{"claude", "--resume", "uuid-999"},
+				"cwd":  "/Users/gabriel/proj",
+			},
+			"labels": map[string]string{
+				"herdr.space": "sp1",
+				"herdr.tab":   "tb1",
+				"where":       "my-proj / feat-auth",
+			},
+		},
+		// Background sub-agent of t2 (no herdr.space label): counts toward t2's subagent_count.
+		{
+			"address": "t3",
+			"state":   "live",
+			"parent":  "t2",
+			"status": map[string]any{
+				"app":   "claude-code",
+				"state": "working",
+			},
+		},
+		// Remote terminal: ignored by local host bridge.
+		{
+			"address": "home/t1",
+			"state":   "live",
+			"status": map[string]any{
+				"app":   "antigravity",
+				"state": "idle",
+			},
+		},
+		// Finished terminal: ignored.
+		{
+			"address": "t4",
+			"state":   "finished",
+			"status": map[string]any{
+				"app":   "antigravity",
+				"state": "done",
+			},
+		},
+	})
+
+	agents, err := client.ListAgents(context.Background())
 	if err != nil {
-		t.Fatalf("CreateWorkspace: %v", err)
+		t.Fatalf("ListAgents: %v", err)
 	}
-	if ws.WorkspaceID == "" || tab.TabID == "" || pane.PaneID == "" {
-		t.Fatalf("CreateWorkspace returned %+v %+v %+v", ws, tab, pane)
+	if len(agents) != 1 {
+		t.Fatalf("got %d agents, want 1 (%+v)", len(agents), agents)
 	}
-
-	tab2, pane2, err := client.CreateTab(ctx, ws.WorkspaceID, "/tmp/proj/sub", "proj 2")
-	if err != nil {
-		t.Fatalf("CreateTab: %v", err)
+	a := agents[0]
+	if a.PaneID != "t2" || a.Agent == nil || *a.Agent != "claude" {
+		t.Errorf("agent = %+v, want PaneID=t2 Agent=claude", a)
 	}
-	if tab2.WorkspaceID != ws.WorkspaceID || pane2.PaneID == "" {
-		t.Fatalf("CreateTab returned %+v %+v", tab2, pane2)
+	if a.WorkspaceID != "sp1" || a.WorkspaceLabel != "my-proj" || a.TabID != "tb1" || a.TabLabel != "feat-auth" {
+		t.Errorf("labels = ws(%q,%q) tab(%q,%q)", a.WorkspaceID, a.WorkspaceLabel, a.TabID, a.TabLabel)
 	}
-
-	started, err := client.StartAgent(ctx, pane2.PaneID, "claude", "proj 2", 25000)
-	if err != nil {
-		t.Fatalf("StartAgent: %v", err)
+	if a.StateChangeSeq != 1012 {
+		t.Errorf("StateChangeSeq = %d, want 1012 (1000 + 12)", a.StateChangeSeq)
 	}
-	if started.PaneID != pane2.PaneID || started.Name == nil || *started.Name != "proj 2" {
-		t.Fatalf("StartAgent = %+v", started)
+	if a.SubagentCount == nil || *a.SubagentCount != 1 {
+		t.Errorf("SubagentCount = %v, want 1", a.SubagentCount)
 	}
-
-	calls := srv.Calls()
-	byMethod := func(method string) map[string]any {
-		for i := len(calls) - 1; i >= 0; i-- {
-			if calls[i].Method == method {
-				return calls[i].Params
-			}
-		}
-		t.Fatalf("no %s call", method)
-		return nil
+	if a.StatusMsg != "Run bash command" || a.StatusKind == nil || *a.StatusKind != "permission" {
+		t.Errorf("status details = kind=%v msg=%q", a.StatusKind, a.StatusMsg)
 	}
-
-	// herdr-socket-api.md §2.2: create and start without taking the owner's
-	// focus, with a label, and an explicit startup wait.
-	p := byMethod("workspace.create")
-	if p["cwd"] != "/tmp/proj" || p["label"] != "proj" || p["focus"] != false {
-		t.Errorf("workspace.create params = %v, want cwd, label and focus false", p)
-	}
-	p = byMethod("tab.create")
-	if p["workspace_id"] != ws.WorkspaceID || p["cwd"] != "/tmp/proj/sub" || p["label"] != "proj 2" || p["focus"] != false {
-		t.Errorf("tab.create params = %v", p)
-	}
-	p = byMethod("agent.start")
-	if p["pane_id"] != pane2.PaneID || p["kind"] != "claude" || p["name"] != "proj 2" || p["timeout_ms"] != float64(25000) {
-		t.Errorf("agent.start params = %v", p)
+	if s := a.TrustedSession(); s == nil || s.Value != "uuid-999" {
+		t.Errorf("TrustedSession = %+v, want uuid-999 from --resume", s)
 	}
 }
 
@@ -288,7 +297,6 @@ func TestTrustedSession(t *testing.T) {
 	agentClaude := "claude"
 	agentAgy := "agy"
 
-	// Matching session
 	infoMatching := herdr.AgentInfo{
 		PaneID: "w1:p1",
 		Agent:  &agentClaude,
@@ -302,7 +310,6 @@ func TestTrustedSession(t *testing.T) {
 		t.Errorf("expected trusted session with uuid-123, got: %v", s)
 	}
 
-	// Mismatched session (stale harness ref)
 	infoStale := herdr.AgentInfo{
 		PaneID: "w1:p1",
 		Agent:  &agentAgy,
@@ -316,7 +323,6 @@ func TestTrustedSession(t *testing.T) {
 		t.Errorf("expected nil for mismatched session, got: %v", s)
 	}
 
-	// Nil Agent or Nil AgentSession
 	infoNilAgent := herdr.AgentInfo{
 		PaneID: "w1:p1",
 		Agent:  nil,

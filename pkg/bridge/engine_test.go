@@ -153,19 +153,19 @@ func TestEngine_AgentStateMapping(t *testing.T) {
 	fgCwd := "/Users/test/Code/repo/subdir"
 	agent := "claude"
 
-	e := &Engine{tabs: map[string]string{"w1:t1": "tareas"}}
+	e := &Engine{}
 
-	// 1. herdr's agent name wins over the tab and the title.
+	// 1. herdr-core's agent name wins over the tab and the title.
 	st1, resolvedCwd := e.buildAgentState(herdr.AgentInfo{
-		PaneID:                "w1:p1",
-		TabID:                 "w1:t1",
-		Agent:                 &agent,
-		Name:                  &name,
-		TerminalTitleStripped: &title,
-		CWD:                   &cwd,
-		ForegroundCWD:         &fgCwd,
-		AgentStatus:           "idle",
-		StateChangeSeq:        10,
+		PaneID:         "w1:p1",
+		TabID:          "w1:t1",
+		TabLabel:       "tareas",
+		Agent:          &agent,
+		Name:           &name,
+		Title:          &title,
+		CWD:            &fgCwd,
+		AgentStatus:    "idle",
+		StateChangeSeq: 10,
 	})
 	if st1.Label != "custom-name" || st1.Name != "custom-name" || st1.Title != "stripped-title" {
 		t.Errorf("label/name/title = %q/%q/%q, want custom-name/custom-name/stripped-title", st1.Label, st1.Name, st1.Title)
@@ -176,24 +176,26 @@ func TestEngine_AgentStateMapping(t *testing.T) {
 
 	// 2. No agent name: the tab's label wins over the title.
 	st2, _ := e.buildAgentState(herdr.AgentInfo{
-		PaneID:                "w1:p2",
-		TabID:                 "w1:t1",
-		Agent:                 &agent,
-		TerminalTitleStripped: &title,
-		AgentStatus:           "working",
+		PaneID:      "w1:p2",
+		TabID:       "w1:t1",
+		TabLabel:    "tareas",
+		Agent:       &agent,
+		Title:       &title,
+		AgentStatus: "working",
 	})
 	if st2.Label != "tareas" || st2.Title != "stripped-title" {
 		t.Errorf("label/title = %q/%q, want tareas/stripped-title", st2.Label, st2.Title)
 	}
 
-	// 3. A tab without a label of its own (not in the map): the title.
+	// 3. A tab without a custom label (or only a number): the title.
 	st3, _ := e.buildAgentState(herdr.AgentInfo{
-		PaneID:                "w1:p3",
-		TabID:                 "w1:t2",
-		Agent:                 &agent,
-		TerminalTitleStripped: &title,
-		CWD:                   &cwd,
-		AgentStatus:           "idle",
+		PaneID:      "w1:p3",
+		TabID:       "w1:t2",
+		TabLabel:    "2",
+		Agent:       &agent,
+		Title:       &title,
+		CWD:         &cwd,
+		AgentStatus: "idle",
 	})
 	if st3.Label != "stripped-title" {
 		t.Errorf("label = %q, want stripped-title", st3.Label)
@@ -201,7 +203,7 @@ func TestEngine_AgentStateMapping(t *testing.T) {
 
 	// 4. An empty title falls back to cwd.
 	emptyTitle := ""
-	st, _ := e.buildAgentState(herdr.AgentInfo{PaneID: "w1:p4", Agent: &agent, TerminalTitleStripped: &emptyTitle, CWD: &cwd})
+	st, _ := e.buildAgentState(herdr.AgentInfo{PaneID: "w1:p4", Agent: &agent, Title: &emptyTitle, CWD: &cwd})
 	if st.Label != "repo" || st.Title != "" {
 		t.Errorf("empty title: label/title = %q/%q, want repo/\"\"", st.Label, st.Title)
 	}
@@ -217,30 +219,25 @@ func TestEngine_AgentStateMapping(t *testing.T) {
 	}
 }
 
-// Tab labels come from tab.list with the workspace labels; a tab whose label
-// is only its number has no name. A rename reaches the relay on the next
-// refresh, as a new label for the agents in that tab.
+// Tab labels come from labels["where"] on each terminal; a tab whose label is
+// only its number has no custom name. A rename reaches the relay on the next
+// change as a new label for the agent.
 func TestEngine_TabLabelNamesTheAgent(t *testing.T) {
 	h := newTestHarness(t)
-	h.server.SetTabs([]map[string]any{
-		{"tab_id": "w1:t1", "workspace_id": "w1", "number": 1, "label": "tareas", "pane_count": 1},
-		{"tab_id": "w1:t2", "workspace_id": "w1", "number": 2, "label": "2", "pane_count": 1},
-	})
-	h.engine.OnHerdrOnline(true, herdr.Pong{Version: "0.9.1", Protocol: 22})
-	pollUntil(t, 3*time.Second, "tab list loaded", func() bool {
-		return callsSince(h, 0, "tab.list") >= 1
-	})
+	h.engine.OnHerdrOnline(true, herdr.Pong{Version: "0.1.14", Protocol: 1})
 
 	agent, title := "claude", "Claude's own title"
+	p1 := herdr.AgentInfo{
+		PaneID: "w1:p1", WorkspaceID: "w1", WorkspaceLabel: "proj", TabID: "w1:t1", TabLabel: "tareas",
+		Agent: &agent, Title: &title, AgentStatus: "idle", StateChangeSeq: 1,
+	}
+	p2 := herdr.AgentInfo{
+		PaneID: "w1:p2", WorkspaceID: "w1", WorkspaceLabel: "proj", TabID: "w1:t2", TabLabel: "2",
+		Agent: &agent, AgentStatus: "idle", StateChangeSeq: 1,
+	}
 	h.engine.OnChanges([]herdr.Change{
-		{Kind: herdr.Added, Agent: herdr.AgentInfo{
-			PaneID: "w1:p1", WorkspaceID: "w1", TabID: "w1:t1", Agent: &agent,
-			TerminalTitleStripped: &title, AgentStatus: "idle", StateChangeSeq: 1,
-		}},
-		{Kind: herdr.Added, Agent: herdr.AgentInfo{
-			PaneID: "w1:p2", WorkspaceID: "w1", TabID: "w1:t2", Agent: &agent,
-			AgentStatus: "idle", StateChangeSeq: 1,
-		}},
+		{Kind: herdr.Added, Agent: p1},
+		{Kind: herdr.Added, Agent: p2},
 	})
 	msg, _ := waitMsg(h, 3*time.Second, func(m any) bool {
 		u, ok := m.(model.AgentUpdateMsg)
@@ -249,8 +246,8 @@ func TestEngine_TabLabelNamesTheAgent(t *testing.T) {
 	if msg == nil {
 		t.Fatal("no agent_update for w1:p1")
 	}
-	if u := msg.(model.AgentUpdateMsg); u.Agent.Label != "tareas" || u.Agent.Title != title {
-		t.Errorf("label/title = %q/%q, want tareas/%q", u.Agent.Label, u.Agent.Title, title)
+	if u := msg.(model.AgentUpdateMsg); u.Agent.Label != "tareas" || u.Agent.Title != title || u.Agent.Workspace != "proj" {
+		t.Errorf("label/title/ws = %q/%q/%q, want tareas/%q/proj", u.Agent.Label, u.Agent.Title, u.Agent.Workspace, title)
 	}
 
 	msg2, _ := waitMsg(h, 3*time.Second, func(m any) bool {
@@ -264,11 +261,12 @@ func TestEngine_TabLabelNamesTheAgent(t *testing.T) {
 		t.Errorf("a tab labelled with its own number is kept as a name: label = %q", u.Agent.Label)
 	}
 
-	// The tab is renamed: the next refresh republishes the agent.
-	h.server.SetTabs([]map[string]any{
-		{"tab_id": "w1:t1", "workspace_id": "w1", "number": 1, "label": "agenda", "pane_count": 1},
+	// The tab is renamed in Herdr.app: the update republishes the agent.
+	p1Renamed := p1
+	p1Renamed.TabLabel = "agenda"
+	h.engine.OnChanges([]herdr.Change{
+		{Kind: herdr.Updated, Agent: p1Renamed, Prev: &p1},
 	})
-	h.engine.RefreshWorkspaces()
 	if msg, _ := waitMsg(h, 3*time.Second, func(m any) bool {
 		u, ok := m.(model.AgentUpdateMsg)
 		return ok && u.Agent.PaneID == "w1:p1" && u.Agent.Label == "agenda"

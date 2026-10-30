@@ -8,7 +8,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gabrielmarcano/agent-monitor/pkg/herdrtest"
 	"github.com/gabrielmarcano/agent-monitor/pkg/model"
 )
 
@@ -39,7 +38,7 @@ func pairRelay(t *testing.T, now time.Time, status int) *httptest.Server {
 	return srv
 }
 
-func newPairApp(t *testing.T, status int) (*testApp, *herdrtest.Server) {
+func newPairApp(t *testing.T, status int) *testApp {
 	t.Helper()
 	ta := newTestApp(t, "launchd")
 	now := time.Date(2026, 9, 25, 15, 0, 0, 0, time.UTC)
@@ -47,16 +46,14 @@ func newPairApp(t *testing.T, status int) (*testApp, *herdrtest.Server) {
 	srv := pairRelay(t, now, status)
 	ta.http = srv.Client()
 	writeConfig(t, ta.defaults().ConfigPath, "ws://"+strings.TrimPrefix(srv.URL, "http://"))
-	herdr := herdrtest.New(t)
-	ta.env["HERDR_SOCKET_PATH"] = herdr.SocketPath
-	return ta, herdr
+	return ta
 }
 
 // pair printed "in 0 seconds" (it read a ttl_seconds field the relay does
 // not send). It must show the real expiry from expires_at, and work without
 // the bridge running.
 func TestPair_PrintsRealExpiry(t *testing.T) {
-	ta, herdr := newPairApp(t, http.StatusOK)
+	ta := newPairApp(t, http.StatusOK)
 	if err := ta.cmdPair(nil); err != nil {
 		t.Fatalf("pair: %v", err)
 	}
@@ -69,25 +66,10 @@ func TestPair_PrintsRealExpiry(t *testing.T) {
 	if strings.Contains(out, "in 0 seconds") || strings.Contains(out, testToken) {
 		t.Errorf("bad output:\n%s", out)
 	}
-
-	var notified bool
-	for _, c := range herdr.Calls() {
-		if c.Method == "notification.show" {
-			notified = true
-			title, _ := c.Params["title"].(string)
-			body, _ := c.Params["body"].(string)
-			if !strings.Contains(title, "417293") || !strings.Contains(body, "5 min") {
-				t.Errorf("notification title=%q body=%q", title, body)
-			}
-		}
-	}
-	if !notified {
-		t.Error("no herdr notification")
-	}
 }
 
 func TestPair_JSON(t *testing.T) {
-	ta, _ := newPairApp(t, http.StatusOK)
+	ta := newPairApp(t, http.StatusOK)
 	if err := ta.cmdPair([]string{"--json"}); err != nil {
 		t.Fatalf("pair --json: %v", err)
 	}
@@ -101,7 +83,7 @@ func TestPair_JSON(t *testing.T) {
 }
 
 func TestPair_RelayRejectsToken(t *testing.T) {
-	ta, _ := newPairApp(t, http.StatusUnauthorized)
+	ta := newPairApp(t, http.StatusUnauthorized)
 	err := ta.cmdPair(nil)
 	if err == nil || !strings.Contains(err.Error(), "401") || !strings.Contains(err.Error(), "host token") {
 		t.Errorf("err = %v, want a 401 host token error", err)

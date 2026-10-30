@@ -21,6 +21,10 @@ func sendRaw(t *testing.T, sockPath string, req map[string]any) map[string]any {
 	}
 	defer conn.Close()
 
+	if _, ok := req["jsonrpc"]; !ok {
+		req["jsonrpc"] = "2.0"
+	}
+
 	data, err := json.Marshal(req)
 	if err != nil {
 		t.Fatalf("marshal req failed: %v", err)
@@ -69,6 +73,22 @@ func sendRawString(t *testing.T, sockPath, raw string) map[string]any {
 	return resp
 }
 
+func errorKind(resp map[string]any) string {
+	errObj, ok := resp["error"].(map[string]any)
+	if !ok {
+		return ""
+	}
+	if data, ok := errObj["data"].(map[string]any); ok {
+		if k, ok := data["kind"].(string); ok {
+			return k
+		}
+	}
+	if c, ok := errObj["code"].(string); ok {
+		return c
+	}
+	return ""
+}
+
 func TestOneRequestPerConnection(t *testing.T) {
 	srv := herdrtest.New(t)
 
@@ -78,8 +98,7 @@ func TestOneRequestPerConnection(t *testing.T) {
 	}
 	defer conn.Close()
 
-	// 1st request succeeds
-	req := `{"id":"req-1","method":"ping","params":{}}` + "\n"
+	req := `{"jsonrpc":"2.0","id":"req-1","method":"hello","params":{}}` + "\n"
 	if _, err := conn.Write([]byte(req)); err != nil {
 		t.Fatalf("write failed: %v", err)
 	}
@@ -93,8 +112,8 @@ func TestOneRequestPerConnection(t *testing.T) {
 		t.Fatalf("expected response line, got empty")
 	}
 
-	// 2nd request on the same connection should fail because the server closed it
-	req2 := `{"id":"req-2","method":"ping","params":{}}` + "\n"
+	// 2nd request on the same connection fails because the server closed it.
+	req2 := `{"jsonrpc":"2.0","id":"req-2","method":"hello","params":{}}` + "\n"
 	_, _ = conn.Write([]byte(req2))
 	_, err = reader.ReadBytes('\n')
 	if err == nil {
@@ -105,23 +124,18 @@ func TestOneRequestPerConnection(t *testing.T) {
 func TestRejectNumericID(t *testing.T) {
 	srv := herdrtest.New(t)
 
-	resp := sendRawString(t, srv.SocketPath, `{"id":123,"method":"ping","params":{}}`)
-	errObj, ok := resp["error"].(map[string]any)
-	if !ok {
-		t.Fatalf("expected error object, got: %v", resp)
-	}
-
-	if code, _ := errObj["code"].(string); code != "invalid_request" {
-		t.Errorf("expected error code invalid_request, got %s", code)
+	resp := sendRawString(t, srv.SocketPath, `{"jsonrpc":"2.0","id":123,"method":"hello","params":{}}`)
+	if got := errorKind(resp); got != "invalid_request" {
+		t.Errorf("expected error kind invalid_request, got %s (%v)", got, resp)
 	}
 }
 
-func TestPing(t *testing.T) {
+func TestHello(t *testing.T) {
 	srv := herdrtest.New(t)
 
 	resp := sendRaw(t, srv.SocketPath, map[string]any{
 		"id":     "p1",
-		"method": "ping",
+		"method": "hello",
 		"params": map[string]any{},
 	})
 
@@ -134,18 +148,15 @@ func TestPing(t *testing.T) {
 		t.Fatalf("expected result object, got %v", resp)
 	}
 
-	if res["type"] != "pong" {
-		t.Errorf("expected type pong, got %v", res["type"])
+	if res["version"] != "0.1.14" {
+		t.Errorf("expected version 0.1.14, got %v", res["version"])
 	}
-	if res["version"] != "0.9.1" {
-		t.Errorf("expected version 0.9.1, got %v", res["version"])
-	}
-	if int(res["protocol"].(float64)) != 22 {
-		t.Errorf("expected protocol 22, got %v", res["protocol"])
+	if int(res["generation"].(float64)) != 1 {
+		t.Errorf("expected generation 1, got %v", res["generation"])
 	}
 }
 
-func TestAgentListAndGet(t *testing.T) {
+func TestTerminalListAndGet(t *testing.T) {
 	srv := herdrtest.New(t)
 
 	agents := []map[string]any{
@@ -159,151 +170,65 @@ func TestAgentListAndGet(t *testing.T) {
 	}
 	srv.SetAgents(agents)
 
-	// List
 	listResp := sendRaw(t, srv.SocketPath, map[string]any{
 		"id":     "l1",
-		"method": "agent.list",
+		"method": "terminal.list",
 		"params": map[string]any{},
 	})
 	res := listResp["result"].(map[string]any)
-	if res["type"] != "agent_list" {
-		t.Errorf("expected agent_list type, got %v", res["type"])
-	}
-	agentsList := res["agents"].([]any)
-	if len(agentsList) != 1 {
-		t.Fatalf("expected 1 agent, got %d", len(agentsList))
+	termsList := res["terminals"].([]any)
+	if len(termsList) != 1 {
+		t.Fatalf("expected 1 terminal, got %d", len(termsList))
 	}
 
-	// Get existing
 	getResp := sendRaw(t, srv.SocketPath, map[string]any{
 		"id":     "g1",
-		"method": "agent.get",
-		"params": map[string]any{"target": "w1:p1"},
+		"method": "terminal.get",
+		"params": map[string]any{"terminal": "w1:p1"},
 	})
-	agentObj := getResp["result"].(map[string]any)
-	if agentObj["pane_id"] != "w1:p1" {
-		t.Errorf("expected pane_id w1:p1, got %v", agentObj["pane_id"])
+	termObj := getResp["result"].(map[string]any)
+	if termObj["address"] != "w1:p1" {
+		t.Errorf("expected address w1:p1, got %v", termObj["address"])
 	}
 
-	// Get non-existent
 	notFoundResp := sendRaw(t, srv.SocketPath, map[string]any{
 		"id":     "g2",
-		"method": "agent.get",
-		"params": map[string]any{"target": "w0:none"},
+		"method": "terminal.get",
+		"params": map[string]any{"terminal": "w0:none"},
 	})
-	errObj := notFoundResp["error"].(map[string]any)
-	if errObj["code"] != "agent_not_found" {
-		t.Errorf("expected agent_not_found code, got %v", errObj["code"])
+	if got := errorKind(notFoundResp); got != "not_found" {
+		t.Errorf("expected not_found kind, got %v", got)
 	}
 }
 
-func TestAgentRead(t *testing.T) {
+func TestTerminalRead(t *testing.T) {
 	srv := herdrtest.New(t)
 
 	srv.SetScreen("w1:p1", "visible", "Visible Screen Content")
 	srv.SetScreen("w1:p1", "recent_unwrapped", "Unwrapped Recent Content")
 
-	// Valid visible source
 	resp := sendRaw(t, srv.SocketPath, map[string]any{
 		"id":     "r1",
-		"method": "agent.read",
-		"params": map[string]any{"target": "w1:p1", "source": "visible"},
+		"method": "terminal.read",
+		"params": map[string]any{"terminal": "w1:p1"},
 	})
 	res := resp["result"].(map[string]any)
-	if res["type"] != "pane_read" {
-		t.Errorf("expected pane_read, got %v", res["type"])
-	}
-	read := res["read"].(map[string]any)
-	if read["text"] != "Visible Screen Content" {
-		t.Errorf("expected 'Visible Screen Content', got %v", read["text"])
+	if res["text"] != "Visible Screen Content" {
+		t.Errorf("expected 'Visible Screen Content', got %v", res["text"])
 	}
 
-	// Valid recent_unwrapped source
 	resp2 := sendRaw(t, srv.SocketPath, map[string]any{
 		"id":     "r2",
-		"method": "agent.read",
-		"params": map[string]any{"target": "w1:p1", "source": "recent_unwrapped"},
+		"method": "terminal.read",
+		"params": map[string]any{"terminal": "w1:p1", "lines": 100},
 	})
-	read2 := resp2["result"].(map[string]any)["read"].(map[string]any)
-	if read2["text"] != "Unwrapped Recent Content" {
-		t.Errorf("expected 'Unwrapped Recent Content', got %v", read2["text"])
-	}
-
-	// Hyphenated recent-unwrapped must be rejected with invalid_request
-	respHyphen := sendRaw(t, srv.SocketPath, map[string]any{
-		"id":     "r3",
-		"method": "agent.read",
-		"params": map[string]any{"target": "w1:p1", "source": "recent-unwrapped"},
-	})
-	errObj := respHyphen["error"].(map[string]any)
-	if errObj["code"] != "invalid_request" {
-		t.Errorf("expected invalid_request for hyphenated recent-unwrapped, got %v", errObj["code"])
-	}
-
-	// Other invalid source rejected
-	respInvalid := sendRaw(t, srv.SocketPath, map[string]any{
-		"id":     "r4",
-		"method": "agent.read",
-		"params": map[string]any{"target": "w1:p1", "source": "bogus"},
-	})
-	if respInvalid["error"].(map[string]any)["code"] != "invalid_request" {
-		t.Errorf("expected invalid_request for bogus source, got %v", respInvalid["error"])
+	res2 := resp2["result"].(map[string]any)
+	if res2["text"] != "Unwrapped Recent Content" {
+		t.Errorf("expected 'Unwrapped Recent Content', got %v", res2["text"])
 	}
 }
 
-// agent.read answers in the format asked for, like herdr: "text" (the
-// default) from SetScreen, "ansi" from SetANSIScreen. The two never leak into
-// each other, and an unknown format is refused.
-func TestAgentReadFormats(t *testing.T) {
-	srv := herdrtest.New(t)
-	const styled = "\x1b[0m\x1b[38;2;245;167;66m┃\x1b[0m Allow once"
-	srv.SetScreen("w1:p1", "visible", "┃ Allow once")
-	srv.SetANSIScreen("w1:p1", "visible", styled)
-
-	read := func(id string, params map[string]any) map[string]any {
-		t.Helper()
-		resp := sendRaw(t, srv.SocketPath, map[string]any{"id": id, "method": "agent.read", "params": params})
-		res, ok := resp["result"].(map[string]any)
-		if !ok {
-			t.Fatalf("%s: no result in %v", id, resp)
-		}
-		return res["read"].(map[string]any)
-	}
-
-	for _, tc := range []struct {
-		id         string
-		params     map[string]any
-		wantText   string
-		wantFormat string
-	}{
-		{"default", map[string]any{"target": "w1:p1", "source": "visible"}, "┃ Allow once", "text"},
-		{"text", map[string]any{"target": "w1:p1", "source": "visible", "format": "text"}, "┃ Allow once", "text"},
-		{"ansi", map[string]any{"target": "w1:p1", "source": "visible", "format": "ansi", "strip_ansi": false}, styled, "ansi"},
-		{"ansi unset", map[string]any{"target": "w1:p2", "source": "visible", "format": "ansi"}, "", "ansi"},
-	} {
-		r := read(tc.id, tc.params)
-		if r["text"] != tc.wantText || r["format"] != tc.wantFormat {
-			t.Errorf("%s: text=%q format=%v, want text=%q format=%s", tc.id, r["text"], r["format"], tc.wantText, tc.wantFormat)
-		}
-	}
-
-	// A text screen set for another source is not served as ansi either.
-	srv.SetScreen("w1:p3", "visible", "plain only")
-	if r := read("ansi-no-leak", map[string]any{"target": "w1:p3", "source": "visible", "format": "ansi"}); r["text"] != "" {
-		t.Errorf("ansi read of a pane with only a text screen = %q, want empty", r["text"])
-	}
-
-	resp := sendRaw(t, srv.SocketPath, map[string]any{
-		"id":     "bogus",
-		"method": "agent.read",
-		"params": map[string]any{"target": "w1:p1", "source": "visible", "format": "html"},
-	})
-	if e, _ := resp["error"].(map[string]any); e == nil || e["code"] != "invalid_request" {
-		t.Errorf("format html: got %v, want invalid_request", resp)
-	}
-}
-
-func TestAgentSendKeysAndPrompt(t *testing.T) {
+func TestTerminalKeysAndSend(t *testing.T) {
 	srv := herdrtest.New(t)
 
 	srv.SetAgents([]map[string]any{
@@ -311,47 +236,42 @@ func TestAgentSendKeysAndPrompt(t *testing.T) {
 		{"pane_id": "w1:blocked", "agent_status": "blocked"},
 	})
 
-	// send_keys to idle agent -> ok
 	respKeys := sendRaw(t, srv.SocketPath, map[string]any{
 		"id":     "k1",
-		"method": "agent.send_keys",
-		"params": map[string]any{"target": "w1:idle", "keys": []string{"1"}},
+		"method": "terminal.keys",
+		"params": map[string]any{"terminal": "w1:idle", "keys": []string{"1"}},
 	})
-	if respKeys["result"].(map[string]any)["type"] != "ok" {
-		t.Errorf("expected ok result, got %v", respKeys)
+	if respKeys["result"] == nil {
+		t.Errorf("expected result, got %v", respKeys)
 	}
 
-	// send_keys to unknown target -> agent_not_found
 	respKeysNotFound := sendRaw(t, srv.SocketPath, map[string]any{
 		"id":     "k2",
-		"method": "agent.send_keys",
-		"params": map[string]any{"target": "w1:unknown", "keys": []string{"1"}},
+		"method": "terminal.keys",
+		"params": map[string]any{"terminal": "w1:unknown", "keys": []string{"1"}},
 	})
-	if respKeysNotFound["error"].(map[string]any)["code"] != "agent_not_found" {
-		t.Errorf("expected agent_not_found, got %v", respKeysNotFound["error"])
+	if got := errorKind(respKeysNotFound); got != "not_found" {
+		t.Errorf("expected not_found, got %v", got)
 	}
 
-	// prompt to idle agent -> ok
-	respPrompt := sendRaw(t, srv.SocketPath, map[string]any{
+	respSend := sendRaw(t, srv.SocketPath, map[string]any{
 		"id":     "p1",
-		"method": "agent.prompt",
-		"params": map[string]any{"target": "w1:idle", "text": "hello"},
+		"method": "terminal.send",
+		"params": map[string]any{"terminal": "w1:idle", "text": "hello"},
 	})
-	if respPrompt["result"].(map[string]any)["type"] != "ok" {
-		t.Errorf("expected ok result, got %v", respPrompt)
+	if respSend["result"] == nil {
+		t.Errorf("expected result, got %v", respSend)
 	}
 
-	// prompt to blocked agent -> agent_blocked error
 	respBlocked := sendRaw(t, srv.SocketPath, map[string]any{
 		"id":     "p2",
-		"method": "agent.prompt",
-		"params": map[string]any{"target": "w1:blocked", "text": "hello"},
+		"method": "terminal.send",
+		"params": map[string]any{"terminal": "w1:blocked", "text": "hello"},
 	})
-	if respBlocked["error"].(map[string]any)["code"] != "agent_blocked" {
-		t.Errorf("expected agent_blocked, got %v", respBlocked["error"])
+	if got := errorKind(respBlocked); got != "blocked" {
+		t.Errorf("expected blocked, got %v", got)
 	}
 
-	// Calls recorded
 	calls := srv.Calls()
 	if len(calls) != 4 {
 		t.Errorf("expected 4 calls recorded, got %d", len(calls))
@@ -361,42 +281,7 @@ func TestAgentSendKeysAndPrompt(t *testing.T) {
 func TestEventsSubscribe(t *testing.T) {
 	srv := herdrtest.New(t)
 
-	// Missing pane_id for pane.agent_status_changed returns invalid_request
-	respMissing := sendRaw(t, srv.SocketPath, map[string]any{
-		"id":     "sub-err",
-		"method": "events.subscribe",
-		"params": map[string]any{
-			"subscriptions": []map[string]any{
-				{"type": "pane.agent_status_changed"},
-			},
-		},
-	})
-	if respMissing["error"].(map[string]any)["code"] != "invalid_request" {
-		t.Fatalf("expected invalid_request for missing pane_id, got %v", respMissing["error"])
-	}
-
-	// Successful subscribe connection
-	conn, err := net.Dial("unix", srv.SocketPath)
-	if err != nil {
-		t.Fatalf("dial failed: %v", err)
-	}
-	defer conn.Close()
-
-	subReq := map[string]any{
-		"id":     "sub-1",
-		"method": "events.subscribe",
-		"params": map[string]any{
-			"subscriptions": []map[string]any{
-				{"type": "pane.agent_status_changed", "pane_id": "w1:target"},
-				{"type": "pane.created"},
-			},
-		},
-	}
-	data, _ := json.Marshal(subReq)
-	data = append(data, '\n')
-	_, _ = conn.Write(data)
-
-	reader := bufio.NewReader(conn)
+	conn, reader := dialSubscribe(t, srv.SocketPath)
 	ackLine, err := reader.ReadBytes('\n')
 	if err != nil {
 		t.Fatalf("read ack failed: %v", err)
@@ -406,36 +291,13 @@ func TestEventsSubscribe(t *testing.T) {
 	if err := json.Unmarshal(ackLine, &ack); err != nil {
 		t.Fatalf("unmarshal ack failed: %v", err)
 	}
-	if ack["result"].(map[string]any)["type"] != "subscription_started" {
-		t.Fatalf("expected subscription_started, got %v", ack)
+	res, ok := ack["result"].(map[string]any)
+	if !ok || res["terminals"] == nil {
+		t.Fatalf("expected SubscribeResult with terminals, got %v", ack)
 	}
 
-	// Second client subscribed to a different pane
-	connOther, err := net.Dial("unix", srv.SocketPath)
-	if err != nil {
-		t.Fatalf("dial other failed: %v", err)
-	}
-	defer connOther.Close()
-
-	subReqOther := map[string]any{
-		"id":     "sub-2",
-		"method": "events.subscribe",
-		"params": map[string]any{
-			"subscriptions": []map[string]any{
-				{"type": "pane.agent_status_changed", "pane_id": "w1:other"},
-			},
-		},
-	}
-	dataOther, _ := json.Marshal(subReqOther)
-	dataOther = append(dataOther, '\n')
-	_, _ = connOther.Write(dataOther)
-	readerOther := bufio.NewReader(connOther)
-	_, _ = readerOther.ReadBytes('\n') // read ack
-
-	// Emit status changed for w1:target
 	srv.EmitStatusChanged("w1:target", "working")
 
-	// Target conn receives the event
 	_ = conn.SetReadDeadline(time.Now().Add(200 * time.Millisecond))
 	evtLine, err := reader.ReadBytes('\n')
 	if err != nil {
@@ -446,55 +308,32 @@ func TestEventsSubscribe(t *testing.T) {
 	if err := json.Unmarshal(evtLine, &evt); err != nil {
 		t.Fatalf("unmarshal event failed: %v", err)
 	}
-	if evt["event"] != "pane.agent_status_changed" {
-		t.Errorf("expected pane.agent_status_changed, got %v", evt["event"])
+	if evt["method"] != "event" {
+		t.Errorf("expected method event, got %v", evt["method"])
 	}
-	evtData := evt["data"].(map[string]any)
-	if evtData["pane_id"] != "w1:target" || evtData["agent_status"] != "working" {
-		t.Errorf("unexpected event payload: %v", evtData)
-	}
-
-	// Other conn should NOT receive this event
-	_ = connOther.SetReadDeadline(time.Now().Add(50 * time.Millisecond))
-	_, err = readerOther.ReadBytes('\n')
-	if err == nil {
-		t.Errorf("expected no event on other subscriber, got event")
-	}
-
-	// Test EmitGlobal: both subscribed to global event
-	srv.EmitGlobal("pane.created", map[string]any{"pane_id": "w1:new"})
-	_ = conn.SetReadDeadline(time.Now().Add(200 * time.Millisecond))
-	globalLine, err := reader.ReadBytes('\n')
-	if err != nil {
-		t.Fatalf("read global event failed: %v", err)
-	}
-	var globalEvt map[string]any
-	_ = json.Unmarshal(globalLine, &globalEvt)
-	if globalEvt["event"] != "pane_created" {
-		t.Errorf("expected pane_created event, got %v", globalEvt["event"])
+	evtParams := evt["params"].(map[string]any)
+	if evtParams["terminal"] != "w1:target" || evtParams["state"] != "working" {
+		t.Errorf("unexpected event payload: %v", evtParams)
 	}
 }
 
 func TestFailNext(t *testing.T) {
 	srv := herdrtest.New(t)
 
-	srv.FailNext("agent.list", "server_error", "temporary failure")
+	srv.FailNext("terminal.list", "server_error", "temporary failure")
 
-	// First call fails with configured error
 	resp1 := sendRaw(t, srv.SocketPath, map[string]any{
 		"id":     "f1",
-		"method": "agent.list",
+		"method": "terminal.list",
 		"params": map[string]any{},
 	})
-	errObj := resp1["error"].(map[string]any)
-	if errObj["code"] != "server_error" {
-		t.Errorf("expected server_error, got %v", errObj["code"])
+	if got := errorKind(resp1); got != "server_error" {
+		t.Errorf("expected server_error, got %v", got)
 	}
 
-	// Second call succeeds
 	resp2 := sendRaw(t, srv.SocketPath, map[string]any{
 		"id":     "f2",
-		"method": "agent.list",
+		"method": "terminal.list",
 		"params": map[string]any{},
 	})
 	if resp2["result"] == nil {
@@ -505,26 +344,22 @@ func TestFailNext(t *testing.T) {
 func TestStopAndStart(t *testing.T) {
 	srv := herdrtest.New(t)
 
-	// Stop server
 	srv.Stop()
 
-	// Dial should fail
 	_, err := net.Dial("unix", srv.SocketPath)
 	if err == nil {
 		t.Errorf("expected dial to fail when server stopped, got nil")
 	}
 
-	// Restart server
 	srv.Start()
 
-	// Dial should succeed again
 	resp := sendRaw(t, srv.SocketPath, map[string]any{
 		"id":     "p1",
-		"method": "ping",
+		"method": "hello",
 		"params": map[string]any{},
 	})
 	if resp["result"] == nil {
-		t.Errorf("expected ping to succeed after restart, got: %v", resp)
+		t.Errorf("expected hello to succeed after restart, got: %v", resp)
 	}
 }
 
@@ -532,12 +367,8 @@ func TestMalformedJSON(t *testing.T) {
 	srv := herdrtest.New(t)
 
 	resp := sendRawString(t, srv.SocketPath, `{not-json`)
-	errObj, ok := resp["error"].(map[string]any)
-	if !ok {
-		t.Fatalf("expected error object, got: %v", resp)
-	}
-	if errObj["code"] != "invalid_request" {
-		t.Errorf("expected invalid_request, got %v", errObj["code"])
+	if got := errorKind(resp); got != "invalid_request" {
+		t.Errorf("expected invalid_request, got %v", got)
 	}
 }
 
@@ -549,31 +380,12 @@ func TestUnknownMethod(t *testing.T) {
 		"method": "bogus.method",
 		"params": map[string]any{},
 	})
-	errObj := resp["error"].(map[string]any)
-	if errObj["code"] != "invalid_request" {
-		t.Errorf("expected invalid_request, got %v", errObj["code"])
+	if got := errorKind(resp); got != "invalid_request" {
+		t.Errorf("expected invalid_request, got %v", got)
 	}
 }
 
-func TestSessionSnapshot(t *testing.T) {
-	srv := herdrtest.New(t)
-
-	srv.SetAgents([]map[string]any{{"pane_id": "w1:p1"}})
-
-	resp := sendRaw(t, srv.SocketPath, map[string]any{
-		"id":     "s1",
-		"method": "session.snapshot",
-		"params": map[string]any{},
-	})
-	res := resp["result"].(map[string]any)
-	if res["type"] != "session_snapshot" {
-		t.Errorf("expected session_snapshot, got %v", res["type"])
-	}
-}
-
-// dialSubscribe opens an events.subscribe stream for the given subscriptions
-// and returns the connection and its reader, without reading the ack.
-func dialSubscribe(t *testing.T, sockPath string, subs []map[string]any) (net.Conn, *bufio.Reader) {
+func dialSubscribe(t *testing.T, sockPath string) (net.Conn, *bufio.Reader) {
 	t.Helper()
 	conn, err := net.Dial("unix", sockPath)
 	if err != nil {
@@ -581,19 +393,18 @@ func dialSubscribe(t *testing.T, sockPath string, subs []map[string]any) (net.Co
 	}
 	t.Cleanup(func() { _ = conn.Close() })
 	data, _ := json.Marshal(map[string]any{
-		"id":     "sub-1",
-		"method": "events.subscribe",
-		"params": map[string]any{"subscriptions": subs},
+		"jsonrpc": "2.0",
+		"id":      "sub-1",
+		"method":  "events.subscribe",
+		"params":  map[string]any{},
 	})
 	if _, err := conn.Write(append(data, '\n')); err != nil {
 		t.Fatalf("write subscribe failed: %v", err)
 	}
-	_ = conn.SetReadDeadline(time.Now().Add(2 * time.Second)) // never hang the test
+	_ = conn.SetReadDeadline(time.Now().Add(2 * time.Second))
 	return conn, bufio.NewReader(conn)
 }
 
-// expectClosed asserts the server closed the connection (EOF), as opposed to
-// merely staying silent until the read deadline.
 func expectClosed(t *testing.T, reader *bufio.Reader, what string) {
 	t.Helper()
 	line, err := reader.ReadBytes('\n')
@@ -602,13 +413,15 @@ func expectClosed(t *testing.T, reader *bufio.Reader, what string) {
 	}
 }
 
-// tryRaw is sendRaw for goroutines: it returns failures instead of calling t.Fatal.
 func tryRaw(sockPath string, req map[string]any) (map[string]any, error) {
 	conn, err := net.Dial("unix", sockPath)
 	if err != nil {
 		return nil, err
 	}
 	defer conn.Close()
+	if _, ok := req["jsonrpc"]; !ok {
+		req["jsonrpc"] = "2.0"
+	}
 	data, _ := json.Marshal(req)
 	if _, err := conn.Write(append(data, '\n')); err != nil {
 		return nil, err
@@ -627,7 +440,7 @@ func tryRaw(sockPath string, req map[string]any) (map[string]any, error) {
 func TestCallsRecordRequestID(t *testing.T) {
 	srv := herdrtest.New(t)
 
-	sendRaw(t, srv.SocketPath, map[string]any{"id": "abc-7", "method": "ping", "params": map[string]any{}})
+	sendRaw(t, srv.SocketPath, map[string]any{"id": "abc-7", "method": "hello", "params": map[string]any{}})
 
 	calls := srv.Calls()
 	if len(calls) != 1 {
@@ -638,32 +451,24 @@ func TestCallsRecordRequestID(t *testing.T) {
 	}
 }
 
-func TestUnknownTargetRejectedWithoutAgents(t *testing.T) {
+func TestUnknownTargetRejectedWithoutTerminals(t *testing.T) {
 	srv := herdrtest.New(t)
-	// No SetAgents: herdr has no agents, so every target is unknown.
 
 	for _, tc := range []struct {
 		method string
 		params map[string]any
 	}{
-		{"agent.send_keys", map[string]any{"target": "w1:ghost", "keys": []string{"1"}}},
-		{"agent.prompt", map[string]any{"target": "w1:ghost", "text": "hi"}},
+		{"terminal.keys", map[string]any{"terminal": "w1:ghost", "keys": []string{"1"}}},
+		{"terminal.send", map[string]any{"terminal": "w1:ghost", "text": "hi"}},
 	} {
 		resp := sendRaw(t, srv.SocketPath, map[string]any{"id": "x", "method": tc.method, "params": tc.params})
-		errObj, ok := resp["error"].(map[string]any)
-		if !ok {
-			t.Errorf("%s to an unknown target with no agents: got %v, want agent_not_found", tc.method, resp)
-			continue
-		}
-		if errObj["code"] != "agent_not_found" {
-			t.Errorf("%s: code = %v, want agent_not_found", tc.method, errObj["code"])
+		if got := errorKind(resp); got != "not_found" {
+			t.Errorf("%s: kind = %v, want not_found (%v)", tc.method, got, resp)
 		}
 	}
 }
 
-// TestInputCallsReadAgentsUnderLock only fails under -race: send_keys and
-// prompt must not read the agent list while SetAgents replaces it.
-func TestInputCallsReadAgentsUnderLock(t *testing.T) {
+func TestInputCallsReadTerminalsUnderLock(t *testing.T) {
 	srv := herdrtest.New(t)
 	agents := []map[string]any{{"pane_id": "w1:p1", "agent_status": "idle"}}
 	srv.SetAgents(agents)
@@ -683,10 +488,10 @@ func TestInputCallsReadAgentsUnderLock(t *testing.T) {
 	}()
 
 	for i := 0; i < 30; i++ {
-		sendRaw(t, srv.SocketPath, map[string]any{"id": "k", "method": "agent.send_keys",
-			"params": map[string]any{"target": "w1:ghost", "keys": []string{"1"}}})
-		sendRaw(t, srv.SocketPath, map[string]any{"id": "p", "method": "agent.prompt",
-			"params": map[string]any{"target": "w1:ghost", "text": "hi"}})
+		sendRaw(t, srv.SocketPath, map[string]any{"id": "k", "method": "terminal.keys",
+			"params": map[string]any{"terminal": "w1:ghost", "keys": []string{"1"}}})
+		sendRaw(t, srv.SocketPath, map[string]any{"id": "p", "method": "terminal.send",
+			"params": map[string]any{"terminal": "w1:ghost", "text": "hi"}})
 	}
 	close(stop)
 	<-done
@@ -696,14 +501,14 @@ func TestHoldNextAnswersWithStateAtArrival(t *testing.T) {
 	srv := herdrtest.New(t)
 	srv.SetAgents([]map[string]any{{"pane_id": "w1:p1", "agent": "claude", "agent_status": "blocked"}})
 
-	hold := srv.HoldNext("agent.list")
+	hold := srv.HoldNext("terminal.list")
 	type result struct {
 		resp map[string]any
 		err  error
 	}
 	got := make(chan result, 1)
 	go func() {
-		resp, err := tryRaw(srv.SocketPath, map[string]any{"id": "l1", "method": "agent.list", "params": map[string]any{}})
+		resp, err := tryRaw(srv.SocketPath, map[string]any{"id": "l1", "method": "terminal.list", "params": map[string]any{}})
 		got <- result{resp, err}
 	}()
 
@@ -713,7 +518,6 @@ func TestHoldNextAnswersWithStateAtArrival(t *testing.T) {
 		t.Fatal("held call never arrived")
 	}
 
-	// herdr moves on while the answer is still in flight.
 	srv.SetAgents([]map[string]any{{"pane_id": "w1:p1", "agent": "claude", "agent_status": "working"}})
 
 	select {
@@ -733,14 +537,14 @@ func TestHoldNextAnswersWithStateAtArrival(t *testing.T) {
 	if r.err != nil {
 		t.Fatalf("held call failed: %v", r.err)
 	}
-	agents := r.resp["result"].(map[string]any)["agents"].([]any)
-	if status := agents[0].(map[string]any)["agent_status"]; status != "blocked" {
-		t.Errorf("held answer status = %v, want the state at arrival (blocked)", status)
+	terms := r.resp["result"].(map[string]any)["terminals"].([]any)
+	statusObj := terms[0].(map[string]any)["status"].(map[string]any)
+	if state := statusObj["state"]; state != "blocked" {
+		t.Errorf("held answer status = %v, want the state at arrival (blocked)", state)
 	}
 
-	// Only the next call is held.
-	if _, err := tryRaw(srv.SocketPath, map[string]any{"id": "l2", "method": "agent.list", "params": map[string]any{}}); err != nil {
-		t.Errorf("second agent.list failed: %v", err)
+	if _, err := tryRaw(srv.SocketPath, map[string]any{"id": "l2", "method": "terminal.list", "params": map[string]any{}}); err != nil {
+		t.Errorf("second terminal.list failed: %v", err)
 	}
 }
 
@@ -748,7 +552,7 @@ func TestHoldNextNeverReleasedEndsOnStop(t *testing.T) {
 	srv := herdrtest.New(t)
 	hold := srv.HoldNext("events.subscribe")
 
-	conn, reader := dialSubscribe(t, srv.SocketPath, []map[string]any{{"type": "pane.created"}})
+	conn, reader := dialSubscribe(t, srv.SocketPath)
 	select {
 	case <-hold.Received():
 	case <-time.After(2 * time.Second):
@@ -764,7 +568,7 @@ func TestHoldNextNeverReleasedEndsOnStop(t *testing.T) {
 func TestDropStreamsKeepsServerUp(t *testing.T) {
 	srv := herdrtest.New(t)
 
-	conn, reader := dialSubscribe(t, srv.SocketPath, []map[string]any{{"type": "pane.created"}})
+	conn, reader := dialSubscribe(t, srv.SocketPath)
 	if _, err := reader.ReadBytes('\n'); err != nil {
 		t.Fatalf("read ack: %v", err)
 	}
@@ -773,9 +577,9 @@ func TestDropStreamsKeepsServerUp(t *testing.T) {
 
 	_ = conn.SetReadDeadline(time.Now().Add(2 * time.Second))
 	expectClosed(t, reader, "the stream after DropStreams")
-	resp := sendRaw(t, srv.SocketPath, map[string]any{"id": "p", "method": "ping", "params": map[string]any{}})
+	resp := sendRaw(t, srv.SocketPath, map[string]any{"id": "p", "method": "hello", "params": map[string]any{}})
 	if resp["result"] == nil {
-		t.Errorf("ping after DropStreams: %v", resp)
+		t.Errorf("hello after DropStreams: %v", resp)
 	}
 }
 
@@ -783,23 +587,23 @@ func TestDropStreamsAfterAck(t *testing.T) {
 	srv := herdrtest.New(t)
 	srv.SetDropStreamsAfterAck(true)
 
-	conn, reader := dialSubscribe(t, srv.SocketPath, []map[string]any{{"type": "pane.created"}})
+	conn, reader := dialSubscribe(t, srv.SocketPath)
 	_ = conn.SetReadDeadline(time.Now().Add(2 * time.Second))
 	ack, err := reader.ReadBytes('\n')
 	if err != nil {
 		t.Fatalf("read ack: %v", err)
 	}
-	if !strings.Contains(string(ack), "subscription_started") {
+	if !strings.Contains(string(ack), `"terminals"`) {
 		t.Fatalf("ack = %s", ack)
 	}
 	expectClosed(t, reader, "the stream right after the ack")
 
 	srv.SetDropStreamsAfterAck(false)
-	conn2, reader2 := dialSubscribe(t, srv.SocketPath, []map[string]any{{"type": "pane.created"}})
+	conn2, reader2 := dialSubscribe(t, srv.SocketPath)
 	if _, err := reader2.ReadBytes('\n'); err != nil {
 		t.Fatalf("read ack: %v", err)
 	}
-	srv.EmitGlobal("pane.created", map[string]any{"pane_id": "w1:p9"})
+	srv.EmitGlobal("created", map[string]any{"terminal": "w1:p9"})
 	_ = conn2.SetReadDeadline(time.Now().Add(2 * time.Second))
 	if _, err := reader2.ReadBytes('\n'); err != nil {
 		t.Errorf("stream should stay open once the knob is off: %v", err)

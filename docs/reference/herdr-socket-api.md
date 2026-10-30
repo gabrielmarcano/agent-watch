@@ -1,139 +1,144 @@
-# Herdr Socket API Reference (verified)
+# Herdr Core (`hc`) Socket API Reference (verified)
 
-Everything here was **probed live against herdr 0.9.1, socket protocol 22**, on 2026-09-23, re-probed on 2026-10-05 against the 0.9.3 schema (`herdr api schema`: protocol 22, every method, param and field used here kept), on 2026-10-07 against a live **herdr 0.9.3 server** (protocol 22): `ping`, `agent.list`, `agent.get` and the error responses behave as below, and on 2026-10-16 against a live **herdr 0.9.5 server** (protocol 22 per `herdr api schema`): `agent.list`, `agent.get`, `pane.read` and `agent.send_keys` (the `shift+tab` chord and a literal digit) behave as below. On 2026-10-20 the session methods (`pane.list`, `workspace.create`, `tab.create`, `agent.start`) were read from `herdr api schema --json` on 0.9.5 (protocol 22); they are not called live here because they create panes and start agents. When in doubt, re-derive it with the `herdr-probe` skill (`.agents/skills/herdr-probe/SKILL.md`). Do not trust memory or blog posts.
+Everything here was **probed live against `herdr-core` (`hc`) 0.1.14 and `Herdr.app` (`herdr-app`) 0.9.10** on 2026-10-29 (`hc schema --json`, `hello`, `terminal.list`, `terminal.read`, `terminal.keys`, `events.subscribe`, and error responses). When in doubt, re-derive it with the `herdr-probe` skill ([`.agents/skills/herdr-probe/SKILL.md`](../../.agents/skills/herdr-probe/SKILL.md)). Do not trust memory or blog posts.
 
-> ⚠️ **Safety first.** The herdr on the development Mac runs the owner's **real** agent sessions: sending `"1"` to a real Claude pane approves whatever it was asking. Which methods are safe and which are never called on the owner's panes: `.agents/rules/herdr-integration.md` § Safety.
+> ⚠️ **Safety first.** The `herdr-core` on the development Mac runs the owner's **real** agent sessions: sending `"1"` to a real Claude terminal approves whatever it was asking. Which methods are safe and which are never called on the owner's terminals: [`.agents/rules/herdr-integration.md`](../../.agents/rules/herdr-integration.md) § Safety.
 
 ---
 
 ## 1. Transport
 
-- **Socket:** `$HERDR_SOCKET_PATH`. If unset, fall back to `~/.config/herdr/herdr.sock`. Do **not** use `~/.config/herdr.sock`: that path is wrong.
-- **Framing:** newline-delimited JSON (NDJSON). Every request is one JSON object followed by `\n`.
+- **Socket resolution (`herdr.DefaultSocketPath`):**
+  1. `$HC_TERMINAL_SOCKET`
+  2. `$HERDR_SOCKET_PATH` (if set to the legacy `~/.config/herdr/herdr.sock` path from an older LaunchAgent plist and the `herdr-core` default socket exists on disk, the `herdr-core` socket is preferred)
+  3. `${XDG_STATE_HOME:-~/.local/state}/herdr-core/${HC_SESSION:-default}/default.sock`
+- **Framing:** newline-delimited JSON-RPC 2.0 (NDJSON). Every request is one JSON object followed by `\n`.
 - **Request:**
 
   ```json
-  {"id":"<string>","method":"<method>","params":{...}}
+  {"jsonrpc":"2.0","id":"<string>","method":"<method>","params":{...}}
   ```
 
-  `id` **must be a string**. A number makes herdr reject the request with `invalid_request`.
+  `id` is a string.
+- **One request per connection** (except `events.subscribe`, which stays open and streams JSON-RPC notifications, §5).
+- **Success:** `{"id":"<same id>","jsonrpc":"2.0","result":{...}}`
+- **Error:**
 
-- **One request per connection.**
-  1. Dial.
-  2. Write one request line.
-  3. Read one response line.
-  4. Close.
+  ```json
+  {
+    "id": "<same id>",
+    "jsonrpc": "2.0",
+    "error": {
+      "code": -32000,
+      "message": "no terminal \"t999999\"",
+      "data": {
+        "kind": "not_found",
+        "hint": "run `hc ls` to see terminal addresses and names"
+      }
+    }
+  }
+  ```
 
-  The server closes the connection after replying; a second request on the same connection never gets an answer.
-- **Exception:** `events.subscribe` keeps the connection open and streams events (§5).
-- **Success:** `{"id":"<same id>","result":{"type":"<result type>", ...}}`
-- **Error:** `{"id":"<same id or empty>","error":{"code":"<code>","message":"<text>"}}`. For malformed requests, `id` is `""` and `code` is `invalid_request` (herdr 0.9.3 keeps the request's `id` there too: an unknown method or a missing param came back with it, 2026-10-07). The message names the offending field; use it to debug.
+  `pkg/herdr.Error` unmarshals `error.data.kind` into `Error.Code` (`not_found`, `blocked`, `invalid_params`, `internal`, …) and `error.data.hint` into `Error.Hint`.
 
-The implementation, with its default timeout and cancellation: `Client.Call` in `pkg/herdr/client.go`.
+The implementation, with its default timeout and cancellation: `Client.Call` in [`pkg/herdr/client.go`](../../pkg/herdr/client.go).
 
 ---
 
 ## 2. Methods used by this project
 
-| Method | Params | Result `type` | Notes |
+| Method | Params | Result | Notes |
 |---|---|---|---|
-| `ping` | `{}` | `pong` | `{"version":"0.9.3","protocol":22,"capabilities":{...}}` — use for `hello` and health checks |
-| `agent.list` | `{}` | `agent_list` | `{"agents":[AgentInfo...]}` — the authoritative list |
-| `agent.get` | `{"target":"<pane_id or name>"}` | — | Single agent. Not called by the bridge; the guards use its CLI form |
-| `agent.read` | `{"target", "source", "lines"?, "format"?, "strip_ansi"?}` | `pane_read` | `{"read":{"text", "truncated", "revision", "pane_id", ...}}` |
-| `agent.send_keys` | `{"target", "keys":[...]}` | — | Key grammar in §4 |
-| `agent.prompt` | `{"target", "text", "wait"?}` | — | Never pass `wait` (it blocks); omit it or send `null` |
-| `session.snapshot` | `{}` | `session_snapshot` | Workspaces, tabs, panes, agents, `focused_pane_id`. Not called by the bridge; handy when probing |
-| `workspace.list` | `{}` | `workspace_list` | `{"workspaces":[{"workspace_id", "number", "label", ...}]}` — the bridge reads `label` for `AgentState.workspace` |
-| `tab.list` | `{}` (or `{"workspace_id"}`) | `tab_list` | `{"tabs":[{"tab_id", "workspace_id", "number", "label", "pane_count", ...}]}`, every workspace's tabs without params. A tab's default `label` is its `number`. The bridge reads `label` for `AgentState.label` (contracts §1.2) |
-| `pane.list` | `{}` (or `{"workspace_id"}`) | `pane_list` | `{"panes":[PaneInfo...]}` with `pane_id`, `workspace_id`, `tab_id`, `cwd`, `foreground_cwd`, `label`, …, every workspace's panes without params. New sessions use `cwd` to find the workspace that already serves a folder |
-| `workspace.create` | `{"cwd", "label", "focus": false}` | `workspace_created` | `{"workspace", "tab", "root_pane"}`. Creates the workspace **and its root tab and pane** in one call. `focus: false` keeps the owner's UI where it is |
-| `tab.create` | `{"workspace_id", "cwd", "label", "focus": false}` | `tab_created` | `{"tab", "root_pane"}`. The root pane is an interactive shell prompt, ready for `agent.start` |
-| `agent.start` | `{"pane_id", "kind", "name", "timeout_ms"?}` | `agent_started` | `{"agent": AgentInfo, "argv": [...]}`. Waits for interactive readiness: default 30 s, values must be > 3000 and ≤ 300000 ms. `kind` must be one of `herdr agent start --help`'s kinds |
-| `notification.show` | `{"title", "body"?, "sound"?: none\|done\|request}` | — | Used by `pair`, because a plugin action's stdout may not be visible (`cmd/bridge/pair.go`) |
-| `events.subscribe` | `{"subscriptions":[...]}` | `subscription_started` | Streaming, §5 |
+| `hello` | `{}` | `{"version":"0.1.14","generation":1,"framed":false,"features":[...],"methods":[...]}` | Used by `Client.Ping` for health checks |
+| `terminal.list` | `{}` | `{"terminals":[Terminal...]}` | Authoritative list of all terminals managed by `herdr-core` |
+| `terminal.get` | `{"target":"<address or name>"}` | `Terminal` | Single terminal. Used by the safety guards via `hc get <target> --json` |
+| `terminal.read` | `{"target":"<address>","lines"?:int}` | `{"address","title","rows","cols","cursor_row","cursor_col","lines":[...],"text":"..."}` | Plain-text screen read (`lines == 0` reads the visible screen; `lines > 0` reads recent scrollback lines) |
+| `terminal.keys` | `{"target":"<address>","keys":[...]}` | `{"address","bytes":int}` | Sends named keys / literal characters (§4) |
+| `terminal.send` | `{"target":"<address>","text":"...","enter":true}` | `{"address","bytes":int,"submitted":true,"queued":bool}` | Sends prompt text and presses Enter (`Client.Prompt`) |
+| `terminal.run` | `{"argv":[...],"cwd"?,"name"?,"keep":true,"no_parent":true,"no_notify":true,"labels"?:{...}}` | `Terminal` | Starts a new agent terminal (`Client.RunTerminal`). Setting `labels["herdr.space"]` causes `Herdr.app` to adopt it into that space and assign `herdr.tab` and `herdr.pane` |
+| `events.subscribe` | `{}` | `{"channel":null,"seq":uint64,"terminals":[Terminal...]}` | Initial ack followed by streaming JSON-RPC notifications (§5) |
 
-**`target`** accepts a `pane_id` (preferred, always unique) or an agent `name`. This project always sends `pane_id`.
-
-### 2.1 `agent.read` sources — note the underscore
-
-`source` ∈ `visible` | `recent` | `recent_unwrapped` | `detection`.
-
-> ⚠️ The **socket** uses `recent_unwrapped` (underscore). The **CLI** flag spells it `recent-unwrapped` (hyphen). Sending the hyphen form to the socket fails with `invalid_request: unknown variant`. Verified.
-
-`format` ∈ `text` | `ansi`, default `text`. The result echoes it in `read.format`.
-
-- **`text`** is plain text without escape codes, one line per row, trailing blanks trimmed. Everything that parses a screen uses it: `Client.Read`.
-- **`ansi`** is the same screen with its styling, and only the OpenCode focus check uses it (`Client.ReadANSI`; agents.md §5.1). A text screen cannot show which button has focus; colours can.
-  - Every styled span starts with `ESC[0m`, then one SGR sequence per attribute: flags (`ESC[1m`, `ESC[7m` …), then `ESC[38;…m` (fg), `ESC[48;…m` (bg), `ESC[58;…m` (underline colour). A colour is `2;r;g;b` (truecolor) or `5;n` (palette index).
-  - Rows end with `\r\n`, not `\n`, and keep their styled trailing blanks.
-  - No cursor moves, OSC or other sequences with the default formatter (libghostty-vt's VT formatter, herdr 0.9.1 source).
-  - `strip_ansi` is ignored by `agent.read` (in the 0.9.1 source only output waits and output subscriptions read it). `ReadANSI` still sends `false`, exactly what `herdr agent read --format ansi` sends.
-  - `ReadANSI` rejects a result whose `read.format` is not `ansi`: plain text there would read as a screen with no colours.
-
-| Use | Params |
-|---|---|
-| Parse a blocked menu | `{"target": pane, "source": "visible", "format": "text"}` |
-| Screen-capture history fallback | `{"target": pane, "source": "recent_unwrapped", "lines": 200, "format": "text"}` |
-| Check which button has focus (OpenCode answers) | `{"target": pane, "source": "visible", "format": "ansi", "strip_ansi": false}` |
+**`target`** accepts a terminal `address` (`t2`, `t1w`, …) or `name`. This project always sends `address` (stored in `AgentInfo.PaneID`).
 
 ---
 
-## 3. `AgentInfo` (element of `agent.list`)
+## 3. `Terminal` (element of `terminal.list`) and `ToAgentInfo`
 
 Real example (trimmed, values replaced with placeholders):
 
 ```json
 {
-  "pane_id": "w5:pAE", "tab_id": "w5:tA9", "workspace_id": "w5", "terminal_id": "term_00000000000000",
-  "agent": "claude", "agent_status": "done", "name": "my-app", "focused": false,
-  "cwd": "/Users/me/Code/app", "foreground_cwd": "/Users/me/Code/app",
-  "terminal_title": "✳ Add a settings page", "terminal_title_stripped": "Add a settings page",
-  "interactive_ready": true, "revision": 3, "state_change_seq": 333,
-  "agent_session": { "agent": "claude", "kind": "id", "source": "herdr:claude",
-                     "value": "00000000-0000-0000-0000-000000000000" }
+  "address": "t2",
+  "id": "00000000000000000000000000000000",
+  "name": "agent-watch",
+  "argv": ["claude", "--resume", "00000000-0000-0000-0000-000000000000"],
+  "cwd": "/Users/me/Code/agent-watch",
+  "title": "✳ Migrate bridge to herdr-core",
+  "pid": 54192,
+  "alive": true,
+  "keep": true,
+  "parent": null,
+  "labels": {
+    "herdr.pane": "pn01",
+    "herdr.space": "sp01",
+    "herdr.tab": "tb01",
+    "where": "Personal / agent-watch"
+  },
+  "foreground": {
+    "pid": 54192,
+    "name": "2.1.112",
+    "argv": ["claude", "--resume", "00000000-0000-0000-0000-000000000000"],
+    "cwd": "/Users/me/Code/agent-watch",
+    "kind": "claude-code"
+  },
+  "status": {
+    "state": "working",
+    "message": "Running tool",
+    "turn": 14,
+    "status_ms": 1761790000000,
+    "output_ms": 1761790000100,
+    "input_ms": 1761789995000,
+    "exit_code": null
+  }
 }
 ```
 
-| Field | Type | Required | Use |
-|---|---|---|---|
-| `pane_id` | string | yes | **Primary key** |
-| `workspace_id`, `tab_id`, `terminal_id` | string | yes | `tab_id` joins the agent to its tab's label (`tab.list`) |
-| `agent_status` | enum | yes | `idle` / `working` / `blocked` / `done` / `unknown` |
-| `focused` | bool | yes | |
-| `revision` | uint64 | yes | **Do not use** as a change detector (stub on some versions) |
-| `state_change_seq` | uint64 | default 0 | Increments on every status change — use this |
-| `agent` | string\|null | no | Herdr agent id (`claude`, `agy`, `opencode`, …) |
-| `display_agent` | string\|null | no | Human name; not used |
-| `name` | string\|null | no | User-set pane name; `AgentState.name`, and the label's first choice |
-| `cwd`, `foreground_cwd` | string\|null | no | |
-| `terminal_title`, `terminal_title_stripped` | string\|null | no | `_stripped` has the spinner/emoji removed; `AgentState.title` |
-| `agent_session` | object\|null | no | See §3.1 |
-| `interactive_ready`, `launch_pending`, `screen_detection_skipped` | bool | no | Ignore |
-| `state_labels`, `tokens` | map | no | Ignore |
-| `completion_seq`, `title` | uint64, string | no | herdr 0.9.3 and later. `completion_seq`: "the current idle transition completed work"; on a 0.9.3 server it is present only on `idle` panes (equal to their `state_change_seq`) and absent on `working` ones, so it does not mark a turn that ends while the pane stays `working` (`agents.md` §3.4). `title` was absent on every pane (2026-10-07). Not used |
+### How `pkg/herdr` maps `Terminal` to `AgentInfo` (`Terminal.ToAgentInfo`)
 
-### 3.1 `agent_session`
-
-`{"agent": string, "kind": "id"|"path", "source": string, "value": string}`
-
-- **`kind: "id"`:** `value` is a session id (a UUID for claude, `ses_…` for opencode).
-- **`kind: "path"`:** `value` is an absolute transcript path (pi; agy reports a transcript path when available).
-- **It can be stale.** Herdr keeps the last session any harness announced for the pane. **Only trust it when `agent_session.agent == agent`.** Even then it can name another conversation of the same agent than the one on screen (Claude's agents view: `agents.md` §3.3).
-- **It can be missing.** The agent's herdr integration may not be installed or up to date. Check with `herdr integration status`.
-
-The agent ids herdr knows are the `kinds:` line of `herdr agent` (its help output).
+- **Filtering (`Client.ListAgents`):**
+  - Finished terminals (`status.state == "finished"` or `!alive`) are skipped.
+  - Remote terminals (`address` containing `/`, e.g. `remote/t1`) are skipped.
+  - Background child terminals (`parent != nil` and no `labels["herdr.space"]`) are not listed as separate top-level panes; instead, live child terminals increment their parent terminal's `SubagentCount`.
+  - Non-agent shells (`foreground.kind` empty or `"shell"`, and `argv[0]` not a known agent binary) are skipped.
+- **Agent kind normalization:**
+  - `claude-code` → `claude`
+  - `antigravity` → `agy`
+  - `opencode`, `codex`, `pi`, etc. stay as-is.
+- **Status mapping:**
+  - `status.state`: `idle`, `working`, `blocked`, `done`, `unknown`.
+  - `status.message` → `AgentInfo.StatusMsg` (used as the fallback prompt title when a `blocked` terminal has no parseable menu on screen).
+- **Change counter (`StateChangeSeq`):**
+  - `uint64(*status.status_ms) + status.turn` when `status_ms != nil`, or `status.turn` otherwise.
+- **Labels (`Herdr.app` integration):**
+  - `labels["herdr.space"]` → `WorkspaceID`
+  - `labels["herdr.tab"]` → `TabID`
+  - `labels["where"]` (`"<space> / <tab>"`) → split on `" / "` into `WorkspaceLabel` and `TabLabel`. No separate `workspace.list` or `tab.list` polling is needed.
+- **Title stripping (`stripLeadingTitleGlyph`):**
+  - Strips leading spinner/status glyphs (`✳ `, `● `, etc.) from `title`.
+- **Foreground process & session discovery:**
+  - `foreground.pid` (or `pid`) → `ForegroundPID`.
+  - `foreground.cwd` (or `cwd`) → `ForegroundCWD` / `CWD`.
+  - If `foreground.argv` or `argv` carries `--resume <id>`, `-r <id>`, or `--session-id <id>`, `AgentSession` is populated with `Kind: "id", Value: <id>`.
 
 ---
 
-## 4. `agent.send_keys` key grammar
+## 4. `terminal.keys` key grammar
 
-- **Special keys** (case-insensitive): `Enter`, `Escape` (alias `esc`), `Up`, `Down`, `Left`, `Right`, `Tab`, `Space`, `Backspace` (alias `BS`), `F1`…`F12`.
+- **Special keys** (case-insensitive, verified on `hc 0.1.14`): `Enter` (`enter`), `Escape` (`esc`), `Up`, `Down`, `Left`, `Right` (`right`), `Tab`, `Space`, `Backspace` (`BS`), `F1`…`F12`.
 - **Single characters:** `"1"`, `"y"`, `"n"`, … are typed literally.
-- **Chords** join with `+`: `ctrl+c`, `shift+tab`, `alt+Up`. Modifiers: `ctrl`, `shift`, `alt`, `cmd`, `super`.
-- **Not supported** (they return `invalid_key`): `PageUp`, `PageDown`, `Home`, `End`, `Insert`, `Delete`, and tmux syntax such as `C-c`.
-- **Order:** multiple keys in one call are applied in order, e.g. `["Down","Down","Enter"]`.
-- **An ack only means herdr accepted the bytes.** It does not prove the TUI reacted. To confirm, re-read the pane.
+- **Chords** join with `+`: `ctrl+c`, `shift+tab`, `alt+Up`.
+- **Order:** multiple keys in one call are applied in order, e.g. `["Right","Enter"]`.
+- **An ack only means `herdr-core` accepted the bytes.** It does not prove the TUI reacted.
 
 ---
 
@@ -142,51 +147,41 @@ The agent ids herdr knows are the `kinds:` line of `herdr agent` (its help outpu
 Request (keep the connection open afterwards):
 
 ```json
-{"id":"sub-1","method":"events.subscribe","params":{"subscriptions":[
-  {"type":"pane.created"},
-  {"type":"pane.closed"},
-  {"type":"pane.exited"},
-  {"type":"pane.agent_detected"},
-  {"type":"pane.agent_status_changed","pane_id":"w5:pAW"},
-  {"type":"pane.agent_status_changed","pane_id":"w5:pAE"}
-]}}
+{"jsonrpc":"2.0","id":"sub-1","method":"events.subscribe","params":{}}
 ```
 
-- **Ack line:** `{"id":"sub-1","result":{"type":"subscription_started"}}`. This was verified.
-- **Event lines:** `{"event":"<name>","data":{...}}`.
-  - The subscription `type` is dot-form (`pane.agent_status_changed`).
-  - The streamed `event` name is not consistent (re-probed 2026-10-05): status changes stream as `pane.agent_status_changed` (dot form), `pane.created` streams as `pane_created` (snake_case, `data.pane` holds the pane). The bridge never branches on the name.
-- **`pane.agent_status_changed` REQUIRES `pane_id`.** Omitting it fails with ``invalid_request: missing field `pane_id` ``. So you need one subscription per agent pane, and you must **re-subscribe** (close and reopen the stream with the new list) whenever the set of agent panes changes.
-- **Global events** (no `pane_id` needed): `pane.created`, `pane.closed`, `pane.exited`, `pane.agent_detected`, `pane.focused`, `workspace.*`, `tab.*`.
-- **Status change payload:** `{pane_id, workspace_id, agent_status, agent?, display_agent?, title?, state_labels?}`; empty optional fields are left out (a claude pane sent only `pane_id`, `workspace_id`, `agent_status`, `agent`).
-- **`pane.agent_detected` bursts:** it can fire for the whole herd at once, so debounce it.
-- **An empty `subscriptions` array** gets an ack but never any events.
+- **Ack line:** `{"id":"sub-1","jsonrpc":"2.0","result":{"channel":null,"seq":1025,"terminals":[...]}}`.
+- **Streamed JSON-RPC 2.0 notifications** (no `id` field):
+  - `{"jsonrpc":"2.0","method":"event","params":{"seq":1026,"kind":"status",...}}`
+  - `{"jsonrpc":"2.0","method":"missed","params":{...}}`
+  - `{"jsonrpc":"2.0","method":"heartbeat","params":{...}}` (ignored by `Client.Subscribe`)
+- **Global subscription:** `events.subscribe` streams events for all terminals globally; there is no need to re-subscribe when the set of terminals changes.
 
-**Bridge policy:** events are only a **trigger**: on any event the bridge schedules a debounced `agent.list` and diffs the result, and it also polls `agent.list`, more often while the stream is down. Never build state from event payloads alone. The loop and its values: `Syncer.Run` in `pkg/herdr/sync.go`.
+**Bridge policy:** events are only a **trigger**: on any `"event"` or `"missed"` notification, the bridge schedules a debounced `terminal.list` and diffs the result, and it also polls `terminal.list` periodically (more often while the stream is down). Never build state from event payloads alone. See `Syncer.Run` in [`pkg/herdr/sync.go`](../../pkg/herdr/sync.go).
 
 ---
 
 ## 6. Errors seen in practice
 
-| Code | When |
+| `error.data.kind` (`Error.Code`) | When |
 |---|---|
-| `invalid_request` | Malformed JSON, wrong param name or type, unknown enum variant, numeric `id` |
-| `agent_not_found` | `target` does not exist (`"agent target w0:x not found"`) |
-| `agent_blocked` | `agent.prompt` on a blocked agent — nothing was typed |
-| `invalid_key` | Unsupported key name in `send_keys` |
+| `not_found` | `target` terminal does not exist (`no terminal "t99"`) |
+| `blocked` | `terminal.send` on a blocked terminal when refused |
+| `invalid_params` | Wrong param name/type or unsupported key name |
+| `internal` | Internal `herdr-core` failure |
 
-If the socket cannot be dialed, herdr is not running. Report `herdr_online=false` and retry with backoff (§7).
+If the socket cannot be dialed, `herdr-core` is not running (`herdr.ErrUnavailable`). Report `herdr_online=false` and retry with backoff (§7).
 
 ---
 
 ## 7. Reconnect (bridge policy)
 
-- **Backoff** for dial failures and stream drops: exponential with jitter (values: `pkg/herdr/clock.go`).
+- **Backoff** for dial failures and stream drops: exponential with jitter (values: [`pkg/herdr/clock.go`](../../pkg/herdr/clock.go)).
 - **On reconnect:**
-  1. `ping` (the bridge then sends `herdr_status` with `herdr_online: true` to the relay)
-  2. `agent.list`, diffed against the last known list: the relay gets `agent_update` / `agent_removed` for what changed
-  3. re-subscribe, then `agent.list` once more to cover the gap
+  1. `hello` (`Ping`; the bridge then sends `herdr_status` with `herdr_online: true` to the relay)
+  2. `terminal.list` (`ListAgents`), diffed against the last known list: the relay gets `agent_update` / `agent_removed` for what changed
+  3. `events.subscribe`, then `terminal.list` once more to cover the gap
 
-  A full `snapshot` goes to the relay only when the bridge (re)connects to the relay, or on a relay `resync` (`contracts.md` §3).
+  A full `snapshot` goes to the relay only when the bridge (re)connects to the relay, or on a relay `resync` ([`contracts.md` §3](contracts.md)).
 
-If a fact here turns out wrong on a newer herdr, fix this file in the same commit as the code change.
+If a fact here turns out wrong on a newer `herdr-core`, fix this file in the same commit as the code change.

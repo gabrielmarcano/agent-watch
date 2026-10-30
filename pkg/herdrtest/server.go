@@ -7,119 +7,107 @@ import (
 	"net"
 	"os"
 	"path/filepath"
-	"strings"
 	"sync"
 	"testing"
 	"time"
 )
 
-// Call records an incoming JSON-RPC request to the fake server.
+// Call records a single incoming RPC call to the fake herdr-core server.
 type Call struct {
-	ID     string // the request id, as sent by the client
+	ID     string
 	Method string
 	Params map[string]any
 }
 
-type failEntry struct {
+type failRule struct {
 	code    string
 	message string
 }
 
-// Hold pauses one call until it is released. See Server.HoldNext.
+// Hold parks the next call to a method after it has been read, until Release
+// is called or the server stops.
 type Hold struct {
 	received chan struct{}
 	release  chan struct{}
 	once     sync.Once
 }
 
-// Received is closed once the held call has reached the server.
+// Received closes as soon as the server has read the held request.
 func (h *Hold) Received() <-chan struct{} { return h.received }
 
-// Release lets the held call be answered. Calling it more than once is safe.
+// Release lets the held call proceed and answer. Safe to call more than once.
 func (h *Hold) Release() { h.once.Do(func() { close(h.release) }) }
 
-// wait blocks until the hold is released (true) or the server stops (false).
-func (h *Hold) wait(stopped <-chan struct{}) bool {
-	select {
-	case <-h.release:
-		return true
-	case <-stopped:
-		return false
-	}
-}
-
 type subscriber struct {
-	conn       net.Conn
-	paneIDs    map[string]bool // immutable after creation
-	eventTypes map[string]bool // immutable after creation
-	mu         sync.Mutex      // serializes writes to conn
+	conn net.Conn
+	mu   sync.Mutex // serializes writes after the ack
 }
 
-// Server is an in-process fake herdr socket server.
+// Server is an in-process fake herdr-core Unix socket server for testing.
 type Server struct {
-	SocketPath   string
-	dir          string
-	t            testing.TB
-	listener     net.Listener
-	mu           sync.Mutex
-	agents       []map[string]any
-	workspaces   []map[string]any
-	tabs         []map[string]any
-	panes        []map[string]any
-	ids          int                          // counter for workspace.create / tab.create / agent.start ids
-	screens      map[string]map[string]string // paneID -> source -> text
-	ansiScreens  map[string]map[string]string // paneID -> source -> styled text (format "ansi")
-	calls        []Call
-	failNext     map[string]failEntry
-	holds        map[string]*Hold
-	dropAfterAck bool
-	subscribers  []*subscriber
-	stopped      chan struct{} // closed by Stop; a new one per Start
-	running      bool
-	closed       bool
-	emitTimeout  time.Duration // per event write; defaultEmitTimeout when zero
+	t          testing.TB
+	SocketPath string
 
-	// Test hooks for the subscribe handshake (internal tests only).
+	mu           sync.RWMutex
+	listener     net.Listener
+	stopped      bool
+	stopCh       chan struct{}
+	activeConns  map[net.Conn]struct{}
+	subscribers  map[*subscriber]struct{}
+	dropAfterAck bool
+	emitTimeout  time.Duration
+	calls        []Call
+	terminals    []map[string]any
+	screens      map[string]map[string]string // target -> source -> text
+	failNext     map[string]failRule
+	holdNext     map[string]*Hold
+	nextSeq      int
+
+	// Internal test hooks (used only by server_internal_test.go).
 	testHookBeforeRegister func()
 	testHookAfterAck       func()
 }
 
-// New creates and starts a new in-process fake herdr socket server.
-// Registers cleanup on t so the server stops when the test completes.
+// New creates and starts a new fake herdr-core server bound to a short temporary socket path.
 func New(t testing.TB) *Server {
-	// A short dir, not t.TempDir(): macOS caps Unix socket paths at 104 bytes.
-	dir, err := os.MkdirTemp("", "hs")
-	if err != nil {
-		t.Fatalf("herdrtest: MkdirTemp failed: %v", err)
-	}
+	t.Helper()
 
-	sockPath := filepath.Join(dir, "herdr.sock")
+	dir, err := os.MkdirTemp("", "ht")
+	if err != nil {
+		t.Fatalf("herdrtest: failed to create temp dir: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = os.RemoveAll(dir)
+	})
+
+	sockPath := filepath.Join(dir, "s.sock")
+
 	s := &Server{
-		SocketPath:  sockPath,
-		dir:         dir,
 		t:           t,
-		ids:         1000,
+		SocketPath:  sockPath,
+		emitTimeout: time.Second,
+		activeConns: make(map[net.Conn]struct{}),
+		subscribers: make(map[*subscriber]struct{}),
 		screens:     make(map[string]map[string]string),
-		ansiScreens: make(map[string]map[string]string),
-		failNext:    make(map[string]failEntry),
-		holds:       make(map[string]*Hold),
+		failNext:    make(map[string]failRule),
+		holdNext:    make(map[string]*Hold),
+		terminals:   []map[string]any{},
 	}
 
 	s.Start()
-
 	t.Cleanup(func() {
-		s.Close()
+		s.Stop()
 	})
 
 	return s
 }
 
-// Start begins listening on SocketPath.
+// Start begins listening on the Unix socket.
 func (s *Server) Start() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if s.running {
+	if s.listener != nil {
 		return
 	}
 
@@ -127,96 +115,200 @@ func (s *Server) Start() {
 
 	l, err := net.Listen("unix", s.SocketPath)
 	if err != nil {
-		if s.t != nil {
-			s.t.Fatalf("herdrtest: listen failed: %v", err)
-		}
-		return
+		s.t.Fatalf("herdrtest: failed to listen on %s: %v", s.SocketPath, err)
 	}
 
 	s.listener = l
-	s.stopped = make(chan struct{})
-	s.running = true
-	go s.serve(l)
+	s.stopped = false
+	s.stopCh = make(chan struct{})
+
+	go s.acceptLoop(l)
 }
 
-// Stop closes the active listener, terminates all subscriber streams and
-// abandons held calls, simulating herdr going offline.
+// Stop closes the listener and all active connections.
 func (s *Server) Stop() {
 	s.mu.Lock()
-	if !s.running {
+	if s.stopped {
 		s.mu.Unlock()
 		return
 	}
-	s.running = false
-	close(s.stopped)
-	l := s.listener
-	s.listener = nil
-
-	subs := s.subscribers
-	s.subscribers = nil
+	s.stopped = true
+	if s.stopCh != nil {
+		close(s.stopCh)
+	}
+	if s.listener != nil {
+		_ = s.listener.Close()
+		s.listener = nil
+	}
+	for c := range s.activeConns {
+		_ = c.Close()
+	}
+	s.activeConns = make(map[net.Conn]struct{})
+	s.subscribers = make(map[*subscriber]struct{})
 	s.mu.Unlock()
-
-	if l != nil {
-		_ = l.Close()
-	}
-
-	for _, sub := range subs {
-		_ = sub.conn.Close()
-	}
 
 	_ = os.Remove(s.SocketPath)
 }
 
-// Close permanently stops the server and cleans up the temporary socket directory.
-func (s *Server) Close() {
+// DropStreams closes every open events.subscribe connection while leaving the
+// listener up.
+func (s *Server) DropStreams() {
 	s.mu.Lock()
-	if s.closed {
-		s.mu.Unlock()
-		return
+	subs := make([]*subscriber, 0, len(s.subscribers))
+	for sub := range s.subscribers {
+		subs = append(subs, sub)
 	}
-	s.closed = true
-	dir := s.dir
+	s.subscribers = make(map[*subscriber]struct{})
 	s.mu.Unlock()
 
-	s.Stop()
-	if dir != "" {
-		_ = os.RemoveAll(dir)
+	for _, sub := range subs {
+		_ = sub.conn.Close()
 	}
 }
 
-// SetAgents replaces the agent.list payload.
+// SetDropStreamsAfterAck makes events.subscribe write its ack and immediately
+// close the connection.
+func (s *Server) SetDropStreamsAfterAck(drop bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.dropAfterAck = drop
+}
+
+// HoldNext parks the next call to method after its request has been read.
+func (s *Server) HoldNext(method string) *Hold {
+	h := &Hold{
+		received: make(chan struct{}),
+		release:  make(chan struct{}),
+	}
+	s.mu.Lock()
+	s.holdNext[method] = h
+	s.mu.Unlock()
+	return h
+}
+
+// SetTerminals replaces the terminal.list payload with normalized herdr-core Terminal maps.
+func (s *Server) SetTerminals(terminals []map[string]any) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make([]map[string]any, 0, len(terminals))
+	for _, t := range terminals {
+		out = append(out, normalizeTerminalRow(t))
+	}
+	s.terminals = out
+}
+
+// SetAgents replaces the terminal.list payload (accepting either herdr-core
+// Terminal maps or test shorthand maps with pane_id/agent/agent_status/state_change_seq).
 func (s *Server) SetAgents(agents []map[string]any) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.agents = make([]map[string]any, len(agents))
-	copy(s.agents, agents)
+	s.SetTerminals(agents)
 }
 
-// SetTabs replaces the tab.list payload.
-func (s *Server) SetTabs(tabs []map[string]any) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.tabs = make([]map[string]any, len(tabs))
-	copy(s.tabs, tabs)
+func normalizeTerminalRow(row map[string]any) map[string]any {
+	out := make(map[string]any, len(row)+6)
+	for k, v := range row {
+		out[k] = v
+	}
+
+	if addr := stringVal(out["address"]); addr == "" {
+		if pid := stringVal(out["pane_id"]); pid != "" {
+			out["address"] = pid
+		}
+	}
+	if stringVal(out["state"]) == "" {
+		out["state"] = "live"
+	}
+
+	if title := stringVal(out["title"]); title != "" {
+		out["title"] = title
+	} else {
+		delete(out, "title")
+	}
+	if cwd := stringVal(out["cwd"]); cwd != "" {
+		out["cwd"] = cwd
+	} else {
+		delete(out, "cwd")
+	}
+
+	labels := make(map[string]string)
+	switch raw := out["labels"].(type) {
+	case map[string]string:
+		for k, v := range raw {
+			labels[k] = v
+		}
+	case map[string]any:
+		for k, v := range raw {
+			if sv := stringVal(v); sv != "" {
+				labels[k] = sv
+			}
+		}
+	}
+	if ws := stringVal(out["workspace_id"]); ws != "" && labels["herdr.space"] == "" {
+		labels["herdr.space"] = ws
+	}
+	if tab := stringVal(out["tab_id"]); tab != "" && labels["herdr.tab"] == "" {
+		labels["herdr.tab"] = tab
+	}
+	if wsLabel := stringVal(out["workspace_label"]); wsLabel != "" && labels["herdr.workspace_label"] == "" {
+		labels["herdr.workspace_label"] = wsLabel
+	}
+	if tabLabel := stringVal(out["tab_label"]); tabLabel != "" && labels["herdr.tab_label"] == "" {
+		labels["herdr.tab_label"] = tabLabel
+	}
+	if len(labels) > 0 {
+		out["labels"] = labels
+	}
+
+	if _, hasTurn := out["turn"]; !hasTurn {
+		if seq, ok := out["state_change_seq"]; ok {
+			out["turn"] = seq
+		}
+	}
+
+	if _, hasStatus := out["status"].(map[string]any); !hasStatus {
+		agentName := stringVal(out["agent"])
+		agentStatus := stringVal(out["agent_status"])
+		_, hasAgentStatusKey := out["agent_status"]
+		if agentName != "" || agentStatus != "" || hasAgentStatusKey {
+			if agentStatus == "" && !hasAgentStatusKey {
+				if agentName != "" {
+					agentStatus = "idle"
+				} else {
+					agentStatus = "unknown"
+				}
+			}
+			st := map[string]any{
+				"state": agentStatus,
+			}
+			if agentName != "" {
+				st["app"] = agentName
+			}
+			if kind := stringVal(out["status_kind"]); kind != "" {
+				st["kind"] = kind
+			}
+			if msg := stringVal(out["status_msg"]); msg != "" {
+				st["msg"] = msg
+			}
+			out["status"] = st
+		}
+	}
+
+	return out
 }
 
-// SetWorkspaces replaces the workspace.list payload.
-func (s *Server) SetWorkspaces(workspaces []map[string]any) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.workspaces = make([]map[string]any, len(workspaces))
-	copy(s.workspaces, workspaces)
+func stringVal(v any) string {
+	switch x := v.(type) {
+	case string:
+		return x
+	case *string:
+		if x != nil {
+			return *x
+		}
+	}
+	return ""
 }
 
-// SetPanes replaces the pane.list payload.
-func (s *Server) SetPanes(panes []map[string]any) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.panes = make([]map[string]any, len(panes))
-	copy(s.panes, panes)
-}
-
-// SetScreen sets the text returned by agent.read for a pane and source.
+// SetScreen sets the text returned by terminal.read for a target and source
+// ("visible" or "recent_unwrapped").
 func (s *Server) SetScreen(paneID, source, text string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -226,601 +318,452 @@ func (s *Server) SetScreen(paneID, source, text string) {
 	s.screens[paneID][source] = text
 }
 
-// SetANSIScreen sets the text returned by agent.read with format "ansi" for a
-// pane and source: the styled screen, with its SGR escape sequences. It is
-// independent of SetScreen, so a test states both forms of the same screen.
-func (s *Server) SetANSIScreen(paneID, source, text string) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.ansiScreens[paneID] == nil {
-		s.ansiScreens[paneID] = make(map[string]string)
-	}
-	s.ansiScreens[paneID][source] = text
-}
-
-// FailNext configures the next call to method to return code and message.
+// FailNext configures the server to fail the next call to method with the given error code and message.
 func (s *Server) FailNext(method, code, message string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.failNext[method] = failEntry{code: code, message: message}
+	s.failNext[method] = failRule{code: code, message: message}
 }
 
-// HoldNext makes the next call to method wait before it is answered, to
-// simulate a slow or hung herdr. The answer is computed when the request
-// arrives, so it reflects the state at that moment, and is written only after
-// Release. For events.subscribe the ack (and the stream) start only after
-// Release. A call that is never released is dropped when the server stops.
-func (s *Server) HoldNext(method string) *Hold {
-	h := &Hold{received: make(chan struct{}), release: make(chan struct{})}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.holds[method] = h
-	return h
-}
-
-// DropStreams closes every open events.subscribe stream while the server
-// keeps answering, simulating a stream drop with herdr still up.
-func (s *Server) DropStreams() {
-	s.mu.Lock()
-	subs := s.subscribers
-	s.subscribers = nil
-	s.mu.Unlock()
-	for _, sub := range subs {
-		_ = sub.conn.Close()
-	}
-}
-
-// SetDropStreamsAfterAck makes every events.subscribe close its connection
-// right after the ack (on), or stream normally again (off).
-func (s *Server) SetDropStreamsAfterAck(on bool) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.dropAfterAck = on
-}
-
-// Calls returns a copy of all requests received so far.
+// Calls returns a snapshot of all recorded RPC calls since server creation.
 func (s *Server) Calls() []Call {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	out := make([]Call, len(s.calls))
-	copy(out, s.calls)
-	return out
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	res := make([]Call, len(s.calls))
+	copy(res, s.calls)
+	return res
 }
 
-// EmitStatusChanged pushes a status event to matching subscribers. Real herdr
-// streams this one in dot form, unlike pane_created (herdr-socket-api.md §5).
+// EmitStatusChanged pushes a status event notification to all subscribers.
 func (s *Server) EmitStatusChanged(paneID, status string) {
-	subs, timeout := s.eventTargets()
-
-	eventData := map[string]any{
-		"event": "pane.agent_status_changed",
-		"data": map[string]any{
-			"pane_id":      paneID,
-			"workspace_id": "w1",
-			"agent_status": status,
-		},
-	}
-	line, _ := json.Marshal(eventData)
-	line = append(line, '\n')
-
-	for _, sub := range subs {
-		if sub.paneIDs[paneID] {
-			s.writeEvent(sub, line, timeout)
-		}
-	}
+	s.EmitEvent("status", map[string]any{
+		"terminal": paneID,
+		"state":    status,
+	})
 }
 
-// EmitGlobal pushes an arbitrary event to subscribers.
+// EmitGlobal pushes an event notification to all subscribers.
 func (s *Server) EmitGlobal(event string, data map[string]any) {
-	subs, timeout := s.eventTargets()
-
-	// Normalize event name to snake_case if passed as dot-form
-	eventName := strings.ReplaceAll(event, ".", "_")
-	dotEvent := strings.ReplaceAll(event, "_", ".")
-
-	eventMsg := map[string]any{
-		"event": eventName,
-		"data":  data,
-	}
-	line, _ := json.Marshal(eventMsg)
-	line = append(line, '\n')
-
-	for _, sub := range subs {
-		if sub.eventTypes[dotEvent] || sub.eventTypes[eventName] || len(sub.eventTypes) == 0 {
-			s.writeEvent(sub, line, timeout)
-		}
-	}
+	s.EmitEvent(event, data)
 }
 
-// defaultEmitTimeout bounds each event write, so a subscriber that stopped
-// reading cannot block Emit* (and the test calling it).
-const defaultEmitTimeout = 2 * time.Second
-
-// eventTargets returns a copy of the subscribers and the event write timeout.
-func (s *Server) eventTargets() ([]*subscriber, time.Duration) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	subs := make([]*subscriber, len(s.subscribers))
-	copy(subs, s.subscribers)
+// EmitEvent pushes a JSON-RPC 2.0 "event" notification to all subscribers.
+func (s *Server) EmitEvent(kind string, data map[string]any) {
+	s.mu.RLock()
 	timeout := s.emitTimeout
-	if timeout <= 0 {
-		timeout = defaultEmitTimeout
+	targets := make([]*subscriber, 0, len(s.subscribers))
+	for sub := range s.subscribers {
+		targets = append(targets, sub)
 	}
-	return subs, timeout
+	s.mu.RUnlock()
+
+	params := make(map[string]any, len(data)+1)
+	for k, v := range data {
+		params[k] = v
+	}
+	if _, ok := params["kind"]; !ok {
+		params["kind"] = kind
+	}
+
+	payload, err := json.Marshal(map[string]any{
+		"jsonrpc": "2.0",
+		"method":  "event",
+		"params":  params,
+	})
+	if err != nil {
+		return
+	}
+	payload = append(payload, '\n')
+
+	for _, sub := range targets {
+		s.writeToSubscriber(sub, payload, timeout)
+	}
 }
 
-// writeEvent writes one event line to sub within timeout. A subscriber whose
-// write fails or times out (a partial line may be out) is dropped, as herdr
-// drops a dead stream.
-func (s *Server) writeEvent(sub *subscriber, line []byte, timeout time.Duration) {
+func (s *Server) writeToSubscriber(sub *subscriber, payload []byte, timeout time.Duration) {
 	sub.mu.Lock()
 	_ = sub.conn.SetWriteDeadline(time.Now().Add(timeout))
-	_, err := sub.conn.Write(line)
+	_, err := sub.conn.Write(payload)
+	_ = sub.conn.SetWriteDeadline(time.Time{})
 	sub.mu.Unlock()
 	if err != nil {
-		s.removeSubscriber(sub)
+		_ = sub.conn.Close()
+		s.mu.Lock()
+		delete(s.subscribers, sub)
+		s.mu.Unlock()
 	}
 }
 
-func (s *Server) removeSubscriber(target *subscriber) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	_ = target.conn.Close()
-	var remaining []*subscriber
-	for _, sub := range s.subscribers {
-		if sub != target {
-			remaining = append(remaining, sub)
-		}
-	}
-	s.subscribers = remaining
-}
-
-func (s *Server) serve(l net.Listener) {
+func (s *Server) acceptLoop(l net.Listener) {
 	for {
 		conn, err := l.Accept()
 		if err != nil {
 			return
 		}
+
+		s.mu.Lock()
+		if s.stopped {
+			s.mu.Unlock()
+			_ = conn.Close()
+			return
+		}
+		s.activeConns[conn] = struct{}{}
+		s.mu.Unlock()
+
 		go s.handleConn(conn)
 	}
 }
 
 func (s *Server) handleConn(conn net.Conn) {
+	keepOpen := false
+	defer func() {
+		if !keepOpen {
+			s.mu.Lock()
+			delete(s.activeConns, conn)
+			s.mu.Unlock()
+			_ = conn.Close()
+		}
+	}()
+
 	reader := bufio.NewReader(conn)
 	line, err := reader.ReadBytes('\n')
 	if err != nil {
-		_ = conn.Close()
 		return
 	}
 
-	var raw map[string]any
-	if err := json.Unmarshal(line, &raw); err != nil {
-		s.writeJSON(conn, errorResp("", "invalid_request", "malformed json"))
-		_ = conn.Close()
+	var rawReq struct {
+		ID     json.RawMessage `json:"id"`
+		Method string          `json:"method"`
+		Params map[string]any  `json:"params"`
+	}
+	if err := json.Unmarshal(line, &rawReq); err != nil {
+		s.writeError(conn, "", "invalid_request", "malformed JSON request")
 		return
 	}
 
-	// Reject numeric or missing ids, like herdr does.
-	idRaw, hasID := raw["id"]
-	idStr, isStr := idRaw.(string)
-	if !hasID || !isStr {
-		s.writeJSON(conn, errorResp("", "invalid_request", "invalid id: expected string"))
-		_ = conn.Close()
+	var reqID string
+	if len(rawReq.ID) == 0 || string(rawReq.ID) == "null" {
+		s.writeError(conn, "", "invalid_request", "id must be a string")
+		return
+	}
+	if err := json.Unmarshal(rawReq.ID, &reqID); err != nil {
+		s.writeError(conn, "", "invalid_request", "id must be a string, not a number or object")
 		return
 	}
 
-	method, _ := raw["method"].(string)
-	params, _ := raw["params"].(map[string]any)
-	if params == nil {
-		params = make(map[string]any)
+	if rawReq.Params == nil {
+		rawReq.Params = make(map[string]any)
 	}
 
 	s.mu.Lock()
-	s.calls = append(s.calls, Call{ID: idStr, Method: method, Params: params})
-	stopped := s.stopped
-	hold := s.holds[method]
-	delete(s.holds, method)
-	fail, failing := s.failNext[method]
-	if failing {
-		delete(s.failNext, method)
+	if rawReq.Method != "hello" && rawReq.Method != "ping" {
+		s.calls = append(s.calls, Call{
+			ID:     reqID,
+			Method: rawReq.Method,
+			Params: rawReq.Params,
+		})
+	} else {
+		s.calls = append(s.calls, Call{
+			ID:     reqID,
+			Method: rawReq.Method,
+			Params: rawReq.Params,
+		})
+	}
+	hold := s.holdNext[rawReq.Method]
+	delete(s.holdNext, rawReq.Method)
+	stopCh := s.stopCh
+	fail, shouldFail := s.failNext[rawReq.Method]
+	if shouldFail {
+		delete(s.failNext, rawReq.Method)
+	}
+	var heldTerminals []map[string]any
+	if hold != nil {
+		heldTerminals = make([]map[string]any, len(s.terminals))
+		copy(heldTerminals, s.terminals)
 	}
 	s.mu.Unlock()
 
-	// A one-shot answer is computed before Received fires: a test that
-	// changes the state once the call has arrived must not change the answer.
-	subscribe := method == "events.subscribe" && !failing
-	var resp map[string]any
-	switch {
-	case failing:
-		resp = errorResp(idStr, fail.code, fail.message)
-	case !subscribe:
-		resp = s.respond(idStr, method, params)
-	}
-
 	if hold != nil {
 		close(hold.received)
+		select {
+		case <-hold.release:
+		case <-stopCh:
+			return
+		}
 	}
 
-	if subscribe {
-		s.handleSubscribe(conn, idStr, params, hold, stopped)
+	if shouldFail {
+		s.writeError(conn, reqID, fail.code, fail.message)
 		return
 	}
-	s.answer(conn, resp, hold, stopped)
-}
 
-// answer writes resp once the hold (if any) is released, then closes conn:
-// one request per connection.
-func (s *Server) answer(conn net.Conn, resp map[string]any, hold *Hold, stopped <-chan struct{}) {
-	defer conn.Close()
-	if hold != nil && !hold.wait(stopped) {
-		return
-	}
-	s.writeJSON(conn, resp)
-}
-
-// respond computes the answer to a one-shot method from the current state.
-func (s *Server) respond(id, method string, params map[string]any) map[string]any {
-	switch method {
-	case "ping":
-		return resultResp(id, map[string]any{
-			"type":         "pong",
-			"version":      "0.9.1",
-			"protocol":     22,
-			"capabilities": map[string]any{},
-		})
-
-	case "agent.list":
-		s.mu.Lock()
-		agentsCopy := make([]map[string]any, len(s.agents))
-		copy(agentsCopy, s.agents)
-		s.mu.Unlock()
-		return resultResp(id, map[string]any{"type": "agent_list", "agents": agentsCopy})
-
-	case "workspace.list":
-		s.mu.Lock()
-		workspacesCopy := make([]map[string]any, len(s.workspaces))
-		copy(workspacesCopy, s.workspaces)
-		s.mu.Unlock()
-		return resultResp(id, map[string]any{"type": "workspace_list", "workspaces": workspacesCopy})
-	case "tab.list":
-		s.mu.Lock()
-		tabsCopy := make([]map[string]any, len(s.tabs))
-		copy(tabsCopy, s.tabs)
-		s.mu.Unlock()
-		return resultResp(id, map[string]any{"type": "tab_list", "tabs": tabsCopy})
-
-	case "pane.list":
-		workspaceID, _ := params["workspace_id"].(string)
-		s.mu.Lock()
-		panesCopy := make([]map[string]any, 0, len(s.panes))
-		for _, p := range s.panes {
-			if workspaceID == "" || p["workspace_id"] == workspaceID {
-				panesCopy = append(panesCopy, p)
-			}
-		}
-		s.mu.Unlock()
-		return resultResp(id, map[string]any{"type": "pane_list", "panes": panesCopy})
-
-	case "workspace.create":
-		cwd, _ := params["cwd"].(string)
-		label, _ := params["label"].(string)
-		s.mu.Lock()
-		s.ids++
-		ws, tab, pane := s.newWorkspaceLocked(s.ids, label, cwd)
-		s.mu.Unlock()
-		return resultResp(id, map[string]any{
-			"type": "workspace_created", "workspace": ws, "tab": tab, "root_pane": pane,
-		})
-
-	case "tab.create":
-		workspaceID, _ := params["workspace_id"].(string)
-		cwd, _ := params["cwd"].(string)
-		label, _ := params["label"].(string)
-		s.mu.Lock()
-		found := false
-		for _, w := range s.workspaces {
-			if w["workspace_id"] == workspaceID {
-				found = true
-				break
-			}
-		}
-		if !found {
-			s.mu.Unlock()
-			return errorResp(id, "invalid_request", fmt.Sprintf("workspace %q not found", workspaceID))
-		}
-		s.ids++
-		tab, pane := s.newTabLocked(s.ids, workspaceID, label, cwd)
-		s.mu.Unlock()
-		return resultResp(id, map[string]any{"type": "tab_created", "tab": tab, "root_pane": pane})
-
-	case "agent.start":
-		paneID, _ := params["pane_id"].(string)
-		kind, _ := params["kind"].(string)
-		name, _ := params["name"].(string)
-		s.mu.Lock()
-		var pane map[string]any
-		for _, p := range s.panes {
-			if p["pane_id"] == paneID {
-				pane = p
-				break
-			}
-		}
-		if pane == nil {
-			s.mu.Unlock()
-			return errorResp(id, "invalid_request", fmt.Sprintf("pane %q not found", paneID))
-		}
-		agent := map[string]any{
-			"pane_id":          paneID,
-			"workspace_id":     pane["workspace_id"],
-			"tab_id":           pane["tab_id"],
-			"terminal_id":      fmt.Sprintf("term_%d", s.ids),
-			"agent":            kind,
-			"agent_status":     "idle",
-			"name":             name,
-			"focused":          false,
-			"cwd":              pane["cwd"],
-			"foreground_cwd":   pane["cwd"],
-			"state_change_seq": 1,
-		}
-		s.agents = append(s.agents, agent)
-		s.mu.Unlock()
-		return resultResp(id, map[string]any{"type": "agent_started", "agent": agent, "argv": []any{kind}})
-
-	case "agent.get":
-		target, _ := params["target"].(string)
-		found := s.findAgent(target)
-		if found == nil {
-			return notFound(id, target)
-		}
-		return resultResp(id, found)
-
-	case "agent.read":
-		target, _ := params["target"].(string)
-		source, _ := params["source"].(string)
-
-		// Must be visible, recent, recent_unwrapped or detection (underscore, not hyphen)
-		if source != "visible" && source != "recent" && source != "recent_unwrapped" && source != "detection" {
-			return errorResp(id, "invalid_request", fmt.Sprintf("unknown variant of enum Source: %q", source))
-		}
-
-		// format is "text" (herdr's default) or "ansi"; herdr ignores
-		// strip_ansi for agent.read.
-		format := "text"
-		if f, ok := params["format"]; ok {
-			format, _ = f.(string)
-		}
-		if format != "text" && format != "ansi" {
-			return errorResp(id, "invalid_request", fmt.Sprintf("unknown variant of enum ReadFormat: %q", format))
-		}
-
-		s.mu.Lock()
-		screens := s.screens
-		if format == "ansi" {
-			screens = s.ansiScreens
-		}
-		text := ""
-		if screens[target] != nil {
-			text = screens[target][source]
-		}
-		s.mu.Unlock()
-
-		return resultResp(id, map[string]any{
-			"type": "pane_read",
-			"read": map[string]any{
-				"pane_id":      target,
-				"text":         text,
-				"truncated":    false,
-				"revision":     0,
-				"source":       source,
-				"format":       format,
-				"workspace_id": "w1",
-				"tab_id":       "t1",
+	switch rawReq.Method {
+	case "hello", "ping":
+		s.writeResult(conn, reqID, map[string]any{
+			"generation": 1,
+			"version":    "0.1.14",
+			"framed":     false,
+			"core": map[string]any{
+				"id":   "test-core-id",
+				"name": "test-host",
 			},
+			"features": []string{"events", "status", "shell"},
 		})
 
-	case "agent.send_keys":
-		target, _ := params["target"].(string)
-		if s.findAgent(target) == nil {
-			return notFound(id, target)
+	case "terminal.list":
+		terminals := heldTerminals
+		if terminals == nil {
+			s.mu.RLock()
+			terminals = make([]map[string]any, len(s.terminals))
+			copy(terminals, s.terminals)
+			s.mu.RUnlock()
 		}
-		return resultResp(id, map[string]any{"type": "ok"})
+		s.writeResult(conn, reqID, map[string]any{
+			"terminals":       terminals,
+			"hidden_finished": 0,
+			"machines":        []any{},
+		})
 
-	case "agent.prompt":
-		target, _ := params["target"].(string)
-		targetAgent := s.findAgent(target)
-		if targetAgent == nil {
-			return notFound(id, target)
+	case "terminal.get":
+		target := stringVal(rawReq.Params["terminal"])
+		if target == "" {
+			target = stringVal(rawReq.Params["target"])
 		}
-		if targetAgent["agent_status"] == "blocked" {
-			return errorResp(id, "agent_blocked", "agent is currently blocked")
-		}
-		return resultResp(id, map[string]any{"type": "ok"})
+		s.mu.RLock()
+		found := s.findTerminalLocked(target)
+		s.mu.RUnlock()
 
-	case "session.snapshot":
+		if found == nil {
+			s.writeError(conn, reqID, "not_found", fmt.Sprintf("no terminal %q", target))
+			return
+		}
+		s.writeResult(conn, reqID, found)
+
+	case "terminal.read":
+		target := stringVal(rawReq.Params["terminal"])
+		if target == "" {
+			target = stringVal(rawReq.Params["target"])
+		}
+		if target == "" {
+			s.writeError(conn, reqID, "invalid_params", "missing terminal parameter")
+			return
+		}
+		lines := 0
+		if rawLines, ok := rawReq.Params["lines"].(float64); ok {
+			lines = int(rawLines)
+		}
+
+		s.mu.RLock()
+		var text string
+		if targetScreens, ok := s.screens[target]; ok {
+			if lines > 0 {
+				if u, ok := targetScreens["recent_unwrapped"]; ok {
+					text = u
+				} else {
+					text = targetScreens["visible"]
+				}
+			} else {
+				if v, ok := targetScreens["visible"]; ok {
+					text = v
+				} else {
+					text = targetScreens["recent_unwrapped"]
+				}
+			}
+		}
+		s.mu.RUnlock()
+
+		s.writeResult(conn, reqID, map[string]any{
+			"text":     text,
+			"complete": true,
+			"how":      "screen",
+		})
+
+	case "terminal.keys":
+		target := stringVal(rawReq.Params["terminal"])
+		if target == "" {
+			target = stringVal(rawReq.Params["target"])
+		}
+		s.mu.RLock()
+		found := s.findTerminalLocked(target)
+		s.mu.RUnlock()
+		if found == nil {
+			s.writeError(conn, reqID, "not_found", fmt.Sprintf("no terminal %q", target))
+			return
+		}
+		s.writeResult(conn, reqID, map[string]any{
+			"turn":   found["turn"],
+			"status": terminalStatusState(found),
+		})
+
+	case "terminal.send":
+		target := stringVal(rawReq.Params["terminal"])
+		if target == "" {
+			target = stringVal(rawReq.Params["target"])
+		}
+		s.mu.RLock()
+		found := s.findTerminalLocked(target)
+		s.mu.RUnlock()
+		if found == nil {
+			s.writeError(conn, reqID, "not_found", fmt.Sprintf("no terminal %q", target))
+			return
+		}
+		force, _ := rawReq.Params["force"].(bool)
+		if !force && terminalStatusState(found) == "blocked" {
+			s.writeError(conn, reqID, "blocked", "terminal is blocked on a prompt")
+			return
+		}
+		s.writeResult(conn, reqID, map[string]any{
+			"turn":    found["turn"],
+			"status":  terminalStatusState(found),
+			"started": true,
+		})
+
+	case "terminal.run":
+		var argv []string
+		if rawArgv, ok := rawReq.Params["argv"].([]any); ok {
+			for _, a := range rawArgv {
+				if str, ok := a.(string); ok {
+					argv = append(argv, str)
+				}
+			}
+		}
+		if len(argv) == 0 {
+			s.writeError(conn, reqID, "invalid_params", "argv is required")
+			return
+		}
+		cwd := stringVal(rawReq.Params["cwd"])
+		name := stringVal(rawReq.Params["name"])
+		labels := make(map[string]string)
+		if rawLabels, ok := rawReq.Params["labels"].(map[string]any); ok {
+			for k, v := range rawLabels {
+				if sv := stringVal(v); sv != "" {
+					labels[k] = sv
+				}
+			}
+		}
+
 		s.mu.Lock()
-		agentsCopy := make([]map[string]any, len(s.agents))
-		copy(agentsCopy, s.agents)
+		s.nextSeq++
+		addr := fmt.Sprintf("t%d", s.nextSeq)
+		if labels["herdr.space"] != "" && labels["herdr.tab"] == "" {
+			labels["herdr.tab"] = fmt.Sprintf("tb%d", s.nextSeq)
+		}
+		term := map[string]any{
+			"address": addr,
+			"state":   "live",
+			"argv":    argv,
+			"cwd":     cwd,
+			"turn":    0,
+			"labels":  labels,
+			"foreground": map[string]any{
+				"pid":  1000 + s.nextSeq,
+				"name": argv[0],
+				"argv": argv,
+				"cwd":  cwd,
+			},
+			"status": map[string]any{
+				"state": "idle",
+				"app":   argv[0],
+			},
+		}
+		if name != "" {
+			term["name"] = name
+		}
+		s.terminals = append(s.terminals, term)
 		s.mu.Unlock()
-		return resultResp(id, map[string]any{
-			"type":       "session_snapshot",
-			"workspaces": []any{},
-			"agents":     agentsCopy,
+
+		s.writeResult(conn, reqID, term)
+
+	case "events.subscribe":
+		sub := &subscriber{conn: conn}
+
+		s.mu.RLock()
+		beforeHook := s.testHookBeforeRegister
+		afterHook := s.testHookAfterAck
+		s.mu.RUnlock()
+		if beforeHook != nil {
+			beforeHook()
+		}
+
+		sub.mu.Lock()
+		s.mu.Lock()
+		if s.stopped {
+			s.mu.Unlock()
+			sub.mu.Unlock()
+			return
+		}
+		drop := s.dropAfterAck
+		if !drop {
+			s.subscribers[sub] = struct{}{}
+			keepOpen = true
+		}
+		terminals := make([]map[string]any, len(s.terminals))
+		copy(terminals, s.terminals)
+		s.mu.Unlock()
+
+		s.writeResult(conn, reqID, map[string]any{
+			"seq":       1,
+			"terminals": terminals,
 		})
+		sub.mu.Unlock()
+
+		if afterHook != nil {
+			afterHook()
+		}
 
 	default:
-		return errorResp(id, "invalid_request", fmt.Sprintf("unknown method: %s", method))
+		s.writeError(conn, reqID, "invalid_request", fmt.Sprintf("unknown method: %s", rawReq.Method))
 	}
 }
 
-// newWorkspaceLocked adds a workspace with its root tab and pane. Callers
-// hold s.mu.
-func (s *Server) newWorkspaceLocked(n int, label, cwd string) (map[string]any, map[string]any, map[string]any) {
-	workspaceID := fmt.Sprintf("w%d", n)
-	tab, pane := s.newTabLocked(n, workspaceID, label, cwd)
-	ws := map[string]any{
-		"workspace_id":  workspaceID,
-		"number":        n,
-		"label":         label,
-		"focused":       false,
-		"pane_count":    1,
-		"tab_count":     1,
-		"active_tab_id": tab["tab_id"],
-		"agent_status":  "idle",
-	}
-	s.workspaces = append(s.workspaces, ws)
-	return ws, tab, pane
-}
-
-// newTabLocked adds a tab and its root pane in workspaceID. Callers hold s.mu.
-func (s *Server) newTabLocked(n int, workspaceID, label, cwd string) (map[string]any, map[string]any) {
-	number := 1
-	for _, t := range s.tabs {
-		if t["workspace_id"] == workspaceID {
-			number++
-		}
-	}
-	if label == "" {
-		label = fmt.Sprintf("%d", number)
-	}
-	tabID := fmt.Sprintf("t%d", n)
-	pane := map[string]any{
-		"pane_id":        fmt.Sprintf("%s:p%d", workspaceID, n),
-		"terminal_id":    fmt.Sprintf("term_%d", n),
-		"workspace_id":   workspaceID,
-		"tab_id":         tabID,
-		"label":          label,
-		"cwd":            cwd,
-		"foreground_cwd": cwd,
-		"focused":        false,
-		"agent_status":   "idle",
-		"revision":       1,
-	}
-	tab := map[string]any{
-		"tab_id":       tabID,
-		"workspace_id": workspaceID,
-		"number":       number,
-		"label":        label,
-		"focused":      false,
-		"pane_count":   1,
-		"agent_status": "idle",
-	}
-	s.tabs = append(s.tabs, tab)
-	s.panes = append(s.panes, pane)
-	return tab, pane
-}
-
-// findAgent returns the agent whose pane_id or name is target, or nil. It
-// reads the agent list under the lock.
-func (s *Server) findAgent(target string) map[string]any {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	for _, a := range s.agents {
-		if a["pane_id"] == target || a["name"] == target {
-			return a
+func (s *Server) findTerminalLocked(target string) map[string]any {
+	for _, t := range s.terminals {
+		if stringVal(t["address"]) == target || stringVal(t["pane_id"]) == target {
+			return t
 		}
 	}
 	return nil
 }
 
-func (s *Server) handleSubscribe(conn net.Conn, id string, params map[string]any, hold *Hold, stopped <-chan struct{}) {
-	subsRaw, _ := params["subscriptions"].([]any)
-	paneIDs := make(map[string]bool)
-	eventTypes := make(map[string]bool)
-
-	for _, subItem := range subsRaw {
-		subMap, ok := subItem.(map[string]any)
-		if !ok {
-			continue
-		}
-		t, _ := subMap["type"].(string)
-		eventTypes[t] = true
-		if t == "pane.agent_status_changed" {
-			paneID, _ := subMap["pane_id"].(string)
-			if paneID == "" {
-				s.answer(conn, errorResp(id, "invalid_request", "missing field `pane_id`"), hold, stopped)
-				return
-			}
-			paneIDs[paneID] = true
+func terminalStatusState(t map[string]any) string {
+	if st, ok := t["status"].(map[string]any); ok {
+		if state := stringVal(st["state"]); state != "" {
+			return state
 		}
 	}
-
-	if hold != nil && !hold.wait(stopped) {
-		_ = conn.Close()
-		return
-	}
-
-	s.mu.Lock()
-	dropAfterAck := s.dropAfterAck
-	beforeRegister, afterAck := s.testHookBeforeRegister, s.testHookAfterAck
-	s.mu.Unlock()
-
-	ack := resultResp(id, map[string]any{"type": "subscription_started"})
-	if dropAfterAck {
-		s.writeJSON(conn, ack)
-		_ = conn.Close()
-		return
-	}
-
-	if beforeRegister != nil {
-		beforeRegister()
-	}
-
-	// Register before writing the ack, and keep sub.mu until the ack is out:
-	// an event emitted as soon as the client sees the ack is then neither lost
-	// nor written ahead of the ack.
-	sub := &subscriber{conn: conn, paneIDs: paneIDs, eventTypes: eventTypes}
-	sub.mu.Lock()
-	s.mu.Lock()
-	select {
-	case <-stopped:
-		// The server stopped while this call was in flight: herdr is gone.
-		s.mu.Unlock()
-		sub.mu.Unlock()
-		_ = conn.Close()
-		return
-	default:
-	}
-	s.subscribers = append(s.subscribers, sub)
-	s.mu.Unlock()
-	s.writeJSON(conn, ack)
-	sub.mu.Unlock()
-
-	if afterAck != nil {
-		afterAck()
-	}
-
-	// Read loop to detect disconnect
-	go func() {
-		buf := make([]byte, 128)
-		for {
-			if _, err := conn.Read(buf); err != nil {
-				s.removeSubscriber(sub)
-				return
-			}
-		}
-	}()
+	return stringVal(t["agent_status"])
 }
 
-func (s *Server) writeJSON(conn net.Conn, v any) {
-	data, _ := json.Marshal(v)
+func (s *Server) writeResult(conn net.Conn, id string, result any) {
+	resp := map[string]any{
+		"jsonrpc": "2.0",
+		"id":      id,
+		"result":  result,
+	}
+	data, err := json.Marshal(resp)
+	if err != nil {
+		return
+	}
 	data = append(data, '\n')
 	_, _ = conn.Write(data)
 }
 
-func resultResp(id string, result map[string]any) map[string]any {
-	return map[string]any{"id": id, "result": result}
-}
-
-func errorResp(id, code, message string) map[string]any {
-	return map[string]any{
-		"id": id,
+func (s *Server) writeError(conn net.Conn, id, code, message string) {
+	resp := map[string]any{
+		"jsonrpc": "2.0",
+		"id":      id,
 		"error": map[string]any{
-			"code":    code,
+			"code":    -32000,
 			"message": message,
+			"data": map[string]any{
+				"kind": code,
+			},
 		},
 	}
-}
-
-func notFound(id, target string) map[string]any {
-	return errorResp(id, "agent_not_found", fmt.Sprintf("agent target %s not found", target))
+	data, err := json.Marshal(resp)
+	if err != nil {
+		return
+	}
+	data = append(data, '\n')
+	_, _ = conn.Write(data)
 }

@@ -72,16 +72,12 @@ type Engine struct {
 	SessionTimeout time.Duration
 	FolderTimeout  time.Duration
 
-	mu            sync.RWMutex
-	states        map[string]*paneState
-	workspaces    map[string]string // workspace_id -> label ("" when unlabeled); from the last workspace.list
-	tabs          map[string]string // tab_id -> the owner's label ("" when it is only the tab's number); from the last tab.list
-	wsRefreshing  bool              // a workspace.list is in flight
-	wsRefreshedAt time.Time         // when the last workspace.list finished (ok or not)
-	herdrOnline   bool
-	pong          herdr.Pong
-	herdrErr      string // why herdr is offline; "" while online
-	guard         commandGuard
+	mu          sync.RWMutex
+	states      map[string]*paneState
+	herdrOnline bool
+	pong        herdr.Pong
+	herdrErr    string // why herdr is offline; "" while online
+	guard       commandGuard
 }
 
 func (e *Engine) lockPane(ctx context.Context, paneID string) (func(), error) {
@@ -122,9 +118,7 @@ func NewEngine(
 		TurnCheckInterval:  15 * time.Second,
 		PresenceInterval:   15 * time.Second,
 
-		states:     make(map[string]*paneState),
-		workspaces: make(map[string]string),
-		tabs:       make(map[string]string),
+		states: make(map[string]*paneState),
 	}
 	if syncer != nil {
 		syncer.Listener = e
@@ -185,9 +179,6 @@ func (e *Engine) OnHerdrOnline(online bool, pong herdr.Pong) {
 			e.herdrErr = "herdr unreachable at " + e.Herdr.SocketPath
 		}
 	}
-	if online {
-		e.startWorkspaceRefreshLocked()
-	}
 	e.mu.Unlock()
 
 	if e.Relay != nil {
@@ -202,8 +193,6 @@ func (e *Engine) OnHerdrOnline(online bool, pong herdr.Pong) {
 func (e *Engine) OnChanges(changes []herdr.Change) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-
-	e.maybeRefreshWorkspacesLocked(changes)
 
 	for _, ch := range changes {
 		paneID := ch.Agent.PaneID
@@ -281,14 +270,24 @@ func (e *Engine) OnChanges(changes []herdr.Change) {
 				pub.Prompt = nil
 			}
 
-			// The turn watch owns the background count; it holds only while
-			// herdr keeps the pane working. The task counts hold with any
-			// status: they change only when the transcript is read again.
-			if pub.Status == model.StatusWorking {
+			// Child terminals from terminal.list (info.SubagentCount) or the
+			// turn watch populate background_agents while working; task counts
+			// hold across statuses until the next transcript read.
+			if info.SubagentCount != nil {
+				pub.BackgroundAgents = *info.SubagentCount
+			} else if pub.Status == model.StatusWorking {
 				pub.BackgroundAgents = st.public.BackgroundAgents
 			}
-			pub.BackgroundShells = st.public.BackgroundShells
-			pub.BackgroundMonitors = st.public.BackgroundMonitors
+			if info.BackgroundShellCount != nil {
+				pub.BackgroundShells = *info.BackgroundShellCount
+			} else {
+				pub.BackgroundShells = st.public.BackgroundShells
+			}
+			if info.BackgroundMonitorCount != nil {
+				pub.BackgroundMonitors = *info.BackgroundMonitorCount
+			} else {
+				pub.BackgroundMonitors = st.public.BackgroundMonitors
+			}
 
 			st.public = pub
 			if e.Relay != nil {
@@ -365,6 +364,9 @@ retry:
 	if !exists || st.info.StateChangeSeq != seq || st.public.Status != model.StatusBlocked {
 		return
 	}
+	if !parsed && st.info.StatusMsg != "" {
+		prompt.Public.Title = st.info.StatusMsg
+	}
 
 	st.prompt = &prompt
 	st.public.Prompt = &prompt.Public
@@ -419,10 +421,10 @@ func (e *Engine) backToConversation(agent string, prev *herdr.AgentInfo, info he
 }
 
 func titleOf(info herdr.AgentInfo) string {
-	if info.TerminalTitleStripped == nil {
+	if info.Title == nil {
 		return ""
 	}
-	return *info.TerminalTitleStripped
+	return *info.Title
 }
 
 func (e *Engine) captureHistory(paneID, cwd, agent string, info herdr.AgentInfo) {
@@ -433,8 +435,8 @@ func (e *Engine) captureHistory(paneID, cwd, agent string, info herdr.AgentInfo)
 	// The pane's title now, not when the capture was scheduled: it says what
 	// the pane shows.
 	e.mu.RLock()
-	if st, ok := e.states[paneID]; ok && st.info.TerminalTitleStripped != nil {
-		info.TerminalTitleStripped = st.info.TerminalTitleStripped
+	if st, ok := e.states[paneID]; ok && st.info.Title != nil {
+		info.Title = st.info.Title
 	}
 	e.mu.RUnlock()
 
@@ -795,137 +797,13 @@ func (e *Engine) readScreenForHistory(ctx context.Context, paneID string) (strin
 	return e.Herdr.Read(readCtx, paneID, herdr.SourceRecentUnwrapped, 200)
 }
 
-const (
-	// wsRetryInterval is the minimum gap between workspace.list calls
-	// triggered by a workspace the engine has not seen yet.
-	wsRetryInterval = 5 * time.Second
-	// wsMaxAge is how stale workspace labels may get while agents change;
-	// it picks up renames without a call per change batch.
-	wsMaxAge = 60 * time.Second
-)
-
-// maybeRefreshWorkspacesLocked starts a workspace.list when a change names a
-// workspace missing from the last list (at most every wsRetryInterval), or
-// when the labels are older than wsMaxAge. Unlabeled workspaces are cached
-// too, so they no longer cause a call per batch. Callers hold e.mu.
-func (e *Engine) maybeRefreshWorkspacesLocked(changes []herdr.Change) {
-	if e.Herdr == nil || e.wsRefreshing {
-		return
-	}
-	unknown := false
-	for _, ch := range changes {
-		if ch.Kind != herdr.Added && ch.Kind != herdr.Updated {
-			continue
-		}
-		if _, ok := e.workspaces[ch.Agent.WorkspaceID]; !ok {
-			unknown = true
-			break
-		}
-		if _, ok := e.tabs[ch.Agent.TabID]; !ok && ch.Agent.TabID != "" {
-			unknown = true
-			break
-		}
-	}
-	age := time.Since(e.wsRefreshedAt)
-	if (unknown && age >= wsRetryInterval) || age >= wsMaxAge {
-		e.startWorkspaceRefreshLocked()
-	}
-}
-
-// RefreshWorkspaces triggers a background refresh of workspace and tab labels.
-func (e *Engine) RefreshWorkspaces() {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	e.startWorkspaceRefreshLocked()
-}
-
-// startWorkspaceRefreshLocked runs one workspace.list in the background
-// unless one is already in flight. Callers hold e.mu.
-func (e *Engine) startWorkspaceRefreshLocked() {
-	if e.Herdr == nil || e.wsRefreshing {
-		return
-	}
-	e.wsRefreshing = true
-	go e.refreshWorkspaces(context.Background())
-}
-
-// refreshWorkspaces replaces the workspace and tab label caches with herdr's
-// lists and republishes agents whose workspace label or label changed (an
-// agent's label can be its tab's).
-func (e *Engine) refreshWorkspaces(ctx context.Context) {
-	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
-	defer cancel()
-
-	wsList, err := e.Herdr.ListWorkspaces(ctx)
-	var tabList []herdr.TabInfo
-	var tabErr error
-	if err == nil {
-		tabList, tabErr = e.Herdr.ListTabs(ctx)
-	}
-
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	e.wsRefreshing = false
-	e.wsRefreshedAt = time.Now()
-
-	if err != nil {
-		if e.Logger != nil {
-			e.Logger.Warn("refresh workspaces failed", "err", err)
-		}
-		return
-	}
-
-	labels := make(map[string]string, len(wsList))
-	for _, ws := range wsList {
-		labels[ws.WorkspaceID] = ws.Label
-	}
-	e.workspaces = labels
-
-	if tabErr != nil {
-		if e.Logger != nil {
-			e.Logger.Warn("refresh tabs failed", "err", tabErr)
-		}
-	} else {
-		tabs := make(map[string]string, len(tabList))
-		for _, t := range tabList {
-			label := strings.TrimSpace(t.Label)
-			if label == strconv.Itoa(t.Number) { // herdr's default: only the tab's number
-				label = ""
-			}
-			tabs[t.TabID] = label
-		}
-		e.tabs = tabs
-	}
-
-	if e.Logger != nil {
-		e.Logger.Debug("refreshed workspaces", "count", len(wsList), "workspaces", labels, "tabs", len(tabList))
-	}
-
-	for _, st := range e.states {
-		wsLabel := labels[st.info.WorkspaceID]
-		name, title := e.agentNames(st.info)
-		label := e.labelFor(st.info, name, title, st.public.CWD)
-		if st.public.Workspace == wsLabel && st.public.Label == label {
-			continue
-		}
-		st.public.Workspace = wsLabel
-		st.public.Label = label
-		if e.Relay != nil {
-			e.Relay.Send(model.AgentUpdateMsg{
-				Type:  model.WireAgentUpdate,
-				Agent: st.public,
-			})
-		}
-	}
-}
-
-// agentNames returns herdr's name for the agent and its terminal title, when
+// agentNames returns herdr-core's name for the agent and its terminal title, when
 // the title describes a task: a title that only names the program is none.
 func (e *Engine) agentNames(info herdr.AgentInfo) (name, title string) {
 	if info.Name != nil {
 		name = strings.TrimSpace(*info.Name)
 	}
-	if info.TerminalTitleStripped != nil {
+	if info.Title != nil {
 		agent := ""
 		if info.Agent != nil {
 			agent = *info.Agent
@@ -935,23 +813,36 @@ func (e *Engine) agentNames(info herdr.AgentInfo) (name, title string) {
 			ad = e.Agents.For(agent)
 		}
 		if ad != nil {
-			title = ad.TaskTitle(*info.TerminalTitleStripped)
+			title = ad.TaskTitle(*info.Title)
 		} else {
-			title = strings.TrimSpace(*info.TerminalTitleStripped)
+			title = strings.TrimSpace(*info.Title)
 		}
 	}
 	return name, title
 }
 
-// labelFor names the agent the way the owner did: herdr's agent name, else
+// customTabLabel returns info.TabLabel unless it is empty or just the tab's number.
+func customTabLabel(tabLabel string) string {
+	trimmed := strings.TrimSpace(tabLabel)
+	if trimmed == "" {
+		return ""
+	}
+	if _, err := strconv.Atoi(trimmed); err == nil {
+		return ""
+	}
+	return trimmed
+}
+
+// labelFor names the agent the way the owner did: herdr-core's agent name, else
 // its tab's label (unless it is only the tab's number), else its terminal
-// title, else the cwd's base name, else the pane id. Callers hold e.mu.
+// title, else the cwd's base name, else the pane id.
 func (e *Engine) labelFor(info herdr.AgentInfo, name, title, cwd string) string {
+	tab := customTabLabel(info.TabLabel)
 	switch {
 	case name != "":
 		return name
-	case e.tabs[info.TabID] != "":
-		return e.tabs[info.TabID]
+	case tab != "":
+		return tab
 	case title != "":
 		return title
 	case cwd != "" && filepath.Base(cwd) != "/" && filepath.Base(cwd) != ".":
@@ -967,19 +858,12 @@ func (e *Engine) buildAgentState(info herdr.AgentInfo) (model.AgentState, string
 	}
 
 	cwd := ""
-	if info.ForegroundCWD != nil && *info.ForegroundCWD != "" {
-		cwd = *info.ForegroundCWD
-	} else if info.CWD != nil && *info.CWD != "" {
+	if info.CWD != nil && *info.CWD != "" {
 		cwd = *info.CWD
 	}
 
 	paneName, taskTitle := e.agentNames(info)
 	label := e.labelFor(info, paneName, taskTitle, cwd)
-
-	wsLabel := ""
-	if e.workspaces != nil {
-		wsLabel = e.workspaces[info.WorkspaceID]
-	}
 
 	return model.AgentState{
 		PaneID:         info.PaneID,
@@ -989,7 +873,7 @@ func (e *Engine) buildAgentState(info herdr.AgentInfo) (model.AgentState, string
 		Title:          taskTitle,
 		CWD:            cwd,
 		WorkspaceID:    info.WorkspaceID,
-		Workspace:      wsLabel,
+		Workspace:      info.WorkspaceLabel,
 		Status:         model.AgentStatus(info.AgentStatus),
 		Focused:        info.Focused,
 		StateChangeSeq: info.StateChangeSeq,

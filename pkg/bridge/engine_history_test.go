@@ -27,7 +27,7 @@ func claudePane(status, title string, seq uint64, session *herdr.AgentSession) h
 	return herdr.AgentInfo{
 		PaneID: "w1:p1", WorkspaceID: "w1", TabID: "t1", Agent: &agent,
 		AgentStatus: status, StateChangeSeq: seq,
-		TerminalTitleStripped: &title, AgentSession: session,
+		Title: &title, AgentSession: session,
 	}
 }
 
@@ -157,7 +157,7 @@ func TestEngine_HistoryAgentsViewPublishesNothing(t *testing.T) {
 		t.Fatalf("published %q for the agents view (title)", got)
 	}
 	for _, c := range h.server.Calls() {
-		if c.Method == "agent.read" {
+		if c.Method == "terminal.read" {
 			t.Fatalf("read the screen of a pane showing the agents view")
 		}
 	}
@@ -175,7 +175,7 @@ func TestEngine_HistoryAgentsViewPublishesNothing(t *testing.T) {
 func TestEngine_HistoryBackToConversation(t *testing.T) {
 	h := newTestHarness(t)
 	h.server.SetScreen("w1:p1", "recent_unwrapped", "❯ say hi\n\n⏺ hi there\n\n✻ Worked for 1s · done 10:25 AM\n\n────\n❯ \n────\n")
-	h.engine.OnHerdrOnline(true, herdr.Pong{Version: "0.9.3", Protocol: 22})
+	h.engine.OnHerdrOnline(true, herdr.Pong{Version: "0.1.14", Protocol: 1})
 
 	inView := claudePane("done", "claude agents", 5, nil)
 	h.track(inView)
@@ -202,7 +202,7 @@ func TestEngine_HistoryScreenReadRetried(t *testing.T) {
 	h.engine.ScreenReadTimeout = 100 * time.Millisecond
 	h.engine.ScreenRetryTimeout = 2 * time.Second
 	h.server.SetScreen("w1:p1", "recent_unwrapped", "❯ say hi\n\n⏺ hi again\n\n✻ Worked for 1s · done 10:25 AM\n\n────\n❯ \n────\n")
-	hold := h.server.HoldNext("agent.read") // never released: the first read times out
+	hold := h.server.HoldNext("terminal.read") // never released: the first read times out
 	defer hold.Release()
 
 	info := claudePane("done", "Sandbox hello", 3, nil)
@@ -213,12 +213,12 @@ func TestEngine_HistoryScreenReadRetried(t *testing.T) {
 	}
 	reads := 0
 	for _, c := range h.server.Calls() {
-		if c.Method == "agent.read" {
+		if c.Method == "terminal.read" {
 			reads++
 		}
 	}
 	if reads != 2 {
-		t.Errorf("agent.read calls = %d, want 2", reads)
+		t.Errorf("terminal.read calls = %d, want 2", reads)
 	}
 }
 
@@ -246,7 +246,7 @@ func TestEngine_HistoryPendingQuestionPublishesNothing(t *testing.T) {
 		t.Fatalf("published %q for a turn waiting on a question", got)
 	}
 	for _, c := range h.server.Calls() {
-		if c.Method == "agent.read" {
+		if c.Method == "terminal.read" {
 			t.Fatal("captured the screen of a turn waiting on a question")
 		}
 	}

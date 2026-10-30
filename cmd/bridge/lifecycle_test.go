@@ -121,7 +121,7 @@ func TestStart_FreshInstallUsesDefaults(t *testing.T) {
 	want := ServiceSpec{
 		Binary:     ta.exe,
 		ConfigPath: filepath.Join(ta.home, ".config", "herdr", "plugins", "config", "herdr-agent-watch", "config.toml"),
-		SocketPath: filepath.Join(ta.home, ".config", "herdr", "herdr.sock"),
+		SocketPath: filepath.Join(ta.home, ".local", "state", "herdr-core", "default", "default.sock"),
 		StateDir:   filepath.Join(ta.home, ".local", "state", "agent-watch"),
 		LogPath:    filepath.Join(ta.home, "Library", "Logs", "agent-watch-bridge.log"),
 	}

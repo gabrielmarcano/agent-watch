@@ -81,8 +81,8 @@ func TestCommands_AllErrorCodes(t *testing.T) {
 	assertNoSendKeys := func(callCountBefore int, label string) {
 		calls := h.server.Calls()
 		for _, c := range calls[callCountBefore:] {
-			if c.Method == "agent.send_keys" {
-				t.Errorf("%s: agent.send_keys was unexpectedly called: %+v", label, c.Params)
+			if c.Method == "terminal.keys" {
+				t.Errorf("%s: terminal.keys was unexpectedly called: %+v", label, c.Params)
 			}
 		}
 	}
@@ -330,23 +330,23 @@ func TestCommands_AnswerDispatchesGoldenKeys(t *testing.T) {
 		t.Fatalf("expected successful answer result, got %+v", res)
 	}
 
-	// Verify agent.send_keys was called on herdr with golden keys
+	// Verify terminal.keys was called on herdr-core with golden keys
 	calls := h.server.Calls()
 	var sentKeysCall *herdrtest.Call
 	for _, c := range calls[beforeCalls:] {
-		if c.Method == "agent.send_keys" {
+		if c.Method == "terminal.keys" {
 			sentKeysCall = &c
 			break
 		}
 	}
 
 	if sentKeysCall == nil {
-		t.Fatal("agent.send_keys was not called on herdr")
+		t.Fatal("terminal.keys was not called on herdr")
 	}
 
-	target := sentKeysCall.Params["target"].(string)
+	target := sentKeysCall.Params["terminal"].(string)
 	if target != "w1:p1" {
-		t.Errorf("send_keys target = %q, want w1:p1", target)
+		t.Errorf("terminal.keys terminal = %q, want w1:p1", target)
 	}
 
 	rawKeys := sentKeysCall.Params["keys"].([]any)
@@ -375,7 +375,7 @@ func TestCommands_CancelDispatchesCancelKeys(t *testing.T) {
 	})
 	// Cancel re-reads the screen: a menu must be on it, matching the published prompt.
 	h.server.SetScreen("w1:p1", "visible", loadFixture(t, "claude", "permission-bash.txt"))
-	h.engine.OnHerdrOnline(true, herdr.Pong{Version: "0.9.1", Protocol: 22})
+	h.engine.OnHerdrOnline(true, herdr.Pong{Version: "0.1.14", Protocol: 1})
 	syncAndAwaitPrompt(t, h, "w1:p1", 100, "")
 
 	beforeCalls := len(h.server.Calls())
@@ -408,18 +408,18 @@ func TestCommands_CancelDispatchesCancelKeys(t *testing.T) {
 		t.Fatalf("expected successful cancel result, got %+v", res)
 	}
 
-	// Verify agent.send_keys was called with ["esc"]
+	// Verify terminal.keys was called with ["esc"]
 	calls := h.server.Calls()
 	var sentKeysCall *herdrtest.Call
 	for _, c := range calls[beforeCalls:] {
-		if c.Method == "agent.send_keys" {
+		if c.Method == "terminal.keys" {
 			sentKeysCall = &c
 			break
 		}
 	}
 
 	if sentKeysCall == nil {
-		t.Fatal("agent.send_keys was not called for cancel")
+		t.Fatal("terminal.keys was not called for cancel")
 	}
 
 	rawKeys := sentKeysCall.Params["keys"].([]any)
@@ -442,7 +442,7 @@ func TestCommands_PromptWhileWorking(t *testing.T) {
 			"state_change_seq": 100,
 		},
 	})
-	h.engine.OnHerdrOnline(true, herdr.Pong{Version: "0.9.1", Protocol: 22})
+	h.engine.OnHerdrOnline(true, herdr.Pong{Version: "0.1.14", Protocol: 1})
 
 	beforeCalls := len(h.server.Calls())
 
@@ -478,14 +478,14 @@ func TestCommands_PromptWhileWorking(t *testing.T) {
 	calls := h.server.Calls()
 	var promptCall *herdrtest.Call
 	for _, c := range calls[beforeCalls:] {
-		if c.Method == "agent.prompt" {
+		if c.Method == "terminal.send" {
 			promptCall = &c
 			break
 		}
 	}
 
 	if promptCall == nil {
-		t.Fatal("agent.prompt was not called on herdr")
+		t.Fatal("terminal.send was not called on herdr")
 	}
 
 	if promptCall.Params["text"].(string) != "please run the tests next" {

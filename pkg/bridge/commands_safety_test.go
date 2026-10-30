@@ -38,11 +38,11 @@ func agentRow(paneID, agent, status string, seq uint64) map[string]any {
 	}
 }
 
-// sendKeysSince returns the key lists passed to agent.send_keys after call index from.
+// sendKeysSince returns the key lists passed to terminal.keys after call index from.
 func sendKeysSince(h *testHarness, from int) [][]string {
 	var out [][]string
 	for _, c := range h.server.Calls()[from:] {
-		if c.Method != "agent.send_keys" {
+		if c.Method != "terminal.keys" {
 			continue
 		}
 		raw, _ := c.Params["keys"].([]any)
@@ -578,9 +578,9 @@ func TestCommands_SendKeysUnavailableRollsBackClaim(t *testing.T) {
 	}
 	fp := fingerprintOf(t, h, "claude", bash)
 
-	// Hold agent.read so we can stop the server right after the screen is read,
+	// Hold terminal.read so we can stop the server right after the screen is read,
 	// causing the subsequent SendKeys dial to fail with herdr.ErrUnavailable.
-	hold := h.server.HoldNext("agent.read")
+	hold := h.server.HoldNext("terminal.read")
 	done := make(chan struct{})
 	var res model.CommandResultMsg
 	go func() {
@@ -594,7 +594,7 @@ func TestCommands_SendKeysUnavailableRollsBackClaim(t *testing.T) {
 	select {
 	case <-hold.Received():
 	case <-time.After(2 * time.Second):
-		t.Fatal("timed out waiting for agent.read hold")
+		t.Fatal("timed out waiting for terminal.read hold")
 	}
 
 	h.server.Stop()
@@ -636,8 +636,8 @@ func TestCommands_PromptRejectedWhileMenuOnScreen(t *testing.T) {
 	if res.OK || res.ErrorCode != "agent_blocked" {
 		t.Errorf("prompt with a menu on screen: ok=%v code=%q, want agent_blocked", res.OK, res.ErrorCode)
 	}
-	if n := callsSince(h, before, "agent.prompt"); n != 0 {
-		t.Errorf("agent.prompt called %d times with a menu on screen, want 0", n)
+	if n := callsSince(h, before, "terminal.send"); n != 0 {
+		t.Errorf("terminal.send called %d times with a menu on screen, want 0", n)
 	}
 	if keys := sendKeysSince(h, before); len(keys) != 0 {
 		t.Errorf("keys sent: %v, want none", keys)
@@ -649,7 +649,7 @@ func TestCommands_PromptRejectedWhenScreenUnreadable(t *testing.T) {
 	h := newTestHarness(t)
 	h.server.SetAgents([]map[string]any{agentRow("w1:p1", "agy", "done", 100)})
 	h.engine.OnHerdrOnline(true, herdr.Pong{Version: "0.9.1", Protocol: 22})
-	h.server.FailNext("agent.read", "internal", "read failed")
+	h.server.FailNext("terminal.read", "internal", "read failed")
 
 	before := len(h.server.Calls())
 	res, _ := runCmd(t, h, model.CommandMsg{
@@ -659,8 +659,8 @@ func TestCommands_PromptRejectedWhenScreenUnreadable(t *testing.T) {
 	if res.OK || res.ErrorCode != "herdr_offline" {
 		t.Errorf("prompt with unreadable screen: ok=%v code=%q, want herdr_offline", res.OK, res.ErrorCode)
 	}
-	if n := callsSince(h, before, "agent.prompt"); n != 0 {
-		t.Errorf("agent.prompt called %d times with an unreadable screen, want 0", n)
+	if n := callsSince(h, before, "terminal.send"); n != 0 {
+		t.Errorf("terminal.send called %d times with an unreadable screen, want 0", n)
 	}
 }
 
@@ -679,8 +679,8 @@ func TestCommands_PromptAcceptedWithoutMenu(t *testing.T) {
 	if !res.OK {
 		t.Fatalf("prompt without menu: code=%q msg=%q, want ok", res.ErrorCode, res.Message)
 	}
-	if n := callsSince(h, before, "agent.prompt"); n != 1 {
-		t.Errorf("agent.prompt called %d times, want 1", n)
+	if n := callsSince(h, before, "terminal.send"); n != 1 {
+		t.Errorf("terminal.send called %d times, want 1", n)
 	}
 }
 
@@ -714,7 +714,7 @@ func TestCommands_PromptStatusAllowlist(t *testing.T) {
 			RequestID: "req-status-" + c.pane, Action: "prompt", PaneID: c.pane,
 			ExpectedSeq: 7, Text: "hello",
 		})
-		prompts := callsSince(h, before, "agent.prompt")
+		prompts := callsSince(h, before, "terminal.send")
 		if c.wantCode == "" {
 			if !res.OK || prompts != 1 {
 				t.Errorf("status %q: ok=%v code=%q prompts=%d, want accepted once", c.status, res.OK, res.ErrorCode, prompts)
@@ -725,7 +725,7 @@ func TestCommands_PromptStatusAllowlist(t *testing.T) {
 			t.Errorf("status %q: ok=%v code=%q, want %s", c.status, res.OK, res.ErrorCode, c.wantCode)
 		}
 		if prompts != 0 {
-			t.Errorf("status %q: agent.prompt called %d times, want 0", c.status, prompts)
+			t.Errorf("status %q: terminal.send called %d times, want 0", c.status, prompts)
 		}
 	}
 }
