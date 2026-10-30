@@ -287,3 +287,28 @@ func TestClaudeViewDetector(t *testing.T) {
 		t.Error("a reply quoting the hints was taken for the agents view")
 	}
 }
+
+func TestClaudeSessionPath_PIDResolution(t *testing.T) {
+	const (
+		id  = "9a81252a-b10b-45fe-86ed-cffaac8feb6c"
+		cwd = "/private/tmp/aw-sandbox"
+	)
+	home := t.TempDir()
+	p := newClaudeProfile(t, home, ".claude")
+	p.transcript(id, claudeTitleLines(id, "Sandbox hello")+claudeTurnLines("hello", "pid resolved reply"))
+	p.index("11626.json", "session-index-interactive.json", id, cwd)
+
+	c := newClaudeAdapter(Config{Home: home})
+	item, err := c.LastTurn(context.Background(), SessionRef{
+		Agent: "claude",
+		PID:   11626,
+		CWD:   cwd,
+		Title: "Sandbox hello",
+	})
+	if err != nil {
+		t.Fatalf("LastTurn via PID: %v", err)
+	}
+	if item.Response != "pid resolved reply" {
+		t.Errorf("response = %q, want %q", item.Response, "pid resolved reply")
+	}
+}

@@ -25,6 +25,7 @@ type SessionRef struct {
 	Agent string // herdr agent id
 	Kind  string // "id" | "path"
 	Value string
+	PID   int    // foreground process id (herdr-core foreground.pid)
 	CWD   string // pane cwd; Claude uses it to build the project slug
 	// Title is the pane's terminal title (herdr's terminal_title_stripped).
 	// Claude uses it to check that the session is the one the pane shows.

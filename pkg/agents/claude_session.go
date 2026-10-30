@@ -126,6 +126,7 @@ func (c *claudeAdapter) sessionPathResolutions() int {
 }
 
 func (c *claudeAdapter) resolveSessionPath(ctx context.Context, ref SessionRef) (string, error) {
+	ref = c.populateFromPID(ref)
 	path := c.resolvePath(ref)
 	want := strings.TrimSpace(ref.Title)
 
@@ -242,6 +243,45 @@ func (c *claudeAdapter) sessionsTitled(ctx context.Context, cfgDir, title string
 	return matches, nil
 }
 
+// populateFromPID resolves a foreground process ID to its Claude session index
+// entry (<config dir>/sessions/<pid>.json) when herdr-core reported no explicit
+// session id or path.
+func (c *claudeAdapter) populateFromPID(ref SessionRef) SessionRef {
+	if ref.Value != "" || ref.PID <= 0 {
+		return ref
+	}
+	name := fmt.Sprintf("%d.json", ref.PID)
+	for _, dir := range c.configDirs() {
+		e, ok := readSessionIndexEntry(filepath.Join(dir, "sessions", name))
+		if ok && validSessionID(e.SessionID) {
+			ref.Kind = "id"
+			ref.Value = e.SessionID
+			if ref.CWD == "" && e.CWD != "" {
+				ref.CWD = e.CWD
+			}
+			return ref
+		}
+	}
+	return ref
+}
+
+func readSessionIndexEntry(path string) (claudeIndexEntry, bool) {
+	f, err := os.Open(path)
+	if err != nil {
+		return claudeIndexEntry{}, false
+	}
+	data, err := io.ReadAll(io.LimitReader(f, maxIndexEntrySize+1))
+	f.Close()
+	if err != nil || len(data) > maxIndexEntrySize {
+		return claudeIndexEntry{}, false
+	}
+	var e claudeIndexEntry
+	if json.Unmarshal(data, &e) != nil || e.SessionID == "" {
+		return claudeIndexEntry{}, false
+	}
+	return e, true
+}
+
 // readSessionIndex reads Claude's session index of a profile: one
 // <pid>.json per running Claude process (interactive or background). Other
 // files there (the <pid>.<hash>.key files) are never opened. Unreadable or
@@ -261,17 +301,7 @@ func readSessionIndex(cfgDir string) []claudeIndexEntry {
 		if !n.Type().IsRegular() || !isIndexName(name) {
 			continue
 		}
-		f, err := os.Open(filepath.Join(dir, name))
-		if err != nil {
-			continue
-		}
-		data, err := io.ReadAll(io.LimitReader(f, maxIndexEntrySize+1))
-		f.Close()
-		if err != nil || len(data) > maxIndexEntrySize {
-			continue
-		}
-		var e claudeIndexEntry
-		if json.Unmarshal(data, &e) == nil && e.SessionID != "" {
+		if e, ok := readSessionIndexEntry(filepath.Join(dir, name)); ok {
 			out = append(out, e)
 		}
 	}

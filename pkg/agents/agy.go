@@ -3,6 +3,7 @@ package agents
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -325,12 +326,49 @@ func (a *agyAdapter) resolvePath(ref SessionRef) string {
 		return ref.Value
 	}
 
+	id := ""
 	if ref.Kind == "id" && ref.Value != "" {
-		target := filepath.Join(a.cfg.AgyBrainDir, ref.Value, ".system_generated", "logs", "transcript_full.jsonl")
+		id = ref.Value
+	} else if ref.Value == "" && ref.CWD != "" {
+		id = a.conversationForCWD(ref.CWD)
+	}
+
+	if id != "" && validSessionID(id) && a.cfg.AgyBrainDir != "" {
+		target := filepath.Join(a.cfg.AgyBrainDir, id, ".system_generated", "logs", "transcript_full.jsonl")
 		if _, err := os.Stat(target); err == nil {
 			return target
 		}
 	}
 
+	return ""
+}
+
+// conversationForCWD reads ~/.gemini/antigravity-cli/cache/last_conversations.json
+// (workspace path -> conversation UUID) when herdr-core reported no explicit
+// session id or path.
+func (a *agyAdapter) conversationForCWD(cwd string) string {
+	if a.cfg.AgyBrainDir == "" || cwd == "" {
+		return ""
+	}
+	cachePath := filepath.Join(filepath.Dir(a.cfg.AgyBrainDir), "cache", "last_conversations.json")
+	f, err := os.Open(cachePath)
+	if err != nil {
+		return ""
+	}
+	data, err := io.ReadAll(io.LimitReader(f, maxIndexEntrySize+1))
+	f.Close()
+	if err != nil || len(data) > maxIndexEntrySize {
+		return ""
+	}
+	var m map[string]string
+	if json.Unmarshal(data, &m) != nil {
+		return ""
+	}
+	if id, ok := m[cwd]; ok && validSessionID(id) {
+		return id
+	}
+	if id, ok := m[filepath.Clean(cwd)]; ok && validSessionID(id) {
+		return id
+	}
 	return ""
 }

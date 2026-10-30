@@ -437,3 +437,39 @@ func TestClaudeResolvePath_DiscoversProfiles(t *testing.T) {
 		t.Errorf("LastTurn by id in a discovered profile: %v, %+v", err, item)
 	}
 }
+
+func TestAgyResolvePath_LastConversationsCache(t *testing.T) {
+	root := t.TempDir()
+	brainDir := filepath.Join(root, "brain")
+	cacheDir := filepath.Join(root, "cache")
+	convID := "c1b80a83-a15f-4b10-8eae-c9ca1dab100d"
+	logDir := filepath.Join(brainDir, convID, ".system_generated", "logs")
+	if err := os.MkdirAll(logDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(cacheDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	transcript := `{"type":"USER_INPUT","content":"<USER_REQUEST>\nhi agy\n</USER_REQUEST>"}` + "\n" +
+		`{"type":"PLANNER_RESPONSE","content":"hello from agy cache"}` + "\n"
+	if err := os.WriteFile(filepath.Join(logDir, "transcript_full.jsonl"), []byte(transcript), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cacheJSON := `{"/tmp/project-a":"` + convID + `"}`
+	if err := os.WriteFile(filepath.Join(cacheDir, "last_conversations.json"), []byte(cacheJSON), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	a := newAgyAdapter(Config{AgyBrainDir: brainDir})
+	item, err := a.LastTurn(context.Background(), SessionRef{
+		Agent: "agy",
+		PID:   86122,
+		CWD:   "/tmp/project-a",
+	})
+	if err != nil {
+		t.Fatalf("LastTurn via last_conversations.json: %v", err)
+	}
+	if item.Query != "hi agy" || item.Response != "hello from agy cache" {
+		t.Errorf("got query=%q response=%q", item.Query, item.Response)
+	}
+}

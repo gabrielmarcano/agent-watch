@@ -427,6 +427,31 @@ func titleOf(info herdr.AgentInfo) string {
 	return *info.Title
 }
 
+// sessionRefFor returns the adapter SessionRef and a session key (used to
+// deduplicate history items and backfills) when herdr reports either a trusted
+// session or a foreground process ID.
+func sessionRefFor(agent, cwd string, info herdr.AgentInfo) (agents.SessionRef, string, bool) {
+	if ref := info.TrustedSession(); ref != nil {
+		return agents.SessionRef{
+			Agent: ref.Agent,
+			Kind:  ref.Kind,
+			Value: ref.Value,
+			PID:   info.ForegroundPID,
+			CWD:   cwd,
+			Title: titleOf(info),
+		}, ref.Value, true
+	}
+	if info.ForegroundPID > 0 {
+		return agents.SessionRef{
+			Agent: agent,
+			PID:   info.ForegroundPID,
+			CWD:   cwd,
+			Title: titleOf(info),
+		}, fmt.Sprintf("pid:%d", info.ForegroundPID), true
+	}
+	return agents.SessionRef{}, "", false
+}
+
 func (e *Engine) captureHistory(paneID, cwd, agent string, info herdr.AgentInfo) {
 	budget := 2*e.TranscriptTimeout + e.ScreenReadTimeout + e.ScreenRetryTimeout + time.Second
 	ctx, cancel := context.WithTimeout(context.Background(), budget)
@@ -440,7 +465,7 @@ func (e *Engine) captureHistory(paneID, cwd, agent string, info herdr.AgentInfo)
 	}
 	e.mu.RUnlock()
 
-	ref := info.TrustedSession()
+	sRef, sessionKey, hasSession := sessionRefFor(agent, cwd, info)
 	ad := e.Agents.For(agent)
 
 	if !ad.ShowsConversation(titleOf(info)) {
@@ -454,18 +479,12 @@ func (e *Engine) captureHistory(paneID, cwd, agent string, info herdr.AgentInfo)
 	var item *model.HistoryItem
 	var err error
 
-	if ref == nil {
+	if !hasSession {
 		e.setTasks(paneID, agents.BackgroundTasks{})
 	} else {
 		readCtx, readCancel := context.WithTimeout(ctx, e.TranscriptTimeout)
 		var tasks agents.BackgroundTasks
-		item, tasks, err = ad.ObserveSettledTurn(readCtx, agents.SessionRef{
-			Agent: ref.Agent,
-			Kind:  ref.Kind,
-			Value: ref.Value,
-			CWD:   cwd,
-			Title: titleOf(info),
-		})
+		item, tasks, err = ad.ObserveSettledTurn(readCtx, sRef)
 		readCancel()
 		e.setTasks(paneID, tasks)
 
@@ -478,7 +497,7 @@ func (e *Engine) captureHistory(paneID, cwd, agent string, info herdr.AgentInfo)
 		if (err != nil || item == nil) && e.Logger != nil {
 			// Never log the transcript itself; the error names the cause (ids only).
 			e.Logger.Warn("LastTurn failed; falling back to a screen capture for history",
-				"pane_id", paneID, "agent", agent, "session_kind", ref.Kind, "err", err)
+				"pane_id", paneID, "agent", agent, "session_kind", sRef.Kind, "err", err)
 		}
 	}
 
@@ -500,11 +519,7 @@ func (e *Engine) captureHistory(paneID, cwd, agent string, info herdr.AgentInfo)
 		return
 	}
 
-	sessionValue := ""
-	if ref != nil {
-		sessionValue = ref.Value
-	}
-	e.publishHistory(paneID, agent, sessionValue, *item)
+	e.publishHistory(paneID, agent, sessionKey, *item)
 }
 
 // publishHistory sends the pane's last reply to the relay unless it is the
@@ -551,8 +566,8 @@ func (e *Engine) maybeBackfillHistoryLocked(paneID, cwd, agent string, info herd
 	if e.Relay == nil || e.Agents == nil {
 		return
 	}
-	ref := info.TrustedSession()
-	if ref == nil {
+	sRef, sessionKey, ok := sessionRefFor(agent, cwd, info)
+	if !ok {
 		return
 	}
 	ad := e.Agents.For(agent)
@@ -560,11 +575,11 @@ func (e *Engine) maybeBackfillHistoryLocked(paneID, cwd, agent string, info herd
 		return
 	}
 	st, ok := e.states[paneID]
-	if !ok || st.backfilledSession == ref.Value {
+	if !ok || st.backfilledSession == sessionKey {
 		return
 	}
-	st.backfilledSession = ref.Value
-	go e.backfillHistory(paneID, cwd, agent, info, ref)
+	st.backfilledSession = sessionKey
+	go e.backfillHistory(paneID, agent, sRef, sessionKey)
 }
 
 // backfillHistory publishes the older turns of a pane's transcript, oldest
@@ -573,7 +588,7 @@ func (e *Engine) maybeBackfillHistoryLocked(paneID, cwd, agent string, info herd
 // the reply of a pending "done" push (contracts.md §3). A read failure is
 // logged and forgotten: the live capture covers the last turn, and the relay
 // drops anything it already holds.
-func (e *Engine) backfillHistory(paneID, cwd, agent string, info herdr.AgentInfo, ref *herdr.AgentSession) {
+func (e *Engine) backfillHistory(paneID, agent string, sRef agents.SessionRef, sessionKey string) {
 	ad := e.Agents.For(agent)
 	budget := 2 * e.TranscriptTimeout
 	if budget <= 0 {
@@ -582,13 +597,7 @@ func (e *Engine) backfillHistory(paneID, cwd, agent string, info herdr.AgentInfo
 	ctx, cancel := context.WithTimeout(context.Background(), budget)
 	defer cancel()
 
-	items, err := ad.RecentTurns(ctx, agents.SessionRef{
-		Agent: ref.Agent,
-		Kind:  ref.Kind,
-		Value: ref.Value,
-		CWD:   cwd,
-		Title: titleOf(info),
-	}, historyBackfillTurns)
+	items, err := ad.RecentTurns(ctx, sRef, historyBackfillTurns)
 	if err != nil {
 		if !errors.Is(err, agents.ErrNoTranscript) && e.Logger != nil {
 			e.Logger.Info("no history backfill", "pane_id", paneID, "agent", agent, "err", err)
@@ -597,7 +606,7 @@ func (e *Engine) backfillHistory(paneID, cwd, agent string, info herdr.AgentInfo
 			// A transient failure may succeed on the pane's next change;
 			// a missing transcript will not.
 			e.mu.Lock()
-			if st, ok := e.states[paneID]; ok && st.backfilledSession == ref.Value {
+			if st, ok := e.states[paneID]; ok && st.backfilledSession == sessionKey {
 				st.backfilledSession = ""
 			}
 			e.mu.Unlock()
@@ -607,7 +616,7 @@ func (e *Engine) backfillHistory(paneID, cwd, agent string, info herdr.AgentInfo
 
 	e.mu.RLock()
 	st, exists := e.states[paneID]
-	if !exists || st.backfilledSession != ref.Value {
+	if !exists || st.backfilledSession != sessionKey {
 		e.mu.RUnlock()
 		return // the pane went away or moved to another session
 	}
@@ -616,7 +625,7 @@ func (e *Engine) backfillHistory(paneID, cwd, agent string, info herdr.AgentInfo
 
 	for i := len(items) - 1; i >= 0; i-- { // RecentTurns is newest first
 		item := items[i]
-		item.ID = model.HistoryID(paneID, ref.Value, item.Query, item.Response)
+		item.ID = model.HistoryID(paneID, sessionKey, item.Query, item.Response)
 		item.PaneID = paneID
 		item.Agent = agent
 		item.Label = label
@@ -661,8 +670,8 @@ func (e *Engine) StartTurnWatch(ctx context.Context) {
 
 // workingPane is a pane checked by checkWorkingTurns.
 type workingPane struct {
-	paneID, agent string
-	ref           agents.SessionRef
+	paneID, agent, sessionKey string
+	ref                       agents.SessionRef
 }
 
 // checkWorkingTurns publishes the last completed turn of every working pane
@@ -682,14 +691,17 @@ func (e *Engine) checkWorkingTurns(ctx context.Context) {
 			hidden = append(hidden, paneID)
 			continue
 		}
-		ref := st.info.TrustedSession()
-		if ref == nil {
+		sRef, sessionKey, ok := sessionRefFor(st.public.Agent, st.public.CWD, st.info)
+		if !ok {
 			hidden = append(hidden, paneID)
 			continue
 		}
-		panes = append(panes, workingPane{paneID: paneID, agent: st.public.Agent, ref: agents.SessionRef{
-			Agent: ref.Agent, Kind: ref.Kind, Value: ref.Value, CWD: st.public.CWD, Title: titleOf(st.info),
-		}})
+		panes = append(panes, workingPane{
+			paneID:     paneID,
+			agent:      st.public.Agent,
+			sessionKey: sessionKey,
+			ref:        sRef,
+		})
 	}
 	e.mu.RUnlock()
 
@@ -726,7 +738,7 @@ func (e *Engine) checkWorkingTurns(ctx context.Context) {
 			if e.Logger != nil {
 				e.Logger.Info("a turn ended while the pane stays working; publishing its reply", "pane_id", p.paneID, "agent", p.agent)
 			}
-			e.publishHistory(p.paneID, p.agent, p.ref.Value, *end.Item)
+			e.publishHistory(p.paneID, p.agent, p.sessionKey, *end.Item)
 		}
 		e.setBackground(p.paneID, end.Background)
 		e.setTasks(p.paneID, tasks)

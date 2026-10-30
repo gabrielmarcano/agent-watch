@@ -273,13 +273,13 @@ func normalizeAgentName(raw string) string {
 func extractResumeSessionID(argv []string) string {
 	for i := 0; i < len(argv); i++ {
 		arg := argv[i]
-		if (arg == "--resume" || arg == "-r" || arg == "--session-id") && i+1 < len(argv) {
+		if (arg == "--resume" || arg == "-r" || arg == "--session-id" || arg == "--session" || arg == "-s" || arg == "--conversation") && i+1 < len(argv) {
 			val := strings.TrimSpace(argv[i+1])
 			if val != "" && !strings.HasPrefix(val, "-") {
 				return val
 			}
 		}
-		for _, prefix := range []string{"--resume=", "--session-id="} {
+		for _, prefix := range []string{"--resume=", "--session-id=", "--session=", "--conversation="} {
 			if strings.HasPrefix(arg, prefix) {
 				val := strings.TrimSpace(strings.TrimPrefix(arg, prefix))
 				if val != "" {
