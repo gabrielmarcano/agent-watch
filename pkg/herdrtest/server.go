@@ -633,6 +633,21 @@ func (s *Server) handleConn(conn net.Conn) {
 		}
 		cwd := stringVal(rawReq.Params["cwd"])
 		name := stringVal(rawReq.Params["name"])
+		if name != "" {
+			if len(name) > 32 || !validTerminalName(name) {
+				s.writeError(conn, reqID, "invalid_params", "name must be 1-32 chars of a-z 0-9 - _ .")
+				return
+			}
+			s.mu.RLock()
+			for _, t := range s.terminals {
+				if stringVal(t["name"]) == name {
+					s.mu.RUnlock()
+					s.writeError(conn, reqID, "name_taken", fmt.Sprintf("terminal name %q already taken", name))
+					return
+				}
+			}
+			s.mu.RUnlock()
+		}
 		labels := make(map[string]string)
 		if rawLabels, ok := rawReq.Params["labels"].(map[string]any); ok {
 			for k, v := range rawLabels {
@@ -732,6 +747,19 @@ func terminalStatusState(t map[string]any) string {
 		}
 	}
 	return stringVal(t["agent_status"])
+}
+
+func validTerminalName(name string) bool {
+	if len(name) == 0 || len(name) > 32 {
+		return false
+	}
+	for i := 0; i < len(name); i++ {
+		c := name[i]
+		if !((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-' || c == '_' || c == '.') {
+			return false
+		}
+	}
+	return true
 }
 
 func (s *Server) writeResult(conn net.Conn, id string, result any) {

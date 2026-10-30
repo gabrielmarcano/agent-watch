@@ -85,6 +85,8 @@ func herdrErrorCode(ctx context.Context, err error, fallback string) string {
 		return string(model.ErrUnknownPane) // the terminal closed after the list
 	case herdr.IsCode(err, "blocked"), herdr.IsCode(err, "agent_blocked"):
 		return string(model.ErrAgentBlocked)
+	case herdr.IsCode(err, "status_mismatch"):
+		return string(model.ErrPromptChanged)
 	case errors.Is(err, herdr.ErrUnavailable):
 		return string(model.ErrHerdrOffline)
 	case ctx.Err() != nil || errors.Is(err, context.DeadlineExceeded):

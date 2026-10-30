@@ -318,7 +318,7 @@ func (e *Engine) executeSessionCreate(ctx context.Context, cmd model.CommandMsg)
 		return
 	}
 
-	workspaceID, wsLabel, name, err := e.planSession(ctx, cwd, base)
+	workspaceID, wsLabel, label, termName, err := e.planSession(ctx, cwd, base)
 	if err != nil {
 		code, msg := sessionError(ctx, err)
 		e.replyHost(cmd, false, code, msg, nil)
@@ -329,13 +329,13 @@ func (e *Engine) executeSessionCreate(ctx context.Context, cmd model.CommandMsg)
 	started, err := e.Herdr.RunTerminal(startCtx, herdr.RunParams{
 		Argv:     []string{kind},
 		CWD:      cwd,
-		Name:     name,
+		Name:     termName,
 		Keep:     true,
 		NoParent: true,
 		NoNotify: true,
 		Labels: map[string]string{
 			"herdr.space": workspaceID,
-			"where":       wsLabel + " / " + name,
+			"where":       wsLabel + " / " + label,
 		},
 	})
 	cancel()
@@ -361,33 +361,36 @@ func (e *Engine) executeSessionCreate(ctx context.Context, cmd model.CommandMsg)
 			WorkspaceID: workspaceID,
 			TabID:       tabID,
 			Kind:        kind,
-			Label:       name,
+			Label:       label,
 		}
 	})
 }
 
 // planSession finds an existing space serving cwd (or allocates a new space ID
 // that Herdr.app will adopt into a new space) and returns the space ID, space
-// label, and unique session name.
-func (e *Engine) planSession(ctx context.Context, cwd, base string) (workspaceID, wsLabel, name string, err error) {
+// label, human-readable session label, and unique herdr-core terminal name.
+func (e *Engine) planSession(ctx context.Context, cwd, base string) (workspaceID, wsLabel, label, termName string, err error) {
 	callCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	agentsList, err := e.Herdr.ListAgents(callCtx)
 	cancel()
 	if err != nil {
-		return "", "", "", err
+		return "", "", "", "", err
 	}
 
 	workspaceID, wsLabel = workspaceForFolder(cwd, agentsList)
 	if workspaceID == "" {
 		workspaceID = newSpaceID()
 		wsLabel = uniqueName(filepath.Base(cwd), workspaceLabelsFromAgents(agentsList))
-		return workspaceID, wsLabel, uniqueName(base, map[string]bool{}), nil
+		label = uniqueName(base, map[string]bool{})
+	} else {
+		if wsLabel == "" {
+			wsLabel = filepath.Base(cwd)
+		}
+		label = uniqueName(base, agentLabelsIn(agentsList, workspaceID))
 	}
-	if wsLabel == "" {
-		wsLabel = filepath.Base(cwd)
-	}
-	name = uniqueName(base, agentNamesIn(agentsList, workspaceID))
-	return workspaceID, wsLabel, name, nil
+
+	termName = uniqueTerminalName(sanitizeTerminalName(label), allTerminalNames(agentsList))
+	return workspaceID, wsLabel, label, termName, nil
 }
 
 func newSpaceID() string {
@@ -429,15 +432,79 @@ func workspaceLabelsFromAgents(agents []herdr.AgentInfo) map[string]bool {
 	return out
 }
 
-// agentNamesIn is the set of agent names already used in workspaceID.
-func agentNamesIn(agents []herdr.AgentInfo, workspaceID string) map[string]bool {
+// agentLabelsIn is the set of agent labels already used in workspaceID.
+func agentLabelsIn(agents []herdr.AgentInfo, workspaceID string) map[string]bool {
 	out := make(map[string]bool, len(agents))
 	for _, a := range agents {
-		if a.WorkspaceID == workspaceID && a.Name != nil && *a.Name != "" {
+		if a.WorkspaceID == workspaceID {
+			if a.TabLabel != "" {
+				out[a.TabLabel] = true
+			}
+			if a.Name != nil && *a.Name != "" {
+				out[*a.Name] = true
+			}
+		}
+	}
+	return out
+}
+
+// allTerminalNames returns all terminal names used across live terminals.
+func allTerminalNames(agents []herdr.AgentInfo) map[string]bool {
+	out := make(map[string]bool, len(agents))
+	for _, a := range agents {
+		if a.Name != nil && *a.Name != "" {
 			out[*a.Name] = true
 		}
 	}
 	return out
+}
+
+// sanitizeTerminalName converts raw into a valid herdr-core terminal name
+// (1-32 chars of a-z 0-9 - _ .).
+func sanitizeTerminalName(raw string) string {
+	raw = strings.ToLower(strings.TrimSpace(raw))
+	var b strings.Builder
+	lastDash := false
+	for _, r := range raw {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '_' || r == '.' {
+			b.WriteRune(r)
+			lastDash = false
+		} else if !lastDash {
+			b.WriteByte('-')
+			lastDash = true
+		}
+	}
+	res := strings.Trim(b.String(), "-_.")
+	if res == "" {
+		res = "session"
+	}
+	if len(res) > 28 {
+		res = strings.Trim(res[:28], "-_.")
+		if res == "" {
+			res = "session"
+		}
+	}
+	return res
+}
+
+// uniqueTerminalName returns base, or base with the first free "-N" suffix.
+func uniqueTerminalName(base string, taken map[string]bool) string {
+	if !taken[base] {
+		return base
+	}
+	for i := 2; ; i++ {
+		candidate := fmt.Sprintf("%s-%d", base, i)
+		if len(candidate) > 32 {
+			maxBase := 32 - len(fmt.Sprintf("-%d", i))
+			if maxBase < 1 {
+				maxBase = 1
+			}
+			candidate = fmt.Sprintf("%s-%d", strings.Trim(base[:maxBase], "-_."), i)
+		}
+		if !taken[candidate] {
+			return candidate
+		}
+	}
 }
 
 // uniqueName returns base, or base with the first free " N" suffix.

@@ -191,7 +191,7 @@ func (g *commandGuard) DoClaim(paneID string, seq uint64, claim string, fn func(
 	g.mu.Unlock()
 
 	err = fn()
-	if err != nil && (errors.Is(err, herdr.ErrUnavailable) || herdr.IsCode(err, "blocked") || herdr.IsCode(err, "agent_blocked")) {
+	if err != nil && (errors.Is(err, herdr.ErrUnavailable) || herdr.IsCode(err, "blocked") || herdr.IsCode(err, "agent_blocked") || herdr.IsCode(err, "status_mismatch")) {
 		g.mu.Lock()
 		if cur, ok := g.consumed[paneID]; ok && cur.seq == seq {
 			for i, f := range cur.fingerprints {

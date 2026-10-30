@@ -361,8 +361,8 @@ func TestSessionCreate_ReusesWorkspaceAndSuffixesName(t *testing.T) {
 	if len(started) != 1 {
 		t.Fatalf("terminal.run calls = %d, want 1", len(started))
 	}
-	if got, _ := started[0].Params["name"].(string); got != "project 2" {
-		t.Errorf("terminal.run name = %q, want %q", got, "project 2")
+	if got, _ := started[0].Params["name"].(string); got != "project-2" {
+		t.Errorf("terminal.run name = %q, want %q", got, "project-2")
 	}
 	labels, _ := started[0].Params["labels"].(map[string]any)
 	if got, _ := labels["herdr.space"].(string); got != "w1" {
@@ -606,6 +606,36 @@ func TestUniqueName(t *testing.T) {
 	}
 	if got := uniqueName("other", taken); got != "other" {
 		t.Errorf("uniqueName = %q, want other", got)
+	}
+}
+
+func TestSanitizeTerminalName(t *testing.T) {
+	cases := []struct {
+		input string
+		want  string
+	}{
+		{"", "session"},
+		{"   ", "session"},
+		{"Project Alpha", "project-alpha"},
+		{"review docs & notes", "review-docs-notes"},
+		{"my_terminal.1", "my_terminal.1"},
+		{"---foo---", "foo"},
+		{"SuperLongNameExceedingThirtyTwoCharactersTotal", "superlongnameexceedingthirty"},
+	}
+	for _, tc := range cases {
+		if got := sanitizeTerminalName(tc.input); got != tc.want {
+			t.Errorf("sanitizeTerminalName(%q) = %q, want %q", tc.input, got, tc.want)
+		}
+	}
+}
+
+func TestUniqueTerminalName(t *testing.T) {
+	taken := map[string]bool{"project": true, "project-2": true}
+	if got := uniqueTerminalName("project", taken); got != "project-3" {
+		t.Errorf("uniqueTerminalName = %q, want project-3", got)
+	}
+	if got := uniqueTerminalName("other", taken); got != "other" {
+		t.Errorf("uniqueTerminalName = %q, want other", got)
 	}
 }
 
