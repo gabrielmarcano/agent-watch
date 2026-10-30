@@ -26,11 +26,11 @@ One line per app: what runs today and what is left. The versions live in [`VERSI
 | **Phone (`:mobile`)** | Release-signed, paired, OTA updates work, push arrives and `0.5.10` was checked and approved on device by the owner (2026-10-27). The chat list, the conversation, the approval card, the new-session form and the update banner are in place. | The settings screen, and continuing the UI/UX pass ([`docs/phases/7-android-mobile.md`](phases/7-android-mobile.md) § step 6) at a later time. |
 | **Watch (`:app`)** | Runs on the Pixel Watch 2 as a debug-signed build; the several-hosts work is in the code but not on the wrist. | Its own release build, its update card, the unknown-sources screen and the pending watch checks (the owner's watch day). |
 | **watchOS** | **STOPPED / LEGACY** (frozen in `watchos-app/`). | None (stopped). |
-| **Bridge** | Runs on the owner's Mac: the relay link, the transcript reads, the host sessions and the presence switch. | Migration to `herdr-core` (`hc`). |
+| **Bridge** | Runs on the owner's Mac (`herdr-core` `0.1.14` / `Herdr.app` `0.9.10`): the relay link, the transcript reads (including PID-based Claude and CWD-based Antigravity resolution), the host sessions (`terminal.create`) and the presence switch. | Update other hosts (`home`, `bazzite`) when migrating them to `herdr-core`. |
 | **Relay** | Runs on the VPS: the snapshots, the SSE stream, the commands and the phone's update. | Phase 8 steps 3–4 (the other hosts). |
 | **macOS menu bar** | Released; the presence switch lives in it. | The single-app packaging idea, later. |
 
-**Deployed** (2026-10-27): the relay `0.9.0` (on Google Cloud `general-vps`) and, on the owner's Mac, the bridge `0.9.0` (Only Notify When Away on), both rebuilt and deployed from `main` (`c8c2073`, after squash-merging PR #32). The menu bar `0.6.0` (rebuilt from `main` on 2026-10-07) and the Wear OS app `1.3.1` (release build, version code 12, 2026-10-07) are unchanged. The phone app `0.5.10` (version code 20) is release-signed, installed and paired on the owner's phone and published to the relay's update directory (2026-10-22); the watch app was neither rebuilt nor published (its release build comes with the watch's own day). The component versions are in `VERSIONS`.
+**Deployed** (2026-10-30): the relay `0.9.0` (on Google Cloud `general-vps`, from `c8c2073`) and, on the owner's Mac, the bridge `0.9.0` (`d2890d9`, migrated to `herdr-core` `0.1.14`, Only Notify When Away on). The menu bar `0.6.0` (rebuilt from `main` on 2026-10-07) and the Wear OS app `1.3.1` (release build, version code 12, 2026-10-07) are unchanged. The phone app `0.5.10` (version code 20) is release-signed, installed and paired on the owner's phone and published to the relay's update directory (2026-10-22); the watch app was neither rebuilt nor published (its release build comes with the watch's own day). The component versions are in `VERSIONS`.
 
 **What can run in parallel:**
 - **5 runs alone:** it tests the whole system.
@@ -100,9 +100,7 @@ Known and accepted for now; none blocks a phase.
   - the docs that say the id is fixed.
 
   Phase 7 expects the key.
-- **Focus refusal:** the watch recognises OpenCode's focus refusal by the relay's message text. A dedicated error code would be sturdier.
-- **OpenCode focus guard:** a millisecond window remains between the ANSI read and `send_keys`.
-- **Claude transcript:** herdr reports only the session id, not the transcript path its hook receives. A turn that ends while the bridge restarts gets the generic `Task finished` body.
+- **Claude transcript:** herdr-core reports the foreground PID (`<config_dir>/sessions/<pid>.json`), not the transcript path directly. A turn that ends while the bridge restarts gets the generic `Task finished` body.
 - **macOS Background App Activity** (the owner's request, 2026-10-06): menu bar `0.5.0` shows as **Agent Watch** with the Wear OS app's icon (checked by the owner on 2026-10-06, after turning Open at Login off and on). The bridge still shows as `agent-watch-bridge` with the `exec` icon: its LaunchAgent names the app in `AssociatedBundleIdentifiers` (bridge `0.5.1`), but macOS lists it on its own (`sfltool dumpbtm`), probably because the key needs both signed with the same Team ID (there is no Developer ID account). The fix that needs no Team ID is the packaging below (the bridge inside the app).
 - **Single-app packaging, modelled on Tailscale's macOS app (the owner's idea, 2026-10-06, for later):** one `Agent Watch.app` that carries the bridge binary and registers it with `SMAppService.agent`, so Settings shows one item. Linux keeps what it has (the same bridge under systemd `--user`, started and stopped with the CLI, as Tailscale does with `tailscaled` and `tailscale up`/`down`); a Linux tray app would be a separate, optional client of the same CLI. Costs found in the code:
   - the bundled plist is fixed, so the `HERDR_*` paths `start` pins today must come from `config.toml` or defaults;
@@ -136,7 +134,6 @@ Known and accepted for now; none blocks a phase.
 - **Long single-line texts left** (the short-lines rule, `wearos-app/ARCHITECTURE.md` §4b; the list card and the agent screen's header follow it since Wear OS `1.2.4`):
   - the agents tile's second line chains the status and the agent id as text (`AgentsTileService.kt`), and has no logo;
   - the complication's text chains `<status> · <agent>` and `· +N more` (`complication_status_agent`, `complication_status_more`).
-- **OpenCode 2 focus check** (bridge `0.8.0`): the V2 rule was captured on the default theme only (`docs/reference/agents.md` §5.1). A theme where it does not hold refuses Allow, never presses.
 - **agy 1.2.17 menus:** `Create file` and `Question` parse without a `detail`; picking `Write-in...` leaves a text field the watch cannot answer (`docs/reference/agents.md` §4.1).
 
 ### Checks nobody has done yet
@@ -153,12 +150,11 @@ Only changes that affect what the system does (the owner's rule, 2026-10-07): a 
 
 ## Next steps
 
-1. **Migrate to `herdr-core` (`hc`):** replace legacy `herdr` socket assumptions with `herdr-core` (`hc`) and prune obsolete bridge complexity.
-2. **The phone's UI and UX pass** (phase 7, step 6): the owner's list of what to change on the device, one change at a time, published with `publish-android.sh --phone` and checked on the phone.
-3. **Phase 7's rest**: the settings screen, push (owner action), the step-5 device checks with sandbox agents.
-4. **Phase 5**, above (the release gate).
-5. **Phase 8** steps 3–4: the other hosts on the relay, and the watch.
-7. **Later ideas:**
+1. **The phone's UI and UX pass** (phase 7, step 6): the owner's list of what to change on the device, one change at a time, published with `publish-android.sh --phone` and checked on the phone.
+2. **Phase 7's rest**: the settings screen, push (owner action), the step-5 device checks with sandbox agents.
+3. **Phase 5**, above (the release gate).
+4. **Phase 8** steps 3–4: the other hosts on the relay, and the watch.
+5. **Later ideas:**
    - a Telegram bot with inline approval buttons, for when the watch is charging;
    - Discord webhook summaries;
    - dedicated adapters for Codex, Pi, Amp and other CLI agents;
